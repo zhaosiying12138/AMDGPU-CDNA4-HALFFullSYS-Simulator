@@ -1,0 +1,13 @@
+{
+  "schema": "amdgpu-sim.current.v1",
+  "goal_id": "GSIM-001",
+  "plan_id": "AMDGPU-SIM-V1",
+  "plan_revision": 1,
+  "checkpoint_id": "CP-0001",
+  "phase_id": "P0",
+  "state": "paused",
+  "paused_at": "2026-08-07T19:47:18+08:00",
+  "next_action_id": "P0-SRC-01",
+  "next_action_summary": "Revalidate official source/model revisions online, write the immutable source lock, and clone pristine upstream lanes.",
+  "resume_command": "scripts/resume.sh --verify"
+}

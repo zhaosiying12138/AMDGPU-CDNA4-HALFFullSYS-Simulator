@@ -1,0 +1,23 @@
+{
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "id": "CP-0001",
+  "sequence": 1,
+  "parent_checkpoint": null,
+  "created_at": "2026-08-07T19:47:18+08:00",
+  "goal_id": "GSIM-001",
+  "phase_id": "P0",
+  "status": "accepted",
+  "root_parent_commit": null,
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "plan_sha256": "81de777e0a99090625363d11e3216bfe7ec890fee81e19d99c314653d9aeb06d",
+  "goal_sha256": "32a358fc698a4e681bb06d0fdb1a8fbbb20efcf5f53565e16b0204fa605aeb4f",
+  "source_lock_sha256": "264fa3fb5f17e9ebac26ae0c4a0d7fe7bd567f8e4564d01951a238598342385a",
+  "repositories": [],
+  "changes": ["Initialized root control plane and recorded the complete staged architecture and recovery protocol.", "Corrected the model identity to official Qwen/Qwen3.5-0.8B.", "No upstream source was cloned in this checkpoint."],
+  "validation": [{"command": "git init -b main", "cwd": ".", "exit_code": 0, "result": "root repository initialized"}, {"command": "python3 -m json.tool state/current.json", "cwd": ".", "exit_code": 0, "result": "valid JSON"}, {"command": "python3 -m json.tool SOURCE_LOCK.json", "cwd": ".", "exit_code": 0, "result": "valid JSON"}],
+  "evidence_ids": ["EV-0001"],
+  "bitlesson_ids": ["BL-0001"],
+  "blockers": ["Upstream checkout and official Hugging Face revision lock are deferred until the next token/session."],
+  "limitations": ["This commit contains no simulator/runtime implementation and makes no execution claim."],
+  "next_action": {"id": "P0-SRC-01", "cwd": ".", "argv": ["scripts/resolve_sources.sh", "--online"], "prerequisites": ["Read PLAN.md, GOAL.md, SOURCE_LOCK.json, and this checkpoint.", "Network access is available for official GitHub/Hugging Face verification."], "expected": "SOURCE_LOCK.json becomes frozen with commit/tree hashes; pristine source lanes are cloned with upstream history and baseline tags; a new checkpoint and coordinator commit are produced.", "rollback_boundary": "Do not reset child repositories automatically; preserve prepared commits for audited finalization."}
+}

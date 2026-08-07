@@ -1,0 +1,18 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0001",
+  "type": "bootstrap-observation",
+  "claim": "The control plane was created in an empty workspace and provisional upstream observations were recorded without cloning or downloading artifacts.",
+  "command_argv": ["pwd", "find . -mindepth 1 -maxdepth 2", "git init -b main", "git ls-remote --symref <official URLs> HEAD (read-only audit)", "python3 -m json.tool <control-plane JSON>"],
+  "cwd": "/home/zhaosiying/amdgpu-sim",
+  "repo_commits": [],
+  "started_at": "2026-08-07T19:30:00+08:00",
+  "ended_at": "2026-08-07T19:47:18+08:00",
+  "exit_code": 0,
+  "result": "Workspace was empty before bootstrap; source checkout and model download remain pending by design.",
+  "stdout_sha256": null,
+  "stderr_sha256": null,
+  "environment_fingerprint": {"kernel": "WSL2 x86_64", "python": "3.14.6", "git": "2.53.0", "cmake": "3.31.10", "available_disk": "about 853 GiB"},
+  "limitations": ["The model revision was observed through a mirror while official Hugging Face access was unavailable; it is not an official lock.", "Remote HEADs are observations and must be revalidated in P0-SRC-01."],
+  "redactions": []
+}

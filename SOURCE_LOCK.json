@@ -1,0 +1,103 @@
+{
+  "schema": "amdgpu-sim.source-lock.v1",
+  "lock_id": "SL-0000-observed",
+  "status": "observed-not-fetched",
+  "observed_at": "2026-08-07T19:39:00+08:00",
+  "observation_note": "Remote observations are provisional until P0-SRC-01 revalidates them online and records tree hashes. No source checkout has been made.",
+  "sources": [
+    {
+      "id": "gem5",
+      "role": "simulator",
+      "path": "projects/gem5",
+      "materialization": "pending",
+      "upstream_url": "https://github.com/gem5/gem5.git",
+      "upstream_ref": "stable",
+      "observed_head": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_commit": null,
+      "baseline_tree": null,
+      "work_branch": "amdgpu-sim/gemsim-host-bridge",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "id": "rocm-systems",
+      "role": "rocr-libhsakmt-hip-clr-rccl",
+      "path": "projects/rocm-systems",
+      "materialization": "pending",
+      "upstream_url": "https://github.com/ROCm/rocm-systems.git",
+      "upstream_ref": "develop",
+      "observed_head": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_commit": null,
+      "baseline_tree": null,
+      "selected_paths": ["projects/rocr-runtime", "projects/clr", "projects/hip", "projects/rccl"],
+      "work_branch": "amdgpu-sim/gemsim-runtime",
+      "license": "component-specific; preserve all LICENSE/NOTICE files"
+    },
+    {
+      "id": "llvm-project",
+      "role": "llvm-clang-device-libs",
+      "path": "projects/llvm-project",
+      "materialization": "pending",
+      "upstream_url": "https://github.com/ROCm/llvm-project.git",
+      "upstream_ref": "amd-staging",
+      "observed_head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_commit": null,
+      "baseline_tree": null,
+      "work_branch": "amdgpu-sim/gemsim-llvm",
+      "license": "Apache-2.0 WITH LLVM-exception plus third-party terms"
+    },
+    {
+      "id": "triton",
+      "role": "compiler-and-python-backend",
+      "path": "projects/triton",
+      "materialization": "pending",
+      "upstream_url": "https://github.com/triton-lang/triton.git",
+      "upstream_ref": "main",
+      "observed_head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_commit": null,
+      "baseline_tree": null,
+      "work_branch": "amdgpu-sim/gemsim-triton",
+      "license": "upstream license and notices"
+    },
+    {
+      "id": "pytorch",
+      "role": "tensor-runtime",
+      "path": "projects/pytorch",
+      "materialization": "pending",
+      "upstream_url": "https://github.com/pytorch/pytorch.git",
+      "upstream_ref": "main",
+      "observed_head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "triton_pin_at_observed_head": "675c59878aa2280b31f722aaf42b825fcee21de8",
+      "baseline_commit": null,
+      "baseline_tree": null,
+      "work_branch": "amdgpu-sim/gemsim-pytorch",
+      "license": "BSD-style; preserve third-party notices"
+    },
+    {
+      "id": "vllm",
+      "role": "inference-runtime",
+      "path": "projects/vllm",
+      "materialization": "pending",
+      "upstream_url": "https://github.com/vllm-project/vllm.git",
+      "upstream_ref": "main",
+      "observed_head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_commit": null,
+      "baseline_tree": null,
+      "work_branch": "amdgpu-sim/gemsim-vllm",
+      "license": "Apache-2.0"
+    },
+    {
+      "id": "qwen3.5-0.8b",
+      "role": "acceptance-model",
+      "path": "models/Qwen3.5-0.8B",
+      "materialization": "external-download-pending",
+      "upstream_url": "https://huggingface.co/Qwen/Qwen3.5-0.8B",
+      "upstream_ref": "main",
+      "official_revision": null,
+      "mirror_observation": "2fc06364715b967f1860aea9cf38778875588b17",
+      "mirror_observation_status": "not-an-official-lock",
+      "download_method": "huggingface_hub.snapshot_download with resolved immutable revision",
+      "weights_in_git": false,
+      "license": "verify model card before distribution"
+    }
+  ]
+}

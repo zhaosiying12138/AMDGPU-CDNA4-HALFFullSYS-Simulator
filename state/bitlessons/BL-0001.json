@@ -1,0 +1,15 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0001",
+  "checkpoint_id": "CP-0001",
+  "question_or_symptom": "The earlier conversation used Qwen3.5-0.9B while the requested official model was later corrected.",
+  "observation": "The source review found the canonical target is Qwen/Qwen3.5-0.8B; no official 0.9B target is used by this plan.",
+  "evidence_ids": ["EV-0001"],
+  "conclusion": "Model identity is a locked acceptance invariant, not a casual label.",
+  "decision": "Use Qwen/Qwen3.5-0.8B, text-only first; resolve and hash the official model revision before download.",
+  "invalidated_assumptions": ["Qwen3.5-0.9B is not a valid project anchor."],
+  "applies_to": ["PLAN.md", "GOAL.md", "SOURCE_LOCK.json", "scripts/resolve_sources.sh"],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

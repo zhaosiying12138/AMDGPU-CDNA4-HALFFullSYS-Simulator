@@ -1,0 +1,69 @@
+# The root repository tracks control-plane metadata and source locks only.
+# Large source checkouts remain independent repositories under projects/;
+# generated, downloaded, and machine-specific material is never committed.
+
+/models/*
+!/models/.gitkeep
+/env/*
+!/env/.gitkeep
+/.venv/
+/build/*
+!/build/.gitkeep
+/artifacts/*
+!/artifacts/.gitkeep
+/logs/*
+!/logs/.gitkeep
+/cache/*
+!/cache/.gitkeep
+/downloads/*
+!/downloads/.gitkeep
+/runs/*
+!/runs/.gitkeep
+/tmp/*
+!/tmp/.gitkeep
+
+# Cross-repository transaction journals are intentionally local and recoverable
+# from the child commits; the root checkpoint is their durable audit record.
+/.git/amdgpu-sim/
+/state/transactions/*
+!/state/transactions/.gitkeep
+
+# Common build products in otherwise tracked source lanes.
+/projects/*/build/
+/projects/*/build-*/
+/projects/*/.cache/
+/projects/*/compile_commands.json
+/projects/*/\.ninja_*
+
+# Python and native build noise.
+__pycache__/
+*.py[cod]
+*.so
+*.so.*
+*.o
+*.a
+*.d
+*.gcda
+*.gcno
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Model/checkpoint formats are forbidden even if a caller tries git add -f.
+*.safetensors
+*.safetensors.index.json
+*.pt
+*.pth
+*.bin
+*.onnx
+*.ckpt
+*.gguf
+*.npz
+*.npy
+
+# Local credentials and ad-hoc dumps.
+.env
+.env.*
+*.pem
+*.key
+*.log

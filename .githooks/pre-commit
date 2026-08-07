@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root_dir=$(git rev-parse --show-toplevel)
+cd "$root_dir"
+max_bytes=$((10 * 1024 * 1024))
+while IFS= read -r path; do
+  case "$path" in
+    models/.gitkeep|env/.gitkeep|build/.gitkeep|artifacts/.gitkeep|logs/.gitkeep|cache/.gitkeep|downloads/.gitkeep|runs/.gitkeep|tmp/.gitkeep|state/transactions/.gitkeep)
+      continue ;;
+    models/*|env/*|build/*|artifacts/*|logs/*|cache/*|downloads/*|runs/*|tmp/*)
+      echo "forbidden generated/artifact path staged: $path" >&2; exit 1 ;;
+    *.safetensors|*.safetensors.index.json|*.pt|*.pth|*.bin|*.onnx|*.ckpt|*.gguf)
+      echo "forbidden model artifact staged: $path" >&2; exit 1 ;;
+  esac
+  if [[ -f "$path" ]]; then
+    size=$(wc -c <"$path")
+    if (( size > max_bytes )); then
+      echo "file exceeds 10 MiB policy: $path ($size bytes)" >&2; exit 1
+    fi
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACMR)
