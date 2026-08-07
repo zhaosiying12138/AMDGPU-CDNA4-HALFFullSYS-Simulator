@@ -1,0 +1,26 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0005",
+  "checkpoint_id": "CP-0002",
+  "question_or_symptom": "The locked rocm-systems .gitmodules declares more submodules than the commit tree actually contains.",
+  "observation": "At 92115a2941982a384de161be3f78cf9bff547027 the root metadata declares 36 paths but the tree contains 34 mode-160000 gitlinks. The stale declarations are projects/rccl/ext-src/mscclpp and projects/rccl/ext-src/json; neither path exists in the locked tree, and projects/rccl/.gitmodules is the empty blob e69de29bb2d1d6434b8b29ae775ad8c2e48c5391.",
+  "evidence_ids": [
+    "EV-0003"
+  ],
+  "conclusion": "A .gitmodules stanza is configuration metadata, not proof that a submodule exists at a particular commit.",
+  "decision": "Freeze declared paths and actual gitlink paths separately, record stale and undeclared differences, and initialize only locked mode-160000 entries selected by the build dependency audit.",
+  "invalidated_assumptions": [
+    "Every path declared by an upstream .gitmodules file exists as a gitlink in the same commit.",
+    "The selected RCCL source at this baseline directly requires the two stale root-level ext-src declarations."
+  ],
+  "applies_to": [
+    "SOURCE_LOCK.json",
+    "scripts/source_manager.py",
+    "scripts/verify_workspace.py",
+    "projects/rocm-systems",
+    "future nested-source lock"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

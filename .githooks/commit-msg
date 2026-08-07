@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -euo pipefail
-repo=$(git rev-parse --show-toplevel)
 hook_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
-exec python3 "$hook_dir/../scripts/check_staged.py" --repo "$repo"
+exec python3 "$hook_dir/../scripts/check_commit_message.py" "$1"

@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0006",
+  "checkpoint_id": "CP-0002",
+  "question_or_symptom": "The planned absorbed Git administration path was derived from the submodule worktree path and did not match standard Git behavior.",
+  "observation": "A real temporary repository with submodule name example and path projects/example was migrated by git submodule absorbgitdirs to the root common directory modules/example, not modules/projects/example. The production .gitmodules uses lane IDs such as gem5 and llvm-project as submodule names.",
+  "evidence_ids": ["EV-0003"],
+  "conclusion": "An absorbed submodule's administrative directory is keyed by its .gitmodules submodule name; the worktree path is a separate identity.",
+  "decision": "Require canonical source IDs, compute the exact administration path as modules/<source-id>, require a relative .git gitfile pointing to that directory, and reject embedded repositories, absolute gitfiles, aliases, and linked worktrees at checkpoint acceptance.",
+  "invalidated_assumptions": [
+    "git submodule absorbgitdirs mirrors every component of the submodule worktree path under .git/modules."
+  ],
+  "applies_to": [
+    ".gitmodules",
+    "scripts/source_manager.py",
+    "scripts/verify_workspace.py",
+    "all registered child repositories"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

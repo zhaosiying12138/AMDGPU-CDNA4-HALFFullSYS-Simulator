@@ -1,0 +1,15 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0003",
+  "checkpoint_id": "CP-0002",
+  "question_or_symptom": "The plan requested latest Triton, but frozen PyTorch names a different exact Triton revision.",
+  "observation": "PyTorch 411e87a93704f547e5146c74c95fa11acf13d646 pins Triton 675c59878aa2280b31f722aaf42b825fcee21de8. That commit is not an ancestor of latest Triton main cd513e2798db0f4675b3d1205c8e76eb3381a0b3; their merge base is 3bb23dde71a3679f0ae3e9c1be6dcae1f4bff462.",
+  "evidence_ids": ["EV-0002"],
+  "conclusion": "Latest Triton and PyTorch-compatible Triton are distinct source lanes even though they share one repository checkout.",
+  "decision": "Baseline latest Triton for the requested out-of-tree backend, retain the PyTorch pin as a separately tagged and offline-complete compatibility revision, and require an explicit compatibility matrix before choosing either in an environment build.",
+  "invalidated_assumptions": ["A recent PyTorch Triton pin is necessarily an ancestor of current Triton main."],
+  "applies_to": ["SOURCE_LOCK.json", "projects/triton", "future environment lock", "future Triton/PyTorch integration"],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

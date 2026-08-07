@@ -3,11 +3,11 @@
   "goal_id": "GSIM-001",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 1,
-  "checkpoint_id": "CP-0001",
+  "checkpoint_id": "CP-0002",
+  "checkpoint_sha256": "931698e40c55e8ed6dfb2902e11148eca0ada5f2041fbbda479eede17a5dabb6",
   "phase_id": "P0",
-  "state": "paused",
-  "paused_at": "2026-08-07T19:47:18+08:00",
-  "next_action_id": "P0-SRC-01",
-  "next_action_summary": "Revalidate official source/model revisions online, write the immutable source lock, and clone pristine upstream lanes.",
+  "state": "ready",
+  "next_action_id": "P0-SELF-01",
+  "next_action_summary": "Generalize the lane registry, then initialize the standalone self-amdgpu-runtime pristine baseline.",
   "resume_command": "scripts/resume.sh --verify"
 }

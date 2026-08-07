@@ -1,0 +1,23 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0008",
+  "checkpoint_id": "CP-0002",
+  "question_or_symptom": "The source-freeze verifier makes the checkpoint repository set and current child heads exactly equal to the six immutable upstream entries in SOURCE_LOCK.",
+  "observation": "That equality is correct for CP-0002, but it would reject a new self-amdgpu-runtime gitlink as unregistered and would reject every audited descendant commit in gem5, Triton, PyTorch, or vLLM because its current head differs from the frozen baseline head.",
+  "evidence_ids": ["EV-0003"],
+  "conclusion": "Immutable source provenance and an evolving workspace project registry have different ownership and lifecycle rules.",
+  "decision": "Make P0-SELF-01 first introduce a tracked authored-lane registry. SOURCE_LOCK and the registry authorize immutable baseline identity; checkpoints authorize exact current head/tree and require the head to descend from its baseline. The .gitmodules set must equal the union of upstream and authored lanes before self-amdgpu-runtime is published as a root gitlink.",
+  "invalidated_assumptions": [
+    "The immutable upstream source lock can permanently serve as both the complete project registry and the current-head registry."
+  ],
+  "applies_to": [
+    "PLAN.md",
+    "scripts/verify_workspace.py",
+    "future authored-lane registry",
+    "P0-SELF-01",
+    "all future child commits"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

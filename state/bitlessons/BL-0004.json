@@ -1,0 +1,26 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0004",
+  "checkpoint_id": "CP-0002",
+  "question_or_symptom": "Large partial clones and baseline hydration repeatedly lost tens of minutes of transfer progress, and one upstream branch advanced after it had been officially resolved.",
+  "observation": "Monolithic blob:none clone packs for PyTorch and ROCm LLVM ended with early EOF and clone removed their staging directories. GitHub codeload returned HTTP 200 without usable Range support and partial archives could not resume. A fetch-pack issued inside a promisor repository could negotiate an empty pack even for a missing blob, while porcelain git fetch --refetch transferred that exact object. A nominally read-only git show in the PyTorch promisor clone also fetched one missing 41-byte blob and mutated its object database because GIT_NO_LAZY_FETCH was absent. PyTorch main moved from the reviewed 411e87a revision to b318b41, and ROCm LLVM amd-staging later moved from the reviewed 73f2a21fe16b34e35fd0e149564b8664e59da392 revision to 87e29e9cb9cc295adbc11ea44b64a07e3e11b9b4, while their exact materializations were still in progress.",
+  "evidence_ids": ["EV-0003"],
+  "conclusion": "Online source resolution, immutable identity, history acquisition, and baseline-blob hydration are separate state transitions and each needs its own resumable invariant.",
+  "decision": "Anchor the reviewed 40-byte commit under refs/amdgpu-sim/resolved/<branch>; acquire history with persistent init plus bounded depth/deepen batches until non-shallow; hydrate missing baseline objects with bounded git fetch --refetch --stdin batches and before/after missing-object counts; set GIT_NO_LAZY_FETCH=1 on every command described as offline or read-only; quarantine failed temporary packs without deleting or resetting prior progress; accept only an offline archive of the exact locked tree.",
+  "invalidated_assumptions": [
+    "A partial clone is resumable merely because it uses --filter=blob:none.",
+    "A fixed-revision codeload response can always resume with HTTP Range.",
+    "fetch-pack necessarily transfers an explicitly requested missing blob from a promisor repository.",
+    "A default branch remains at the revision observed at the start of a long materialization.",
+    "Git content-inspection commands are necessarily side-effect free in a promisor clone."
+  ],
+  "applies_to": [
+    "scripts/source_manager.py",
+    "projects/.staging",
+    "SOURCE_LOCK.json",
+    "all future source-lane materialization"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

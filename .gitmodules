@@ -1,0 +1,24 @@
+[submodule "gem5"]
+	path = projects/gem5
+	url = https://github.com/gem5/gem5.git
+	branch = stable
+[submodule "rocm-systems"]
+	path = projects/rocm-systems
+	url = https://github.com/ROCm/rocm-systems.git
+	branch = develop
+[submodule "llvm-project"]
+	path = projects/llvm-project
+	url = https://github.com/ROCm/llvm-project.git
+	branch = amd-staging
+[submodule "triton"]
+	path = projects/triton
+	url = https://github.com/triton-lang/triton.git
+	branch = main
+[submodule "pytorch"]
+	path = projects/pytorch
+	url = https://github.com/pytorch/pytorch.git
+	branch = main
+[submodule "vllm"]
+	path = projects/vllm
+	url = https://github.com/vllm-project/vllm.git
+	branch = main

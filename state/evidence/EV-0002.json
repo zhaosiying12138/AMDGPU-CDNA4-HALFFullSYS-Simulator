@@ -1,0 +1,87 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0002",
+  "checkpoint_id": "CP-0002",
+  "type": "official-source-resolution",
+  "claim": "All six Git source lanes and the official Qwen/Qwen3.5-0.8B acceptance revision were revalidated at immutable revisions before local modification.",
+  "command_argv": [
+    ["git", "ls-remote", "--symref", "git@github.com:<owner>/<repository>.git", "HEAD"],
+    ["scripts/resolve_sources.sh", "--online"],
+    ["web-open", "https://huggingface.co/Qwen/Qwen3.5-0.8B/tree/main"],
+    ["web-open", "https://huggingface.co/Qwen/Qwen3.5-0.8B/commit/2fc06364715b967f1860aea9cf38778875588b17"],
+    ["web-open", "https://huggingface.co/Qwen/Qwen3.5-0.8B/blob/2fc06364715b967f1860aea9cf38778875588b17/model.safetensors-00001-of-00001.safetensors"],
+    ["web-open", "https://huggingface.co/Qwen/Qwen3.5-0.8B/blob/2fc06364715b967f1860aea9cf38778875588b17/tokenizer.json"]
+  ],
+  "cwd": "/home/zhaosiying/amdgpu-sim",
+  "repo_commits": [
+    {"id": "gem5", "revision": "cbf0eae213c5e39c727172b546434287d47b5bbe", "ref": "stable", "canonical_url": "https://github.com/gem5/gem5.git", "transport_url": "git@github.com:gem5/gem5.git", "observed_at": "2026-08-07T20:13:35+08:00", "command_result_id": "independent-official-git-observations"},
+    {"id": "rocm-systems", "revision": "92115a2941982a384de161be3f78cf9bff547027", "ref": "develop", "canonical_url": "https://github.com/ROCm/rocm-systems.git", "transport_url": "git@github.com:ROCm/rocm-systems.git", "observed_at": "2026-08-07T20:13:35+08:00", "command_result_id": "independent-official-git-observations"},
+    {"id": "llvm-project", "revision": "73f2a21fe16b34e35fd0e149564b8664e59da392", "ref": "amd-staging", "canonical_url": "https://github.com/ROCm/llvm-project.git", "transport_url": "git@github.com:ROCm/llvm-project.git", "observed_at": "2026-08-07T20:13:35+08:00", "command_result_id": "independent-official-git-observations"},
+    {"id": "triton", "revision": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3", "ref": "main", "canonical_url": "https://github.com/triton-lang/triton.git", "transport_url": "git@github.com:triton-lang/triton.git", "observed_at": "2026-08-07T20:13:35+08:00", "command_result_id": "independent-official-git-observations"},
+    {"id": "pytorch", "revision": "411e87a93704f547e5146c74c95fa11acf13d646", "ref": "main", "canonical_url": "https://github.com/pytorch/pytorch.git", "transport_url": "git@github.com:pytorch/pytorch.git", "observed_at": "2026-08-07T20:13:35+08:00", "command_result_id": "independent-official-git-observations"},
+    {"id": "vllm", "revision": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e", "ref": "main", "canonical_url": "https://github.com/vllm-project/vllm.git", "transport_url": "git@github.com:vllm-project/vllm.git", "observed_at": "2026-08-07T20:13:35+08:00", "command_result_id": "independent-official-git-observations"},
+    {"id": "qwen3.5-0.8b", "revision": "2fc06364715b967f1860aea9cf38778875588b17", "ref": "main", "canonical_url": "https://huggingface.co/Qwen/Qwen3.5-0.8B", "transport_url": null, "observed_at": "2026-08-07T21:10:00+08:00", "command_result_id": "official-qwen-fixed-pages"}
+  ],
+  "started_at": "2026-08-07T20:13:35+08:00",
+  "ended_at": "2026-08-07T21:10:00+08:00",
+  "exit_code": 0,
+  "result": "The aggregate adjudication succeeded, but the local parallel resolver itself exited 1 and its artifact remains status=failed. Independent official GitHub SSH observations supplied the missing PyTorch and vLLM records; official fixed-revision Hugging Face pages supplied the reviewed Qwen revision while the local official API failed closed. The fixed PyTorch source pins Triton 675c59878aa2280b31f722aaf42b825fcee21de8, retained separately from latest Triton main.",
+  "command_results": [
+    {
+      "id": "local-parallel-resolver",
+      "argv": ["scripts/resolve_sources.sh", "--online"],
+      "cwd": "/home/zhaosiying/amdgpu-sim",
+      "exit_code": 1,
+      "result": "Four Git lanes resolved; PyTorch, vLLM, and official Hugging Face failed. The exact failed artifact is retained and hashed below.",
+      "raw_streams_retained": false,
+      "raw_streams_limitation": "The parallel resolver was run before the command capture helper existed; only its fail-closed JSON artifact was retained.",
+      "stdout_sha256": null,
+      "stderr_sha256": null
+    },
+    {
+      "id": "independent-official-git-observations",
+      "argv": ["git", "ls-remote", "--symref", "git@github.com:<owner>/<repository>.git", "HEAD"],
+      "cwd": "/home/zhaosiying/amdgpu-sim",
+      "exit_code": 0,
+      "result": "All six canonical Git source revisions were observed through official GitHub SSH, including PyTorch and vLLM outside the failed parallel resolver window.",
+      "raw_streams_retained": false,
+      "raw_streams_limitation": "These independent observations predated the command capture helper; exact revisions and canonical commands were retained but their raw streams were not.",
+      "stdout_sha256": null,
+      "stderr_sha256": null
+    },
+    {
+      "id": "official-qwen-fixed-pages",
+      "argv": ["web-open", "official Hugging Face fixed-revision pages listed in command_argv"],
+      "cwd": "external browsing transport",
+      "exit_code": 0,
+      "result": "The official model page, exact commit page, safetensors pointer page, and tokenizer pointer page were reviewed at the fixed 40-byte revision.",
+      "raw_streams_retained": false,
+      "raw_streams_limitation": "The browsing transport did not expose raw response bytes to the workspace; fixed URLs and reviewed identities were retained.",
+      "stdout_sha256": null,
+      "stderr_sha256": null
+    }
+  ],
+  "external_artifacts": [
+    {
+      "path": "artifacts/source-resolution.json",
+      "size": 2835,
+      "sha256": "eaff055bb7a8b7ad651039ca7a7422a7d96a1a4c152a5971d20fc09f5d941898",
+      "tracked": false,
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "purpose": "Fail-closed local resolver output; four Git resolutions succeeded while local Hugging Face, PyTorch, and vLLM connections timed out or were unreachable. Independent official checks supplied the retained revision evidence."
+    }
+  ],
+  "environment_fingerprint": {
+    "kernel": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+    "python": "3.14.6",
+    "git": "2.53.0",
+    "timezone": "Asia/Shanghai"
+  },
+  "limitations": [
+    "The local official Hugging Face API/Git route was unreachable and failed closed. Official fixed-revision web pages were checked through the browsing transport; the mirror supplied only a cryptographic metadata cross-check for the same official commit.",
+    "The local parallel resolver timed out for PyTorch and vLLM while their full-history clones occupied the same constrained SSH route; their exact official refs had already been resolved independently over official GitHub SSH.",
+    "Raw stdout/stderr and raw official Hugging Face HTTP response bytes were not retained for the independent observations; the exact revisions, fixed URLs, failed resolver artifact, and cross-checked file inventory are retained."
+  ],
+  "redactions": []
+}

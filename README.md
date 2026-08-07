@@ -5,10 +5,11 @@ long-term purpose is to let HIP, OpenCL, Triton, PyTorch, and vLLM workloads
 submit real AMDGPU code objects to gem5 without a guest kernel, `/dev/kfd`,
 `/dev/dri`, or the production AMD UMD/KMD binaries.
 
-The project is intentionally bootstrapped as a control-plane repository.  The
-large upstream source lanes are kept as independent Git repositories under
-`projects/`; the root records exact upstream commits, patch ancestry, tests,
-checkpoints, and lessons.  Model weights, virtual environments, and build
+The root is a control-plane and transaction-coordinator repository. The six
+pinned upstream source lanes are standard Git submodules under `projects/`;
+each child retains independent history and an immutable annotated baseline tag,
+while the root gitlink records its exact head, tests, checkpoints, and lessons.
+Model weights, virtual environments, and build
 outputs are downloaded or built by scripts into ignored paths and are never
 stored in Git.
 
@@ -28,4 +29,7 @@ PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、最新 checkpoint �
 bitlesson，运行 scripts/resume.sh --verify；不要重做已通过的工作。
 ```
 
-The current bootstrap deliberately stops before cloning upstream projects.
+`CP-0002` is the accepted pristine-source boundary. The next action is
+`P0-SELF-01`: add the authored/current lane registry and initialize the
+standalone `self-amdgpu-runtime` project from an auditable pristine baseline.
+The frozen `SOURCE_LOCK.json` remains the immutable upstream authority.

@@ -1,5 +1,5 @@
 # The root repository tracks control-plane metadata and source locks only.
-# Large source checkouts remain independent repositories under projects/;
+# Large source checkouts are registered gitlinks under projects/;
 # generated, downloaded, and machine-specific material is never committed.
 
 /models/*
@@ -7,7 +7,7 @@
 /env/*
 !/env/.gitkeep
 /.venv/
-/build/*
+/build*/
 !/build/.gitkeep
 /artifacts/*
 !/artifacts/.gitkeep
@@ -28,7 +28,10 @@
 /state/transactions/*
 !/state/transactions/.gitkeep
 
-# Common build products in otherwise tracked source lanes.
+# Unregistered source/staging directories are ignored. Registered gitlinks are
+# force-added by the coordinator and validated by the hook/resume verifier.
+/projects/*
+!/projects/.gitkeep
 /projects/*/build/
 /projects/*/build-*/
 /projects/*/.cache/

@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0007",
+  "checkpoint_id": "CP-0002",
+  "question_or_symptom": "The source freeze recorded a SHA-256 for the mutable pre-freeze lock candidate but overwrote the only bytes from which that hash could be recomputed.",
+  "observation": "A syntactically valid 64-byte hexadecimal field could pass the original resume verifier even when no retained artifact proved which candidate lock bytes were reviewed before freeze.",
+  "evidence_ids": ["EV-0003"],
+  "conclusion": "A digest without retained bytes or an independently retrievable immutable object is an assertion, not reproducible evidence.",
+  "decision": "Atomically preserve the exact pre-freeze SOURCE_LOCK.json under ignored artifact storage, bind its path, size, and SHA-256 in both the frozen lock and EV-0003, require it at checkpoint acceptance, and permit its later removal only after the accepted metadata remains sufficient for resume.",
+  "invalidated_assumptions": [
+    "Recording a candidate SHA-256 alone preserves source-lock chain of custody after the candidate file is overwritten."
+  ],
+  "applies_to": [
+    "SOURCE_LOCK.json",
+    "scripts/source_manager.py",
+    "scripts/verify_workspace.py",
+    "state/evidence/EV-0003.json"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

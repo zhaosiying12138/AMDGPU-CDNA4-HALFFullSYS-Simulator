@@ -2,7 +2,7 @@
 
 **Goal ID:** `GSIM-001`  
 **Plan:** `AMDGPU-SIM-V1`, revision `1`  
-**Current state:** `paused-after-bootstrap`  
+**Current state:** `P0-SRC-01-source-freeze-accepted`
 **Current phase:** `P0`  
 **Model correction:** the official target is `Qwen/Qwen3.5-0.8B`; there is no
 official `Qwen3.5-0.9B` checkpoint in this project.
@@ -56,9 +56,10 @@ advance a phase without a new checkpoint and root coordinator commit.
 继续执行 amdgpu-sim 计划。当前目录是 /home/zhaosiying/amdgpu-sim。
 先读取 PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、其引用的
 最新 checkpoint/bitlesson/evidence，运行 scripts/resume.sh --verify。
-根据 next_action 从 P0-SRC-01 继续；不要重做已通过的 bootstrap。先在线
-复核官方精确版本并拉取上游，保留上游历史和 baseline 标记；每个原子修改
-使用新的 Checkpoint-ID，先提交 child 再提交 root coordinator commit，并
-同步 checkpoint、bitlesson、evidence。遇到长耗时或 token 切换，先写
-partial checkpoint，更新 current.json 的唯一 next_action，再暂停。
+根据 current 指向的 CP-0002 唯一 next_action，从 P0-SELF-01 继续；不要
+重做 bootstrap 或 source freeze，也不要修改已冻结的 SOURCE_LOCK.json。
+先引入 authored/current lane registry，再建立 self-amdgpu-runtime 的独立
+pristine initial baseline。每个原子进展使用新的 Checkpoint-ID，先提交 child
+再提交 root coordinator commit，并同步 checkpoint、bitlesson、evidence。
+遇到长耗时或 token 切换，先形成 coherent partial checkpoint，再暂停。
 ```

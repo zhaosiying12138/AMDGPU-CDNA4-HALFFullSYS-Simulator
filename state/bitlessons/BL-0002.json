@@ -1,0 +1,18 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0002",
+  "checkpoint_id": "CP-0002",
+  "question_or_symptom": "Canonical HTTPS identity and local source acquisition were conflated, causing official GitHub/Hugging Face operations to stall on this network.",
+  "observation": "GitHub SSH through ssh.github.com:443 reliably resolved canonical GitHub repositories, while canonical Hugging Face API/Git remained blocked. Official Hugging Face fixed-revision pages were reachable through the browsing transport, and a mirror exposed metadata for the same full commit.",
+  "evidence_ids": ["EV-0002"],
+  "conclusion": "Source identity, transport, and evidence provenance are separate fields and must never be inferred from one another.",
+  "decision": "Keep canonical upstream URLs in .gitmodules and SOURCE_LOCK, record SSH fetch transports separately, fail closed on local official API failure, and label mirror metadata as cross-check-only.",
+  "invalidated_assumptions": [
+    "A reachable mirror can stand in for an official revision lock.",
+    "One network transport will work uniformly for GitHub and Hugging Face."
+  ],
+  "applies_to": ["SOURCE_LOCK.json", ".gitmodules", "scripts/source_manager.py", "scripts/download_model.py"],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

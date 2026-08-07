@@ -1,0 +1,143 @@
+{
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "id": "CP-0002",
+  "sequence": 2,
+  "parent_checkpoint": "CP-0001",
+  "created_at": "2026-08-08T02:52:00+08:00",
+  "goal_id": "GSIM-001",
+  "phase_id": "P0",
+  "status": "accepted",
+  "root_parent_commit": "850b61de9ca3aecde80a7fd707ed6f3d83f0db36",
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "plan_sha256": "71223f5b5e4f35b5c5da6416594c4553980c60313df8605b0cbcb3ccfccde21a",
+  "goal_sha256": "2ea4c6b5d8d27a6dee7ce3c8a743466e4f8cf6718769994bc0ee00310bfec0a3",
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "repositories": [
+    {
+      "id": "gem5",
+      "path": "projects/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "head": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "administrative_git_dir": "modules/gem5",
+      "clean": true
+    },
+    {
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "administrative_git_dir": "modules/rocm-systems",
+      "clean": true
+    },
+    {
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "administrative_git_dir": "modules/llvm-project",
+      "clean": true
+    },
+    {
+      "id": "triton",
+      "path": "projects/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "administrative_git_dir": "modules/triton",
+      "clean": true
+    },
+    {
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "administrative_git_dir": "modules/pytorch",
+      "clean": true
+    },
+    {
+      "id": "vllm",
+      "path": "projects/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "administrative_git_dir": "modules/vllm",
+      "clean": true
+    }
+  ],
+  "changes": [
+    "Revalidated and froze six official Git source lanes at exact commits, trees, annotated baseline tags, and local offline-complete locked trees.",
+    "Froze Qwen/Qwen3.5-0.8B at revision 2fc06364715b967f1860aea9cf38778875588b17 with a reviewed 13-file metadata inventory while keeping weights outside Git.",
+    "Added resumable source materialization, two-phase transaction, evidence capture, artifact policy, model download, and strict offline resume tooling.",
+    "Recorded seven P0 source and recovery lessons and advanced the sole next action to the authored runtime lane."
+  ],
+  "validation": [
+    {"command": "scripts/source_manager.py absorb", "cwd": ".", "exit_code": 0, "result": "six exact gitlinks absorbed", "evidence_id": "EV-0003"},
+    {"command": "scripts/source_manager.py freeze --lock-id SL-0001 ...", "cwd": ".", "exit_code": 0, "result": "immutable source lock frozen", "evidence_id": "EV-0003"},
+    {"command": "python3 -m unittest discover -s tests -v", "cwd": ".", "exit_code": 0, "result": "74 tests passed", "evidence_id": "EV-0003"},
+    {"command": "python3 -m py_compile <control-plane modules and tests>", "cwd": ".", "exit_code": 0, "result": "15 Python files compiled", "evidence_id": "EV-0003"},
+    {"command": "bash -n <hooks and shell entry points>", "cwd": ".", "exit_code": 0, "result": "shell syntax passed", "evidence_id": "EV-0003"},
+    {"command": "python3 -m json.tool SOURCE_LOCK.json", "cwd": ".", "exit_code": 0, "result": "frozen lock parsed", "evidence_id": "EV-0003"},
+    {"command": "git diff --check", "cwd": ".", "exit_code": 0, "result": "no whitespace errors", "evidence_id": "EV-0003"}
+  ],
+  "evidence_ids": ["EV-0002", "EV-0003"],
+  "evidence_sha256": {
+    "EV-0002": "9192c9cec01abc873b2f01d28ece4c51536efc000641424c5bea342251297284",
+    "EV-0003": "b02a92d178de98b96c996979821c6527f97eeb93a3e14ecfc953488cffdee373"
+  },
+  "evidence_manifest_id": "EV-0003",
+  "evidence_manifest_sha256": "b02a92d178de98b96c996979821c6527f97eeb93a3e14ecfc953488cffdee373",
+  "bitlesson_ids": ["BL-0002", "BL-0003", "BL-0004", "BL-0005", "BL-0006", "BL-0007", "BL-0008"],
+  "bitlesson_sha256": {
+    "BL-0002": "366dbce475e154920e1b7bcb8863e2977a2a67458f9d3bee2ed72809314292b1",
+    "BL-0003": "0a41ad658bfa9077ec500d416a0f9154d1572d481bac1f864e56fd22d2424402",
+    "BL-0004": "b9f86ee04e7cbe0cbc1984ede3191d9d48e961d0f8ea73c996cd43d11b1d48b3",
+    "BL-0005": "ba9fd6f98fc784d6bceca4942022fa6b05b276e174f93fdb80e298b187e376a8",
+    "BL-0006": "6dcc80c6997bd5165f83aa1c4d8854329c58a673c1b4e1e651a6ac89c49b87af",
+    "BL-0007": "98699c23cec27c6f03543863b20e4ac47a80580e497a6c9172530c2c3b16dce2",
+    "BL-0008": "fe8cde24121c29669dafbed0f55b0cbc7180b602667deb7e175b3144e919e6f5"
+  },
+  "change_kind": "source",
+  "baseline_commit_marker": "N/A",
+  "blockers": [],
+  "limitations": [
+    "This checkpoint establishes reproducible pristine sources and control-plane recovery; it does not yet implement or execute the host-side GPU runtime bridge.",
+    "Nested upstream submodules are inventoried but deliberately uninitialized until a build-closure audit selects the required paths.",
+    "Model weights, Python environments, build products, downloads, caches, and retained raw evidence remain outside Git by policy.",
+    "The local official Hugging Face API route was unavailable; fixed official revision pages and an independently normalized mirror inventory form the recorded model-revision evidence."
+  ],
+  "next_action": {
+    "id": "P0-SELF-01",
+    "cwd": ".",
+    "argv": ["scripts/transaction.py", "begin", "--checkpoint", "CP-0003", "--intent", "Generalize lane registry and initialize the standalone self-amdgpu-runtime baseline", "--participant", "self-amdgpu-runtime=projects/self-amdgpu-runtime"],
+    "prerequisites": [
+      "CP-0002 is accepted and scripts/resume.sh --verify passes offline.",
+      "No transaction journal is active.",
+      "SOURCE_LOCK.json remains byte-identical to frozen SL-0001.",
+      "The canonical origin policy for self-amdgpu-runtime is decided before root gitlink publication."
+    ],
+    "expected": "A tracked authored/current lane registry separates immutable upstream baselines from evolving project heads, and the standalone self-amdgpu-runtime pristine baseline is initialized.",
+    "rollback_boundary": "Keep CP-0002 and SL-0001 unchanged; preserve any created child commit, but do not publish its root gitlink until its canonical origin and registry entry are reproducible."
+  }
+}

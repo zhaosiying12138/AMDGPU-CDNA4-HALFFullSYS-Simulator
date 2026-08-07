@@ -1,0 +1,286 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0003",
+  "checkpoint_id": "CP-0002",
+  "type": "source-freeze-acceptance",
+  "claim": "The six pristine Git source lanes were absorbed as exact gitlinks, frozen at immutable baseline identities, and accepted by the control-plane test and integrity gates.",
+  "command_argv": [
+    ["scripts/source_manager.py", "absorb"],
+    ["scripts/source_manager.py", "freeze", "--lock-id", "SL-0001", "--frozen-at", "2026-08-08T02:44:00+08:00", "--checkpoint", "CP-0002", "--resolution-evidence-id", "EV-0002", "--resolution-evidence", "state/evidence/EV-0002.json", "--resolution-artifact", "artifacts/source-resolution.json", "--candidate-artifact", "artifacts/source-lock-pre-freeze.json"],
+    ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+    ["python3", "-m", "py_compile", "scripts/capture_evidence.py", "scripts/check_commit_message.py", "scripts/check_staged.py", "scripts/download_model.py", "scripts/evidence_policy.py", "scripts/source_manager.py", "scripts/transaction.py", "scripts/verify_workspace.py", "tests/test_capture_evidence.py", "tests/test_check_commit_message.py", "tests/test_check_staged.py", "tests/test_download_model.py", "tests/test_source_manager.py", "tests/test_transaction.py", "tests/test_verify_workspace.py"],
+    ["bash", "-n", ".githooks/pre-commit", ".githooks/commit-msg", "scripts/bootstrap.sh", "scripts/materialize_sources.sh", "scripts/resolve_sources.sh", "scripts/resume.sh"],
+    ["python3", "-m", "json.tool", "SOURCE_LOCK.json"],
+    ["git", "diff", "--check"]
+  ],
+  "cwd": ".",
+  "started_at": "2026-08-07T18:40:02+00:00",
+  "ended_at": "2026-08-07T18:55:39+00:00",
+  "exit_code": 0,
+  "result": "All seven retained acceptance commands succeeded. The source lock is frozen as SL-0001, all six source lanes are exact clean gitlinks with absorbed administrative directories, and 74 control-plane tests passed.",
+  "command_results": [
+    {
+      "id": "absorb-source-lanes",
+      "argv": ["scripts/source_manager.py", "absorb"],
+      "cwd": ".",
+      "started_at": "2026-08-07T18:40:02+00:00",
+      "ended_at": "2026-08-07T18:40:03+00:00",
+      "exit_code": 0,
+      "result": "All six source repositories were absorbed under the root Git administrative directory and retained exact staged gitlinks.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0002/absorb.json",
+        "size": 579,
+        "sha256": "5c8269783c272b4bdccb621542548c0e430e450b0bb1bc97afce3203405e6bb0",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0002/absorb.stdout",
+        "size": 1274,
+        "sha256": "fd566dbe38772a70fc05ed8f4f53817139d8fb024fe55f37b22e44849ad0640f",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0002/absorb.stderr",
+        "size": 951,
+        "sha256": "6999d40b4a79a7074b9f7f0319494cb49fdc2bca1a699272918df8f863730778",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "freeze-source-lock",
+      "argv": ["scripts/source_manager.py", "freeze", "--lock-id", "SL-0001", "--frozen-at", "2026-08-08T02:44:00+08:00", "--checkpoint", "CP-0002", "--resolution-evidence-id", "EV-0002", "--resolution-evidence", "state/evidence/EV-0002.json", "--resolution-artifact", "artifacts/source-resolution.json", "--candidate-artifact", "artifacts/source-lock-pre-freeze.json"],
+      "cwd": ".",
+      "started_at": "2026-08-07T18:43:02+00:00",
+      "ended_at": "2026-08-07T18:47:50+00:00",
+      "exit_code": 0,
+      "result": "SL-0001 was frozen only after the six baseline identities, tags, histories, locked trees, licenses, remotes, hooks, and absorbed administrative paths passed offline validation.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0002/freeze.json",
+        "size": 947,
+        "sha256": "c57d908e4ef5e13fdaef59f7d5dce043a7a698f24486ad5e71eb7b5a987aee48",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0002/freeze.stdout",
+        "size": 34,
+        "sha256": "d0c11ad0795dbb31601a4cce42132d86535a121d70dad4b7fbe711bc0a7da0f1",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0002/freeze.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "control-plane-tests",
+      "argv": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+      "cwd": ".",
+      "started_at": "2026-08-07T18:55:38+00:00",
+      "ended_at": "2026-08-07T18:55:39+00:00",
+      "exit_code": 0,
+      "result": "All 74 control-plane unit and integration tests passed.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0002/unittest.json",
+        "size": 626,
+        "sha256": "39eaeaaa04d07d33956cf3b30fb2834fdc449bf37c6a0bbf96d3111e8d9cd6b1",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0002/unittest.stdout",
+        "size": 32,
+        "sha256": "845eb27dd556ca677278cd529b762abf5980a5ee033fa0b8daee8a58cb245b1d",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0002/unittest.stderr",
+        "size": 12431,
+        "sha256": "bb389f5be22054b3a922f5b6911225d0ac0dbf60ee36815600d741c1907d0e0e",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "python-syntax",
+      "argv": ["python3", "-m", "py_compile", "scripts/capture_evidence.py", "scripts/check_commit_message.py", "scripts/check_staged.py", "scripts/download_model.py", "scripts/evidence_policy.py", "scripts/source_manager.py", "scripts/transaction.py", "scripts/verify_workspace.py", "tests/test_capture_evidence.py", "tests/test_check_commit_message.py", "tests/test_check_staged.py", "tests/test_download_model.py", "tests/test_source_manager.py", "tests/test_transaction.py", "tests/test_verify_workspace.py"],
+      "cwd": ".",
+      "started_at": "2026-08-07T18:55:38+00:00",
+      "ended_at": "2026-08-07T18:55:38+00:00",
+      "exit_code": 0,
+      "result": "All control-plane Python modules and tests compiled successfully.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0002/pycompile.json",
+        "size": 1103,
+        "sha256": "fc6192d6f3b9f1803f113bf4656718eaf6b97fa451fcbe62d3f8f479f752601f",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0002/pycompile.stdout",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0002/pycompile.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "shell-syntax",
+      "argv": ["bash", "-n", ".githooks/pre-commit", ".githooks/commit-msg", "scripts/bootstrap.sh", "scripts/materialize_sources.sh", "scripts/resolve_sources.sh", "scripts/resume.sh"],
+      "cwd": ".",
+      "started_at": "2026-08-07T18:48:38+00:00",
+      "ended_at": "2026-08-07T18:48:38+00:00",
+      "exit_code": 0,
+      "result": "All tracked shell entry points and Git hooks passed bash syntax validation.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0002/shell-syntax.json",
+        "size": 742,
+        "sha256": "f43b9c1a021464f678a4339d3f3751389d87581258759ef12db3b272ad954d2c",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0002/shell-syntax.stdout",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0002/shell-syntax.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "source-lock-json",
+      "argv": ["python3", "-m", "json.tool", "SOURCE_LOCK.json"],
+      "cwd": ".",
+      "started_at": "2026-08-07T18:48:38+00:00",
+      "ended_at": "2026-08-07T18:48:38+00:00",
+      "exit_code": 0,
+      "result": "The frozen SOURCE_LOCK document passed strict JSON parsing.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0002/source-lock-json.json",
+        "size": 617,
+        "sha256": "836c555b6ae245915762f374a60e9319371c2de60ce794bf9aaf963b681b3840",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0002/source-lock-json.stdout",
+        "size": 41513,
+        "sha256": "35e1f32c1b751301dd38ae8542afd1fe6072a168fc2abd0f831df3e886e8f522",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0002/source-lock-json.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "working-tree-diff-check",
+      "argv": ["git", "diff", "--check"],
+      "cwd": ".",
+      "started_at": "2026-08-07T18:55:38+00:00",
+      "ended_at": "2026-08-07T18:55:38+00:00",
+      "exit_code": 0,
+      "result": "The complete CP-0002 working tree had no whitespace errors.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0002/diff-check.json",
+        "size": 573,
+        "sha256": "d803eb564bf8ca4988ba0f8c1cb48815b5c0782bbd974cc3fe22aeb6e98ec9bb",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0002/diff-check.stdout",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0002/diff-check.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    }
+  ],
+  "external_artifacts": [
+    {
+      "path": "artifacts/source-lock-pre-freeze.json",
+      "size": 10492,
+      "sha256": "b3a606484299cf5db4148a23bc88c451d0945662b97d7b7e6c7dc596b94e550c",
+      "tracked": false,
+      "required_at_acceptance": true,
+      "required_for_resume": false
+    }
+  ],
+  "includes": {
+    "EV-0002": "9192c9cec01abc873b2f01d28ece4c51536efc000641424c5bea342251297284"
+  },
+  "environment_fingerprint": {
+    "kernel": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+    "python": "3.14.6",
+    "git": "2.53.0",
+    "timezone": "Asia/Shanghai"
+  },
+  "limitations": [
+    "Git histories use each lane's recorded partial-clone filter. All reachable commits and every locked baseline or compatibility tree are offline-complete; unrelated historical trees and blobs are outside this checkpoint's offline guarantee.",
+    "Long-running clone and hydration transcripts predated the capture helper. Their local logs and quarantined failed packs remain outside Git, while freeze independently revalidated the final identities and object closure.",
+    "The local official Hugging Face API route was unavailable. Official fixed-revision pages were reviewed, mirror metadata provided a cryptographic inventory cross-check, and model weights remain deliberately undownloaded."
+  ],
+  "redactions": []
+}

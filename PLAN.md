@@ -3,7 +3,7 @@
 **Plan ID:** `AMDGPU-SIM-V1`  
 **Revision:** `1`  
 **Revision date:** `2026-08-07`  
-**State at this commit:** `P0-control-plane-complete; paused-for-handoff`
+**State at this commit:** `P0-SRC-01-source-freeze-complete; next-P0-SELF-01`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -37,6 +37,12 @@ there is a new lesson), and a final root coordinator commit.  Git cannot make
 multiple repositories one physical atomic transaction, so the protocol is
 explicitly two-phase and crash-recoverable (see section 8).
 
+Every project-authored child and root commit carries exactly one
+`Checkpoint-ID`, `Goal-ID`, `Plan-Revision`, `Source-Lock-SHA256`,
+`Evidence-Manifest-SHA256`, `Change-Kind`, and `Baseline-Commit` trailer. The
+tracked `commit-msg` hook rejects missing, duplicate, abbreviated, or malformed
+identities. Existing upstream commits are never rewritten to add our trailers.
+
 ## 2. Fixed decisions
 
 | Area | Decision | Boundary |
@@ -52,7 +58,7 @@ explicitly two-phase and crash-recoverable (see section 8).
 | Triton | Reuse AMD lowering/compiler; add an out-of-tree `gemsim_amd` driver and launcher | Cache keys include every toolchain/runtime/simulator revision |
 | Precision | Bitwise for copies/integers; explicit per-op/layer BF16/FP16 tolerances; exact final greedy token | No claim of all-float bitwise identity |
 | Failure | Abort the whole job epoch, checkpoint at request/layer boundaries, deterministic replay | No elastic shrink in the anchor |
-| Distribution | Root control repo plus independent upstream Git lanes with immutable baseline tags | We never rewrite upstream history |
+| Distribution | Root coordinator plus standard submodule gitlinks and immutable child baseline tags | We never rewrite upstream history |
 | Artifacts | Weights, environments, binaries, caches and logs are ignored; scripts fetch/rebuild by fixed revision and hash | Offline execution after preparation is required |
 | License | GPL-3.0-or-later for new glue/aggregate where legally possible; preserve every upstream license and notice | No license header is removed or relicensed casually |
 
@@ -82,9 +88,24 @@ The first three ROCm components are intentionally taken from one
 `rocm-systems` revision so ROCr/HIP/CLR/RCCL interfaces cannot drift.  The
 active device-libs source is `ROCm/llvm-project/amd/device-libs`; the archived
 standalone Device-Libs repository is not used as the primary lane.  Nested
-source repositories preserve their upstream history.  A pristine checkout is
-tagged `upstream-baseline/<lane>/<sha>` (or recorded as a gitlink); our work
-branches and commits must descend from that exact object.
+source repositories preserve their upstream history. The root always records
+each child as a standard `.gitmodules` entry plus mode-160000 gitlink. A
+pristine checkout is tagged `upstream-baseline/<lane>/<full-40-byte-sha>`; our
+work branches and commits must descend from that exact object. A child has only
+an `upstream` remote until a durable project fork is configured; local changes
+must not advance the root gitlink before their `origin` is reproducible.
+
+Large source lanes may use a non-shallow partial clone with a recorded
+`blob:none` or `tree:0` filter and a full, non-sparse checkout. Non-shallow means
+that every commit in the ancestry reachable from the locked head is locally
+traversable; it does not claim that unrelated historical trees or blobs are
+local. The complete locked baseline tree, plus every compatibility tree named
+by the lock, must be hydrated and pass
+`GIT_NO_LAZY_FETCH=1 git archive <revision>` before acceptance. This provides an
+offline-buildable prepared checkout while retaining honest promisor semantics
+for unused history. A later offline bundle gate must hydrate all reachable
+objects and create a hashed full mirror/bundle when a fresh disconnected clone,
+rather than a copied prepared checkout, is required.
 
 ## 4. Architecture to implement
 
@@ -165,12 +186,19 @@ vector kernels, elementwise, reductions/LDS/barriers/atomics, MFMA/GEMM,
 embedding/RMSNorm/MLP/RoPE, GDN, paged attention, logits/sampling, then full
 official layers.
 
-### P0 — control plane and source freeze (current bootstrap, then next run)
+### P0 — control plane and source freeze
 
 Deliver PLAN/GOAL/recovery scripts, root initial commit, exact source lock,
 upstream checkouts and immutable baseline tags, license inventory, model-fetch
-script, and a clean offline verification gate.  The current commit stops after
-the control plane; the next unique action is `P0-SRC-01` in `state/current.json`.
+script, and a clean offline verification gate. After `P0-SRC-01`,
+`P0-SELF-01` must generalize the repository registry before adding authored
+code: immutable upstream baseline identity remains under `SOURCE_LOCK`, while
+checkpoint/current head identity may advance only through audited descendant
+commits. The registered project set then becomes the union of locked upstream
+lanes and separately declared project-authored lanes. That checkpoint creates
+`self-amdgpu-runtime` with a pristine initial baseline commit before any runtime
+implementation commit. This split is required before gem5, Triton, PyTorch, or
+vLLM work heads can advance without weakening source provenance.
 
 ### P1 — gem5 host bridge and one daemon
 
@@ -292,13 +320,22 @@ under `state/evidence/`. Required audit classes are:
   N=3 non-pair topology tests.
 
 Large logs and artifacts are external/ignored. Evidence manifests store their
-size and SHA-256, never an unbounded blob in Git.
+size and SHA-256, never an unbounded blob in Git. Historical commands whose raw
+streams predate the capture helper must declare that limitation explicitly and
+cannot independently support an acceptance claim; every new acceptance command
+retains a command record plus hashed stdout and stderr through the capture
+helper. The exact pre-freeze `SOURCE_LOCK.json` candidate is likewise preserved
+as an ignored, hash-addressed artifact and must be bound by the checkpoint's
+evidence manifest at acceptance.
 
 ## 8. Recovery and commit protocol
 
 `state/current.json` is the only resume pointer.  A checkpoint names exactly
-one next action with cwd, argv, prerequisites, expected gate, and rollback
-boundary.  A bitlesson is append-only and records the symptom, source evidence,
+one next action with cwd, argv, non-empty prerequisites, expected gate, and
+rollback boundary. A source-freeze checkpoint also carries an exact repository
+map (`id`, path, baseline commit/tree/tag, head/tree, administrative Git path,
+and clean state) that is verified against the immutable source lock. A
+bitlesson is append-only and records the symptom, source evidence,
 wrong assumption, decision, confidence, and affected commit range.
 
 `scripts/resume.sh --verify` is offline and read-only.  It refuses handoff if
@@ -349,17 +386,18 @@ licenses into a false aggregate claim.
 
 ## 10. Current handoff boundary
 
-This bootstrap commit contains no upstream checkout and no implementation
-claim.  It establishes the plan, goal, lock schema, recovery verifier, hooks,
-and the first checkpoint.  The next unique action is:
+`CP-0002` freezes the reviewed official Qwen revision and six pristine upstream
+source lanes. Each Git lane retains its upstream history, immutable annotated
+baseline tag, complete locked tree, safe no-push remote, and a standard root
+gitlink. No simulator or runtime implementation claim is made at this boundary.
 
-```text
-P0-SRC-01: run scripts/resolve_sources.sh --online, revalidate every official
-remote HEAD and the official Hugging Face model revision, write immutable
-SOURCE_LOCK.json (including tree hashes), then clone the three source lanes and
-the ML lanes with their pristine upstream history before any local patch.
-```
+The next unique action is `P0-SELF-01`: introduce the authored/current lane
+registry described in P0, separate immutable baseline authority from advancing
+checkpoint heads, and then create the standalone GPL `self-amdgpu-runtime`
+project with its own pristine initial baseline commit and tag. `SOURCE_LOCK.json`
+is append-only after this checkpoint and must not be repurposed as the evolving
+workspace-head registry.
 
-After this commit the requested workflow intentionally pauses for a model/token
-handoff.  The exact blank-context continuation prompt is in `GOAL.md` and
-`state/current.json`.
+The exact blank-context continuation contract remains in `GOAL.md`; the
+machine-executable argv, prerequisites, expected gate, and rollback boundary
+are in `state/current.json` and its referenced checkpoint.

@@ -1,103 +1,773 @@
 {
-  "schema": "amdgpu-sim.source-lock.v1",
-  "lock_id": "SL-0000-observed",
-  "status": "observed-not-fetched",
+  "accepted_parent_root_commit": "850b61de9ca3aecde80a7fd707ed6f3d83f0db36",
+  "accepted_parent_source_lock_sha256": "264fa3fb5f17e9ebac26ae0c4a0d7fe7bd567f8e4564d01951a238598342385a",
+  "frozen_at": "2026-08-08T02:44:00+08:00",
+  "frozen_by_checkpoint": "CP-0002",
+  "lock_id": "SL-0001",
+  "observation_note": "Git revisions were revalidated online and baseline-tagged. Every commit reachable from each locked head is locally traversable, and every locked baseline or compatibility tree is offline-complete. Unrelated historical trees and blobs may remain promised exactly as recorded by each lane's frozen partial-clone filter.",
   "observed_at": "2026-08-07T19:39:00+08:00",
-  "observation_note": "Remote observations are provisional until P0-SRC-01 revalidates them online and records tree hashes. No source checkout has been made.",
+  "pre_freeze_candidate_artifact": {
+    "path": "artifacts/source-lock-pre-freeze.json",
+    "required_for_resume": false,
+    "sha256": "b3a606484299cf5db4148a23bc88c451d0945662b97d7b7e6c7dc596b94e550c",
+    "size": 10492
+  },
+  "pre_freeze_candidate_sha256": "b3a606484299cf5db4148a23bc88c451d0945662b97d7b7e6c7dc596b94e550c",
+  "resolution_artifact": {
+    "path": "artifacts/source-resolution.json",
+    "required_for_resume": false,
+    "sha256": "eaff055bb7a8b7ad651039ca7a7422a7d96a1a4c152a5971d20fc09f5d941898",
+    "size": 2835,
+    "status": "failed"
+  },
+  "resolution_evidence_id": "EV-0002",
+  "resolution_evidence_path": "state/evidence/EV-0002.json",
+  "resolution_evidence_sha256": "9192c9cec01abc873b2f01d28ece4c51536efc000641424c5bea342251297284",
+  "revalidated_at": "2026-08-07T20:13:35+08:00",
+  "schema": "amdgpu-sim.source-lock.v1",
   "sources": [
     {
+      "administrative_git_dir": "modules/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "baseline_tag_payload": "object cbf0eae213c5e39c727172b546434287d47b5bbe\ntype commit\ntag upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe\ntagger zhaosiying12138 <neucszhaopeng2016@163.com> 1786108097 +0800\n\nPristine upstream baseline for gem5\n\nUpstream-URL: https://github.com/gem5/gem5.git\nUpstream-Ref: stable\nBaseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe\nBaseline-Tree: d6527ec47acf018cb89afab496b974bda79eaa36\nObserved-At: 2026-08-07T21:08:17+08:00\n",
+      "baseline_tag_payload_sha256": "45e23c61ae143bd31716dee6e0d44208e1646161d72a8cb6cad193b0f157553f",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "baseline_verification": {
+        "alternates_required": false,
+        "offline_archive_verified": true,
+        "tree_object_verified": true
+      },
+      "commit_time": "2026-07-28T14:09:57-07:00",
+      "expected_push_urls": {
+        "upstream": "no_push"
+      },
+      "expected_remotes": {
+        "upstream": "git@github.com:gem5/gem5.git"
+      },
+      "history": {
+        "commit_ancestry_offline_traversable": true,
+        "commit_ancestry_scope": "all commits reachable from the locked baseline head",
+        "fresh_offline_clone_bundle_available": false,
+        "historical_tree_blob_scope": "promisor-filtered",
+        "locked_baseline_tree_fully_hydrated": true,
+        "partial_clone_filter": "blob:none",
+        "promisor_remote": true,
+        "reachable_commit_count": 23672,
+        "shallow": false
+      },
+      "hooks_path": "../../.githooks",
       "id": "gem5",
-      "role": "simulator",
-      "path": "projects/gem5",
-      "materialization": "pending",
-      "upstream_url": "https://github.com/gem5/gem5.git",
-      "upstream_ref": "stable",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        {
+          "path": "LICENSE",
+          "sha256": "bafc693ac009ddd37e3a96da715eaab7b97891cbf4f800a4a9d93394dfde989c"
+        },
+        {
+          "path": "COPYING",
+          "sha256": "320ed0e3e6b1c857a638e89c5aeb06a9a6820c7f9aea89b3055bf5ecf007bb43"
+        }
+      ],
+      "materialization": "gitlink",
+      "nested_submodules": {
+        "declared_count": 0,
+        "declared_paths": [],
+        "gitlink_count": 0,
+        "gitlink_paths": [],
+        "materialized": false,
+        "offline_build_closure": false,
+        "stale_declarations": [],
+        "undeclared_gitlinks": []
+      },
       "observed_head": "cbf0eae213c5e39c727172b546434287d47b5bbe",
-      "baseline_commit": null,
-      "baseline_tree": null,
+      "offline_tree_verified": true,
+      "path": "projects/gem5",
+      "resolution_evidence_id": "EV-0002",
+      "resolution_record_id": "gem5",
+      "role": "simulator",
+      "transport_url": "git@github.com:gem5/gem5.git",
+      "upstream_ref": "stable",
+      "upstream_tracking_ref": "refs/amdgpu-sim/resolved/stable",
+      "upstream_url": "https://github.com/gem5/gem5.git",
       "work_branch": "amdgpu-sim/gemsim-host-bridge",
-      "license": "BSD-3-Clause"
+      "work_head": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "work_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "worktree_verification": {
+        "full_checkout": true,
+        "skip_worktree_entries": 0,
+        "sparse_checkout": false
+      }
     },
     {
+      "administrative_git_dir": "modules/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "baseline_tag_payload": "object 92115a2941982a384de161be3f78cf9bff547027\ntype commit\ntag upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027\ntagger amdgpu-sim source lock <source-lock@amdgpu-sim.invalid> 1786105581 +0800\n\nPristine upstream baseline for rocm-systems\n\nUpstream-URL: https://github.com/ROCm/rocm-systems.git\nUpstream-Ref: develop\nBaseline-Commit: 92115a2941982a384de161be3f78cf9bff547027\nBaseline-Tree: 28bf42b65f7aad25167180543dda69b5fc6caf58\nObserved-At: 2026-08-07T20:26:21+08:00\nResolved-At: 2026-08-07T20:26:21+08:00\n",
+      "baseline_tag_payload_sha256": "8509473c4e51fe82b70ef7d89ce43075dda092bce11ee727b61854defa6f6ddc",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "baseline_verification": {
+        "alternates_required": false,
+        "offline_archive_verified": true,
+        "tree_object_verified": true
+      },
+      "commit_time": "2026-08-07T07:15:59-04:00",
+      "expected_push_urls": {
+        "upstream": "no_push"
+      },
+      "expected_remotes": {
+        "upstream": "git@github.com:ROCm/rocm-systems.git"
+      },
+      "history": {
+        "commit_ancestry_offline_traversable": true,
+        "commit_ancestry_scope": "all commits reachable from the locked baseline head",
+        "fresh_offline_clone_bundle_available": false,
+        "historical_tree_blob_scope": "promisor-filtered",
+        "locked_baseline_tree_fully_hydrated": true,
+        "partial_clone_filter": "blob:none",
+        "promisor_remote": true,
+        "reachable_commit_count": 84764,
+        "shallow": false
+      },
+      "hooks_path": "../../.githooks",
       "id": "rocm-systems",
-      "role": "rocr-libhsakmt-hip-clr-rccl",
-      "path": "projects/rocm-systems",
-      "materialization": "pending",
-      "upstream_url": "https://github.com/ROCm/rocm-systems.git",
-      "upstream_ref": "develop",
+      "license": "component-specific; preserve all LICENSE/NOTICE files",
+      "license_files": [
+        {
+          "path": "projects/rocr-runtime/LICENSE.txt",
+          "sha256": "ffa5a77ce21419e276bd9068faec94333128e49e1c95426d9c1d35435e8fe835"
+        },
+        {
+          "path": "projects/rocr-runtime/libhsakmt/LICENSE.md",
+          "sha256": "f45a5bc0bc68dd9a00e9609097788b1cbda79726fee02549cb0c04b90190b419"
+        },
+        {
+          "path": "projects/clr/LICENSE.md",
+          "sha256": "b185aaa652b0bf066c37a0d6314ce4bf4521e4a3c9bf46edd2f6a777ac522223"
+        },
+        {
+          "path": "projects/hip/LICENSE.md",
+          "sha256": "b185aaa652b0bf066c37a0d6314ce4bf4521e4a3c9bf46edd2f6a777ac522223"
+        },
+        {
+          "path": "projects/rccl/LICENSE.txt",
+          "sha256": "44cc3e23bcaf3f152f19e5dd063cb7ffc6b91bf98309b901fca653d6a592b9a1"
+        },
+        {
+          "path": "projects/rccl/NOTICES.txt",
+          "sha256": "ddc1a3a2195d51a537467f22906277a6833c99d42deb62fda86042bbb46ca39f"
+        },
+        {
+          "path": "projects/rccl/ThirdPartyNotices.txt",
+          "sha256": "afc433a3b9262c3266f5e683e017fb6a44687c5098967928e478be6614e77df6"
+        }
+      ],
+      "materialization": "gitlink",
+      "nested_submodules": {
+        "declared_count": 36,
+        "declared_paths": [
+          "experimental/python/perfxpert/opencode",
+          "projects/rccl/ext-src/json",
+          "projects/rccl/ext-src/mscclpp",
+          "projects/rocprofiler-compute/src/lib/external/fmt",
+          "projects/rocprofiler-compute/src/lib/external/googletest",
+          "projects/rocprofiler-compute/src/lib/external/json",
+          "projects/rocprofiler-compute/src/vendored/pyyaml",
+          "projects/rocprofiler-register/external/fmt",
+          "projects/rocprofiler-register/external/glog",
+          "projects/rocprofiler-sdk/external/abseil-cpp",
+          "projects/rocprofiler-sdk/external/cereal",
+          "projects/rocprofiler-sdk/external/doxygen-awesome-css",
+          "projects/rocprofiler-sdk/external/elfio",
+          "projects/rocprofiler-sdk/external/filesystem",
+          "projects/rocprofiler-sdk/external/fmt",
+          "projects/rocprofiler-sdk/external/googletest",
+          "projects/rocprofiler-sdk/external/gotcha",
+          "projects/rocprofiler-sdk/external/json",
+          "projects/rocprofiler-sdk/external/perfetto",
+          "projects/rocprofiler-sdk/external/ptl",
+          "projects/rocprofiler-sdk/external/pybind11",
+          "projects/rocprofiler-sdk/external/sqlite",
+          "projects/rocprofiler-sdk/external/yaml-cpp",
+          "projects/rocprofiler-systems/examples/lulesh/external/kokkos",
+          "projects/rocprofiler-systems/external/dyninst",
+          "projects/rocprofiler-systems/external/elfio",
+          "projects/rocprofiler-systems/external/filesystem",
+          "projects/rocprofiler-systems/external/googletest",
+          "projects/rocprofiler-systems/external/json",
+          "projects/rocprofiler-systems/external/onetbb",
+          "projects/rocprofiler-systems/external/papi",
+          "projects/rocprofiler-systems/external/perfetto",
+          "projects/rocprofiler-systems/external/pybind11",
+          "projects/rocprofiler-systems/external/spdlog",
+          "projects/rocprofiler-systems/external/timemory",
+          "projects/rocprofiler/plugin/perfetto/perfetto"
+        ],
+        "gitlink_count": 34,
+        "gitlink_paths": [
+          "experimental/python/perfxpert/opencode",
+          "projects/rocprofiler-compute/src/lib/external/fmt",
+          "projects/rocprofiler-compute/src/lib/external/googletest",
+          "projects/rocprofiler-compute/src/lib/external/json",
+          "projects/rocprofiler-compute/src/vendored/pyyaml",
+          "projects/rocprofiler-register/external/fmt",
+          "projects/rocprofiler-register/external/glog",
+          "projects/rocprofiler-sdk/external/abseil-cpp",
+          "projects/rocprofiler-sdk/external/cereal",
+          "projects/rocprofiler-sdk/external/doxygen-awesome-css",
+          "projects/rocprofiler-sdk/external/elfio",
+          "projects/rocprofiler-sdk/external/filesystem",
+          "projects/rocprofiler-sdk/external/fmt",
+          "projects/rocprofiler-sdk/external/googletest",
+          "projects/rocprofiler-sdk/external/gotcha",
+          "projects/rocprofiler-sdk/external/json",
+          "projects/rocprofiler-sdk/external/perfetto",
+          "projects/rocprofiler-sdk/external/ptl",
+          "projects/rocprofiler-sdk/external/pybind11",
+          "projects/rocprofiler-sdk/external/sqlite",
+          "projects/rocprofiler-sdk/external/yaml-cpp",
+          "projects/rocprofiler-systems/examples/lulesh/external/kokkos",
+          "projects/rocprofiler-systems/external/dyninst",
+          "projects/rocprofiler-systems/external/elfio",
+          "projects/rocprofiler-systems/external/filesystem",
+          "projects/rocprofiler-systems/external/googletest",
+          "projects/rocprofiler-systems/external/json",
+          "projects/rocprofiler-systems/external/onetbb",
+          "projects/rocprofiler-systems/external/papi",
+          "projects/rocprofiler-systems/external/perfetto",
+          "projects/rocprofiler-systems/external/pybind11",
+          "projects/rocprofiler-systems/external/spdlog",
+          "projects/rocprofiler-systems/external/timemory",
+          "projects/rocprofiler/plugin/perfetto/perfetto"
+        ],
+        "materialized": false,
+        "offline_build_closure": false,
+        "stale_declarations": [
+          "projects/rccl/ext-src/json",
+          "projects/rccl/ext-src/mscclpp"
+        ],
+        "undeclared_gitlinks": []
+      },
       "observed_head": "92115a2941982a384de161be3f78cf9bff547027",
-      "baseline_commit": null,
-      "baseline_tree": null,
-      "selected_paths": ["projects/rocr-runtime", "projects/clr", "projects/hip", "projects/rccl"],
+      "offline_tree_verified": true,
+      "path": "projects/rocm-systems",
+      "resolution_evidence_id": "EV-0002",
+      "resolution_record_id": "rocm-systems",
+      "role": "rocr-libhsakmt-hip-clr-rccl",
+      "selected_paths": [
+        "projects/rocr-runtime",
+        "projects/clr",
+        "projects/hip",
+        "projects/rccl"
+      ],
+      "transport_url": "git@github.com:ROCm/rocm-systems.git",
+      "upstream_ref": "develop",
+      "upstream_tracking_ref": "refs/amdgpu-sim/resolved/develop",
+      "upstream_url": "https://github.com/ROCm/rocm-systems.git",
       "work_branch": "amdgpu-sim/gemsim-runtime",
-      "license": "component-specific; preserve all LICENSE/NOTICE files"
+      "work_head": "92115a2941982a384de161be3f78cf9bff547027",
+      "work_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "worktree_verification": {
+        "full_checkout": true,
+        "skip_worktree_entries": 0,
+        "sparse_checkout": false
+      }
     },
     {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tag_payload": "object 73f2a21fe16b34e35fd0e149564b8664e59da392\ntype commit\ntag upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392\ntagger zhaosiying12138 <neucszhaopeng2016@163.com> 1786127830 +0800\n\nUpstream-URL: https://github.com/ROCm/llvm-project.git\nUpstream-Ref: amd-staging\nBaseline-Commit: 73f2a21fe16b34e35fd0e149564b8664e59da392\nBaseline-Tree: d589480097e8a30fd1df38435ccc9a9fca71f489\nCommit-Time: 2026-08-07T06:57:36-04:00\nObserved-At: 2026-08-08T01:45:26+08:00\n",
+      "baseline_tag_payload_sha256": "fe129443cebc1c78f15c85d014cd63b38d318206086b524873a335c9b592fff4",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "baseline_verification": {
+        "alternates_required": false,
+        "offline_archive_verified": true,
+        "tree_object_verified": true
+      },
+      "commit_time": "2026-08-07T06:57:36-04:00",
+      "expected_push_urls": {
+        "upstream": "no_push"
+      },
+      "expected_remotes": {
+        "upstream": "git@github.com:ROCm/llvm-project.git"
+      },
+      "history": {
+        "commit_ancestry_offline_traversable": true,
+        "commit_ancestry_scope": "all commits reachable from the locked baseline head",
+        "fresh_offline_clone_bundle_available": false,
+        "historical_tree_blob_scope": "promisor-filtered",
+        "locked_baseline_tree_fully_hydrated": true,
+        "partial_clone_filter": "tree:0",
+        "promisor_remote": true,
+        "reachable_commit_count": 613934,
+        "shallow": false
+      },
+      "hooks_path": "../../.githooks",
       "id": "llvm-project",
-      "role": "llvm-clang-device-libs",
-      "path": "projects/llvm-project",
-      "materialization": "pending",
-      "upstream_url": "https://github.com/ROCm/llvm-project.git",
-      "upstream_ref": "amd-staging",
+      "license": "Apache-2.0 WITH LLVM-exception plus third-party terms",
+      "license_files": [
+        {
+          "path": "LICENSE.TXT",
+          "sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
+        },
+        {
+          "path": "amd/device-libs/LICENSE.TXT",
+          "sha256": "a4e8e3ba6e9255928a29d3085f929de402e61413cb0c49276e16b558effa8a2a"
+        }
+      ],
+      "materialization": "gitlink",
+      "nested_submodules": {
+        "declared_count": 0,
+        "declared_paths": [],
+        "gitlink_count": 0,
+        "gitlink_paths": [],
+        "materialized": false,
+        "offline_build_closure": false,
+        "stale_declarations": [],
+        "undeclared_gitlinks": []
+      },
       "observed_head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
-      "baseline_commit": null,
-      "baseline_tree": null,
+      "offline_tree_verified": true,
+      "path": "projects/llvm-project",
+      "resolution_evidence_id": "EV-0002",
+      "resolution_record_id": "llvm-project",
+      "role": "llvm-clang-device-libs",
+      "transport_url": "git@github.com:ROCm/llvm-project.git",
+      "upstream_ref": "amd-staging",
+      "upstream_tracking_ref": "refs/amdgpu-sim/resolved/amd-staging",
+      "upstream_url": "https://github.com/ROCm/llvm-project.git",
       "work_branch": "amdgpu-sim/gemsim-llvm",
-      "license": "Apache-2.0 WITH LLVM-exception plus third-party terms"
+      "work_head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "work_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "worktree_verification": {
+        "full_checkout": true,
+        "skip_worktree_entries": 0,
+        "sparse_checkout": false
+      }
     },
     {
+      "administrative_git_dir": "modules/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "baseline_tag_payload": "object cd513e2798db0f4675b3d1205c8e76eb3381a0b3\ntype commit\ntag upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3\ntagger zhaosiying12138 <neucszhaopeng2016@163.com> 1786107781 +0800\n\nPristine upstream baseline for triton\n\nUpstream-URL: https://github.com/triton-lang/triton.git\nUpstream-Ref: main\nBaseline-Commit: cd513e2798db0f4675b3d1205c8e76eb3381a0b3\nBaseline-Tree: 944754ed44b5414f2b72fed267455abc9f6fc8c1\nObserved-At: 2026-08-07T21:03:01+08:00\n",
+      "baseline_tag_payload_sha256": "c606065b3167461015a3083c262708162155d035d2f35bc2e2887f163a2842d0",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "baseline_verification": {
+        "alternates_required": false,
+        "offline_archive_verified": true,
+        "tree_object_verified": true
+      },
+      "commit_time": "2026-08-07T17:21:03+08:00",
+      "compatibility_revisions": [
+        {
+          "ancestor_of_baseline": false,
+          "commit": "675c59878aa2280b31f722aaf42b825fcee21de8",
+          "commit_time": "2026-08-01T18:10:58-07:00",
+          "merge_base_with_baseline": "3bb23dde71a3679f0ae3e9c1be6dcae1f4bff462",
+          "offline_tree_verified": true,
+          "purpose": "Exact Triton revision pinned by the frozen PyTorch source",
+          "required_by_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+          "required_by_source": "pytorch",
+          "tag": "compatibility/pytorch/411e87a/675c59878aa2280b31f722aaf42b825fcee21de8",
+          "tag_object": "7fc61d98c87feedc6207d1634fc227ba8182a77f",
+          "tag_payload": "object 675c59878aa2280b31f722aaf42b825fcee21de8\ntype commit\ntag compatibility/pytorch/411e87a/675c59878aa2280b31f722aaf42b825fcee21de8\ntagger zhaosiying12138 <neucszhaopeng2016@163.com> 1786107745 +0800\n\nTriton compatibility baseline for PyTorch 411e87a93704f547e5146c74c95fa11acf13d646\n\nUpstream-URL: https://github.com/triton-lang/triton.git\nUpstream-Ref: PyTorch 411e87a93704f547e5146c74c95fa11acf13d646 compatibility pin\nCompatibility-Commit: 675c59878aa2280b31f722aaf42b825fcee21de8\nCompatibility-Tree: 1285d1c814d60ef93f771d40d5d53e4b5b34a1e5\nObserved-At: 2026-08-07T21:02:25+08:00\n",
+          "tag_payload_sha256": "4f35d6f8ea99b9d6b9c0c11d37de65208ae90736ed19e68550d93705f7417543",
+          "tree": "1285d1c814d60ef93f771d40d5d53e4b5b34a1e5"
+        }
+      ],
+      "expected_push_urls": {
+        "upstream": "no_push"
+      },
+      "expected_remotes": {
+        "upstream": "git@github.com:triton-lang/triton.git"
+      },
+      "history": {
+        "commit_ancestry_offline_traversable": true,
+        "commit_ancestry_scope": "all commits reachable from the locked baseline head",
+        "fresh_offline_clone_bundle_available": false,
+        "historical_tree_blob_scope": "promisor-filtered",
+        "locked_baseline_tree_fully_hydrated": true,
+        "partial_clone_filter": "blob:none",
+        "promisor_remote": true,
+        "reachable_commit_count": 6683,
+        "shallow": false
+      },
+      "hooks_path": "../../.githooks",
       "id": "triton",
-      "role": "compiler-and-python-backend",
-      "path": "projects/triton",
-      "materialization": "pending",
-      "upstream_url": "https://github.com/triton-lang/triton.git",
-      "upstream_ref": "main",
+      "license": "MIT",
+      "license_files": [
+        {
+          "path": "LICENSE",
+          "sha256": "92640fb97222fd0a698ff28ce0c3782c172623f8d6c609b557636a80f28fb946"
+        }
+      ],
+      "materialization": "gitlink",
+      "nested_submodules": {
+        "declared_count": 0,
+        "declared_paths": [],
+        "gitlink_count": 0,
+        "gitlink_paths": [],
+        "materialized": false,
+        "offline_build_closure": false,
+        "stale_declarations": [],
+        "undeclared_gitlinks": []
+      },
       "observed_head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
-      "baseline_commit": null,
-      "baseline_tree": null,
+      "offline_tree_verified": true,
+      "path": "projects/triton",
+      "resolution_evidence_id": "EV-0002",
+      "resolution_record_id": "triton",
+      "role": "compiler-and-python-backend",
+      "transport_url": "git@github.com:triton-lang/triton.git",
+      "upstream_ref": "main",
+      "upstream_tracking_ref": "refs/amdgpu-sim/resolved/main",
+      "upstream_url": "https://github.com/triton-lang/triton.git",
       "work_branch": "amdgpu-sim/gemsim-triton",
-      "license": "upstream license and notices"
+      "work_head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "work_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "worktree_verification": {
+        "full_checkout": true,
+        "skip_worktree_entries": 0,
+        "sparse_checkout": false
+      }
     },
     {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tag_payload": "object 411e87a93704f547e5146c74c95fa11acf13d646\ntype commit\ntag upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646\ntagger amdgpu-sim source lock <source-lock@amdgpu-sim.invalid> 1786104815 +0800\n\nPristine upstream baseline for pytorch\n\nUpstream-URL: https://github.com/pytorch/pytorch.git\nUpstream-Ref: main\nBaseline-Commit: 411e87a93704f547e5146c74c95fa11acf13d646\nBaseline-Tree: b742566ccb3cc783c2c99176939076831f4e8315\nObserved-At: 2026-08-07T19:39:00+08:00\nResolved-At: 2026-08-07T20:13:35+08:00\n",
+      "baseline_tag_payload_sha256": "e23ba55858a16a4a9710a28daa1da14e53d70ab9be3bad7773ffabec78083e18",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "baseline_verification": {
+        "alternates_required": false,
+        "offline_archive_verified": true,
+        "tree_object_verified": true
+      },
+      "commit_time": "2026-08-07T11:18:49Z",
+      "expected_push_urls": {
+        "upstream": "no_push"
+      },
+      "expected_remotes": {
+        "upstream": "git@github.com:pytorch/pytorch.git"
+      },
+      "history": {
+        "commit_ancestry_offline_traversable": true,
+        "commit_ancestry_scope": "all commits reachable from the locked baseline head",
+        "fresh_offline_clone_bundle_available": false,
+        "historical_tree_blob_scope": "promisor-filtered",
+        "locked_baseline_tree_fully_hydrated": true,
+        "partial_clone_filter": "blob:none",
+        "promisor_remote": true,
+        "reachable_commit_count": 108662,
+        "shallow": false
+      },
+      "hooks_path": "../../.githooks",
       "id": "pytorch",
-      "role": "tensor-runtime",
-      "path": "projects/pytorch",
-      "materialization": "pending",
-      "upstream_url": "https://github.com/pytorch/pytorch.git",
-      "upstream_ref": "main",
+      "license": "BSD-style; preserve third-party notices",
+      "license_files": [
+        {
+          "path": "LICENSE",
+          "sha256": "bd018feef8825e88181c84eb7e3aa4eafb8f08a20d9fd6ef948569610c4a3e43"
+        }
+      ],
+      "materialization": "gitlink",
+      "nested_submodules": {
+        "declared_count": 37,
+        "declared_paths": [
+          "android/libs/fbjni",
+          "third_party/FP16",
+          "third_party/FXdiv",
+          "third_party/NNPACK",
+          "third_party/NVTX",
+          "third_party/VulkanMemoryAllocator",
+          "third_party/XNNPACK",
+          "third_party/aiter",
+          "third_party/benchmark",
+          "third_party/composable_kernel",
+          "third_party/cpp-httplib",
+          "third_party/cpuinfo",
+          "third_party/cudnn_frontend",
+          "third_party/cutlass",
+          "third_party/fbgemm",
+          "third_party/flash-attention",
+          "third_party/flatbuffers",
+          "third_party/fmt",
+          "third_party/gemmlowp/gemmlowp",
+          "third_party/gloo",
+          "third_party/googletest",
+          "third_party/ideep",
+          "third_party/ittapi",
+          "third_party/kineto",
+          "third_party/kleidiai",
+          "third_party/mimalloc",
+          "third_party/mslk",
+          "third_party/nlohmann",
+          "third_party/onnx",
+          "third_party/pocketfft",
+          "third_party/protobuf",
+          "third_party/psimd",
+          "third_party/pthreadpool",
+          "third_party/pybind11",
+          "third_party/python-peachpy",
+          "third_party/sleef",
+          "third_party/tensorpipe"
+        ],
+        "gitlink_count": 37,
+        "gitlink_paths": [
+          "android/libs/fbjni",
+          "third_party/FP16",
+          "third_party/FXdiv",
+          "third_party/NNPACK",
+          "third_party/NVTX",
+          "third_party/VulkanMemoryAllocator",
+          "third_party/XNNPACK",
+          "third_party/aiter",
+          "third_party/benchmark",
+          "third_party/composable_kernel",
+          "third_party/cpp-httplib",
+          "third_party/cpuinfo",
+          "third_party/cudnn_frontend",
+          "third_party/cutlass",
+          "third_party/fbgemm",
+          "third_party/flash-attention",
+          "third_party/flatbuffers",
+          "third_party/fmt",
+          "third_party/gemmlowp/gemmlowp",
+          "third_party/gloo",
+          "third_party/googletest",
+          "third_party/ideep",
+          "third_party/ittapi",
+          "third_party/kineto",
+          "third_party/kleidiai",
+          "third_party/mimalloc",
+          "third_party/mslk",
+          "third_party/nlohmann",
+          "third_party/onnx",
+          "third_party/pocketfft",
+          "third_party/protobuf",
+          "third_party/psimd",
+          "third_party/pthreadpool",
+          "third_party/pybind11",
+          "third_party/python-peachpy",
+          "third_party/sleef",
+          "third_party/tensorpipe"
+        ],
+        "materialized": false,
+        "offline_build_closure": false,
+        "stale_declarations": [],
+        "undeclared_gitlinks": []
+      },
       "observed_head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "offline_tree_verified": true,
+      "path": "projects/pytorch",
+      "resolution_evidence_id": "EV-0002",
+      "resolution_record_id": "pytorch",
+      "role": "tensor-runtime",
+      "transport_url": "git@github.com:pytorch/pytorch.git",
       "triton_pin_at_observed_head": "675c59878aa2280b31f722aaf42b825fcee21de8",
-      "baseline_commit": null,
-      "baseline_tree": null,
+      "upstream_ref": "main",
+      "upstream_tracking_ref": "refs/amdgpu-sim/resolved/main",
+      "upstream_url": "https://github.com/pytorch/pytorch.git",
       "work_branch": "amdgpu-sim/gemsim-pytorch",
-      "license": "BSD-style; preserve third-party notices"
+      "work_head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "work_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "worktree_verification": {
+        "full_checkout": true,
+        "skip_worktree_entries": 0,
+        "sparse_checkout": false
+      }
     },
     {
+      "administrative_git_dir": "modules/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "baseline_tag_payload": "object 8d9b52f7c2514490bdadfd5eb0c931e58625df2e\ntype commit\ntag upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e\ntagger zhaosiying12138 <neucszhaopeng2016@163.com> 1786114614 +0800\n\nPristine upstream baseline for vllm\n\nUpstream-URL: https://github.com/vllm-project/vllm.git\nUpstream-Ref: main\nBaseline-Commit: 8d9b52f7c2514490bdadfd5eb0c931e58625df2e\nBaseline-Tree: d7f16cac8369098d7fde19003ab2577171116ecb\nObserved-At: 2026-08-07T22:56:54+08:00\n",
+      "baseline_tag_payload_sha256": "9ee3c90dbe2bb5290a9752361c779393220e20a5e1a1e5d90b39c993065d1c48",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "baseline_verification": {
+        "alternates_required": false,
+        "offline_archive_verified": true,
+        "tree_object_verified": true
+      },
+      "commit_time": "2026-08-07T10:25:31Z",
+      "expected_push_urls": {
+        "upstream": "no_push"
+      },
+      "expected_remotes": {
+        "upstream": "git@github.com:vllm-project/vllm.git"
+      },
+      "history": {
+        "commit_ancestry_offline_traversable": true,
+        "commit_ancestry_scope": "all commits reachable from the locked baseline head",
+        "fresh_offline_clone_bundle_available": false,
+        "historical_tree_blob_scope": "promisor-filtered",
+        "locked_baseline_tree_fully_hydrated": true,
+        "partial_clone_filter": "blob:none",
+        "promisor_remote": true,
+        "reachable_commit_count": 19663,
+        "shallow": false
+      },
+      "hooks_path": "../../.githooks",
       "id": "vllm",
-      "role": "inference-runtime",
-      "path": "projects/vllm",
-      "materialization": "pending",
-      "upstream_url": "https://github.com/vllm-project/vllm.git",
-      "upstream_ref": "main",
+      "license": "Apache-2.0",
+      "license_files": [
+        {
+          "path": "LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ],
+      "materialization": "gitlink",
+      "nested_submodules": {
+        "declared_count": 0,
+        "declared_paths": [],
+        "gitlink_count": 0,
+        "gitlink_paths": [],
+        "materialized": false,
+        "offline_build_closure": false,
+        "stale_declarations": [],
+        "undeclared_gitlinks": []
+      },
       "observed_head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
-      "baseline_commit": null,
-      "baseline_tree": null,
+      "offline_tree_verified": true,
+      "path": "projects/vllm",
+      "resolution_evidence_id": "EV-0002",
+      "resolution_record_id": "vllm",
+      "role": "inference-runtime",
+      "transport_url": "git@github.com:vllm-project/vllm.git",
+      "upstream_ref": "main",
+      "upstream_tracking_ref": "refs/amdgpu-sim/resolved/main",
+      "upstream_url": "https://github.com/vllm-project/vllm.git",
       "work_branch": "amdgpu-sim/gemsim-vllm",
-      "license": "Apache-2.0"
+      "work_head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "work_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "worktree_verification": {
+        "full_checkout": true,
+        "skip_worktree_entries": 0,
+        "sparse_checkout": false
+      }
     },
     {
-      "id": "qwen3.5-0.8b",
-      "role": "acceptance-model",
-      "path": "models/Qwen3.5-0.8B",
-      "materialization": "external-download-pending",
-      "upstream_url": "https://huggingface.co/Qwen/Qwen3.5-0.8B",
-      "upstream_ref": "main",
-      "official_revision": null,
-      "mirror_observation": "2fc06364715b967f1860aea9cf38778875588b17",
-      "mirror_observation_status": "not-an-official-lock",
       "download_method": "huggingface_hub.snapshot_download with resolved immutable revision",
-      "weights_in_git": false,
-      "license": "verify model card before distribution"
+      "download_status": "not-downloaded",
+      "files": [
+        {
+          "blob_id": "52373fe24473b1aa44333d318f578ae6bf04b49b",
+          "path": ".gitattributes",
+          "size": 1570
+        },
+        {
+          "blob_id": "f938136e3adacfd92be087f6e113b5d6d97f678f",
+          "path": "LICENSE",
+          "size": 11544
+        },
+        {
+          "blob_id": "5824f1761b2b3a55a2141a9a1172a7f92c7c2ad9",
+          "path": "README.md",
+          "size": 61705
+        },
+        {
+          "blob_id": "0ef09f214eaa6d9bca297988afc1454b5827b2c7",
+          "path": "chat_template.jinja",
+          "size": 7755
+        },
+        {
+          "blob_id": "715f0448b9d38103211f0ad88bbb4d6e4f4be8c9",
+          "path": "config.json",
+          "size": 2907
+        },
+        {
+          "blob_id": "a494e019ca1502219fd0128658b979e5f05ae8e8",
+          "path": "merges.txt",
+          "size": 3353259
+        },
+        {
+          "blob_id": "969da4e6aa85b4e224739020212b7cb0d09cee14",
+          "lfs": {
+            "pointer_size": 135,
+            "sha256": "04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696",
+            "size": 1746942600,
+            "xet_reconstruction_hash": "f0140d845aced424f17b1c75ebc5a67ef75fe309c68d2f613acda2eb551db7dd"
+          },
+          "path": "model.safetensors-00001-of-00001.safetensors",
+          "size": 1746942600
+        },
+        {
+          "blob_id": "f691cefdb79d73270895ebd6d9594ddcecfc1838",
+          "path": "model.safetensors.index.json",
+          "size": 50900
+        },
+        {
+          "blob_id": "2ea84a437d448ff71b08df68fdd949d5cc4ebb64",
+          "path": "preprocessor_config.json",
+          "size": 390
+        },
+        {
+          "blob_id": "a73a846725794819aa6e1c9e97d8dc9671c2006d",
+          "lfs": {
+            "pointer_size": 133,
+            "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+            "size": 12807982,
+            "xet_reconstruction_hash": "8f06040c24d0d6efc263cf398806debbf20d732031ba128349d086f6a7b8bab2"
+          },
+          "path": "tokenizer.json",
+          "size": 12807982
+        },
+        {
+          "blob_id": "fae3ce993e07c092ad024dde45e592379fde91bb",
+          "path": "tokenizer_config.json",
+          "size": 16709
+        },
+        {
+          "blob_id": "3ba673a5ad7d4d13f54155ecd38b2a94a6dac8fe",
+          "path": "video_preprocessor_config.json",
+          "size": 385
+        },
+        {
+          "blob_id": "0aa0ce0658d60ac4a5d609f4eadb0e8e43514176",
+          "path": "vocab.json",
+          "size": 6722759
+        }
+      ],
+      "id": "qwen3.5-0.8b",
+      "license": "Apache-2.0",
+      "local_official_api_status": "network-unreachable; fail-closed evidence retained",
+      "materialization": "external-download",
+      "materialized_size": 1769980465,
+      "mirror_metadata": {
+        "endpoint": "https://hf-mirror.com",
+        "mirror_api_manifest_sha256": "b39151c83d2fe9eeef51d10c0e84da46b9143cb6afb7f83605974dccf5fd33f8",
+        "normalization": "sorted compact JSON over path, blobId, size, and LFS sha256/size/pointerSize",
+        "normalized_revision_manifest_sha256": "a75f357a84fbec475d54f7b4e2eedc808af21405c23206e16cc6057453b2c9d6",
+        "revision": "2fc06364715b967f1860aea9cf38778875588b17",
+        "status": "cross-check-only; never substitutes for official revision evidence"
+      },
+      "model_manifest_provenance": "mirror metadata cryptographically normalized and cross-checked against official fixed-revision pages; no raw official API archive",
+      "official_evidence": [
+        "https://huggingface.co/Qwen/Qwen3.5-0.8B/tree/main",
+        "https://huggingface.co/Qwen/Qwen3.5-0.8B/commit/2fc06364715b967f1860aea9cf38778875588b17",
+        "https://huggingface.co/Qwen/Qwen3.5-0.8B/blob/2fc06364715b967f1860aea9cf38778875588b17/model.safetensors-00001-of-00001.safetensors",
+        "https://huggingface.co/Qwen/Qwen3.5-0.8B/blob/2fc06364715b967f1860aea9cf38778875588b17/tokenizer.json"
+      ],
+      "official_evidence_observed_at": "2026-08-07T21:10:00+08:00",
+      "official_raw_response_sha256": null,
+      "official_revision": "2fc06364715b967f1860aea9cf38778875588b17",
+      "official_revision_status": "frozen-from-official-fixed-revision-pages",
+      "path": "models/Qwen3.5-0.8B",
+      "repo_id": "Qwen/Qwen3.5-0.8B",
+      "resolution_evidence_id": "EV-0002",
+      "resolution_record_id": "qwen3.5-0.8b",
+      "role": "acceptance-model",
+      "upstream_ref": "main",
+      "upstream_url": "https://huggingface.co/Qwen/Qwen3.5-0.8B",
+      "weights_in_git": false
     }
-  ]
+  ],
+  "status": "frozen"
 }
