@@ -1,0 +1,25 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0013",
+  "checkpoint_id": "CP-0003",
+  "question_or_symptom": "A transaction can be interrupted after a child commit but before record-child, and a root allowlist alone can still permit an undeclared child gitlink to enter the coordinator tree.",
+  "observation": "A journal containing only the participant path and an unset target cannot distinguish the accepted starting head from an arbitrary child state after that interruption. Separately, checking declared children individually does not prove that every changed projects/ gitlink belongs to that declared set.",
+  "evidence_ids": [
+    "EV-0005"
+  ],
+  "conclusion": "A recoverable two-phase participant declaration needs its immutable starting identity, eventual target identity, and exact ownership of every changed coordinator gitlink.",
+  "decision": "At begin, derive every existing participant's initial commit from the previous root gitlink and its tree from the local child object database; record null only for a genuinely new lane. Recompute that identity from previous_root on every transition and reject journal tampering. The target may remain unset until the child commit exists. At prepare and post-commit verification, require the raw previous-root-to-new-tree projects/ gitlink change set to equal the locked participant paths exactly.",
+  "invalidated_assumptions": [
+    "The previous root commit and a participant path are sufficient recovery metadata even when tools do not materialize the starting gitlink identity in the journal.",
+    "Verifying each declared child gitlink proves that no undeclared gitlink was added to the coordinator tree."
+  ],
+  "applies_to": [
+    "scripts/transaction.py",
+    "scripts/verify_workspace.py",
+    "tests/test_transaction.py",
+    "all future existing-lane transactions"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

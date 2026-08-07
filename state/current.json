@@ -3,11 +3,11 @@
   "goal_id": "GSIM-001",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 1,
-  "checkpoint_id": "CP-0002",
-  "checkpoint_sha256": "931698e40c55e8ed6dfb2902e11148eca0ada5f2041fbbda479eede17a5dabb6",
-  "phase_id": "P0",
+  "checkpoint_id": "CP-0003",
+  "checkpoint_sha256": "62e979b1c4b5d6d2c6bbccd988cb1e1148736dae11ae2ecc13a65664b1afb290",
+  "phase_id": "P1",
   "state": "ready",
-  "next_action_id": "P0-SELF-01",
-  "next_action_summary": "Generalize the lane registry, then initialize the standalone self-amdgpu-runtime pristine baseline.",
+  "next_action_id": "P1-HOST-01",
+  "next_action_summary": "Implement and validate the versioned self-amdgpu-runtime to gem5 transport handshake.",
   "resume_command": "scripts/resume.sh --verify"
 }

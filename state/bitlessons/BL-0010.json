@@ -1,0 +1,25 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0010",
+  "checkpoint_id": "CP-0003",
+  "question_or_symptom": "The CP-0002 verifier made SOURCE_LOCK both the immutable upstream authority and the exact current-head registry, which prevents authored lanes and audited descendant commits.",
+  "observation": "SOURCE_LOCK must remain byte-identical to the accepted upstream freeze, while self-amdgpu-runtime has no upstream revision and future gem5/runtime/Triton changes necessarily move their gitlinks beyond baseline commits.",
+  "evidence_ids": [
+    "EV-0005"
+  ],
+  "conclusion": "Baseline provenance, project membership, and accepted current state are separate authorities with different mutation rules.",
+  "decision": "Keep upstream baselines in immutable SOURCE_LOCK, keep project-authored baselines in PROJECT_LANES, and place exact current commit/tree identities only in checkpoints. Verify the exact union of both registries and require every current head to descend from its declared baseline.",
+  "invalidated_assumptions": [
+    "A frozen upstream source manifest can also be the permanent membership and current-head database for a multi-repository implementation project."
+  ],
+  "applies_to": [
+    "SOURCE_LOCK.json",
+    "PROJECT_LANES.json",
+    "scripts/verify_workspace.py",
+    "scripts/source_manager.py",
+    "all future child gitlink updates"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

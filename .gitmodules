@@ -22,3 +22,7 @@
 	path = projects/vllm
 	url = https://github.com/vllm-project/vllm.git
 	branch = main
+[submodule "self-amdgpu-runtime"]
+	path = projects/self-amdgpu-runtime
+	url = ../self-amdgpu-runtime.git
+	branch = main

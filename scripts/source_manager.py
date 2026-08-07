@@ -31,14 +31,18 @@ from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from evidence_policy import EvidencePolicyError, validate_evidence  # noqa: E402
+from check_commit_message import MessageError, check as check_commit_message  # noqa: E402
 
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 LOCK_ID_RE = re.compile(r"^SL-[0-9]{4}$")
 SOURCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 CP_RE = re.compile(r"^CP-[0-9]{4}$")
 ROOT = Path(__file__).resolve().parent.parent
 LOCK_PATH = ROOT / "SOURCE_LOCK.json"
+PROJECT_LANES_PATH = ROOT / "PROJECT_LANES.json"
+PROJECT_LANES_SCHEMA = "amdgpu-sim.project-lanes.v1"
 
 
 class SourceError(RuntimeError):
@@ -62,6 +66,8 @@ def run(
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_NO_LAZY_FETCH"] = "1"
+    env["GIT_OPTIONAL_LOCKS"] = "0"
     env.setdefault("GIT_HTTP_LOW_SPEED_LIMIT", "1024")
     env.setdefault("GIT_HTTP_LOW_SPEED_TIME", "60")
     if extra_env:
@@ -142,7 +148,12 @@ def git_blob_bytes(repo: Path, revision: str, path: str) -> bytes:
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1"},
+        env={
+            **os.environ,
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_NO_LAZY_FETCH": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+        },
     )
     if proc.returncode:
         detail = proc.stderr.decode(errors="replace").strip()
@@ -961,8 +972,278 @@ def git_source_revision(lock: dict[str, Any], source: dict[str, Any]) -> str:
     return observed
 
 
-def absorption_sources(lock: dict[str, Any]) -> list[tuple[dict[str, Any], str]]:
-    """Select Git sources from a frozen or pre-freeze SOURCE_LOCK."""
+def valid_branch_name(value: Any) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    return (
+        run(
+            ["git", "check-ref-format", "--branch", value],
+            check=False,
+            discard_stdout=True,
+        ).returncode
+        == 0
+    )
+
+
+def valid_timestamp(value: Any) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
+
+
+def parse_trailers(message: str) -> dict[str, list[str]]:
+    trailers: dict[str, list[str]] = {}
+    for line in message.splitlines():
+        match = re.fullmatch(r"([A-Za-z0-9-]+): (.+)", line)
+        if match:
+            trailers.setdefault(match.group(1), []).append(match.group(2))
+    return trailers
+
+
+def verify_authored_baseline_before_absorb(
+    source: dict[str, Any], repo: Path
+) -> None:
+    source_id = source["id"]
+    baseline = source["baseline_commit"]
+    tree = run(["git", "rev-parse", f"{baseline}^{{tree}}"], cwd=repo).stdout.strip()
+    if tree != source["baseline_tree"]:
+        raise SourceError(f"authored baseline tree mismatch: {source_id}")
+    tag = source["baseline_tag"]
+    if run(["git", "cat-file", "-t", tag], cwd=repo).stdout.strip() != "tag":
+        raise SourceError(f"authored baseline tag is not annotated: {source_id}")
+    if run(["git", "rev-parse", tag], cwd=repo).stdout.strip() != source[
+        "baseline_tag_object"
+    ]:
+        raise SourceError(f"authored baseline tag object mismatch: {source_id}")
+    payload = run(["git", "cat-file", "tag", tag], cwd=repo).stdout
+    if (
+        payload != source["baseline_tag_payload"]
+        or hashlib.sha256(payload.encode()).hexdigest()
+        != source["baseline_tag_payload_sha256"]
+        or run(["git", "rev-list", "-n", "1", tag], cwd=repo).stdout.strip()
+        != baseline
+    ):
+        raise SourceError(f"authored baseline tag payload mismatch: {source_id}")
+    expected_metadata = {
+        "Project-ID": source_id,
+        "Project-URL": source["origin"]["url"],
+        "Origin-Policy": source["origin"]["policy"],
+        "Baseline-Commit": baseline,
+        "Baseline-Tree": source["baseline_tree"],
+        "License-SPDX": source["license"]["spdx_id"],
+        "Created-At": source["baseline_created_at"],
+    }
+    observed: dict[str, list[str]] = {key: [] for key in expected_metadata}
+    for line in payload.splitlines():
+        match = re.fullmatch(r"([A-Za-z0-9-]+): (.*)", line)
+        if match and match.group(1) in observed:
+            observed[match.group(1)].append(match.group(2))
+    if any(observed[key] != [value] for key, value in expected_metadata.items()):
+        raise SourceError(f"authored baseline tag metadata mismatch: {source_id}")
+    current_head = run(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    for revision, label in ((baseline, "baseline"), (current_head, "current")):
+        try:
+            license_blob = git_blob_bytes(repo, revision, source["license"]["path"])
+        except SourceError as exc:
+            raise SourceError(
+                f"authored {label} license is missing: {source_id}"
+            ) from exc
+        if hashlib.sha256(license_blob).hexdigest() != source["license"]["sha256"]:
+            raise SourceError(f"authored {label} license mismatch: {source_id}")
+    worktree_license = repo / source["license"]["path"]
+    if (
+        not worktree_license.is_file()
+        or worktree_license.is_symlink()
+        or file_sha256(worktree_license) != source["license"]["sha256"]
+    ):
+        raise SourceError(f"authored worktree license mismatch: {source_id}")
+    message = run(
+        ["git", "log", "-1", "--format=%B", baseline], cwd=repo
+    ).stdout.strip()
+    try:
+        check_commit_message(message)
+    except MessageError as exc:
+        raise SourceError(
+            f"authored baseline commit message violates audit policy: {source_id}: {exc}"
+        ) from exc
+    identity = source["baseline_commit_trailers"]
+    expected_trailers = {
+        "Checkpoint-ID": identity["checkpoint_id"],
+        "Goal-ID": identity["goal_id"],
+        "Plan-Revision": str(identity["plan_revision"]),
+        "Source-Lock-SHA256": identity["source_lock_sha256"],
+        "Evidence-Manifest-SHA256": identity["evidence_manifest_sha256"],
+        "Change-Kind": identity["change_kind"],
+        "Baseline-Commit": identity["baseline_commit_marker"],
+    }
+    trailers = parse_trailers(message)
+    if any(trailers.get(key) != [value] for key, value in expected_trailers.items()):
+        raise SourceError(f"authored baseline commit trailer mismatch: {source_id}")
+    live_lock = ROOT / "SOURCE_LOCK.json"
+    if (
+        not live_lock.is_file()
+        or file_sha256(live_lock) != identity["source_lock_sha256"]
+    ):
+        raise SourceError(f"authored baseline binds another source lock: {source_id}")
+    origin = source["origin"]
+    if run(["git", "remote"], cwd=repo).stdout.splitlines() != [origin["remote"]]:
+        raise SourceError(f"authored baseline remote set mismatch: {source_id}")
+    fetch_urls = run(
+        ["git", "config", "--get-all", f"remote.{origin['remote']}.url"],
+        cwd=repo,
+        check=False,
+    )
+    push_urls = run(
+        ["git", "config", "--get-all", f"remote.{origin['remote']}.pushurl"],
+        cwd=repo,
+        check=False,
+    )
+    if (
+        fetch_urls.returncode
+        or (fetch_urls.stdout or "").splitlines() != [origin["url"]]
+        or push_urls.returncode
+        or (push_urls.stdout or "").splitlines() != [origin["push_url"]]
+    ):
+        raise SourceError(f"authored baseline origin policy mismatch: {source_id}")
+
+
+def authored_absorption_sources(registry: dict[str, Any]) -> list[tuple[dict[str, Any], str]]:
+    """Select project-authored baselines without treating them as upstream sources."""
+
+    if set(registry) != {"schema", "registry_revision", "url_policy", "lanes"}:
+        raise SourceError("PROJECT_LANES has missing or unknown fields")
+    if registry.get("schema") != PROJECT_LANES_SCHEMA:
+        raise SourceError("cannot absorb sources from an invalid PROJECT_LANES schema")
+    if (
+        not isinstance(registry.get("registry_revision"), int)
+        or isinstance(registry.get("registry_revision"), bool)
+        or registry["registry_revision"] != 1
+        or registry.get("url_policy") != {
+        "scheme": "sibling-relative-v1",
+        "template": "../{project_id}.git",
+        }
+    ):
+        raise SourceError("PROJECT_LANES policy or revision is unsupported")
+    lanes = registry.get("lanes")
+    if not isinstance(lanes, list):
+        raise SourceError("PROJECT_LANES lanes must be a list")
+    selected: list[tuple[dict[str, Any], str]] = []
+    for lane in lanes:
+        if not isinstance(lane, dict):
+            raise SourceError("PROJECT_LANES entries must be objects")
+        expected_lane_fields = {
+            "id",
+            "ownership",
+            "role",
+            "path",
+            "materialization",
+            "origin",
+            "baseline_commit",
+            "baseline_tree",
+            "baseline_tag",
+            "baseline_tag_object",
+            "baseline_tag_payload",
+            "baseline_tag_payload_sha256",
+            "baseline_created_at",
+            "baseline_checkpoint_id",
+            "baseline_evidence_id",
+            "baseline_commit_trailers",
+            "administrative_git_dir",
+            "license",
+        }
+        if set(lane) != expected_lane_fields:
+            raise SourceError("authored lane has missing or unknown fields")
+        lane_id = lane.get("id")
+        expected_url = f"../{lane_id}.git"
+        origin = lane.get("origin")
+        license_metadata = lane.get("license")
+        commit_trailers = lane.get("baseline_commit_trailers")
+        if (
+            not isinstance(lane_id, str)
+            or not SOURCE_ID_RE.fullmatch(lane_id)
+            or lane.get("ownership") != "project-authored"
+            or not isinstance(lane.get("role"), str)
+            or not SOURCE_ID_RE.fullmatch(lane["role"])
+            or lane.get("materialization") != "gitlink"
+            or lane.get("path") != f"projects/{lane_id}"
+            or lane.get("administrative_git_dir") != f"modules/{lane_id}"
+            or not isinstance(origin, dict)
+            or set(origin)
+            != {
+                "policy",
+                "remote",
+                "url",
+                "push_url",
+                "reachability",
+                "branch",
+            }
+            or origin.get("policy") != "sibling-relative-v1"
+            or origin.get("remote") != "origin"
+            or origin.get("url") != expected_url
+            or origin.get("push_url") != "no_push"
+            or origin.get("reachability") != "not-asserted"
+            or not isinstance(origin.get("branch"), str)
+            or not valid_branch_name(origin["branch"])
+            or not SHA_RE.fullmatch(str(lane.get("baseline_commit", "")))
+            or not SHA_RE.fullmatch(str(lane.get("baseline_tree", "")))
+            or not SHA_RE.fullmatch(str(lane.get("baseline_tag_object", "")))
+            or lane.get("baseline_tag")
+            != f"project-baseline/{lane_id}/{lane.get('baseline_commit')}"
+            or not isinstance(lane.get("baseline_tag_payload"), str)
+            or not lane["baseline_tag_payload"]
+            or not SHA256_RE.fullmatch(
+                str(lane.get("baseline_tag_payload_sha256", ""))
+            )
+            or not valid_timestamp(lane.get("baseline_created_at"))
+            or not CP_RE.fullmatch(str(lane.get("baseline_checkpoint_id", "")))
+            or not re.fullmatch(r"EV-[0-9]{4}", str(lane.get("baseline_evidence_id", "")))
+            or not isinstance(license_metadata, dict)
+            or set(license_metadata) != {"spdx_id", "path", "sha256"}
+            or license_metadata.get("spdx_id") != "GPL-3.0-or-later"
+            or license_metadata.get("path") != "LICENSE"
+            or not SHA256_RE.fullmatch(str(license_metadata.get("sha256", "")))
+            or not isinstance(commit_trailers, dict)
+            or set(commit_trailers)
+            != {
+                "checkpoint_id",
+                "goal_id",
+                "plan_revision",
+                "source_lock_sha256",
+                "evidence_manifest_sha256",
+                "change_kind",
+                "baseline_commit_marker",
+            }
+            or commit_trailers.get("checkpoint_id")
+            != lane.get("baseline_checkpoint_id")
+            or not isinstance(commit_trailers.get("goal_id"), str)
+            or not commit_trailers["goal_id"]
+            or not isinstance(commit_trailers.get("plan_revision"), int)
+            or isinstance(commit_trailers.get("plan_revision"), bool)
+            or commit_trailers["plan_revision"] < 1
+            or not SHA256_RE.fullmatch(
+                str(commit_trailers.get("source_lock_sha256", ""))
+            )
+            or not SHA256_RE.fullmatch(
+                str(commit_trailers.get("evidence_manifest_sha256", ""))
+            )
+            or commit_trailers.get("change_kind") != "baseline"
+            or commit_trailers.get("baseline_commit_marker") != "N/A"
+        ):
+            raise SourceError(f"authored lane identity is incomplete: {lane_id!r}")
+        normalized = dict(lane)
+        normalized["_lane_authority"] = "project-authored"
+        selected.append((normalized, lane["baseline_commit"]))
+    return selected
+
+
+def absorption_sources(
+    lock: dict[str, Any], registry: dict[str, Any] | None = None
+) -> list[tuple[dict[str, Any], str]]:
+    """Select the union of upstream and project-authored Git lanes."""
 
     if lock.get("schema") != "amdgpu-sim.source-lock.v1":
         raise SourceError("cannot absorb sources from an invalid SOURCE_LOCK schema")
@@ -1000,8 +1281,19 @@ def absorption_sources(lock: dict[str, Any]) -> list[tuple[dict[str, Any], str]]
         seen_ids.add(source_id)
         seen_paths.add(path_text)
         selected.append((source, git_source_revision(lock, source)))
+    if registry is not None:
+        for lane, baseline in authored_absorption_sources(registry):
+            lane_id = lane["id"]
+            path_text = lane["path"]
+            if lane_id in seen_ids or path_text in seen_paths:
+                raise SourceError(
+                    f"duplicate source id or path across upstream/authored lanes: {lane_id}"
+                )
+            seen_ids.add(lane_id)
+            seen_paths.add(path_text)
+            selected.append((lane, baseline))
     if not selected:
-        raise SourceError("SOURCE_LOCK contains no Git sources to absorb")
+        raise SourceError("upstream/authored registry contains no Git sources to absorb")
     return selected
 
 
@@ -1114,10 +1406,12 @@ def verify_absorbed_source(source: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def absorb_sources(lock: dict[str, Any]) -> list[dict[str, str]]:
-    """Validate and absorb every locked Git source into the root repository."""
+def absorb_sources(
+    lock: dict[str, Any], registry: dict[str, Any] | None = None
+) -> list[dict[str, str]]:
+    """Validate and absorb every upstream or authored lane into the root repository."""
 
-    selected = absorption_sources(lock)
+    selected = absorption_sources(lock, registry)
     module_entries = gitmodules_path_entries()
     paths: list[str] = []
     for source, expected_commit in selected:
@@ -1137,11 +1431,42 @@ def absorb_sources(lock: dict[str, Any]) -> list[dict[str, str]]:
             raise SourceError(
                 f"root .gitmodules maps {path_text} through non-canonical names: {aliases}"
             )
-        mode, object_id, stage = indexed_gitlink(path_text)
-        if (mode, object_id, stage) != ("160000", expected_commit, "0"):
+        if source.get("_lane_authority") == "project-authored":
+            expected_module_values = {
+                "url": source["origin"]["url"],
+                "branch": source["origin"]["branch"],
+            }
+        else:
+            expected_module_values = {
+                "url": source.get("upstream_url"),
+                "branch": source.get("upstream_ref"),
+            }
+        for key, expected in expected_module_values.items():
+            value = run(
+                [
+                    "git",
+                    "config",
+                    "-f",
+                    ".gitmodules",
+                    "--get-all",
+                    f"submodule.{source_id}.{key}",
+                ],
+                cwd=ROOT,
+                check=False,
+            )
+            if (
+                not isinstance(expected, str)
+                or value.returncode
+                or (value.stdout or "").splitlines() != [expected]
+            ):
+                raise SourceError(
+                    f"root .gitmodules {key} mismatch for {source_id}"
+                )
+        mode, indexed_head, stage = indexed_gitlink(path_text)
+        if mode != "160000" or stage != "0" or not SHA_RE.fullmatch(indexed_head):
             raise SourceError(
-                f"root index gitlink mismatch for {source_id}: "
-                f"{mode} {object_id} stage={stage}; expected 160000 {expected_commit} stage=0"
+                f"root index gitlink is malformed for {source_id}: "
+                f"{mode} {indexed_head} stage={stage}"
             )
         repo = safe_workspace_path(path_text)
         git_entry = repo / ".git"
@@ -1159,6 +1484,26 @@ def absorb_sources(lock: dict[str, Any]) -> list[dict[str, str]]:
         if top != repo:
             raise SourceError(f"source path is not its Git worktree root: {source_id}")
         head = run(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip()
+        baseline_authority = (
+            lock.get("status") == "frozen"
+            or source.get("_lane_authority") == "project-authored"
+        )
+        if baseline_authority:
+            ancestor = run(
+                ["git", "merge-base", "--is-ancestor", expected_commit, indexed_head],
+                cwd=repo,
+                check=False,
+            )
+            if ancestor.returncode:
+                raise SourceError(
+                    f"gitlink head is not a baseline descendant: {source_id}"
+                )
+            expected_commit = indexed_head
+        elif indexed_head != expected_commit:
+            raise SourceError(
+                f"root index gitlink mismatch for {source_id}: "
+                f"{indexed_head}; expected {expected_commit}"
+            )
         if head != expected_commit:
             raise SourceError(
                 f"source HEAD mismatch for {source_id}: {head} != {expected_commit}"
@@ -1167,7 +1512,28 @@ def absorb_sources(lock: dict[str, Any]) -> list[dict[str, str]]:
             ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=repo
         ).stdout:
             raise SourceError(f"refusing to absorb dirty source: {source_id}")
+        if source.get("_lane_authority") == "project-authored":
+            verify_authored_baseline_before_absorb(source, repo)
         paths.append(path_text)
+    configured_keys = run(
+        [
+            "git",
+            "config",
+            "-f",
+            ".gitmodules",
+            "--name-only",
+            "--get-regexp",
+            r".*",
+        ],
+        cwd=ROOT,
+    ).stdout.splitlines()
+    expected_keys = {
+        f"submodule.{source['id']}.{key}"
+        for source, _baseline in selected
+        for key in ("path", "url", "branch")
+    }
+    if set(configured_keys) != expected_keys or len(configured_keys) != len(expected_keys):
+        raise SourceError("root .gitmodules contains missing, duplicate, or unexpected keys")
     run(
         ["git", "submodule", "absorbgitdirs", "--", *paths],
         cwd=ROOT,
@@ -1179,11 +1545,15 @@ def absorb_sources(lock: dict[str, Any]) -> list[dict[str, str]]:
 
 def absorb_command(_args: argparse.Namespace) -> int:
     lock = load_json(LOCK_PATH)
-    repositories = absorb_sources(lock)
+    registry = load_json(PROJECT_LANES_PATH)
+    repositories = absorb_sources(lock, registry)
     payload = {
         "schema": "amdgpu-sim.source-absorption.v1",
         "absorbed_at": utc_now(),
         "source_lock_sha256": hashlib.sha256(LOCK_PATH.read_bytes()).hexdigest(),
+        "project_lanes_sha256": hashlib.sha256(
+            PROJECT_LANES_PATH.read_bytes()
+        ).hexdigest(),
         "repositories": repositories,
     }
     print(json.dumps(payload, indent=2, sort_keys=True))

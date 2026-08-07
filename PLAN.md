@@ -3,7 +3,7 @@
 **Plan ID:** `AMDGPU-SIM-V1`  
 **Revision:** `1`  
 **Revision date:** `2026-08-07`  
-**State at this commit:** `P0-SRC-01-source-freeze-complete; next-P0-SELF-01`
+**State at this commit:** `P0-SELF-01-authored-runtime-baseline-complete; next-P1-HOST-01`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -68,6 +68,7 @@ identities. Existing upstream commits are never rewritten to add our trailers.
 PLAN.md                         complete staged plan
 GOAL.md                         human-readable acceptance contract
 SOURCE_LOCK.json                observed and then frozen upstream revisions
+PROJECT_LANES.json              immutable project-authored baseline registry
 projects/gem5/                  independent gem5 checkout
 projects/rocm-systems/         ROCr, libhsakmt, HIP, CLR, RCCL source lane
 projects/llvm-project/         LLVM/Clang/device-libs source lane
@@ -106,6 +107,15 @@ offline-buildable prepared checkout while retaining honest promisor semantics
 for unused history. A later offline bundle gate must hydrate all reachable
 objects and create a hashed full mirror/bundle when a fresh disconnected clone,
 rather than a copied prepared checkout, is required.
+
+`SOURCE_LOCK.json` is byte-immutable after CP-0002 and remains the authority
+for upstream provenance. `PROJECT_LANES.json` separately records immutable
+baselines for repositories authored by this project. Neither file owns an
+evolving work head: each accepted checkpoint records the exact current
+commit/tree, and the verifier requires that commit to descend from its declared
+baseline. The registered workspace is the exact union of both authorities;
+`.gitmodules`, mode-160000 gitlinks, absorbed Git administration directories,
+and checkpoint repository records must agree on that same set.
 
 ## 4. Architecture to implement
 
@@ -199,6 +209,12 @@ lanes and separately declared project-authored lanes. That checkpoint creates
 `self-amdgpu-runtime` with a pristine initial baseline commit before any runtime
 implementation commit. This split is required before gem5, Triton, PyTorch, or
 vLLM work heads can advance without weakening source provenance.
+
+Accepted boundary: CP-0003 completes this phase. The standalone runtime has a
+GPL-3.0-or-later initial baseline, a versioned C ABI foundation, static/shared
+package-consumer tests, and no claimed GPU transport implementation. P1 starts
+with a jointly versioned runtime-to-gem5 handshake rather than adding runtime
+APIs whose transport contract is still implicit.
 
 ### P1 — gem5 host bridge and one daemon
 
@@ -338,6 +354,14 @@ and clean state) that is verified against the immutable source lock. A
 bitlesson is append-only and records the symptom, source evidence,
 wrong assumption, decision, confidence, and affected commit range.
 
+Immutability is proven from Git history, not trusted from the current JSON.
+The active `SOURCE_LOCK.json` must match the lock blob and checkpoint hash in
+the CP-0002 coordinator commit. For each project-authored lane, the verifier
+finds its first appearance in `PROJECT_LANES.json`, binds that historical blob
+to the same commit's `Checkpoint-ID` and checkpoint hash, and requires the
+current lane declaration to remain exact. A later checkpoint may append a new
+lane but cannot redefine an existing baseline or move its introduction point.
+
 `scripts/resume.sh --verify` is offline and read-only.  It refuses handoff if
 the root is dirty or in merge/rebase/bisect, the current pointer/hash does not
 match its checkpoint, required evidence is missing, a source lane is not a
@@ -347,14 +371,29 @@ separate optional source-reachability check and may not be required for resume.
 
 Cross-repository work uses a local fsync+rename journal:
 
-1. Lock a `Checkpoint-ID` and record the previous root head and expected child
-   heads (`prepare`).
-2. Commit each changed child from its immutable baseline, with the same trailers.
-3. Verify children, stage only the allowlisted gitlinks/manifests/state/evidence,
-   and make one root coordinator commit (`commit`).
-4. Verify the root ref, then retire the journal.  A crash after step 2 leaves
-   auditable prepared child commits; resume never resets them automatically and
-   reports whether finalization is safe.
+1. From a clean, strictly verified accepted checkpoint, allocate exactly the
+   next `Checkpoint-ID`, lock the participant set, and record each participant's
+   starting commit/tree from the previous root gitlink (or explicit absence for
+   a new lane).
+2. Commit each changed child from its immutable baseline with the same audit
+   trailers. Before the journal records a target, consolidate its incremental
+   object closure into a non-thin pack, fsync objects/refs, issue a filesystem
+   durability barrier, and revalidate the child identity.
+3. Stage only the declared root allowlist. The gitlinks changed from the
+   previous root must equal the participant set exactly. Persist the prepared
+   root tree and index, issue the barrier, revalidate the tree and children, and
+   only then advance the journal from `prepare` to `prepared`.
+4. Make the single root coordinator commit, run the full acceptance verifier,
+   persist the coordinator object closure/ref and every participant filesystem,
+   and revalidate all identities before the journal can become `committed` and
+   be retired. Destination-before-source directory fsync makes a crash-recovered
+   duplicate journal name safe only when both copies are byte-identical.
+
+A crash after a child commit leaves an auditable prepared object and never
+causes an automatic reset. Pending diagnostics report each declared participant
+relative to both its immutable initial and target identities. Detached HEAD,
+linked-worktree administration, checkpoint sequence gaps, undeclared gitlink
+changes, and a durability-barrier failure are fail-closed conditions.
 
 Commit trailers are mandatory:
 
@@ -364,7 +403,7 @@ Goal-ID: GSIM-001
 Plan-Revision: 1
 Source-Lock-SHA256: <sha256>
 Evidence-Manifest-SHA256: <sha256>
-Change-Kind: bootstrap|source|code|test|lesson|checkpoint
+Change-Kind: baseline|bootstrap|source|code|test|lesson|checkpoint
 Baseline-Commit: <sha-or-N/A>
 ```
 
@@ -386,17 +425,16 @@ licenses into a false aggregate claim.
 
 ## 10. Current handoff boundary
 
-`CP-0002` freezes the reviewed official Qwen revision and six pristine upstream
-source lanes. Each Git lane retains its upstream history, immutable annotated
-baseline tag, complete locked tree, safe no-push remote, and a standard root
-gitlink. No simulator or runtime implementation claim is made at this boundary.
+`CP-0003` retains the CP-0002 official Qwen and six-upstream source freeze, then
+adds the separately governed GPL `self-amdgpu-runtime` initial baseline. Its
+public ABI is deliberately limited to version and status discovery; no
+transport, queue, memory, or GPU execution claim is made at this boundary.
 
-The next unique action is `P0-SELF-01`: introduce the authored/current lane
-registry described in P0, separate immutable baseline authority from advancing
-checkpoint heads, and then create the standalone GPL `self-amdgpu-runtime`
-project with its own pristine initial baseline commit and tag. `SOURCE_LOCK.json`
-is append-only after this checkpoint and must not be repurposed as the evolving
-workspace-head registry.
+The next unique action is `P1-HOST-01`: create a CP-0004 two-child transaction
+for gem5 and `self-amdgpu-runtime`, define the versioned transport handshake,
+and validate both endpoints against the same wire contract before extending
+the runtime API. `SOURCE_LOCK.json` remains byte-immutable, and existing
+`PROJECT_LANES` declarations remain historically anchored and append-only.
 
 The exact blank-context continuation contract remains in `GOAL.md`; the
 machine-executable argv, prerequisites, expected gate, and rollback boundary

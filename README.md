@@ -6,10 +6,13 @@ submit real AMDGPU code objects to gem5 without a guest kernel, `/dev/kfd`,
 `/dev/dri`, or the production AMD UMD/KMD binaries.
 
 The root is a control-plane and transaction-coordinator repository. The six
-pinned upstream source lanes are standard Git submodules under `projects/`;
-each child retains independent history and an immutable annotated baseline tag,
-while the root gitlink records its exact head, tests, checkpoints, and lessons.
-Model weights, virtual environments, and build
+pinned upstream source lanes and the project-authored `self-amdgpu-runtime`
+lane are standard Git submodules under `projects/`. Each child retains
+independent history and an immutable annotated baseline tag, while the root
+gitlink records its exact current head, tests, checkpoints, and lessons.
+`SOURCE_LOCK.json` owns upstream provenance; `PROJECT_LANES.json` owns our
+project baselines; accepted checkpoints own descendant work heads. Model
+weights, virtual environments, and build
 outputs are downloaded or built by scripts into ignored paths and are never
 stored in Git.
 
@@ -29,7 +32,8 @@ PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、最新 checkpoint �
 bitlesson，运行 scripts/resume.sh --verify；不要重做已通过的工作。
 ```
 
-`CP-0002` is the accepted pristine-source boundary. The next action is
-`P0-SELF-01`: add the authored/current lane registry and initialize the
-standalone `self-amdgpu-runtime` project from an auditable pristine baseline.
-The frozen `SOURCE_LOCK.json` remains the immutable upstream authority.
+`CP-0003` is the accepted authored-runtime baseline boundary. The standalone
+runtime currently exposes only its version/status ABI and does not pretend to
+transport GPU work. The next action is `P1-HOST-01`: implement and test a
+versioned handshake across `self-amdgpu-runtime` and the gem5 host endpoint.
+The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

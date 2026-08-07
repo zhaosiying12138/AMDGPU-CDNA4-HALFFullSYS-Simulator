@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import hashlib
 import json
 import os
@@ -26,6 +27,13 @@ BL_RE = re.compile(r"^BL-[0-9]{4}$")
 LOCK_ID_RE = re.compile(r"^SL-[0-9]{4}$")
 SOURCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+PROJECT_LANES_SCHEMA = "amdgpu-sim.project-lanes.v1"
+PROJECT_LANES_PATH = "PROJECT_LANES.json"
+SIBLING_RELATIVE_POLICY = {
+    "scheme": "sibling-relative-v1",
+    "template": "../{project_id}.git",
+}
 FORBIDDEN_PREFIXES = (
     "models/",
     "env/",
@@ -79,7 +87,12 @@ def run(
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1"},
+        env={
+            **os.environ,
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_NO_LAZY_FETCH": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+        },
     )
     if check and proc.returncode:
         detail = (proc.stderr or proc.stdout).decode(errors="replace").strip()
@@ -100,7 +113,12 @@ def run_discard_stdout(
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1"},
+        env={
+            **os.environ,
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_NO_LAZY_FETCH": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+        },
     )
     if proc.returncode:
         detail = proc.stderr.decode(errors="replace").strip()
@@ -151,6 +169,178 @@ def parse_trailers(message: str) -> dict[str, list[str]]:
     return trailers
 
 
+def valid_timestamp(value: Any) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
+
+
+def valid_branch_name(value: Any) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    proc = subprocess.run(
+        ["git", "check-ref-format", "--branch", value],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env={
+            **os.environ,
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_NO_LAZY_FETCH": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+        },
+    )
+    return proc.returncode == 0
+
+
+def json_bytes(payload: bytes, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise VerifyError(f"invalid historical JSON {label}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise VerifyError(f"historical JSON root is not an object: {label}")
+    return value
+
+
+def commit_blob(root: Path, commit: str, relative: str) -> bytes:
+    proc = run(
+        root,
+        ["git", "cat-file", "blob", f"{commit}:{relative}"],
+        check=False,
+    )
+    if proc.returncode:
+        detail = proc.stderr.decode(errors="replace").strip()
+        raise VerifyError(
+            f"historical commit lacks {relative}: {commit}: {detail}"
+        )
+    return proc.stdout
+
+
+def checkpoint_commit(root: Path, checkpoint_id: str) -> str:
+    """Locate one reachable coordinator commit by its exact audit trailer."""
+
+    candidates: list[str] = []
+    commits = text(root, ["git", "rev-list", "HEAD"]).splitlines()
+    for commit in commits:
+        message = text(root, ["git", "log", "-1", "--format=%B", commit])
+        if parse_trailers(message).get("Checkpoint-ID") == [checkpoint_id]:
+            candidates.append(commit)
+    if len(candidates) != 1:
+        raise VerifyError(
+            f"checkpoint trailer does not identify one reachable commit: {checkpoint_id}"
+        )
+    return candidates[0]
+
+
+def accepted_checkpoint(root: Path, checkpoint_id: str) -> dict[str, Any]:
+    commit = checkpoint_commit(root, checkpoint_id)
+    relative = f"state/checkpoints/{checkpoint_id}.json"
+    historical_blob = commit_blob(root, commit, relative)
+    if (root / relative).read_bytes() != historical_blob:
+        raise VerifyError(f"checkpoint differs from accepted history: {checkpoint_id}")
+    checkpoint = json_bytes(historical_blob, f"{commit}:{relative}")
+    if checkpoint.get("id") != checkpoint_id:
+        raise VerifyError(f"historical checkpoint identity mismatch: {checkpoint_id}")
+    for ids_key, hash_key, directory in (
+        ("evidence_ids", "evidence_sha256", "evidence"),
+        ("bitlesson_ids", "bitlesson_sha256", "bitlessons"),
+    ):
+        item_ids = checkpoint.get(ids_key)
+        identities = checkpoint.get(hash_key)
+        if (
+            not isinstance(item_ids, list)
+            or len(item_ids) != len(set(item_ids))
+            or not all(isinstance(item, str) and item for item in item_ids)
+            or (identities is not None and not isinstance(identities, dict))
+            or (isinstance(identities, dict) and set(identities) != set(item_ids))
+        ):
+            raise VerifyError(
+                f"historical checkpoint has invalid {ids_key}: {checkpoint_id}"
+            )
+        for identity in item_ids:
+            item_relative = f"state/{directory}/{identity}.json"
+            item_blob = commit_blob(root, commit, item_relative)
+            expected_sha = identities.get(identity) if isinstance(identities, dict) else None
+            if (
+                (root / item_relative).read_bytes() != item_blob
+                or (
+                    expected_sha is not None
+                    and (
+                        not SHA256_RE.fullmatch(str(expected_sha))
+                        or hashlib.sha256(item_blob).hexdigest() != expected_sha
+                    )
+                )
+            ):
+                raise VerifyError(
+                    f"historical checkpoint {directory} differs from acceptance: {identity}"
+                )
+    return checkpoint
+
+
+def verify_checkpoint_history_chain(
+    root: Path, current_checkpoint: dict[str, Any]
+) -> None:
+    expected = current_checkpoint
+    seen: set[str] = set()
+    while True:
+        checkpoint_id = expected.get("id")
+        if (
+            not isinstance(checkpoint_id, str)
+            or not CP_RE.fullmatch(checkpoint_id)
+            or checkpoint_id in seen
+        ):
+            raise VerifyError("checkpoint history chain is malformed or cyclic")
+        seen.add(checkpoint_id)
+        historical = accepted_checkpoint(root, checkpoint_id)
+        if historical != expected:
+            raise VerifyError(f"live checkpoint JSON drifted: {checkpoint_id}")
+        parent_id = historical.get("parent_checkpoint")
+        if parent_id is None:
+            return
+        if not isinstance(parent_id, str) or not CP_RE.fullmatch(parent_id):
+            raise VerifyError(f"checkpoint parent identity is invalid: {checkpoint_id}")
+        expected = load_json(
+            root / "state" / "checkpoints" / f"{parent_id}.json"
+        )
+
+
+def verify_source_lock_history(
+    root: Path,
+    lock: dict[str, Any],
+    source_checkpoint: dict[str, Any],
+) -> str:
+    """Anchor the live frozen lock and checkpoint file to their accepted commit."""
+
+    checkpoint_id = lock["frozen_by_checkpoint"]
+    commit = checkpoint_commit(root, checkpoint_id)
+    checkpoint_relative = f"state/checkpoints/{checkpoint_id}.json"
+    historical_checkpoint_blob = commit_blob(root, commit, checkpoint_relative)
+    historical_checkpoint = json_bytes(
+        historical_checkpoint_blob, f"{commit}:{checkpoint_relative}"
+    )
+    historical_lock_blob = commit_blob(root, commit, "SOURCE_LOCK.json")
+    historical_lock_sha = hashlib.sha256(historical_lock_blob).hexdigest()
+    live_lock_blob = (root / "SOURCE_LOCK.json").read_bytes()
+    live_checkpoint_blob = (root / checkpoint_relative).read_bytes()
+    if (
+        historical_checkpoint.get("id") != checkpoint_id
+        or source_checkpoint != historical_checkpoint
+        or live_checkpoint_blob != historical_checkpoint_blob
+        or historical_checkpoint.get("source_lock_sha256") != historical_lock_sha
+        or hashlib.sha256(live_lock_blob).hexdigest() != historical_lock_sha
+        or live_lock_blob != historical_lock_blob
+    ):
+        raise VerifyError(
+            "SOURCE_LOCK or its freeze checkpoint differs from accepted history"
+        )
+    return commit
+
+
 def safe_path(root: Path, relative: str) -> Path:
     posix = PurePosixPath(relative)
     if posix.is_absolute() or ".." in posix.parts:
@@ -159,6 +349,240 @@ def safe_path(root: Path, relative: str) -> Path:
     if resolved != root and root not in resolved.parents:
         raise VerifyError(f"path escapes workspace: {relative!r}")
     return resolved
+
+
+def verify_journal_initial_children(
+    root: Path, journal: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    """Anchor declared participant origins to the journal's previous root."""
+
+    previous_root = journal.get("previous_root")
+    declared = journal.get("declared_children")
+    if not isinstance(previous_root, str) or not SHA_RE.fullmatch(previous_root):
+        raise VerifyError("transaction journal has no valid previous root")
+    previous_commit = run(
+        root,
+        ["git", "cat-file", "-e", f"{previous_root}^{{commit}}"],
+        check=False,
+    )
+    if previous_commit.returncode:
+        raise VerifyError("transaction previous root commit is unavailable offline")
+    if not isinstance(declared, dict) or not declared:
+        raise VerifyError("transaction journal has no declared child participants")
+    seen_paths: set[str] = set()
+    for child_id, declaration in sorted(declared.items()):
+        if (
+            not isinstance(child_id, str)
+            or not SOURCE_ID_RE.fullmatch(child_id)
+            or not isinstance(declaration, dict)
+        ):
+            raise VerifyError("transaction journal has an invalid declared child")
+        relative = declaration.get("path")
+        if not isinstance(relative, str):
+            raise VerifyError(f"declared child path is invalid: {child_id}")
+        relative_path = PurePosixPath(relative)
+        if (
+            relative_path.is_absolute()
+            or ".." in relative_path.parts
+            or len(relative_path.parts) != 2
+            or relative_path.parts[0] != "projects"
+            or relative_path.as_posix() != relative
+            or relative in seen_paths
+        ):
+            raise VerifyError(f"declared child path is invalid or duplicate: {child_id}")
+        seen_paths.add(relative)
+        repo = safe_path(root, relative)
+        if "initial_head" not in declaration or "initial_tree" not in declaration:
+            raise VerifyError(
+                f"declared child lacks its initial identity pair: {child_id}"
+            )
+        if "target_head" not in declaration or "target_tree" not in declaration:
+            raise VerifyError(
+                f"declared child lacks its target identity pair: {child_id}"
+            )
+        target = (declaration.get("target_head"), declaration.get("target_tree"))
+        if target != (None, None) and (
+            not all(isinstance(value, str) and SHA_RE.fullmatch(value) for value in target)
+        ):
+            raise VerifyError(f"declared child target identity is invalid: {child_id}")
+        listing = text(root, ["git", "ls-tree", previous_root, "--", relative])
+        if not listing:
+            expected_initial: tuple[str | None, str | None] = (None, None)
+        else:
+            records = listing.splitlines()
+            try:
+                metadata, listed_path = records[0].split("\t", 1)
+                mode, object_type, initial_head = metadata.split()
+            except (IndexError, ValueError) as exc:
+                raise VerifyError(
+                    f"previous root child entry is malformed: {child_id}"
+                ) from exc
+            if (
+                len(records) != 1
+                or listed_path != relative
+                or mode != "160000"
+                or object_type != "commit"
+                or not SHA_RE.fullmatch(initial_head)
+            ):
+                raise VerifyError(
+                    f"previous root child entry is not an exact gitlink: {child_id}"
+                )
+            if not repo.is_dir():
+                raise VerifyError(
+                    f"previous root child worktree is unavailable: {child_id}"
+                )
+            tree_proc = run(
+                root,
+                ["git", "rev-parse", f"{initial_head}^{{tree}}"],
+                cwd=repo,
+                check=False,
+            )
+            initial_tree = tree_proc.stdout.decode().strip()
+            if tree_proc.returncode or not SHA_RE.fullmatch(initial_tree):
+                raise VerifyError(
+                    f"previous root child commit is unavailable offline: {child_id}"
+                )
+            expected_initial = (initial_head, initial_tree)
+        observed_initial = (
+            declaration.get("initial_head"),
+            declaration.get("initial_tree"),
+        )
+        if observed_initial != expected_initial:
+            raise VerifyError(
+                f"declared child initial identity mismatch: {child_id}"
+            )
+    return declared
+
+
+def verify_coordinator_participant_gitlinks(
+    root: Path,
+    previous_root: str,
+    coordinator_head: str,
+    declared: dict[str, dict[str, Any]],
+) -> None:
+    """Bind coordinator project gitlink changes to the journal participant set."""
+
+    raw = run(
+        root,
+        [
+            "git",
+            "diff",
+            "--raw",
+            "-z",
+            "--no-renames",
+            previous_root,
+            coordinator_head,
+            "--",
+            "projects",
+        ],
+    ).stdout
+    parts = raw.split(b"\0")
+    if parts[-1:] == [b""]:
+        parts.pop()
+    if len(parts) % 2:
+        raise VerifyError("coordinator projects diff has malformed raw records")
+    changed: set[str] = set()
+    for offset in range(0, len(parts), 2):
+        fields = parts[offset].split()
+        if len(fields) != 5 or not fields[0].startswith(b":"):
+            raise VerifyError("coordinator projects diff has malformed metadata")
+        old_mode = fields[0][1:]
+        new_mode = fields[1]
+        try:
+            relative = parts[offset + 1].decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise VerifyError("coordinator project path is not UTF-8") from exc
+        posix = PurePosixPath(relative)
+        if (
+            posix.is_absolute()
+            or len(posix.parts) != 2
+            or posix.parts[0] != "projects"
+            or posix.as_posix() != relative
+            or old_mode not in {b"000000", b"160000"}
+            or new_mode != b"160000"
+        ):
+            raise VerifyError(
+                f"coordinator project change is not a canonical gitlink: {relative}"
+            )
+        if relative in changed:
+            raise VerifyError(f"coordinator project path is duplicated: {relative}")
+        changed.add(relative)
+    expected = {entry["path"] for entry in declared.values()}
+    if changed != expected:
+        raise VerifyError(
+            "coordinator gitlinks differ from transaction participants; "
+            f"missing={sorted(expected - changed)}, extra={sorted(changed - expected)}"
+        )
+
+
+def describe_journal_children(
+    root: Path,
+    declared: dict[str, dict[str, Any]],
+    recorded: Any,
+) -> list[str]:
+    """Describe every participant relative to its immutable start and target."""
+
+    recorded_children = recorded if isinstance(recorded, dict) else {}
+    descriptions: list[str] = []
+    for child_id, declaration in sorted(declared.items()):
+        relative = declaration["path"]
+        repo = safe_path(root, relative)
+        initial = (
+            declaration.get("initial_head"),
+            declaration.get("initial_tree"),
+        )
+        target = (
+            declaration.get("target_head"),
+            declaration.get("target_tree"),
+        )
+        recorded_child = recorded_children.get(child_id)
+        if target == (None, None) and isinstance(recorded_child, dict):
+            target = (recorded_child.get("head"), recorded_child.get("tree"))
+        initial_label = (
+            "absent" if initial == (None, None) else f"{initial[0]}:{initial[1]}"
+        )
+        target_label = (
+            "unrecorded" if target == (None, None) else f"{target[0]}:{target[1]}"
+        )
+        if not repo.is_dir():
+            descriptions.append(
+                f"  child {child_id}: missing {relative} initial={initial_label} "
+                f"target={target_label}"
+            )
+            continue
+        actual_head = run(
+            root, ["git", "rev-parse", "HEAD"], cwd=repo, check=False
+        )
+        actual_tree = run(
+            root, ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, check=False
+        )
+        dirty = run(
+            root,
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=repo,
+            check=False,
+        )
+        head_value = actual_head.stdout.decode().strip()
+        tree_value = actual_tree.stdout.decode().strip()
+        actual = (head_value, tree_value)
+        readable = actual_head.returncode == 0 and actual_tree.returncode == 0
+        initial_match = readable and initial != (None, None) and actual == initial
+        target_available = target != (None, None)
+        target_match = readable and target_available and actual == target
+        if initial_match:
+            position = "initial"
+        elif target_match:
+            position = "target"
+        else:
+            position = "other"
+        descriptions.append(
+            f"  child {child_id}: head={head_value or 'unreadable'} "
+            f"tree={tree_value or 'unreadable'} clean={not bool(dirty.stdout)} "
+            f"position={position} initial={initial_label} target={target_label} "
+            f"initial_identity_match={initial_match} "
+            f"target_identity_match={target_match if target_available else 'unavailable'}"
+        )
+    return descriptions
 
 
 def verify_root_state(
@@ -194,6 +618,7 @@ def verify_root_state(
                 or not allowed["root_allowlist"]
             ):
                 raise VerifyError("prepared transaction participant/allowlist set is incomplete")
+            declared = verify_journal_initial_children(root, allowed)
             for child_id, child in recorded.items():
                 declaration = declared[child_id]
                 if (
@@ -210,6 +635,12 @@ def verify_root_state(
                 or allowed.get("previous_root") != coordinator_parent
             ):
                 raise VerifyError("transaction journal does not bind coordinator HEAD")
+            verify_coordinator_participant_gitlinks(
+                root,
+                allowed["previous_root"],
+                coordinator_head,
+                declared,
+            )
             if phase == "committed" and (
                 allowed.get("root_coordinator_commit") != coordinator_head
                 or not isinstance(allowed.get("committed_at"), str)
@@ -229,47 +660,12 @@ def verify_root_state(
                 descriptions.append(
                     f"{checkpoint} phase={phase} root={root_head} previous_root={previous}"
                 )
-                for child_id, child in sorted(
-                    (journal.get("expected_children") or {}).items()
-                ):
-                    relative = child.get("path")
-                    if not isinstance(relative, str):
-                        descriptions.append(f"  child {child_id}: invalid path")
-                        continue
-                    try:
-                        repo = safe_path(root, relative)
-                    except VerifyError as exc:
-                        descriptions.append(f"  child {child_id}: {exc}")
-                        continue
-                    if not repo.is_dir():
-                        descriptions.append(f"  child {child_id}: missing {relative}")
-                        continue
-                    actual_head = run(
-                        root, ["git", "rev-parse", "HEAD"], cwd=repo, check=False
+                declared = verify_journal_initial_children(root, journal)
+                descriptions.extend(
+                    describe_journal_children(
+                        root, declared, journal.get("expected_children")
                     )
-                    actual_tree = run(
-                        root, ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, check=False
-                    )
-                    dirty = run(
-                        root,
-                        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
-                        cwd=repo,
-                        check=False,
-                    )
-                    head_value = actual_head.stdout.decode().strip()
-                    tree_value = actual_tree.stdout.decode().strip()
-                    matches = (
-                        actual_head.returncode == 0
-                        and actual_tree.returncode == 0
-                        and head_value == child.get("head")
-                        and tree_value == child.get("tree")
-                        and not dirty.stdout
-                    )
-                    descriptions.append(
-                        f"  child {child_id}: head={head_value or 'unreadable'} "
-                        f"tree={tree_value or 'unreadable'} clean={not bool(dirty.stdout)} "
-                        f"recorded_identity_match={matches}"
-                    )
+                )
                 if phase == "prepared" and isinstance(
                     journal.get("expected_root_tree"), str
                 ):
@@ -426,6 +822,7 @@ def verify_checkpoint(
         "PLAN.md": checkpoint.get("plan_sha256"),
         "GOAL.md": checkpoint.get("goal_sha256"),
         "SOURCE_LOCK.json": checkpoint.get("source_lock_sha256"),
+        PROJECT_LANES_PATH: checkpoint.get("project_lanes_sha256"),
     }.items():
         if not isinstance(expected, str) or digest(root / relative) != expected:
             raise VerifyError(f"checkpoint hash mismatch: {relative}")
@@ -590,9 +987,415 @@ def verify_checkpoint(
     return current, checkpoint, action
 
 
-def verify_checkpoint_repositories(
-    checkpoint: dict[str, Any], lock: dict[str, Any]
+def authored_lanes(registry: dict[str, Any]) -> list[dict[str, Any]]:
+    """Validate and return immutable project-authored baseline declarations."""
+
+    if set(registry) != {"schema", "registry_revision", "url_policy", "lanes"}:
+        raise VerifyError("PROJECT_LANES has missing or unknown fields")
+    if registry.get("schema") != PROJECT_LANES_SCHEMA:
+        raise VerifyError("unsupported PROJECT_LANES schema")
+    if (
+        not isinstance(registry.get("registry_revision"), int)
+        or isinstance(registry.get("registry_revision"), bool)
+        or registry["registry_revision"] != 1
+    ):
+        raise VerifyError("unsupported PROJECT_LANES registry revision")
+    if registry.get("url_policy") != SIBLING_RELATIVE_POLICY:
+        raise VerifyError("PROJECT_LANES sibling-relative URL policy mismatch")
+    lanes = registry.get("lanes")
+    if not isinstance(lanes, list):
+        raise VerifyError("PROJECT_LANES lanes is not a list")
+    seen_ids: set[str] = set()
+    seen_paths: set[str] = set()
+    seen_admin: set[str] = set()
+    for lane in lanes:
+        if not isinstance(lane, dict):
+            raise VerifyError("PROJECT_LANES entries must be objects")
+        lane_id = lane.get("id")
+        forbidden_current = {"head", "tree", "work_head", "work_tree"}.intersection(lane)
+        if forbidden_current:
+            raise VerifyError(
+                f"PROJECT_LANES must not own current head/tree: {lane_id}:{sorted(forbidden_current)}"
+            )
+        expected_lane_fields = {
+            "id",
+            "ownership",
+            "role",
+            "path",
+            "materialization",
+            "origin",
+            "baseline_commit",
+            "baseline_tree",
+            "baseline_tag",
+            "baseline_tag_object",
+            "baseline_tag_payload",
+            "baseline_tag_payload_sha256",
+            "baseline_created_at",
+            "baseline_checkpoint_id",
+            "baseline_evidence_id",
+            "baseline_commit_trailers",
+            "administrative_git_dir",
+            "license",
+        }
+        if set(lane) != expected_lane_fields:
+            raise VerifyError("authored lane has missing or unknown fields")
+        if not isinstance(lane_id, str) or not SOURCE_ID_RE.fullmatch(lane_id):
+            raise VerifyError(f"authored lane has an unsafe project id: {lane_id!r}")
+        expected_path = f"projects/{lane_id}"
+        expected_admin = f"modules/{lane_id}"
+        expected_url = SIBLING_RELATIVE_POLICY["template"].format(project_id=lane_id)
+        origin = lane.get("origin")
+        license_metadata = lane.get("license")
+        commit_trailers = lane.get("baseline_commit_trailers")
+        if not isinstance(origin, dict) or set(origin) != {
+            "policy",
+            "remote",
+            "url",
+            "push_url",
+            "reachability",
+            "branch",
+        }:
+            raise VerifyError("authored lane origin has missing or unknown fields")
+        if not isinstance(license_metadata, dict) or set(license_metadata) != {
+            "spdx_id",
+            "path",
+            "sha256",
+        }:
+            raise VerifyError("authored lane license has missing or unknown fields")
+        if not isinstance(commit_trailers, dict) or set(commit_trailers) != {
+            "checkpoint_id",
+            "goal_id",
+            "plan_revision",
+            "source_lock_sha256",
+            "evidence_manifest_sha256",
+            "change_kind",
+            "baseline_commit_marker",
+        }:
+            raise VerifyError(
+                "authored lane baseline commit trailers have missing or unknown fields"
+            )
+        baseline_fields = (
+            "baseline_commit",
+            "baseline_tree",
+            "baseline_tag_object",
+        )
+        if (
+            lane.get("ownership") != "project-authored"
+            or not isinstance(lane.get("role"), str)
+            or not SOURCE_ID_RE.fullmatch(lane["role"])
+            or lane.get("materialization") != "gitlink"
+            or lane.get("path") != expected_path
+            or lane.get("administrative_git_dir") != expected_admin
+            or origin.get("policy") != "sibling-relative-v1"
+            or origin.get("remote") != "origin"
+            or origin.get("url") != expected_url
+            or origin.get("push_url") != "no_push"
+            or origin.get("reachability") != "not-asserted"
+            or not isinstance(origin.get("branch"), str)
+            or not valid_branch_name(origin["branch"])
+            or license_metadata.get("spdx_id") != "GPL-3.0-or-later"
+            or license_metadata.get("path") != "LICENSE"
+            or not SHA256_RE.fullmatch(str(license_metadata.get("sha256", "")))
+            or not all(SHA_RE.fullmatch(str(lane.get(field, ""))) for field in baseline_fields)
+            or lane.get("baseline_tag")
+            != f"project-baseline/{lane_id}/{lane.get('baseline_commit')}"
+            or not isinstance(lane.get("baseline_tag_payload"), str)
+            or not lane["baseline_tag_payload"]
+            or not SHA256_RE.fullmatch(str(lane.get("baseline_tag_payload_sha256", "")))
+            or not valid_timestamp(lane.get("baseline_created_at"))
+            or not CP_RE.fullmatch(str(lane.get("baseline_checkpoint_id", "")))
+            or not EV_RE.fullmatch(str(lane.get("baseline_evidence_id", "")))
+            or commit_trailers.get("checkpoint_id")
+            != lane.get("baseline_checkpoint_id")
+            or not isinstance(commit_trailers.get("goal_id"), str)
+            or not commit_trailers["goal_id"]
+            or not isinstance(commit_trailers.get("plan_revision"), int)
+            or isinstance(commit_trailers.get("plan_revision"), bool)
+            or commit_trailers["plan_revision"] < 1
+            or not SHA256_RE.fullmatch(
+                str(commit_trailers.get("source_lock_sha256", ""))
+            )
+            or not SHA256_RE.fullmatch(
+                str(commit_trailers.get("evidence_manifest_sha256", ""))
+            )
+            or commit_trailers.get("change_kind") != "baseline"
+            or commit_trailers.get("baseline_commit_marker") != "N/A"
+        ):
+            raise VerifyError(f"authored lane identity is incomplete: {lane_id}")
+        if lane_id in seen_ids or expected_path in seen_paths or expected_admin in seen_admin:
+            raise VerifyError(f"duplicate authored lane identity: {lane_id}")
+        seen_ids.add(lane_id)
+        seen_paths.add(expected_path)
+        seen_admin.add(expected_admin)
+        verify_authored_tag_metadata(lane)
+    return lanes
+
+
+def verify_authored_tag_metadata(lane: dict[str, Any]) -> None:
+    expected = {
+        "Project-ID": lane["id"],
+        "Project-URL": lane["origin"]["url"],
+        "Origin-Policy": lane["origin"]["policy"],
+        "Baseline-Commit": lane["baseline_commit"],
+        "Baseline-Tree": lane["baseline_tree"],
+        "License-SPDX": lane["license"]["spdx_id"],
+        "Created-At": lane["baseline_created_at"],
+    }
+    observed: dict[str, list[str]] = {key: [] for key in expected}
+    for line in lane["baseline_tag_payload"].splitlines():
+        match = re.fullmatch(r"([A-Za-z0-9-]+): (.*)", line)
+        if match and match.group(1) in observed:
+            observed[match.group(1)].append(match.group(2))
+    for key, value in expected.items():
+        if observed[key] != [value]:
+            raise VerifyError(
+                f"authored baseline tag has missing, duplicate, or mismatched {key}: {lane['id']}"
+            )
+
+
+def verify_authored_lane_history(
+    root: Path,
+    registry: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Prove authored baseline declarations are append-only from first acceptance."""
+
+    current = {lane["id"]: lane for lane in authored_lanes(registry)}
+    commits = text(
+        root,
+        ["git", "rev-list", "--reverse", "HEAD", "--", PROJECT_LANES_PATH],
+    ).splitlines()
+    if current and not commits:
+        raise VerifyError("PROJECT_LANES has no reachable acceptance history")
+    accepted: dict[str, dict[str, Any]] = {}
+    accepted_at: dict[str, str] = {}
+    prior_ids: set[str] = set()
+    for commit in commits:
+        historical_blob = commit_blob(root, commit, PROJECT_LANES_PATH)
+        historical_registry = json_bytes(
+            historical_blob, f"{commit}:{PROJECT_LANES_PATH}"
+        )
+        historical_lanes = {
+            lane["id"]: lane for lane in authored_lanes(historical_registry)
+        }
+        if not prior_ids.issubset(historical_lanes):
+            raise VerifyError("PROJECT_LANES history deletes an accepted authored lane")
+        for lane_id in prior_ids:
+            if historical_lanes[lane_id] != accepted[lane_id]:
+                raise VerifyError(
+                    f"PROJECT_LANES history rewrites an authored baseline: {lane_id}"
+                )
+        new_ids = set(historical_lanes) - prior_ids
+        if not new_ids:
+            raise VerifyError(
+                "PROJECT_LANES changed without appending an authored lane"
+            )
+        message = text(root, ["git", "log", "-1", "--format=%B", commit])
+        checkpoint_values = parse_trailers(message).get("Checkpoint-ID", [])
+        if len(checkpoint_values) != 1 or not CP_RE.fullmatch(checkpoint_values[0]):
+            raise VerifyError(
+                "PROJECT_LANES acceptance commit has no unique Checkpoint-ID trailer"
+            )
+        checkpoint_id = checkpoint_values[0]
+        if checkpoint_commit(root, checkpoint_id) != commit:
+            raise VerifyError(
+                f"PROJECT_LANES acceptance checkpoint is ambiguous: {checkpoint_id}"
+            )
+        checkpoint_relative = f"state/checkpoints/{checkpoint_id}.json"
+        checkpoint_blob = commit_blob(root, commit, checkpoint_relative)
+        checkpoint = json_bytes(checkpoint_blob, f"{commit}:{checkpoint_relative}")
+        historical_registry_sha = hashlib.sha256(historical_blob).hexdigest()
+        if (
+            checkpoint.get("id") != checkpoint_id
+            or checkpoint.get("project_lanes_sha256") != historical_registry_sha
+            or (root / checkpoint_relative).read_bytes() != checkpoint_blob
+        ):
+            raise VerifyError(
+                f"authored lane checkpoint does not bind its registry: {checkpoint_id}"
+            )
+        for lane_id in new_ids:
+            lane = historical_lanes[lane_id]
+            if lane["baseline_checkpoint_id"] != checkpoint_id:
+                raise VerifyError(
+                    f"authored lane baseline checkpoint is not its first declaration: {lane_id}"
+                )
+            evidence_id = lane["baseline_evidence_id"]
+            evidence_sha = lane["baseline_commit_trailers"][
+                "evidence_manifest_sha256"
+            ]
+            evidence_ids = checkpoint.get("evidence_ids")
+            evidence_hashes = checkpoint.get("evidence_sha256")
+            manifest_id = checkpoint.get("evidence_manifest_id")
+            if (
+                not isinstance(evidence_ids, list)
+                or evidence_ids.count(evidence_id) != 1
+                or not isinstance(evidence_hashes, dict)
+                or evidence_hashes.get(evidence_id) != evidence_sha
+                or manifest_id == evidence_id
+                or not isinstance(manifest_id, str)
+                or checkpoint.get("evidence_manifest_sha256")
+                != evidence_hashes.get(manifest_id)
+            ):
+                raise VerifyError(
+                    f"authored baseline evidence is not layered into its checkpoint: {lane_id}"
+                )
+            evidence_relative = f"state/evidence/{evidence_id}.json"
+            evidence_blob = commit_blob(root, commit, evidence_relative)
+            if hashlib.sha256(evidence_blob).hexdigest() != evidence_sha:
+                raise VerifyError(
+                    f"authored baseline evidence blob mismatch: {lane_id}"
+                )
+            evidence = json_bytes(evidence_blob, f"{commit}:{evidence_relative}")
+            if (
+                evidence.get("id") != evidence_id
+                or evidence.get("checkpoint_id") != checkpoint_id
+            ):
+                raise VerifyError(
+                    f"authored baseline evidence identity mismatch: {lane_id}"
+                )
+            manifest_relative = f"state/evidence/{manifest_id}.json"
+            manifest_blob = commit_blob(root, commit, manifest_relative)
+            if (
+                hashlib.sha256(manifest_blob).hexdigest()
+                != checkpoint["evidence_manifest_sha256"]
+            ):
+                raise VerifyError(
+                    f"authored baseline umbrella evidence blob mismatch: {lane_id}"
+                )
+            manifest = json_bytes(manifest_blob, f"{commit}:{manifest_relative}")
+            if (
+                manifest.get("id") != manifest_id
+                or manifest.get("checkpoint_id") != checkpoint_id
+                or not isinstance(manifest.get("includes"), dict)
+                or manifest["includes"].get(evidence_id) != evidence_sha
+            ):
+                raise VerifyError(
+                    f"authored baseline evidence is absent from umbrella manifest: {lane_id}"
+                )
+            if (
+                (root / evidence_relative).read_bytes() != evidence_blob
+                or (root / manifest_relative).read_bytes() != manifest_blob
+            ):
+                raise VerifyError(
+                    f"authored baseline evidence differs from accepted history: {lane_id}"
+                )
+            accepted[lane_id] = lane
+            accepted_at[lane_id] = commit
+        prior_ids = set(historical_lanes)
+    if set(current) != set(accepted):
+        raise VerifyError("PROJECT_LANES live set differs from append-only history")
+    for lane_id, lane in current.items():
+        if lane != accepted[lane_id]:
+            raise VerifyError(
+                f"PROJECT_LANES live baseline differs from first acceptance: {lane_id}"
+            )
+    return {
+        lane_id: {"lane": accepted[lane_id], "commit": accepted_at[lane_id]}
+        for lane_id in sorted(accepted)
+    }
+
+
+def verify_current_progress_commits(
+    root: Path,
+    checkpoint: dict[str, Any],
+    plan_revision: int,
+    authority: dict[str, Any],
+    current: dict[str, Any],
 ) -> None:
+    """Bind every new child commit to the current two-phase checkpoint."""
+
+    baseline = authority["baseline_commit"]
+    head = current["head"]
+    parent_checkpoint_id = checkpoint.get("parent_checkpoint")
+    if not isinstance(parent_checkpoint_id, str) or not CP_RE.fullmatch(
+        parent_checkpoint_id
+    ):
+        raise VerifyError(f"progressed lane has no parent checkpoint: {authority['id']}")
+    parent_checkpoint = accepted_checkpoint(root, parent_checkpoint_id)
+    parent_repositories = parent_checkpoint.get("repositories")
+    if not isinstance(parent_repositories, list):
+        raise VerifyError("parent checkpoint repositories is not a list")
+    previous_records = [
+        item
+        for item in parent_repositories
+        if isinstance(item, dict) and item.get("id") == authority["id"]
+    ]
+    if not previous_records:
+        if head == baseline:
+            return
+        raise VerifyError(
+            f"new lane advances beyond its accepted baseline: {authority['id']}"
+        )
+    if len(previous_records) != 1:
+        raise VerifyError(
+            f"progressed lane has no unique previous head: {authority['id']}"
+        )
+    previous = previous_records[0].get("head")
+    if not isinstance(previous, str) or not SHA_RE.fullmatch(previous):
+        raise VerifyError(f"progressed lane previous head is invalid: {authority['id']}")
+    repo = safe_path(root, authority["path"])
+    if previous == head:
+        return
+    ancestor = run(
+        root,
+        ["git", "merge-base", "--is-ancestor", previous, head],
+        cwd=repo,
+        check=False,
+    )
+    if ancestor.returncode:
+        raise VerifyError(
+            f"current lane head does not descend from previous checkpoint: {authority['id']}"
+        )
+    commits = text(
+        root,
+        ["git", "rev-list", "--reverse", "--topo-order", f"{previous}..{head}"],
+        cwd=repo,
+    ).splitlines()
+    if not commits or commits[-1] != head:
+        raise VerifyError(f"cannot enumerate current lane progress: {authority['id']}")
+    evidence_hashes = checkpoint.get("evidence_sha256")
+    if not isinstance(evidence_hashes, dict):
+        raise VerifyError("current checkpoint evidence map is absent")
+    allowed_evidence = {
+        value for value in evidence_hashes.values() if isinstance(value, str)
+    }
+    expected = {
+        "Checkpoint-ID": checkpoint["id"],
+        "Goal-ID": checkpoint["goal_id"],
+        "Plan-Revision": str(plan_revision),
+        "Source-Lock-SHA256": checkpoint["source_lock_sha256"],
+        "Change-Kind": checkpoint["change_kind"],
+        "Baseline-Commit": baseline,
+    }
+    for commit in commits:
+        message = text(root, ["git", "log", "-1", "--format=%B", commit], cwd=repo)
+        try:
+            check_commit_message(message)
+        except MessageError as exc:
+            raise VerifyError(
+                f"progress commit message violates audit policy: {authority['id']}:{commit}: {exc}"
+            ) from exc
+        trailers = parse_trailers(message)
+        for key, value in expected.items():
+            if trailers.get(key) != [value]:
+                raise VerifyError(
+                    f"progress commit has mismatched {key}: {authority['id']}:{commit}"
+                )
+        evidence_values = trailers.get("Evidence-Manifest-SHA256")
+        if (
+            not isinstance(evidence_values, list)
+            or len(evidence_values) != 1
+            or evidence_values[0] not in allowed_evidence
+        ):
+            raise VerifyError(
+                f"progress commit evidence is not in current checkpoint: {authority['id']}:{commit}"
+            )
+
+
+def verify_checkpoint_repositories(
+    checkpoint: dict[str, Any],
+    lock: dict[str, Any],
+    registry: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
     repositories = checkpoint.get("repositories")
     if not isinstance(repositories, list):
         raise VerifyError("checkpoint repositories is not a list")
@@ -604,30 +1407,49 @@ def verify_checkpoint_repositories(
         for source in sources
         if isinstance(source, dict) and source.get("materialization") == "gitlink"
     ]
+    lanes = authored_lanes(
+        (
+            {
+            "schema": PROJECT_LANES_SCHEMA,
+            "registry_revision": 1,
+            "url_policy": SIBLING_RELATIVE_POLICY,
+            "lanes": [],
+            }
+            if registry is None
+            else registry
+        )
+    )
     repository_ids = [
         repository.get("id")
         for repository in repositories
         if isinstance(repository, dict)
     ]
-    source_ids = [source.get("id") for source in git_sources]
+    authorities = [*git_sources, *lanes]
+    source_ids = [source.get("id") for source in authorities]
+    source_paths = [source.get("path") for source in authorities]
+    source_admin = [source.get("administrative_git_dir") for source in authorities]
     if (
         not git_sources
         or len(repository_ids) != len(repositories)
         or len(repository_ids) != len(set(repository_ids))
         or any(not isinstance(source_id, str) for source_id in source_ids)
         or len(source_ids) != len(set(source_ids))
+        or any(not isinstance(path, str) for path in source_paths)
+        or len(source_paths) != len(set(source_paths))
+        or any(not isinstance(path, str) for path in source_admin)
+        or len(source_admin) != len(set(source_admin))
         or set(repository_ids) != set(source_ids)
     ):
-        raise VerifyError("checkpoint repository set does not match frozen Git sources")
+        raise VerifyError(
+            "checkpoint repository set does not match upstream/authored lane union"
+        )
     by_id = {repository["id"]: repository for repository in repositories}
-    for source in git_sources:
+    for source in authorities:
         required_source_fields = (
             "id",
             "path",
             "baseline_commit",
             "baseline_tree",
-            "work_head",
-            "work_tree",
             "baseline_tag",
             "baseline_tag_object",
             "administrative_git_dir",
@@ -639,22 +1461,35 @@ def verify_checkpoint_repositories(
             raise VerifyError(
                 f"frozen source identity is incomplete: {source.get('id')}"
             )
-        expected = {
+        if source in git_sources and (
+            source.get("work_head") != source.get("baseline_commit")
+            or source.get("work_tree") != source.get("baseline_tree")
+        ):
+            raise VerifyError(
+                f"frozen upstream source current identity is not its baseline: {source['id']}"
+            )
+        expected_baseline = {
             "id": source["id"],
             "path": source["path"],
             "baseline_commit": source["baseline_commit"],
             "baseline_tree": source["baseline_tree"],
-            "head": source["work_head"],
-            "tree": source["work_tree"],
             "baseline_tag": source["baseline_tag"],
             "baseline_tag_object": source["baseline_tag_object"],
             "administrative_git_dir": source["administrative_git_dir"],
-            "clean": True,
         }
-        if by_id[source["id"]] != expected:
+        repository = by_id[source["id"]]
+        if (
+            set(repository)
+            != {*expected_baseline, "head", "tree", "clean"}
+            or any(repository.get(key) != value for key, value in expected_baseline.items())
+            or not SHA_RE.fullmatch(str(repository.get("head", "")))
+            or not SHA_RE.fullmatch(str(repository.get("tree", "")))
+            or repository.get("clean") is not True
+        ):
             raise VerifyError(
                 f"checkpoint repository identity mismatch: {source['id']}"
             )
+    return by_id
 
 
 def verify_pre_freeze_candidate(
@@ -762,7 +1597,11 @@ def verify_annotated_tag(
     )
 
 
-def verify_child(root: Path, source: dict[str, Any]) -> None:
+def verify_child(
+    root: Path,
+    source: dict[str, Any],
+    current: dict[str, Any] | None = None,
+) -> None:
     source_id = source["id"]
     if not isinstance(source_id, str) or not SOURCE_ID_RE.fullmatch(source_id):
         raise VerifyError(f"source has an unsafe submodule name: {source_id!r}")
@@ -770,10 +1609,10 @@ def verify_child(root: Path, source: dict[str, Any]) -> None:
     repo = safe_path(root, relative)
     if not repo.is_dir():
         raise VerifyError(f"materialized source is missing: {relative}")
-    expected_head = source.get("work_head")
+    expected_head = (current or {}).get("head", source.get("work_head"))
     baseline = source.get("baseline_commit")
     baseline_tree = source.get("baseline_tree")
-    work_tree = source.get("work_tree", baseline_tree)
+    work_tree = (current or {}).get("tree", source.get("work_tree", baseline_tree))
     tag = source.get("baseline_tag")
     tag_object = source.get("baseline_tag_object")
     tag_payload = source.get("baseline_tag_payload")
@@ -853,9 +1692,12 @@ def verify_child(root: Path, source: dict[str, Any]) -> None:
         child_common_dir = child_common_dir.resolve()
     root_common_dir = Path(text(root, ["git", "rev-parse", "--git-common-dir"]))
     if not root_common_dir.is_absolute():
-        root_common_dir = (root / root_common_dir).resolve()
-    else:
-        root_common_dir = root_common_dir.resolve()
+        root_common_dir = root / root_common_dir
+    modules_dir = root_common_dir / "modules"
+    expected_admin_path = modules_dir / source_id
+    if modules_dir.is_symlink() or expected_admin_path.is_symlink():
+        raise VerifyError(f"child administrative Git path is a symlink: {source_id}")
+    root_common_dir = root_common_dir.resolve()
     expected_admin_relative = (PurePosixPath("modules") / source_id).as_posix()
     expected_child_common_dir = (root_common_dir / expected_admin_relative).resolve()
     expected_gitfile = (
@@ -1052,25 +1894,304 @@ def verify_child(root: Path, source: dict[str, Any]) -> None:
         raise VerifyError(f"upstream tracking ref mismatch for {source_id}")
 
 
+def verify_authored_child(
+    root: Path,
+    lane: dict[str, Any],
+    current: dict[str, Any],
+) -> None:
+    """Verify a locally authored lane without attributing upstream provenance to it."""
+
+    lane_id = lane["id"]
+    relative = lane["path"]
+    repo = safe_path(root, relative)
+    if not repo.is_dir():
+        raise VerifyError(f"materialized authored lane is missing: {relative}")
+    baseline = lane["baseline_commit"]
+    baseline_tree = lane["baseline_tree"]
+    expected_head = current["head"]
+    expected_tree = current["tree"]
+    origin = lane["origin"]
+    index = text(root, ["git", "ls-files", "--stage", "--", relative])
+    fields = index.split()
+    if len(fields) < 4 or fields[0] != "160000" or fields[1] != expected_head:
+        raise VerifyError(f"root gitlink mismatch for authored lane {lane_id}")
+    if gitmodule_value(root, lane_id, "path") != relative:
+        raise VerifyError(f".gitmodules path mismatch for authored lane {lane_id}")
+    if gitmodule_value(root, lane_id, "url") != origin["url"]:
+        raise VerifyError(f".gitmodules canonical URL mismatch for authored lane {lane_id}")
+    if gitmodule_value(root, lane_id, "branch") != origin["branch"]:
+        raise VerifyError(f".gitmodules branch mismatch for authored lane {lane_id}")
+    if text(root, ["git", "rev-parse", "HEAD"], cwd=repo) != expected_head:
+        raise VerifyError(f"authored lane HEAD mismatch: {lane_id}")
+    if text(root, ["git", "rev-parse", "HEAD^{tree}"], cwd=repo) != expected_tree:
+        raise VerifyError(f"authored lane tree mismatch: {lane_id}")
+    if text(root, ["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=repo):
+        raise VerifyError(f"authored lane worktree is dirty: {lane_id}")
+    if text(root, ["git", "remote"], cwd=repo).splitlines() != [origin["remote"]]:
+        raise VerifyError(f"authored lane remote set mismatch: {lane_id}")
+    fetch_urls = run(
+        root,
+        ["git", "config", "--get-all", f"remote.{origin['remote']}.url"],
+        cwd=repo,
+        check=False,
+    )
+    push_urls = run(
+        root,
+        ["git", "config", "--get-all", f"remote.{origin['remote']}.pushurl"],
+        cwd=repo,
+        check=False,
+    )
+    if fetch_urls.returncode or fetch_urls.stdout.decode().splitlines() != [origin["url"]]:
+        raise VerifyError(f"authored lane origin URL is not a singleton: {lane_id}")
+    if push_urls.returncode or push_urls.stdout.decode().splitlines() != [origin["push_url"]]:
+        raise VerifyError(f"authored lane push policy mismatch: {lane_id}")
+    expected_hooks = os.path.relpath(root / ".githooks", repo)
+    if text(root, ["git", "config", "--get", "core.hooksPath"], cwd=repo) != expected_hooks:
+        raise VerifyError(f"authored lane hooksPath mismatch: {lane_id}")
+    if text(root, ["git", "rev-parse", "--is-shallow-repository"], cwd=repo) != "false":
+        raise VerifyError(f"authored lane repository is shallow: {lane_id}")
+    sparse = run(
+        root,
+        ["git", "config", "--bool", "core.sparseCheckout"],
+        cwd=repo,
+        check=False,
+    )
+    if sparse.returncode not in (0, 1) or sparse.stdout.decode().strip() == "true":
+        raise VerifyError(f"authored lane uses sparse checkout: {lane_id}")
+    indexed = run(root, ["git", "ls-files", "-v", "-z"], cwd=repo).stdout
+    if any(entry and entry[:1] in {b"S", b"s"} for entry in indexed.split(b"\0")):
+        raise VerifyError(f"authored lane has skip-worktree entries: {lane_id}")
+    child_git_dir = Path(text(root, ["git", "rev-parse", "--absolute-git-dir"], cwd=repo))
+    child_common_dir = Path(text(root, ["git", "rev-parse", "--git-common-dir"], cwd=repo))
+    child_common_dir = (
+        (repo / child_common_dir).resolve()
+        if not child_common_dir.is_absolute()
+        else child_common_dir.resolve()
+    )
+    root_common_dir = Path(text(root, ["git", "rev-parse", "--git-common-dir"]))
+    if not root_common_dir.is_absolute():
+        root_common_dir = root / root_common_dir
+    modules_dir = root_common_dir / "modules"
+    expected_admin_path = modules_dir / lane_id
+    if modules_dir.is_symlink() or expected_admin_path.is_symlink():
+        raise VerifyError(
+            f"authored lane administrative Git path is a symlink: {lane_id}"
+        )
+    root_common_dir = root_common_dir.resolve()
+    expected_admin_relative = f"modules/{lane_id}"
+    expected_admin = (root_common_dir / expected_admin_relative).resolve()
+    expected_gitfile = f"gitdir: {os.path.relpath(expected_admin, repo)}\n"
+    if (
+        lane["administrative_git_dir"] != expected_admin_relative
+        or not (repo / ".git").is_file()
+        or (repo / ".git").is_symlink()
+        or (repo / ".git").read_text(encoding="utf-8") != expected_gitfile
+        or child_git_dir.resolve() != expected_admin
+        or child_common_dir != expected_admin
+    ):
+        raise VerifyError(f"authored lane administrative Git path mismatch: {lane_id}")
+    for marker in (
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "BISECT_LOG",
+        "rebase-merge",
+        "rebase-apply",
+    ):
+        if (child_git_dir / marker).exists():
+            raise VerifyError(f"authored lane Git operation is in progress: {lane_id}:{marker}")
+    if (child_git_dir / "info" / "grafts").is_file():
+        raise VerifyError(f"authored lane history uses a grafts file: {lane_id}")
+    if text(root, ["git", "replace", "-l"], cwd=repo):
+        raise VerifyError(f"authored lane history uses replacement objects: {lane_id}")
+    alternates = child_git_dir / "objects" / "info" / "alternates"
+    if alternates.is_file() and alternates.read_text(encoding="utf-8").strip():
+        raise VerifyError(f"authored lane depends on alternates: {lane_id}")
+    verify_annotated_tag(
+        root,
+        repo,
+        lane_id,
+        commit=baseline,
+        tree=baseline_tree,
+        tag=lane["baseline_tag"],
+        tag_object=lane["baseline_tag_object"],
+        tag_payload=lane["baseline_tag_payload"],
+        tag_payload_sha256=lane["baseline_tag_payload_sha256"],
+        required_lines=[
+            f"Project-ID: {lane_id}",
+            f"Project-URL: {origin['url']}",
+            "Origin-Policy: sibling-relative-v1",
+            f"Baseline-Commit: {baseline}",
+            f"Baseline-Tree: {baseline_tree}",
+        ],
+    )
+    commit_message = text(
+        root, ["git", "log", "-1", "--format=%B", baseline], cwd=repo
+    )
+    try:
+        check_commit_message(commit_message)
+    except MessageError as exc:
+        raise VerifyError(
+            f"authored baseline commit message violates audit policy: {lane_id}: {exc}"
+        ) from exc
+    trailers = parse_trailers(commit_message)
+    commit_identity = lane["baseline_commit_trailers"]
+    expected_trailers = {
+        "Checkpoint-ID": commit_identity["checkpoint_id"],
+        "Goal-ID": commit_identity["goal_id"],
+        "Plan-Revision": str(commit_identity["plan_revision"]),
+        "Source-Lock-SHA256": commit_identity["source_lock_sha256"],
+        "Evidence-Manifest-SHA256": commit_identity["evidence_manifest_sha256"],
+        "Change-Kind": commit_identity["change_kind"],
+        "Baseline-Commit": commit_identity["baseline_commit_marker"],
+    }
+    for key, expected in expected_trailers.items():
+        if trailers.get(key) != [expected]:
+            raise VerifyError(
+                f"authored baseline commit has mismatched {key} trailer: {lane_id}"
+            )
+    if commit_identity["source_lock_sha256"] != digest(root / "SOURCE_LOCK.json"):
+        raise VerifyError(f"authored baseline commit binds another source lock: {lane_id}")
+    ancestor = run(
+        root,
+        ["git", "merge-base", "--is-ancestor", baseline, expected_head],
+        cwd=repo,
+        check=False,
+    )
+    if ancestor.returncode:
+        raise VerifyError(f"authored lane head is not a baseline descendant: {lane_id}")
+    license_metadata = lane["license"]
+    for revision, label in ((baseline, "baseline"), (expected_head, "current")):
+        license_result = run(
+            root,
+            ["git", "cat-file", "blob", f"{revision}:{license_metadata['path']}"],
+            cwd=repo,
+            check=False,
+        )
+        if (
+            license_result.returncode
+            or hashlib.sha256(license_result.stdout).hexdigest()
+            != license_metadata["sha256"]
+        ):
+            raise VerifyError(
+                f"authored lane {label} license hash mismatch: {lane_id}"
+            )
+    worktree_license = repo / license_metadata["path"]
+    if (
+        not worktree_license.is_file()
+        or worktree_license.is_symlink()
+        or digest(worktree_license) != license_metadata["sha256"]
+    ):
+        raise VerifyError(f"authored lane worktree license hash mismatch: {lane_id}")
+    run_discard_stdout(root, ["git", "archive", "--format=tar", expected_head], cwd=repo)
+    run_discard_stdout(root, ["git", "fsck", "--connectivity-only"], cwd=repo)
+    tree_entries = run(
+        root, ["git", "ls-tree", "-r", "-z", expected_head], cwd=repo
+    ).stdout
+    gitlinks = [
+        entry
+        for entry in tree_entries.split(b"\0")
+        if entry and entry.split(b" ", 1)[0] == b"160000"
+    ]
+    module_blob = run(
+        root,
+        ["git", "cat-file", "-e", f"{expected_head}:.gitmodules"],
+        cwd=repo,
+        check=False,
+    )
+    declarations = b""
+    if module_blob.returncode == 0:
+        declaration_result = run(
+            root,
+            [
+                "git",
+                "config",
+                "--blob",
+                f"{expected_head}:.gitmodules",
+                "--get-regexp",
+                r"^submodule\..*\.path$",
+            ],
+            cwd=repo,
+            check=False,
+        )
+        if declaration_result.returncode not in (0, 1):
+            detail = declaration_result.stderr.decode(errors="replace").strip()
+            raise VerifyError(
+                f"cannot inspect authored lane submodule declarations: {lane_id}: {detail}"
+            )
+        declarations = declaration_result.stdout
+    elif module_blob.returncode != 128:
+        raise VerifyError(f"cannot inspect authored lane .gitmodules: {lane_id}")
+    if gitlinks or declarations:
+        raise VerifyError(
+            f"authored lane unexpectedly declares nested submodules: {lane_id}"
+        )
+    if text(root, ["git", "submodule", "status", "--recursive"], cwd=repo):
+        raise VerifyError(f"authored lane unexpectedly declares nested submodules: {lane_id}")
+
+
+def verify_root_gitmodules(
+    root: Path,
+    sources: list[dict[str, Any]],
+    lanes: list[dict[str, Any]],
+    registered: set[str],
+) -> None:
+    configured = text(
+        root,
+        ["git", "config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$"],
+    )
+    module_paths = {
+        line.split(None, 1)[1] for line in configured.splitlines() if line.strip()
+    }
+    if module_paths != registered:
+        raise VerifyError(
+            ".gitmodules paths do not exactly match upstream/authored lane union"
+        )
+    configured_keys = run(
+        root,
+        ["git", "config", "-f", ".gitmodules", "--name-only", "--get-regexp", r".*"],
+    ).stdout.decode().splitlines()
+    expected_keys = {
+        f"submodule.{source['id']}.{key}"
+        for source in sources
+        if source.get("materialization") == "gitlink"
+        for key in ("path", "url", "branch")
+    }
+    expected_keys.update(
+        f"submodule.{lane['id']}.{key}"
+        for lane in lanes
+        for key in ("path", "url", "branch")
+    )
+    if set(configured_keys) != expected_keys or len(configured_keys) != len(expected_keys):
+        raise VerifyError(".gitmodules contains missing, duplicate, or unexpected keys")
+
+
 def verify_sources(root: Path, checkpoint_id: str) -> None:
     lock = load_json(root / "SOURCE_LOCK.json")
+    registry = load_json(root / PROJECT_LANES_PATH)
     if lock.get("schema") != "amdgpu-sim.source-lock.v1":
         raise VerifyError("unsupported SOURCE_LOCK schema")
+    frozen_by_checkpoint = lock.get("frozen_by_checkpoint")
     if (
         lock.get("status") != "frozen"
         or not LOCK_ID_RE.fullmatch(str(lock.get("lock_id", "")))
-        or lock.get("frozen_by_checkpoint") != checkpoint_id
+        or not CP_RE.fullmatch(str(frozen_by_checkpoint or ""))
     ):
         raise VerifyError("SOURCE_LOCK is not frozen")
     checkpoint = load_json(root / "state" / "checkpoints" / f"{checkpoint_id}.json")
-    verify_checkpoint_repositories(checkpoint, lock)
+    source_checkpoint = load_json(
+        root / "state" / "checkpoints" / f"{frozen_by_checkpoint}.json"
+    )
+    current_repositories = verify_checkpoint_repositories(checkpoint, lock, registry)
+    if source_checkpoint.get("id") != frozen_by_checkpoint:
+        raise VerifyError("SOURCE_LOCK freeze checkpoint identity mismatch")
     parent_commit = lock.get("accepted_parent_root_commit")
     parent_hash = lock.get("accepted_parent_source_lock_sha256")
     candidate_hash = lock.get("pre_freeze_candidate_sha256")
     if (
         not isinstance(parent_commit, str)
         or not SHA_RE.match(parent_commit)
-        or parent_commit != checkpoint.get("root_parent_commit")
+        or parent_commit != source_checkpoint.get("root_parent_commit")
         or not isinstance(parent_hash, str)
         or not re.fullmatch(r"[0-9a-f]{64}", parent_hash)
         or not isinstance(candidate_hash, str)
@@ -1083,6 +2204,8 @@ def verify_sources(root: Path, checkpoint_id: str) -> None:
     ).stdout
     if hashlib.sha256(parent_blob).hexdigest() != parent_hash:
         raise VerifyError("SOURCE_LOCK accepted parent blob hash mismatch")
+    verify_source_lock_history(root, lock, source_checkpoint)
+    verify_checkpoint_history_chain(root, checkpoint)
     try:
         import datetime as dt
 
@@ -1105,13 +2228,14 @@ def verify_sources(root: Path, checkpoint_id: str) -> None:
     if (
         evidence.get("schema") != "amdgpu-sim.evidence.v1"
         or evidence.get("id") != evidence_id
-        or evidence.get("checkpoint_id") != checkpoint_id
+        or evidence.get("checkpoint_id") != frozen_by_checkpoint
         or evidence.get("type") != "official-source-resolution"
         or digest(evidence_path) != evidence_sha
-        or (checkpoint.get("evidence_sha256") or {}).get(evidence_id) != evidence_sha
+        or (source_checkpoint.get("evidence_sha256") or {}).get(evidence_id)
+        != evidence_sha
     ):
         raise VerifyError("SOURCE_LOCK resolution evidence does not match its file")
-    manifest_id = checkpoint.get("evidence_manifest_id")
+    manifest_id = source_checkpoint.get("evidence_manifest_id")
     if not isinstance(manifest_id, str):
         raise VerifyError("checkpoint has no evidence manifest for source provenance")
     manifest = load_json(root / "state" / "evidence" / f"{manifest_id}.json")
@@ -1160,6 +2284,15 @@ def verify_sources(root: Path, checkpoint_id: str) -> None:
             or artifact_value.get("status") != artifact.get("status")
         ):
             raise VerifyError("SOURCE_LOCK resolution artifact metadata mismatch")
+    current_state = load_json(root / "state/current.json")
+    plan_revision = current_state.get("plan_revision")
+    if (
+        current_state.get("checkpoint_id") != checkpoint_id
+        or not isinstance(plan_revision, int)
+        or isinstance(plan_revision, bool)
+        or plan_revision < 1
+    ):
+        raise VerifyError("current plan revision is unavailable for progress verification")
     registered = set()
     for source in lock.get("sources", []):
         relative = source.get("path")
@@ -1193,7 +2326,14 @@ def verify_sources(root: Path, checkpoint_id: str) -> None:
         ):
             raise VerifyError(f"source resolution provenance mismatch: {source.get('id')}")
         if source.get("materialization") == "gitlink":
-            verify_child(root, source)
+            verify_child(root, source, current_repositories[source["id"]])
+            verify_current_progress_commits(
+                root,
+                checkpoint,
+                plan_revision,
+                source,
+                current_repositories[source["id"]],
+            )
             registered.add(relative)
         elif source.get("role") == "acceptance-model":
             revision = source.get("official_revision")
@@ -1241,6 +2381,71 @@ def verify_sources(root: Path, checkpoint_id: str) -> None:
                 not in str(source.get("model_manifest_provenance", ""))
             ):
                 raise VerifyError("acceptance model provenance boundary is incomplete")
+    lanes = authored_lanes(registry)
+    verify_authored_lane_history(root, registry)
+    for lane in lanes:
+        lane_checkpoint_id = lane["baseline_checkpoint_id"]
+        lane_checkpoint = (
+            checkpoint
+            if lane_checkpoint_id == checkpoint_id
+            else load_json(
+                root
+                / "state"
+                / "checkpoints"
+                / f"{lane_checkpoint_id}.json"
+            )
+        )
+        baseline_repositories = lane_checkpoint.get("repositories")
+        if (
+            lane_checkpoint.get("id") != lane_checkpoint_id
+            or not isinstance(baseline_repositories, list)
+        ):
+            raise VerifyError(
+                f"authored lane baseline checkpoint is invalid: {lane['id']}"
+            )
+        baseline_records = [
+            item
+            for item in baseline_repositories
+            if isinstance(item, dict) and item.get("id") == lane["id"]
+        ]
+        if len(baseline_records) != 1:
+            raise VerifyError(
+                f"authored lane baseline checkpoint has no unique repository: {lane['id']}"
+            )
+        baseline_record = baseline_records[0]
+        if (
+            baseline_record.get("baseline_commit") != lane["baseline_commit"]
+            or baseline_record.get("baseline_tree") != lane["baseline_tree"]
+            or baseline_record.get("head") != lane["baseline_commit"]
+            or baseline_record.get("tree") != lane["baseline_tree"]
+            or baseline_record.get("baseline_tag") != lane["baseline_tag"]
+            or baseline_record.get("baseline_tag_object")
+            != lane["baseline_tag_object"]
+            or baseline_record.get("clean") is not True
+            or lane_checkpoint.get("goal_id")
+            != lane["baseline_commit_trailers"]["goal_id"]
+            or lane_checkpoint.get("source_lock_sha256")
+            != lane["baseline_commit_trailers"]["source_lock_sha256"]
+            or not isinstance(lane_checkpoint.get("evidence_sha256"), dict)
+            or lane_checkpoint["evidence_sha256"].get(lane["baseline_evidence_id"])
+            != lane["baseline_commit_trailers"]["evidence_manifest_sha256"]
+            or lane_checkpoint.get("change_kind")
+            != lane["baseline_commit_trailers"]["change_kind"]
+            or lane_checkpoint.get("baseline_commit_marker")
+            != lane["baseline_commit_trailers"]["baseline_commit_marker"]
+        ):
+            raise VerifyError(
+                f"authored lane baseline checkpoint identity mismatch: {lane['id']}"
+            )
+        verify_authored_child(root, lane, current_repositories[lane["id"]])
+        verify_current_progress_commits(
+            root,
+            checkpoint,
+            plan_revision,
+            lane,
+            current_repositories[lane["id"]],
+        )
+        registered.add(lane["path"])
     projects = root / "projects"
     if projects.is_dir():
         for child in projects.iterdir():
@@ -1249,25 +2454,7 @@ def verify_sources(root: Path, checkpoint_id: str) -> None:
             relative = child.relative_to(root).as_posix()
             if child.is_dir() and relative not in registered:
                 raise VerifyError(f"unregistered project directory: {relative}")
-    configured = text(
-        root,
-        ["git", "config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$"],
-    )
-    module_paths = {line.split(None, 1)[1] for line in configured.splitlines() if line.strip()}
-    if module_paths != registered:
-        raise VerifyError(".gitmodules paths do not exactly match frozen gitlink sources")
-    configured_keys = run(
-        root,
-        ["git", "config", "-f", ".gitmodules", "--name-only", "--get-regexp", r"^submodule\."],
-    ).stdout.decode().splitlines()
-    expected_keys = {
-        f"submodule.{source['id']}.{key}"
-        for source in lock.get("sources", [])
-        if source.get("materialization") == "gitlink"
-        for key in ("path", "url", "branch")
-    }
-    if set(configured_keys) != expected_keys or len(configured_keys) != len(expected_keys):
-        raise VerifyError(".gitmodules contains missing, duplicate, or unexpected keys")
+    verify_root_gitmodules(root, lock.get("sources", []), lanes, registered)
 
 
 def main() -> int:

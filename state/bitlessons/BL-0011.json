@@ -1,0 +1,25 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0011",
+  "checkpoint_id": "CP-0003",
+  "question_or_symptom": "The root ignore policy rejected the new authored repository when the coordinator attempted to stage it as a gitlink.",
+  "observation": "Forcing the add would bypass the same policy intended to prevent source trees, build products, models, and environments from entering the coordinator history. A narrow path exception still allows the hook and resume verifier to require mode 160000.",
+  "evidence_ids": [
+    "EV-0005"
+  ],
+  "conclusion": "A registered gitlink should be authorized declaratively, not smuggled through an ignore rule with a force option.",
+  "decision": "Add an exact .gitignore exception for each project-authored lane, use ordinary git add, and retain the staged/tracked policy gates that reject any projects entry that is not a mode-160000 gitlink.",
+  "invalidated_assumptions": [
+    "Using git add -f for a known gitlink is equivalent to an auditable, tracked exception in the repository policy."
+  ],
+  "applies_to": [
+    ".gitignore",
+    ".githooks/pre-commit",
+    "scripts/check_staged.py",
+    "scripts/verify_workspace.py",
+    "future project-authored lanes"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

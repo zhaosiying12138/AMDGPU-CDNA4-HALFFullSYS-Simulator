@@ -51,7 +51,8 @@ def absorption_fixture(root: Path, source_id: str = "example") -> tuple[dict[str
     (root / ".gitmodules").write_text(
         f'[submodule "{source_id}"]\n'
         f"\tpath = {relative}\n"
-        f"\turl = https://example.invalid/{source_id}.git\n",
+        f"\turl = https://example.invalid/{source_id}.git\n"
+        "\tbranch = main\n",
         encoding="utf-8",
     )
     git("add", ".gitmodules", cwd=root)
@@ -61,6 +62,8 @@ def absorption_fixture(root: Path, source_id: str = "example") -> tuple[dict[str
         "path": relative,
         "materialization": "pending",
         "observed_head": commit,
+        "upstream_url": f"https://example.invalid/{source_id}.git",
+        "upstream_ref": "main",
     }
     lock: dict[str, object] = {
         "schema": "amdgpu-sim.source-lock.v1",
@@ -75,6 +78,60 @@ def absorption_fixture(root: Path, source_id: str = "example") -> tuple[dict[str
         ],
     }
     return lock, child, commit
+
+
+def project_lanes_fixture(source_id: str, commit: str) -> dict[str, object]:
+    return {
+        "schema": "amdgpu-sim.project-lanes.v1",
+        "registry_revision": 1,
+        "url_policy": {
+            "scheme": "sibling-relative-v1",
+            "template": "../{project_id}.git",
+        },
+        "lanes": [
+            {
+                "id": source_id,
+                "ownership": "project-authored",
+                "role": "host-runtime",
+                "path": f"projects/{source_id}",
+                "materialization": "gitlink",
+                "origin": {
+                    "policy": "sibling-relative-v1",
+                    "remote": "origin",
+                    "url": f"../{source_id}.git",
+                    "push_url": "no_push",
+                    "reachability": "not-asserted",
+                    "branch": "main",
+                },
+                "baseline_commit": commit,
+                "baseline_tree": "2" * 40,
+                "baseline_tag": f"project-baseline/{source_id}/{commit}",
+                "baseline_tag_object": "3" * 40,
+                "baseline_tag_payload": "fixture tag payload\n",
+                "baseline_tag_payload_sha256": hashlib.sha256(
+                    b"fixture tag payload\n"
+                ).hexdigest(),
+                "baseline_created_at": "2026-08-08T03:00:00+08:00",
+                "baseline_checkpoint_id": "CP-0003",
+                "baseline_evidence_id": "EV-0004",
+                "baseline_commit_trailers": {
+                    "checkpoint_id": "CP-0003",
+                    "goal_id": "GSIM-001",
+                    "plan_revision": 1,
+                    "source_lock_sha256": "4" * 64,
+                    "evidence_manifest_sha256": "5" * 64,
+                    "change_kind": "baseline",
+                    "baseline_commit_marker": "N/A",
+                },
+                "administrative_git_dir": f"modules/{source_id}",
+                "license": {
+                    "spdx_id": "GPL-3.0-or-later",
+                    "path": "LICENSE",
+                    "sha256": "6" * 64,
+                },
+            }
+        ],
+    }
 
 
 class SourceManagerTest(unittest.TestCase):
@@ -140,6 +197,42 @@ class SourceManagerTest(unittest.TestCase):
                     source_manager.absorb_sources(lock)
             self.assertTrue((child / ".git").is_dir())
 
+    def test_absorb_rejects_upstream_gitmodules_url_or_branch_drift(self) -> None:
+        for key, value in (
+            ("url", "https://example.invalid/other.git"),
+            ("branch", "other"),
+        ):
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp) / "root"
+                lock, child, _commit = absorption_fixture(root)
+                git(
+                    "config",
+                    "-f",
+                    ".gitmodules",
+                    f"submodule.example.{key}",
+                    value,
+                    cwd=root,
+                )
+                git("add", ".gitmodules", cwd=root)
+                with mock.patch.object(source_manager, "ROOT", root):
+                    with self.assertRaisesRegex(
+                        source_manager.SourceError, f"{key} mismatch"
+                    ):
+                        source_manager.absorb_sources(lock)
+                self.assertTrue((child / ".git").is_dir())
+
+    def test_absorb_rejects_unknown_gitmodules_key_before_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "root"
+            lock, child, _commit = absorption_fixture(root)
+            with (root / ".gitmodules").open("a", encoding="utf-8") as stream:
+                stream.write("[include]\n\tpath = extra.conf\n")
+            git("add", ".gitmodules", cwd=root)
+            with mock.patch.object(source_manager, "ROOT", root):
+                with self.assertRaisesRegex(source_manager.SourceError, "unexpected keys"):
+                    source_manager.absorb_sources(lock)
+            self.assertTrue((child / ".git").is_dir())
+
     def test_absorbed_layout_verifier_rejects_embedded_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "root"
@@ -177,6 +270,201 @@ class SourceManagerTest(unittest.TestCase):
             source_manager.absorption_sources(lock)
         source["work_head"] = "a" * 40
         self.assertEqual(source_manager.absorption_sources(lock)[0][1], "a" * 40)
+
+    def test_absorb_accepts_frozen_upstream_descendant_gitlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "root"
+            lock, child, baseline = absorption_fixture(root)
+            source = lock["sources"][0]
+            lock["status"] = "frozen"
+            source.update(
+                {
+                    "materialization": "gitlink",
+                    "baseline_commit": baseline,
+                    "work_head": baseline,
+                }
+            )
+            (child / "payload").write_text("descendant\n", encoding="utf-8")
+            git("add", "payload", cwd=child)
+            git("commit", "-m", "descendant", cwd=child)
+            descendant = git("rev-parse", "HEAD", cwd=child, capture=True)
+            git(
+                "update-index",
+                "--cacheinfo",
+                f"160000,{descendant},projects/example",
+                cwd=root,
+            )
+            with mock.patch.object(source_manager, "ROOT", root):
+                result = source_manager.absorb_sources(lock)
+            self.assertEqual(result[0]["id"], "example")
+            self.assertEqual(git("rev-parse", "HEAD", cwd=child, capture=True), descendant)
+
+    def test_absorb_rejects_non_descendant_upstream_gitlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "root"
+            lock, child, baseline = absorption_fixture(root)
+            source = lock["sources"][0]
+            lock["status"] = "frozen"
+            source.update(
+                {
+                    "materialization": "gitlink",
+                    "baseline_commit": baseline,
+                    "work_head": baseline,
+                }
+            )
+            empty_tree = subprocess.run(
+                ["git", "mktree"],
+                cwd=child,
+                input="",
+                text=True,
+                check=True,
+                stdout=subprocess.PIPE,
+            ).stdout.strip()
+            unrelated = subprocess.run(
+                ["git", "commit-tree", empty_tree, "-m", "unrelated"],
+                cwd=child,
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+            ).stdout.strip()
+            git("checkout", "--detach", unrelated, cwd=child)
+            git(
+                "update-index",
+                "--cacheinfo",
+                f"160000,{unrelated},projects/example",
+                cwd=root,
+            )
+            with mock.patch.object(source_manager, "ROOT", root):
+                with self.assertRaisesRegex(
+                    source_manager.SourceError, "not a baseline descendant"
+                ):
+                    source_manager.absorb_sources(lock)
+            self.assertTrue((child / ".git").is_dir())
+
+    def test_absorb_supports_project_authored_lane(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "root"
+            lock, child, baseline = absorption_fixture(
+                root, source_id="self-amdgpu-runtime"
+            )
+            lock["sources"] = [lock["sources"][1]]
+            lock_bytes = (json.dumps(lock, sort_keys=True) + "\n").encode()
+            (root / "SOURCE_LOCK.json").write_bytes(lock_bytes)
+            lock_sha = hashlib.sha256(lock_bytes).hexdigest()
+            (child / "LICENSE").write_text("fixture license\n", encoding="utf-8")
+            git("add", "LICENSE", cwd=child)
+            baseline_message = (
+                "baseline\n\n"
+                "Checkpoint-ID: CP-0003\n"
+                "Goal-ID: GSIM-001\n"
+                "Plan-Revision: 1\n"
+                f"Source-Lock-SHA256: {lock_sha}\n"
+                f"Evidence-Manifest-SHA256: {'5' * 64}\n"
+                "Change-Kind: baseline\n"
+                "Baseline-Commit: N/A"
+            )
+            git("commit", "--amend", "-m", baseline_message, cwd=child)
+            baseline = git("rev-parse", "HEAD", cwd=child, capture=True)
+            tree = git("rev-parse", "HEAD^{tree}", cwd=child, capture=True)
+            tag = f"project-baseline/self-amdgpu-runtime/{baseline}"
+            tag_message = (
+                "fixture baseline\n\n"
+                "Project-ID: self-amdgpu-runtime\n"
+                "Project-URL: ../self-amdgpu-runtime.git\n"
+                "Origin-Policy: sibling-relative-v1\n"
+                f"Baseline-Commit: {baseline}\n"
+                f"Baseline-Tree: {tree}\n"
+                "License-SPDX: GPL-3.0-or-later\n"
+                "Created-At: 2026-08-08T03:00:00+08:00"
+            )
+            git("tag", "-a", tag, "-m", tag_message, cwd=child)
+            tag_object = git("rev-parse", tag, cwd=child, capture=True)
+            tag_payload = subprocess.check_output(
+                ["git", "cat-file", "tag", tag], cwd=child, text=True
+            )
+            git("remote", "add", "origin", "../self-amdgpu-runtime.git", cwd=child)
+            git("remote", "set-url", "--push", "origin", "no_push", cwd=child)
+            registry = project_lanes_fixture("self-amdgpu-runtime", baseline)
+            lane = registry["lanes"][0]
+            lane.update(
+                {
+                    "baseline_tree": tree,
+                    "baseline_tag": tag,
+                    "baseline_tag_object": tag_object,
+                    "baseline_tag_payload": tag_payload,
+                    "baseline_tag_payload_sha256": hashlib.sha256(
+                        tag_payload.encode()
+                    ).hexdigest(),
+                    "license": {
+                        "spdx_id": "GPL-3.0-or-later",
+                        "path": "LICENSE",
+                        "sha256": hashlib.sha256(b"fixture license\n").hexdigest(),
+                    },
+                }
+            )
+            lane["baseline_commit_trailers"]["source_lock_sha256"] = lock_sha
+            modules = root / ".gitmodules"
+            modules.write_text(
+                '[submodule "self-amdgpu-runtime"]\n'
+                "\tpath = projects/self-amdgpu-runtime\n"
+                "\turl = ../self-amdgpu-runtime.git\n"
+                "\tbranch = main\n",
+                encoding="utf-8",
+            )
+            git("add", ".gitmodules", cwd=root)
+            git(
+                "update-index",
+                "--cacheinfo",
+                f"160000,{baseline},projects/self-amdgpu-runtime",
+                cwd=root,
+            )
+            with mock.patch.object(source_manager, "ROOT", root):
+                result = source_manager.absorb_sources(lock, registry)
+                repeated = source_manager.absorb_sources(lock, registry)
+            self.assertEqual(result, repeated)
+            self.assertEqual(result[0]["id"], "self-amdgpu-runtime")
+            self.assertTrue((child / ".git").is_file())
+            for field, mutation, message in (
+                (
+                    "tree",
+                    lambda value: value.__setitem__("baseline_tree", "f" * 40),
+                    "baseline tree mismatch",
+                ),
+                (
+                    "tag",
+                    lambda value: value.__setitem__("baseline_tag_object", "f" * 40),
+                    "tag object mismatch",
+                ),
+                (
+                    "license",
+                    lambda value: value["license"].__setitem__("sha256", "f" * 64),
+                    "license mismatch",
+                ),
+            ):
+                with self.subTest(field=field):
+                    tampered = json.loads(json.dumps(registry))
+                    mutation(tampered["lanes"][0])
+                    with mock.patch.object(source_manager, "ROOT", root):
+                        with self.assertRaisesRegex(source_manager.SourceError, message):
+                            source_manager.absorb_sources(lock, tampered)
+
+    def test_authored_registry_collision_with_upstream_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "root"
+            lock, _child, baseline = absorption_fixture(root)
+            registry = project_lanes_fixture("example", baseline)
+            with self.assertRaisesRegex(
+                source_manager.SourceError, "across upstream/authored lanes"
+            ):
+                source_manager.absorption_sources(lock, registry)
+
+    def test_authored_absorption_registry_rejects_unknown_fields(self) -> None:
+        registry = project_lanes_fixture("self-amdgpu-runtime", "1" * 40)
+        registry["lanes"][0]["unexpected"] = True
+        with self.assertRaisesRegex(
+            source_manager.SourceError, "unknown fields"
+        ):
+            source_manager.authored_absorption_sources(registry)
 
     def test_materializer_recreates_compatibility_revision_offline(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

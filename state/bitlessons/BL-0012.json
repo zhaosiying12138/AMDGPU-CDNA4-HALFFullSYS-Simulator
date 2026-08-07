@@ -1,0 +1,24 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0012",
+  "checkpoint_id": "CP-0003",
+  "question_or_symptom": "The two-phase journal used atomic rename but did not fully specify durability for its namespace or the Git objects and refs that it names.",
+  "observation": "Without fsync of the parent that first publishes txn/, a crash can lose the active journal directory. During retirement, persisting the source-directory deletion before the destination-directory addition can lose the only durable name. Separately, a durable journal can still point at a recently created loose commit or tree that Git has not fsynced under its default configuration.",
+  "evidence_ids": [
+    "EV-0005"
+  ],
+  "conclusion": "Atomic rename alone is not a durable cross-repository transaction protocol; journal namespaces, referenced Git object closure, refs, indexes, directory ordering, and possible post-crash states are all part of the state machine.",
+  "decision": "Persist newly created journal directories through their parent, fsync the retirement destination before the source, and recover dual active/retired names only when their bytes are identical. Before publishing journal transitions, write child commits, prepared root trees, and the coordinator commit to non-thin packs, fsync pack indexes and refs, and reject detached or linked-worktree layouts whose ref ownership is ambiguous. Conflicting duplicate journals remain a hard failure.",
+  "invalidated_assumptions": [
+    "An atomic os.replace call makes a cross-directory journal move crash-durable without ordered directory fsyncs and duplicate recovery.",
+    "A successfully created Git commit or tree is necessarily durable before a separately fsynced transaction journal references it."
+  ],
+  "applies_to": [
+    "scripts/transaction.py",
+    "tests/test_transaction.py",
+    "all future cross-repository checkpoints"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

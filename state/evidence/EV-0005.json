@@ -1,0 +1,161 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0005",
+  "checkpoint_id": "CP-0003",
+  "type": "authored-runtime-registry-acceptance",
+  "claim": "The standalone runtime baseline is registered as an immutable project-authored lane, all seven repositories retain exact offline identities, and the coordinator control plane passes its integration and recovery gates.",
+  "command_argv": [
+    ["scripts/transaction.py", "record-child", "--checkpoint", "CP-0003", "--id", "self-amdgpu-runtime", "--path", "projects/self-amdgpu-runtime", "--head", "54f0badb0a30c486334f15daea252ab6b55dd9a5", "--tree", "836b7af8027396f7296b385e7105246d8dabafda"],
+    ["scripts/source_manager.py", "absorb"],
+    ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+    ["python3", "-m", "py_compile", "scripts/capture_evidence.py", "scripts/check_commit_message.py", "scripts/check_staged.py", "scripts/download_model.py", "scripts/evidence_policy.py", "scripts/source_manager.py", "scripts/transaction.py", "scripts/verify_workspace.py", "tests/test_capture_evidence.py", "tests/test_check_commit_message.py", "tests/test_check_staged.py", "tests/test_download_model.py", "tests/test_source_manager.py", "tests/test_transaction.py", "tests/test_verify_workspace.py"],
+    ["bash", "-n", ".githooks/pre-commit", ".githooks/commit-msg", "scripts/bootstrap.sh", "scripts/materialize_sources.sh", "scripts/resolve_sources.sh", "scripts/resume.sh"],
+    ["python3", "-m", "json.tool", "PROJECT_LANES.json"],
+    ["git", "diff", "HEAD", "--check"],
+    ["git", "fsck", "--strict", "--no-dangling"],
+    ["scripts/resume.sh", "--verify"]
+  ],
+  "cwd": ".",
+  "started_at": "2026-08-07T20:27:11+00:00",
+  "ended_at": "2026-08-07T20:27:43+00:00",
+  "exit_code": 0,
+  "result": "Eight acceptance commands exited zero, including a durable child-record transition, 118 control-plane tests, and strict child object verification. The pre-commit resume probe exited with the reserved pending-transaction code 20 and accurately identified the new runtime at its declared target.",
+  "command_results": [
+    {
+      "id": "durable-runtime-record",
+      "argv": ["scripts/transaction.py", "record-child", "--checkpoint", "CP-0003", "--id", "self-amdgpu-runtime", "--path", "projects/self-amdgpu-runtime", "--head", "54f0badb0a30c486334f15daea252ab6b55dd9a5", "--tree", "836b7af8027396f7296b385e7105246d8dabafda"],
+      "cwd": ".",
+      "started_at": "2026-08-07T20:27:11+00:00",
+      "ended_at": "2026-08-07T20:27:11+00:00",
+      "exit_code": 0,
+      "result": "The child target was revalidated, written into a non-thin local pack, fsynced with its refs, passed the filesystem durability barrier, and remained the exact clean recorded target.",
+      "raw_streams_retained": true,
+      "record": {"path": "artifacts/evidence/CP-0003/durable-record-child.json", "size": 854, "sha256": "cc7c4355e309fdf7d580a2c33c4363c05e113e6f0b5ca05c5335037fd7641262", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stdout": {"path": "artifacts/evidence/CP-0003/durable-record-child.stdout", "size": 73, "sha256": "65c8b7809b53cc823d255a6a257cb751d2185da0ded9efa90b6963bb1447bbf8", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stderr": {"path": "artifacts/evidence/CP-0003/durable-record-child.stderr", "size": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "tracked": false, "required_at_acceptance": true, "required_for_resume": false}
+    },
+    {
+      "id": "authored-lane-absorb",
+      "argv": ["scripts/source_manager.py", "absorb"],
+      "cwd": ".",
+      "started_at": "2026-08-07T20:27:40+00:00",
+      "ended_at": "2026-08-07T20:27:40+00:00",
+      "exit_code": 0,
+      "result": "All six upstream lanes and the self-amdgpu-runtime authored lane have exact gitlinks and canonical absorbed administrative directories.",
+      "raw_streams_retained": true,
+      "record": {"path": "artifacts/evidence/CP-0003/authored-absorb.json", "size": 595, "sha256": "d76578fea40d364f357f2582ad22863a8d145d0957e849b7d77a3b5a67ba4775", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stdout": {"path": "artifacts/evidence/CP-0003/authored-absorb.stdout", "size": 1591, "sha256": "e78fe9cf1b8f2ba1c17aa868fba5f95f3dc29205ea6c8adfb1b22a31cde2860d", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stderr": {"path": "artifacts/evidence/CP-0003/authored-absorb.stderr", "size": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "tracked": false, "required_at_acceptance": true, "required_for_resume": false}
+    },
+    {
+      "id": "control-plane-tests",
+      "argv": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+      "cwd": ".",
+      "started_at": "2026-08-07T20:27:40+00:00",
+      "ended_at": "2026-08-07T20:27:42+00:00",
+      "exit_code": 0,
+      "result": "All 118 control-plane unit and integration tests passed.",
+      "raw_streams_retained": true,
+      "record": {"path": "artifacts/evidence/CP-0003/control-plane-tests.json", "size": 648, "sha256": "5d7abc8c1a14d9302c554dec8a833c616f7e54c70746dd0af2d8426cc06181d2", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stdout": {"path": "artifacts/evidence/CP-0003/control-plane-tests.stdout", "size": 68, "sha256": "35b1a747b15631480e6cb9d46c70ce56fb50a5d26b7b0c0f9ec50a41ff4784cb", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stderr": {"path": "artifacts/evidence/CP-0003/control-plane-tests.stderr", "size": 23493, "sha256": "465f39354ebd7b50113048fe302c7a73ccaf8890296c18f3b00adc397f0bd67b", "tracked": false, "required_at_acceptance": true, "required_for_resume": false}
+    },
+    {
+      "id": "python-syntax",
+      "argv": ["python3", "-m", "py_compile", "scripts/capture_evidence.py", "scripts/check_commit_message.py", "scripts/check_staged.py", "scripts/download_model.py", "scripts/evidence_policy.py", "scripts/source_manager.py", "scripts/transaction.py", "scripts/verify_workspace.py", "tests/test_capture_evidence.py", "tests/test_check_commit_message.py", "tests/test_check_staged.py", "tests/test_download_model.py", "tests/test_source_manager.py", "tests/test_transaction.py", "tests/test_verify_workspace.py"],
+      "cwd": ".",
+      "started_at": "2026-08-07T20:27:42+00:00",
+      "ended_at": "2026-08-07T20:27:43+00:00",
+      "exit_code": 0,
+      "result": "All Python control-plane modules and tests compiled successfully.",
+      "raw_streams_retained": true,
+      "record": {"path": "artifacts/evidence/CP-0003/python-syntax.json", "size": 1111, "sha256": "7fa56a421c1f5bf5f4e7bf566b5b87513d82aa639170dc307c99e21eb9607094", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stdout": {"path": "artifacts/evidence/CP-0003/python-syntax.stdout", "size": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stderr": {"path": "artifacts/evidence/CP-0003/python-syntax.stderr", "size": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "tracked": false, "required_at_acceptance": true, "required_for_resume": false}
+    },
+    {
+      "id": "shell-syntax",
+      "argv": ["bash", "-n", ".githooks/pre-commit", ".githooks/commit-msg", "scripts/bootstrap.sh", "scripts/materialize_sources.sh", "scripts/resolve_sources.sh", "scripts/resume.sh"],
+      "cwd": ".",
+      "started_at": "2026-08-07T20:27:43+00:00",
+      "ended_at": "2026-08-07T20:27:43+00:00",
+      "exit_code": 0,
+      "result": "All shell entry points and Git hooks passed syntax validation.",
+      "raw_streams_retained": true,
+      "record": {"path": "artifacts/evidence/CP-0003/shell-syntax.json", "size": 742, "sha256": "1ff68cff22b6f5c7dff6085115dcbc9a0298043d01f83f88863e9f87315846a5", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stdout": {"path": "artifacts/evidence/CP-0003/shell-syntax.stdout", "size": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stderr": {"path": "artifacts/evidence/CP-0003/shell-syntax.stderr", "size": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "tracked": false, "required_at_acceptance": true, "required_for_resume": false}
+    },
+    {
+      "id": "project-lanes-json",
+      "argv": ["python3", "-m", "json.tool", "PROJECT_LANES.json"],
+      "cwd": ".",
+      "started_at": "2026-08-07T20:27:43+00:00",
+      "ended_at": "2026-08-07T20:27:43+00:00",
+      "exit_code": 0,
+      "result": "The authored-lane registry parses as JSON.",
+      "raw_streams_retained": true,
+      "record": {"path": "artifacts/evidence/CP-0003/project-lanes-json.json", "size": 622, "sha256": "0417982cdbfdd4f5709b37405fd8a554726eb2998ad83783aabf9a29917c202d", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stdout": {"path": "artifacts/evidence/CP-0003/project-lanes-json.stdout", "size": 2709, "sha256": "c0db245bf19e98e40721fd6725b167895c2cecd4acf314a9b8580ee9c53b5bf6", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stderr": {"path": "artifacts/evidence/CP-0003/project-lanes-json.stderr", "size": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "tracked": false, "required_at_acceptance": true, "required_for_resume": false}
+    },
+    {
+      "id": "root-diff-check",
+      "argv": ["git", "diff", "HEAD", "--check"],
+      "cwd": ".",
+      "started_at": "2026-08-07T20:27:43+00:00",
+      "ended_at": "2026-08-07T20:27:43+00:00",
+      "exit_code": 0,
+      "result": "The complete tracked CP-0003 patch present at capture time has no whitespace errors.",
+      "raw_streams_retained": true,
+      "record": {"path": "artifacts/evidence/CP-0003/root-diff-check.json", "size": 595, "sha256": "23d763c5b9cbfa2a8f571bdea82e023697d17f752f509afd5f64cc923d748ccb", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stdout": {"path": "artifacts/evidence/CP-0003/root-diff-check.stdout", "size": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stderr": {"path": "artifacts/evidence/CP-0003/root-diff-check.stderr", "size": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "tracked": false, "required_at_acceptance": true, "required_for_resume": false}
+    },
+    {
+      "id": "runtime-object-integrity",
+      "argv": ["git", "fsck", "--strict", "--no-dangling"],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-07T20:27:43+00:00",
+      "ended_at": "2026-08-07T20:27:43+00:00",
+      "exit_code": 0,
+      "result": "The authored runtime baseline commit and annotated tag have a strict, offline-complete Git object closure.",
+      "raw_streams_retained": true,
+      "record": {"path": "artifacts/evidence/CP-0003/runtime-fsck.json", "size": 626, "sha256": "5d0108514306daf385b6b5e73ae476fa46022eaaad20da0ff11db353b2339db0", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stdout": {"path": "artifacts/evidence/CP-0003/runtime-fsck.stdout", "size": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stderr": {"path": "artifacts/evidence/CP-0003/runtime-fsck.stderr", "size": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "tracked": false, "required_at_acceptance": true, "required_for_resume": false}
+    },
+    {
+      "id": "pending-transaction-resume",
+      "argv": ["scripts/resume.sh", "--verify"],
+      "cwd": ".",
+      "started_at": "2026-08-07T20:27:43+00:00",
+      "ended_at": "2026-08-07T20:27:43+00:00",
+      "exit_code": 20,
+      "result": "The reserved pending code was returned and the diagnostic bound CP-0003 to the unchanged CP-0002 root plus the exact clean runtime target commit and tree.",
+      "raw_streams_retained": true,
+      "record": {"path": "artifacts/evidence/CP-0003/pending-resume.json", "size": 587, "sha256": "f8ef393f150624f8d7f0b8526d61f16dab45d020260d5d82a3515c5d39352e6c", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stdout": {"path": "artifacts/evidence/CP-0003/pending-resume.stdout", "size": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "tracked": false, "required_at_acceptance": true, "required_for_resume": false},
+      "stderr": {"path": "artifacts/evidence/CP-0003/pending-resume.stderr", "size": 570, "sha256": "4a6202a909f89e592ad3c757e8f599cc23d55b7c0bb485378998746c46be3481", "tracked": false, "required_at_acceptance": true, "required_for_resume": false}
+    }
+  ],
+  "external_artifacts": [],
+  "includes": {
+    "EV-0004": "067fe03309f42135af97a1add3b99c962b8b75fbe6089196cba8ffcd5d496806"
+  },
+  "environment_fingerprint": {
+    "kernel": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+    "python": "3.14.6",
+    "git": "2.53.0",
+    "cmake": "3.31.10",
+    "ninja": "1.13.0.git.kitware.jobserver-pipe-1",
+    "timezone": "Asia/Shanghai"
+  },
+  "limitations": [
+    "CP-0003 establishes an auditable runtime ABI, package baseline, and authored-lane authority only; it does not claim a gem5 transport, command queue, memory protocol, HIP, HSA, OpenCL, Triton, PyTorch, or vLLM execution path.",
+    "The sibling-relative runtime origin is a coordinated publication identity. Network reachability is deliberately not asserted by this checkpoint.",
+    "The pending resume result is the expected pre-coordinator transaction state. A successful strict resume is required again after the coordinator commit is finalized.",
+    "Build trees and retained raw transcripts remain ignored external artifacts; only their exact identities and the small evidence manifests are tracked."
+  ],
+  "redactions": []
+}

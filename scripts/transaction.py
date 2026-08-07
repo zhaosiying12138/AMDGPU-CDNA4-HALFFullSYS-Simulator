@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import ctypes
 import datetime as dt
 import fcntl
 import hashlib
@@ -32,20 +33,32 @@ class TransactionError(RuntimeError):
     pass
 
 
-def git(*args: str, check: bool = True) -> str:
+def git_environment() -> dict[str, str]:
+    return {
+        **os.environ,
+        "GIT_NO_LAZY_FETCH": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+
+
+def git_bytes(*args: str, check: bool = True) -> bytes:
     proc = subprocess.run(
         ["git", *args],
         cwd=ROOT,
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        env=git_environment(),
     )
     if check and proc.returncode:
-        detail = (proc.stderr or proc.stdout).strip()
+        detail = (proc.stderr or proc.stdout).decode(errors="replace").strip()
         raise TransactionError(f"git {' '.join(args)} failed: {detail}")
-    return proc.stdout.strip()
+    return proc.stdout
+
+
+def git(*args: str, check: bool = True) -> str:
+    return git_bytes(*args, check=check).decode(errors="replace").strip()
 
 
 def git_dir() -> Path:
@@ -53,7 +66,10 @@ def git_dir() -> Path:
 
 
 def atomic_json(path: Path, value: dict[str, Any]) -> None:
+    parent_created = not path.parent.exists()
     path.parent.mkdir(parents=True, exist_ok=True)
+    if parent_created:
+        fsync_directory(path.parent.parent)
     payload = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
     with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
         stream.write(payload)
@@ -61,17 +77,16 @@ def atomic_json(path: Path, value: dict[str, Any]) -> None:
         os.fsync(stream.fileno())
         temporary = Path(stream.name)
     os.replace(temporary, path)
-    directory = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
+    fsync_directory(path.parent)
 
 
 @contextmanager
 def transition_lock() -> Iterator[Path]:
     control = git_dir() / "amdgpu-sim"
+    control_created = not control.exists()
     control.mkdir(parents=True, exist_ok=True)
+    if control_created:
+        fsync_directory(control.parent)
     lock_path = control / "transition.lock"
     descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     try:
@@ -108,6 +123,225 @@ def verify_child_identity(child_id: str, child: dict[str, str]) -> None:
         raise TransactionError(f"child worktree is dirty: {child_id}")
 
 
+def repository_layout(repo: Path, label: str) -> tuple[Path, Path, str]:
+    git_directory = Path(
+        git("-C", str(repo), "rev-parse", "--absolute-git-dir")
+    ).resolve()
+    common_directory = Path(
+        git(
+            "-C",
+            str(repo),
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        )
+    ).resolve()
+    symbolic = git("-C", str(repo), "symbolic-ref", "-q", "HEAD", check=False)
+    if git_directory != common_directory:
+        raise TransactionError(
+            f"{label} uses a linked worktree; transaction durability requires one Git directory"
+        )
+    if not symbolic.startswith("refs/heads/"):
+        raise TransactionError(
+            f"{label} has detached or non-branch HEAD; recovery requires a branch ref"
+        )
+    return git_directory, common_directory, symbolic
+
+
+def fsync_file(path: Path, label: str) -> None:
+    if not path.is_file():
+        raise TransactionError(f"durability file is missing for {label}: {path}")
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def fsync_reference_state(repo: Path, label: str) -> None:
+    git_directory, common_directory, symbolic = repository_layout(repo, label)
+    fsync_file(git_directory / "HEAD", f"{label} HEAD")
+    fsync_file(common_directory / symbolic, f"{label} branch ref")
+    packed_refs = common_directory / "packed-refs"
+    if packed_refs.exists():
+        fsync_file(packed_refs, f"{label} packed refs")
+    refs = common_directory / "refs"
+    if refs.is_dir():
+        directories = {refs}
+        for ref in refs.rglob("*"):
+            if ref.is_symlink():
+                raise TransactionError(f"{label} ref storage contains a symlink: {ref}")
+            if ref.is_file():
+                fsync_file(ref, f"{label} loose ref")
+                directories.add(ref.parent)
+        for directory in sorted(directories, key=lambda item: len(item.parts), reverse=True):
+            fsync_directory(directory)
+    fsync_directory(common_directory)
+
+
+def sync_filesystem(path: Path) -> None:
+    """Issue Linux syncfs for the filesystem containing path."""
+
+    syncfs = getattr(ctypes.CDLL(None, use_errno=True), "syncfs", None)
+    if syncfs is None:
+        raise TransactionError("libc does not provide syncfs on this platform")
+    syncfs.argtypes = [ctypes.c_int]
+    syncfs.restype = ctypes.c_int
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        ctypes.set_errno(0)
+        if syncfs(descriptor) != 0:
+            error = ctypes.get_errno()
+            raise TransactionError(
+                f"syncfs failed for {path}: {os.strerror(error)}"
+            )
+    finally:
+        os.close(descriptor)
+
+
+def sync_repository_filesystems(repositories: list[Path]) -> None:
+    """Flush each unique worktree/admin filesystem once before journaling."""
+
+    by_device: dict[int, Path] = {}
+    for index, repo in enumerate(repositories):
+        git_directory, common_directory, _symbolic = repository_layout(
+            repo, f"durability repository {index}"
+        )
+        for candidate in (repo.resolve(), git_directory, common_directory):
+            device = candidate.stat().st_dev
+            by_device.setdefault(device, candidate)
+    for device in sorted(by_device):
+        sync_filesystem(by_device[device])
+
+
+def harden_object_closure(
+    repo: Path,
+    positive: str,
+    negative: str | None,
+    checkpoint: str,
+    label: str,
+) -> str:
+    """Write and fsync a non-thin pack before a journal references an object."""
+
+    _git_directory, common_directory, _symbolic = repository_layout(repo, label)
+    pack_directory = common_directory / "objects" / "pack"
+    created = not pack_directory.exists()
+    pack_directory.mkdir(parents=True, exist_ok=True)
+    if created:
+        fsync_directory(pack_directory.parent)
+    revision_input = f"{positive}\n"
+    if negative is not None:
+        revision_input += f"^{negative}\n"
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "pack-objects",
+            "--quiet",
+            "--revs",
+            "--no-thin",
+            "--include-tag",
+            str(pack_directory / "pack"),
+        ],
+        cwd=ROOT,
+        check=False,
+        input=revision_input.encode(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=git_environment(),
+    )
+    pack_hash = proc.stdout.decode(errors="replace").strip()
+    if proc.returncode or not SHA_RE.fullmatch(pack_hash):
+        detail = proc.stderr.decode(errors="replace").strip()
+        raise TransactionError(f"cannot harden object closure for {label}: {detail}")
+    pack = pack_directory / f"pack-{pack_hash}.pack"
+    index = pack_directory / f"pack-{pack_hash}.idx"
+    fsync_file(pack, f"{label} object pack")
+    fsync_file(index, f"{label} object index")
+    fsync_directory(pack_directory)
+    fsync_directory(pack_directory.parent)
+    git("-C", str(repo), "cat-file", "-e", positive)
+    return pack_hash
+
+
+def harden_commit(
+    repo: Path,
+    head: str,
+    initial_head: str | None,
+    checkpoint: str,
+    label: str,
+) -> str:
+    if git("-C", str(repo), "rev-parse", "HEAD") != head:
+        raise TransactionError(f"cannot harden a non-HEAD commit: {label}")
+    pack_hash = harden_object_closure(
+        repo,
+        head,
+        initial_head,
+        checkpoint,
+        label,
+    )
+    fsync_reference_state(repo, label)
+    return pack_hash
+
+
+def initial_child_identity(
+    previous_root: str, child_id: str, relative: str
+) -> tuple[str | None, str | None]:
+    listing = git("ls-tree", previous_root, "--", relative)
+    if not listing:
+        return None, None
+    records = listing.splitlines()
+    if len(records) != 1:
+        raise TransactionError(f"previous root has ambiguous child path: {child_id}")
+    try:
+        metadata, listed_path = records[0].split("\t", 1)
+        mode, object_type, head = metadata.split()
+    except ValueError as exc:
+        raise TransactionError(f"previous root child entry is malformed: {child_id}") from exc
+    if (
+        listed_path != relative
+        or mode != "160000"
+        or object_type != "commit"
+        or not SHA_RE.fullmatch(head)
+    ):
+        raise TransactionError(f"previous root child entry is not a gitlink: {child_id}")
+    if not (ROOT / relative).is_dir():
+        raise TransactionError(f"previous child worktree is missing: {child_id}")
+    tree = git("-C", relative, "rev-parse", f"{head}^{{tree}}")
+    if not SHA_RE.fullmatch(tree):
+        raise TransactionError(f"previous child tree is unavailable offline: {child_id}")
+    return head, tree
+
+
+def verify_declared_initial_children(value: dict[str, Any]) -> None:
+    previous_root = value.get("previous_root")
+    declared = value.get("declared_children")
+    if not isinstance(previous_root, str) or not SHA_RE.fullmatch(previous_root):
+        raise TransactionError("transaction has no valid previous root")
+    if not isinstance(declared, dict) or not declared:
+        raise TransactionError("transaction has no declared child participants")
+    for child_id, entry in declared.items():
+        if not isinstance(entry, dict) or not re.fullmatch(
+            r"[a-z0-9][a-z0-9-]*", child_id
+        ):
+            raise TransactionError("transaction has an invalid declared child")
+        relative = validated_child_path(str(entry.get("path", "")))
+        expected_head, expected_tree = initial_child_identity(
+            previous_root, child_id, relative
+        )
+        present = ("initial_head" in entry, "initial_tree" in entry)
+        if present == (False, False):
+            # Deterministic migration for journals created before initial
+            # participant identities became mandatory.
+            entry["initial_head"] = expected_head
+            entry["initial_tree"] = expected_tree
+        elif present != (True, True) or (
+            entry.get("initial_head"), entry.get("initial_tree")
+        ) != (expected_head, expected_tree):
+            raise TransactionError(f"declared child initial identity mismatch: {child_id}")
+
+
 def validated_child_path(value: str) -> str:
     relative = PurePosixPath(value)
     if (
@@ -125,6 +359,57 @@ def validated_root_path(value: str) -> str:
     if relative.is_absolute() or ".." in relative.parts or value in {"", "."}:
         raise TransactionError(f"unsafe root allowlist path: {value!r}")
     return relative.as_posix()
+
+
+def verify_begin_prerequisites(next_checkpoint: str) -> dict[str, Any]:
+    """Require one fully accepted workspace before publishing a new journal."""
+
+    verifier = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "verify_workspace.py"),
+            "--root",
+            str(ROOT),
+        ],
+        cwd=ROOT,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=git_environment(),
+    )
+    if verifier.returncode:
+        detail = (verifier.stderr or verifier.stdout).strip()
+        raise TransactionError(f"accepted workspace verification failed: {detail}")
+
+    try:
+        current = json.loads(
+            (ROOT / "state/current.json").read_text(encoding="utf-8")
+        )
+        checkpoint_id = current["checkpoint_id"]
+        checkpoint = json.loads(
+            (ROOT / "state/checkpoints" / f"{checkpoint_id}.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (KeyError, OSError, json.JSONDecodeError) as exc:
+        raise TransactionError(f"cannot read the accepted checkpoint: {exc}") from exc
+    sequence = checkpoint.get("sequence")
+    if (
+        current.get("state") != "ready"
+        or checkpoint.get("status") != "accepted"
+        or checkpoint.get("id") != checkpoint_id
+        or not isinstance(sequence, int)
+        or isinstance(sequence, bool)
+        or checkpoint_id != f"CP-{sequence:04d}"
+    ):
+        raise TransactionError("current checkpoint is not an accepted ready state")
+    expected_next = f"CP-{sequence + 1:04d}"
+    if next_checkpoint != expected_next:
+        raise TransactionError(
+            f"next transaction checkpoint must be {expected_next}, got {next_checkpoint}"
+        )
+    return current
 
 
 def command_begin(args: argparse.Namespace) -> None:
@@ -169,10 +454,35 @@ def command_begin(args: argparse.Namespace) -> None:
             )
         if git("status", "--porcelain=v1", "--untracked-files=all"):
             raise TransactionError("root worktree must be clean before beginning a transaction")
-        current = json.loads((ROOT / "state/current.json").read_text(encoding="utf-8"))
+        current = verify_begin_prerequisites(args.checkpoint)
+        repository_layout(ROOT, "root coordinator")
         message = git("log", "-1", "--format=%B")
-        if f"Checkpoint-ID: {current['checkpoint_id']}" not in message:
-            raise TransactionError("HEAD does not match the current checkpoint pointer")
+        checkpoint_lines = [
+            line for line in message.splitlines() if line.startswith("Checkpoint-ID: ")
+        ]
+        if checkpoint_lines != [f"Checkpoint-ID: {current['checkpoint_id']}"]:
+            raise TransactionError("HEAD has no unique current Checkpoint-ID trailer")
+        previous_root = git("rev-parse", "HEAD")
+        for child_id, entry in declared_children.items():
+            initial_head, initial_tree = initial_child_identity(
+                previous_root, child_id, entry["path"] or ""
+            )
+            if initial_head is None:
+                if (ROOT / (entry["path"] or "")).exists():
+                    raise TransactionError(
+                        f"new child path already exists before transaction begin: {child_id}"
+                    )
+            else:
+                verify_child_identity(
+                    child_id,
+                    {
+                        "path": entry["path"] or "",
+                        "head": initial_head,
+                        "tree": initial_tree or "",
+                    },
+                )
+            entry["initial_head"] = initial_head
+            entry["initial_tree"] = initial_tree
         value = {
             "schema": "amdgpu-sim.transaction.v1",
             "checkpoint_id": args.checkpoint,
@@ -180,7 +490,7 @@ def command_begin(args: argparse.Namespace) -> None:
             "started_at": args.started_at or dt.datetime.now(dt.timezone.utc).isoformat(
                 timespec="seconds"
             ),
-            "previous_root": git("rev-parse", "HEAD"),
+            "previous_root": previous_root,
             "previous_checkpoint": current["checkpoint_id"],
             "intent": args.intent,
             "declared_children": declared_children,
@@ -202,11 +512,6 @@ def command_declare_child(args: argparse.Namespace) -> None:
         not SHA_RE.fullmatch(args.head) or not SHA_RE.fullmatch(args.tree)
     ):
         raise TransactionError("declared child target must use full SHA-1 object IDs")
-    entry: dict[str, str | None] = {
-        "path": relative,
-        "target_head": args.head,
-        "target_tree": args.tree,
-    }
     with transition_lock() as control:
         path = journal_path(control, args.checkpoint)
         value = load_journal(path)
@@ -216,6 +521,7 @@ def command_declare_child(args: argparse.Namespace) -> None:
             raise TransactionError("transaction participant set is not locked")
         value.pop("expected_child_heads", None)
         value.setdefault("root_allowlist", [])
+        verify_declared_initial_children(value)
         declared = value.setdefault("declared_children", {})
         if args.id not in declared:
             raise TransactionError(
@@ -230,7 +536,10 @@ def command_declare_child(args: argparse.Namespace) -> None:
         target_was_unset = (
             previous.get("target_head") is None and previous.get("target_tree") is None
         )
-        if not target_was_unset and previous != entry:
+        if not target_was_unset and (
+            previous.get("target_head") != args.head
+            or previous.get("target_tree") != args.tree
+        ):
             raise TransactionError(f"declared child identity changed: {args.id}")
         recorded = (value.get("expected_children") or {}).get(args.id)
         if recorded is not None:
@@ -241,7 +550,8 @@ def command_declare_child(args: argparse.Namespace) -> None:
             ):
                 raise TransactionError(f"recorded child target conflicts: {args.id}")
         if target_was_unset:
-            declared[args.id] = entry
+            previous["target_head"] = args.head
+            previous["target_tree"] = args.tree
         atomic_json(path, value)
         print(f"declared {args.id} at {relative}")
 
@@ -274,6 +584,7 @@ def command_record_child(args: argparse.Namespace) -> None:
             raise TransactionError("children can only be recorded during prepare")
         if value.get("participants_locked") is not True:
             raise TransactionError("transaction participant set is not locked")
+        verify_declared_initial_children(value)
         declared = (value.get("declared_children") or {}).get(args.id)
         if declared is None:
             raise TransactionError(f"child was not declared at transaction begin: {args.id}")
@@ -292,9 +603,69 @@ def command_record_child(args: argparse.Namespace) -> None:
         previous = children.get(args.id)
         if previous not in (None, entry):
             raise TransactionError(f"child identity changed after recording: {args.id}")
+        harden_commit(
+            ROOT / relative,
+            args.head,
+            declared.get("initial_head"),
+            args.checkpoint,
+            args.id,
+        )
+        sync_repository_filesystems([ROOT / relative])
+        verify_child_identity(args.id, entry)
         children[args.id] = entry
         atomic_json(path, value)
         print(f"recorded {args.id} at {args.head}")
+
+
+def verify_staged_participant_gitlinks(value: dict[str, Any]) -> None:
+    """Require every changed projects/ gitlink to be a declared participant."""
+
+    previous_root = value.get("previous_root")
+    declared = value.get("declared_children")
+    if not isinstance(previous_root, str) or not SHA_RE.fullmatch(previous_root):
+        raise TransactionError("transaction has no valid previous root")
+    if not isinstance(declared, dict) or not declared:
+        raise TransactionError("transaction has no declared child participants")
+    raw = git_bytes(
+        "diff",
+        "--cached",
+        "--raw",
+        "-z",
+        "--no-renames",
+        previous_root,
+        "--",
+        "projects",
+    )
+    parts = raw.split(b"\0")
+    if parts[-1:] == [b""]:
+        parts.pop()
+    if len(parts) % 2:
+        raise TransactionError("staged projects diff has malformed raw records")
+    changed: set[str] = set()
+    for offset in range(0, len(parts), 2):
+        fields = parts[offset].split()
+        if len(fields) != 5 or not fields[0].startswith(b":"):
+            raise TransactionError("staged projects diff has malformed metadata")
+        old_mode = fields[0][1:]
+        new_mode = fields[1]
+        try:
+            relative = parts[offset + 1].decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise TransactionError("staged project path is not UTF-8") from exc
+        relative = validated_child_path(relative)
+        if old_mode not in {b"000000", b"160000"} or new_mode != b"160000":
+            raise TransactionError(
+                f"staged project change is not a gitlink publication: {relative}"
+            )
+        if relative in changed:
+            raise TransactionError(f"staged project path is duplicated: {relative}")
+        changed.add(relative)
+    expected = {str(entry.get("path", "")) for entry in declared.values()}
+    if changed != expected:
+        raise TransactionError(
+            "changed gitlinks differ from declared participants; "
+            f"missing={sorted(expected - changed)}, extra={sorted(changed - expected)}"
+        )
 
 
 def command_prepare_root(args: argparse.Namespace) -> None:
@@ -305,6 +676,7 @@ def command_prepare_root(args: argparse.Namespace) -> None:
             raise TransactionError("transaction is not in prepare phase")
         if value.get("participants_locked") is not True:
             raise TransactionError("transaction participant set is not locked")
+        verify_declared_initial_children(value)
         declared = value.get("declared_children") or {}
         recorded = value.get("expected_children") or {}
         if not declared or set(declared) != set(recorded):
@@ -319,6 +691,7 @@ def command_prepare_root(args: argparse.Namespace) -> None:
             fields = index.split()
             if len(fields) < 4 or fields[0] != "160000" or fields[1] != child["head"]:
                 raise TransactionError(f"staged gitlink mismatch for {child_id}")
+        verify_staged_participant_gitlinks(value)
         allowlist = value.get("root_allowlist")
         if not isinstance(allowlist, list) or not allowlist:
             raise TransactionError("root staged-path allowlist is not declared")
@@ -347,35 +720,28 @@ def command_prepare_root(args: argparse.Namespace) -> None:
                 f"untracked={untracked.splitlines()}"
             )
         root_tree = git("write-tree")
-        staged = subprocess.run(
-            ["git", "diff", "--cached", "--binary", "--full-index"],
-            cwd=ROOT,
-            check=True,
-            stdout=subprocess.PIPE,
-        ).stdout
+        harden_object_closure(
+            ROOT,
+            root_tree,
+            f"{value['previous_root']}^{{tree}}",
+            args.checkpoint,
+            "root prepared tree",
+        )
+        fsync_file(git_dir() / "index", "root index")
+        fsync_directory(git_dir())
+        sync_repository_filesystems(
+            [ROOT, *(ROOT / child["path"] for child in recorded.values())]
+        )
+        if git("write-tree") != root_tree:
+            raise TransactionError("root index changed across durability barrier")
+        for child_id, child in sorted(recorded.items()):
+            verify_child_identity(child_id, child)
+        staged = git_bytes("diff", "--cached", "--binary", "--full-index")
         value["phase"] = "prepared"
         value["expected_root_tree"] = root_tree
         value["staged_manifest_sha256"] = hashlib.sha256(staged).hexdigest()
         atomic_json(path, value)
         print(f"prepared root tree {root_tree}")
-
-
-def fsync_head_ref() -> None:
-    directory = git_dir()
-    symbolic = git("symbolic-ref", "-q", "HEAD", check=False)
-    if symbolic:
-        ref_path = directory / symbolic
-        if ref_path.is_file():
-            descriptor = os.open(ref_path, os.O_RDONLY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
-    descriptor = os.open(directory, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 def verify_post_commit(checkpoint: str) -> None:
@@ -393,7 +759,7 @@ def verify_post_commit(checkpoint: str) -> None:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1"},
+        env=git_environment(),
     )
     if verifier.returncode:
         detail = (verifier.stderr or verifier.stdout).strip()
@@ -414,12 +780,23 @@ def retire_journal(path: Path, control: Path) -> None:
     retired = control / "committed" / path.name
     retired.parent.mkdir(parents=True, exist_ok=True)
     if retired.exists():
-        raise TransactionError(f"retired transaction journal already exists: {retired}")
+        if not path.is_file() or not retired.is_file() or path.read_bytes() != retired.read_bytes():
+            raise TransactionError(f"retired transaction journal already exists: {retired}")
+        # A power loss after the destination directory was persisted but before
+        # the source-directory fsync may recover both names. Keep the durable
+        # retired copy and remove only an exact duplicate active name.
+        fsync_directory(retired.parent)
+        path.unlink()
+        fsync_directory(path.parent)
+        return
     # Persist the first creation of committed/ before moving the only active
     # journal across directories.
     fsync_directory(control)
     os.replace(path, retired)
-    for directory_path in (path.parent, retired.parent):
+    # Persist the new name first. A crash between these fsyncs may leave both
+    # names, which is recoverable; persisting the deletion first could lose the
+    # only journal name.
+    for directory_path in (retired.parent, path.parent):
         fsync_directory(directory_path)
 
 
@@ -427,6 +804,7 @@ def command_finalize(args: argparse.Namespace) -> None:
     with transition_lock() as control:
         path = journal_path(control, args.checkpoint)
         value = load_journal(path)
+        verify_declared_initial_children(value)
         phase = value.get("phase")
         if phase not in {"prepared", "committed"}:
             raise TransactionError("transaction must be prepared before finalization")
@@ -471,12 +849,29 @@ def command_finalize(args: argparse.Namespace) -> None:
             raise TransactionError("root HEAD changed during post-commit verification")
         if git("status", "--porcelain=v1", "--untracked-files=all"):
             raise TransactionError("root worktree changed during post-commit verification")
+        harden_commit(
+            ROOT,
+            head,
+            value["previous_root"],
+            args.checkpoint,
+            "root coordinator",
+        )
+        sync_repository_filesystems(
+            [ROOT, *(ROOT / child["path"] for child in value["expected_children"].values())]
+        )
+        if (
+            git("rev-parse", "HEAD") != head
+            or git("rev-parse", "HEAD^{tree}") != tree
+            or git("status", "--porcelain=v1", "--untracked-files=all")
+        ):
+            raise TransactionError("root identity changed across durability barrier")
+        for child_id, child in sorted(value["expected_children"].items()):
+            verify_child_identity(child_id, child)
         if phase == "prepared":
             value["phase"] = "committed"
             value["root_coordinator_commit"] = head
             value["committed_at"] = args.committed_at
             atomic_json(path, value)
-        fsync_head_ref()
         retire_journal(path, control)
         print(f"retired committed transaction {args.checkpoint} at {head}")
 

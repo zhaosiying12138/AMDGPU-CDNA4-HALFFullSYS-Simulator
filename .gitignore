@@ -28,10 +28,12 @@
 /state/transactions/*
 !/state/transactions/.gitkeep
 
-# Unregistered source/staging directories are ignored. Registered gitlinks are
-# force-added by the coordinator and validated by the hook/resume verifier.
+# Unregistered source/staging directories are ignored. Project-authored lanes
+# receive an explicit exception and are still required to be mode-160000
+# gitlinks by the hook and resume verifier.
 /projects/*
 !/projects/.gitkeep
+!/projects/self-amdgpu-runtime
 /projects/*/build/
 /projects/*/build-*/
 /projects/*/.cache/

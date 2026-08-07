@@ -1,0 +1,25 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0009",
+  "checkpoint_id": "CP-0003",
+  "question_or_symptom": "A child baseline commit must carry an Evidence-Manifest-SHA256 trailer, while the root checkpoint evidence also needs to bind the final child commit and tag identity.",
+  "observation": "Using one evidence manifest for both layers creates a hash cycle: the child commit needs the manifest hash before it exists, but a root-level manifest that includes the final child identity cannot be finalized until after that commit exists.",
+  "evidence_ids": [
+    "EV-0004",
+    "EV-0005"
+  ],
+  "conclusion": "Cross-repository checkpoints require layered evidence identities in addition to a two-phase commit journal.",
+  "decision": "Freeze a child-specific evidence manifest from the staged tree and retained build/test transcripts first, use that hash in the child commit trailer, then create a root umbrella manifest that includes the immutable child evidence hash and post-commit registry/integration validation.",
+  "invalidated_assumptions": [
+    "One evidence manifest can simultaneously describe a not-yet-created child commit and serve as that commit's mandatory trailer identity."
+  ],
+  "applies_to": [
+    "projects/self-amdgpu-runtime",
+    "state/evidence/EV-0004.json",
+    "state/evidence/EV-0005.json",
+    "all future multi-repository checkpoints"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

@@ -70,3 +70,8 @@ declarations are `projects/rccl/ext-src/mscclpp` and
 selected `projects/rccl/.gitmodules` is empty. Source preparation therefore
 intersects declarations with actual locked gitlinks and never initializes a
 path from configuration metadata alone.
+
+Project-authored repositories are intentionally outside this upstream lock.
+Their immutable initial identities live in `PROJECT_LANES.json`, while accepted
+checkpoint repository maps carry current descendant heads. See
+`docs/project-lanes.md` for that ownership and recovery contract.

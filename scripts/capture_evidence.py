@@ -72,6 +72,7 @@ def capture(record_relative: str, cwd_relative: str, argv: list[str]) -> dict[st
             **os.environ,
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_NO_LAZY_FETCH": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
             "PYTHONDONTWRITEBYTECODE": "1",
         },
     )
