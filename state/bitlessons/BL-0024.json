@@ -1,0 +1,23 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0024",
+  "checkpoint_id": "CP-0005",
+  "question_or_symptom": "C and C++ codecs can interoperate while sharing the same unintended drift from prose or stale golden metadata.",
+  "observation": "Cross-process success alone does not independently prove offsets, byte order, CRC coverage, request progression, or ACK/completion field differences when both endpoints changed together.",
+  "evidence_ids": ["EV-0009", "EV-0010", "EV-0011"],
+  "conclusion": "The structured contract and independently recomputed golden bytes are the cross-language authority; interoperability is an additional gate, not a substitute.",
+  "decision": "Keep the CP-0004 framing unchanged, define the 64-byte request/result layouts and three 144-byte golden frames in canonical JSON, independently recompute CRC-32C and every field in root tests, and require both child suites to match the same bytes. Seed queue request progression from HELLO so the first queue request is exactly the next request ID.",
+  "invalidated_assumptions": [
+    "A successful C-to-C++ handshake proves that both implementations match the published wire contract.",
+    "Golden frame metadata can be trusted without deriving it from the actual frame bytes."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-queue.json",
+    "tests/test_host_transport_queue_spec.py",
+    "projects/gem5/src/dev/amdgpu/host_gpu_protocol.test.cc",
+    "projects/self-amdgpu-runtime/tests/protocol_test.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

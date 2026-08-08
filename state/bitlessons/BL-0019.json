@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0019",
+  "checkpoint_id": "CP-0005",
+  "question_or_symptom": "A doorbell request can be sent successfully while its ACK is lost, delayed behind a completion, or replaced by a timeout or cancellation outcome.",
+  "observation": "The server may already have admitted the command when the client cannot validate its ACK. Treating that state as an ordinary retry can duplicate mutation, while consuming a completion before its ACK destroys the protocol commit order.",
+  "evidence_ids": ["EV-0009", "EV-0010", "EV-0011"],
+  "conclusion": "Queue admission ACK and asynchronous completion are separate commit boundaries, and ambiguity before a canonical ACK is not recoverable within the same session.",
+  "decision": "Require ACK before completion. Poison and close the runtime instance after any post-send timeout, cancellation, EOF, malformed response, identity mismatch, or early completion before a canonical ACK. Keep an already acknowledged pending command intact when completion wait alone times out or is cancelled so the caller can retry the wait without replaying the doorbell.",
+  "invalidated_assumptions": [
+    "A timed-out queue request can always be retried safely on the same connection.",
+    "Receiving the completion proves that an omitted or malformed ACK can be ignored."
+  ],
+  "applies_to": [
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "projects/self-amdgpu-runtime/tests/queue_test.c",
+    "protocol/host-transport-v1-queue.json"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

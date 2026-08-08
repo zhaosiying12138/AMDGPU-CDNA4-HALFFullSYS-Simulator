@@ -32,10 +32,12 @@ PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、最新 checkpoint �
 bitlesson，运行 scripts/resume.sh --verify；不要重做已通过的工作。
 ```
 
-`CP-0004` is the accepted host-transport-v1 handshake boundary. The standalone
-runtime and gem5 now pass byte-exact framing, identity, capability, deadline,
-endpoint-lifecycle, failure, and N=1/2/3/4/8 isolation gates, but do not yet
-allocate memory, submit packets, or execute GPU work. The next action is
-`P1-QUEUE-01`: implement and test the versioned single-daemon queue lifecycle,
-doorbell notification, and gem5 event-queue completion/error path. The frozen
+`CP-0005` is the accepted bounded queue-control boundary. The standalone
+runtime and gem5 preserve the CP-0004 byte-exact handshake and
+N=1/2/3/4/8 isolation gates while adding versioned create/destroy, strictly
+ordered control-only doorbells, and correlated gem5 event-queue completion and
+error behavior. They do not yet allocate or transfer simulated memory, submit
+packets, load code objects, or execute GPU work. The next action is
+`P1-MEM-01`: implement and test bounded generation-safe allocation/free plus
+host-to-simulated-device and simulated-device-to-host byte transfer. The frozen
 `SOURCE_LOCK.json` and registered project baseline remain immutable.

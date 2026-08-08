@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the CP-0004 runtime-to-gem5 handshake integration matrix."""
+"""Run the CP-0004 handshake and CP-0005 queue-control integration matrix."""
 
 from __future__ import annotations
 
@@ -910,6 +910,7 @@ class Harness:
         result: ClientResult,
         identity: Identity,
         daemon: Daemon,
+        capability_words: list[str] | None = None,
     ) -> dict[str, Any]:
         require(result.returncode == 0,
                 f"runtime CLI failed: stdout={result.stdout!r} stderr={result.stderr!r}")
@@ -917,10 +918,12 @@ class Harness:
         require(payload.get("status") == 0, f"success status is wrong: {payload}")
         require(payload.get("selected_version") == "1.0",
                 f"selected version is wrong: {payload}")
-        require(payload.get("capability_words") == [
+        expected_capabilities = capability_words or [
             "0x0000000000000001", "0x0000000000000000",
             "0x0000000000000000", "0x0000000000000000",
-        ], f"selected capabilities are wrong: {payload}")
+        ]
+        require(payload.get("capability_words") == expected_capabilities,
+                f"selected capabilities are wrong: {payload}")
         require(payload.get("daemon_uuid") == identity.daemon_uuid,
                 f"daemon UUID is wrong: {payload}")
         require(payload.get("job_uuid") == identity.job_uuid,
@@ -961,7 +964,7 @@ class Harness:
 
         result = self.exact_client(
             daemon,
-            extra=("--offer-cap-bit", "1", "--require-cap-bit", "1"),
+            extra=("--offer-cap-bit", "2", "--require-cap-bit", "2"),
         )
         self.expect_failure(result, 5, "capability mismatch", 3)
 
@@ -987,6 +990,82 @@ class Harness:
             wire_statuses=[2, 3, 4, 5, 0],
             daemon_uuid=success["daemon_uuid"],
             peer_pid=success["peer_pid"],
+        )
+
+    def check_queue_control(self) -> None:
+        expected_capabilities = [
+            "0x0000000000000003", "0x0000000000000000",
+            "0x0000000000000000", "0x0000000000000000",
+        ]
+        success_identity = make_identity(20, 1, 0)
+        success_daemon = Daemon(
+            self, "queue-control-success", success_identity,
+            exit_on_handshake=False, run_timeout_ms=8000,
+        )
+        success_daemon.launch()
+        success_result = self.exact_client(
+            success_daemon,
+            extra=(
+                "--queue-depth", "4",
+                "--doorbells", "3",
+                "--command-kind", "1",
+            ),
+        )
+        success = self.validate_success(
+            success_result, success_identity, success_daemon,
+            expected_capabilities,
+        )
+        queue = success.get("queue")
+        require(isinstance(queue, dict), f"queue result is missing: {success}")
+        require(queue.get("status") == 0 and queue.get("depth") == 4,
+                f"queue success metadata is wrong: {queue}")
+        require(queue.get("command_kind") == 1,
+                f"queue command kind is wrong: {queue}")
+        require(queue.get("completion_status") == 0 and
+                queue.get("completion_wire_status") == 0 and
+                queue.get("completion_error_code") == 0,
+                f"queue completion is not canonical success: {queue}")
+        require(int(queue.get("queue_id", "0"), 0) != 0 and
+                int(queue.get("generation", "0"), 0) != 0,
+                f"queue handle is zero: {queue}")
+        sequences = [int(value, 0) for value in queue.get("sequences", [])]
+        require(sequences == [1, 2, 3],
+                f"queue sequences are not strictly ordered: {queue}")
+        success_daemon.stop()
+
+        error_identity = make_identity(21, 1, 0)
+        error_daemon = Daemon(
+            self, "queue-control-error", error_identity,
+            exit_on_handshake=False, run_timeout_ms=8000,
+        )
+        error_daemon.launch()
+        error_result = self.exact_client(
+            error_daemon,
+            extra=(
+                "--queue-depth", "2",
+                "--doorbells", "1",
+                "--command-kind", "2",
+            ),
+        )
+        error = self.validate_success(
+            error_result, error_identity, error_daemon,
+            expected_capabilities,
+        )
+        error_queue = error.get("queue")
+        require(isinstance(error_queue, dict),
+                f"queue error result is missing: {error}")
+        require(error_queue.get("command_kind") == 2 and
+                error_queue.get("completion_status") == 3 and
+                error_queue.get("completion_wire_status") == 10 and
+                error_queue.get("completion_error_code") == 1,
+                f"queue error completion is not canonical: {error_queue}")
+        error_daemon.stop()
+        self.add_check(
+            "queue_control_lifecycle",
+            success_sequences=sequences,
+            success_peer_pid=success["peer_pid"],
+            error_peer_pid=error["peer_pid"],
+            error_wire_status=error_queue["completion_wire_status"],
         )
 
     def check_busy(self) -> None:
@@ -1781,6 +1860,7 @@ class Harness:
         self.check_raw_protocol_state()
         self.check_raw_resource_exhausted()
         self.check_reject_then_success()
+        self.check_queue_control()
         self.check_busy()
         for world_size in WORLD_SIZES:
             self.check_world_isolation(world_size)
@@ -1815,8 +1895,9 @@ def file_path(value: str) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the real CP-0004 runtime CLI against HostGPUBridge processes. "
-            "This validates only the transport handshake, not GPU execution."
+            "Run the real CP-0004/CP-0005 runtime CLI against HostGPUBridge "
+            "processes. This validates the handshake and bounded queue-control "
+            "events, not memory access or GPU execution."
         )
     )
     parser.add_argument("--gem5", required=True, type=executable_path)
@@ -1859,7 +1940,7 @@ def main() -> int:
         return 1
 
     work_dir = Path(tempfile.mkdtemp(
-        prefix="cp4-host-",
+        prefix="cp5-host-",
         dir=str(args.work_root) if args.work_root is not None else None,
     )).resolve()
     os.chmod(work_dir, 0o700)
@@ -1888,7 +1969,10 @@ def main() -> int:
     summary: dict[str, Any] = {
         "schema": "amdgpu-sim.host-transport.integration.v1",
         "status": status,
-        "scope": "CP-0004 host transport handshake only; no GPU execution",
+        "scope": (
+            "CP-0004 host transport handshake and CP-0005 bounded queue-control "
+            "events only; no memory access, packet submission, or GPU execution"
+        ),
         "checks": harness.checks,
         "world_sizes": list(WORLD_SIZES),
         "resource_bounds": {

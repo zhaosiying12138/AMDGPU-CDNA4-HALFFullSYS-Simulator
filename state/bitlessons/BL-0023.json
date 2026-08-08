@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0023",
+  "checkpoint_id": "CP-0005",
+  "question_or_symptom": "Per-queue accounting can make a daemon accept more incomplete commands than its fixed global event and outbound capacity can safely retain.",
+  "observation": "Queue depth limits local ordering, but pending command storage and event delivery are daemon-session resources. Describing an eight-command bound as per queue would multiply the actual resource claim across active queues.",
+  "evidence_ids": ["EV-0009", "EV-0010"],
+  "conclusion": "Protocol limits must name their ownership domain and every lifecycle transition must update the same accounting authority.",
+  "decision": "Enforce at most eight active queues, depth at most 64, and at most eight incomplete commands across the daemon session. Reject duplicate active queue identities, require destroy to observe no pending commands, and release the exact global credit on completion or disconnect cleanup.",
+  "invalidated_assumptions": [
+    "An inflight limit stated without an ownership domain is unambiguous.",
+    "Independent per-queue bounds necessarily protect daemon-wide event storage."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-queue.json",
+    "projects/gem5/src/dev/amdgpu/host_gpu_queue_state.cc",
+    "projects/self-amdgpu-runtime/README.md"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

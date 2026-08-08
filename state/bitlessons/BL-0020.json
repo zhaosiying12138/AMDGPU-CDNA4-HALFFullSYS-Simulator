@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0020",
+  "checkpoint_id": "CP-0005",
+  "question_or_symptom": "A delayed gem5 event can run after a client disconnects and its file descriptor or queue slot has been reused.",
+  "observation": "A file descriptor, queue ID, or sequence alone is reusable. Without the originating request identity and both client and queue generations, a stale event can be delivered to a new owner that happens to reuse one of those numeric values.",
+  "evidence_ids": ["EV-0009", "EV-0011"],
+  "conclusion": "Asynchronous completion correlation is a compound identity, not a single handle comparison.",
+  "decision": "Store and revalidate owner file descriptor, client generation, queue generation, exact sequence, and originating request ID at event-queue execution. Require request IDs to increase strictly after HELLO and doorbell sequences to equal the previous value plus one; reject gaps, duplicates, and wraparound before mutation.",
+  "invalidated_assumptions": [
+    "A matching queue ID is sufficient to deliver an asynchronous completion.",
+    "Monotonic means only greater-than and therefore permits sequence gaps."
+  ],
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_queue_state.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_connection_state.hh"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

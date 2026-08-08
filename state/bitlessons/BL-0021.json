@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0021",
+  "checkpoint_id": "CP-0005",
+  "question_or_symptom": "Two implementations can accept the same semantic operation while emitting different success, failure, or malformed response bytes.",
+  "observation": "Unchecked reserved fields, partial failure echoes, optional capability selection, or version checks before structural validation create multiple wire encodings for one outcome and make error precedence implementation-dependent.",
+  "evidence_ids": ["EV-0009", "EV-0010", "EV-0011"],
+  "conclusion": "A versioned binary protocol remains interoperable only when canonical zero fields, complete echoes, capability rules, and error precedence are mechanically unique.",
+  "decision": "Require queue capability bit 1 to be both offered and required. Validate envelope safety first, then canonical payload shape before version, session identity, request progression, and queue state. Define one exact encoding for successful ACK, failed ACK, successful completion, and the single control-error completion, and reject all field mutations in both codecs.",
+  "invalidated_assumptions": [
+    "Known status codes are sufficient even when the rest of a failure ACK is noncanonical.",
+    "Version incompatibility should override malformed canonical fields."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-queue.json",
+    "projects/gem5/src/dev/amdgpu/host_gpu_protocol.cc",
+    "projects/self-amdgpu-runtime/src/transport_codec.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0022",
+  "checkpoint_id": "CP-0005",
+  "question_or_symptom": "A peer can close while an ACK or completion remains queued behind socket backpressure.",
+  "observation": "Waiting for an outbound deque to drain before honoring POLLHUP, POLLERR, or POLLNVAL can leave a permanently unwriteable descriptor registered, repeatedly wake poll, and retain queue ownership after the peer is gone.",
+  "evidence_ids": ["EV-0009", "EV-0011"],
+  "conclusion": "Terminal readiness is a resource-lifetime event and cannot be subordinated to best-effort outbound delivery.",
+  "decision": "Close generation-safely on terminal poll state even with queued output, disconnect all queues owned by that client generation, invalidate pending callbacks, and reclaim admission and inflight credits. Cover the path with a real SOCK_SEQPACKET send-buffer saturation followed by peer close.",
+  "invalidated_assumptions": [
+    "A queued response justifies retaining a connection after peer hangup.",
+    "POLLNVAL can share the normal writable-retry path."
+  ],
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_socket_utils.test.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_queue_state.cc"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

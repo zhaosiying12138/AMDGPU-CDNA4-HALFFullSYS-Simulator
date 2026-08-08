@@ -1,0 +1,136 @@
+{
+  "schema": "amdgpu-sim.host-transport-v1.queue.v1",
+  "title": "GemSim host transport queue-control extension",
+  "base_protocol": "protocol/host-transport-v1.json",
+  "scope": "bounded control queue and event completion only",
+  "capability": {
+    "name": "QUEUE_CONTROL_V1",
+    "bit": 1,
+    "byte_index": 0,
+    "mask_hex": "02",
+    "negotiation": "must be offered and required by the client; selected by the daemon; absent means queue messages are NOT_SUPPORTED"
+  },
+  "transport": {
+    "header_bytes": 80,
+    "byte_order": "big-endian",
+    "message_types": {
+      "QUEUE_REQUEST": 3,
+      "QUEUE_ACK": 4,
+      "QUEUE_COMPLETION": 5
+    },
+    "payload_bytes": 64,
+    "crc": "base protocol CRC-32C over the complete frame"
+  },
+  "request_payload": {
+    "bytes": 64,
+    "fields": [
+      {"name": "queue_major", "offset": 0, "bytes": 2, "type": "u16", "constant": 1},
+      {"name": "queue_minor", "offset": 2, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "opcode", "offset": 4, "bytes": 2, "type": "u16", "values": {"CREATE": 1, "DESTROY": 2, "DOORBELL": 3}},
+      {"name": "flags", "offset": 6, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "queue_id", "offset": 8, "bytes": 8, "type": "u64"},
+      {"name": "generation", "offset": 16, "bytes": 8, "type": "u64"},
+      {"name": "sequence", "offset": 24, "bytes": 8, "type": "u64"},
+      {"name": "arg0", "offset": 32, "bytes": 8, "type": "u64"},
+      {"name": "arg1", "offset": 40, "bytes": 8, "type": "u64"},
+      {"name": "reserved0", "offset": 48, "bytes": 8, "type": "u64", "constant": 0},
+      {"name": "reserved1", "offset": 56, "bytes": 8, "type": "u64", "constant": 0}
+    ]
+  },
+  "result_payload": {
+    "bytes": 64,
+    "fields": [
+      {"name": "queue_major", "offset": 0, "bytes": 2, "type": "u16", "constant": 1},
+      {"name": "queue_minor", "offset": 2, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "status", "offset": 4, "bytes": 4, "type": "u32", "values": {"OK": 0, "MALFORMED": 1, "UNSUPPORTED_VERSION": 2, "UNSUPPORTED_CAPABILITY": 3, "INSTANCE_MISMATCH": 4, "TOPOLOGY_MISMATCH": 5, "UNAUTHORIZED": 6, "BUSY": 7, "RESOURCE_EXHAUSTED": 8, "PROTOCOL_STATE": 9, "INTERNAL": 10}},
+      {"name": "opcode", "offset": 8, "bytes": 2, "type": "u16"},
+      {"name": "reserved_opcode", "offset": 10, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "reserved_status", "offset": 12, "bytes": 4, "type": "u32", "constant": 0},
+      {"name": "queue_id", "offset": 16, "bytes": 8, "type": "u64"},
+      {"name": "generation", "offset": 24, "bytes": 8, "type": "u64"},
+      {"name": "sequence", "offset": 32, "bytes": 8, "type": "u64"},
+      {"name": "value", "offset": 40, "bytes": 8, "type": "u64"},
+      {"name": "error_code", "offset": 48, "bytes": 8, "type": "u64"},
+      {"name": "sim_tick", "offset": 56, "bytes": 8, "type": "u64"}
+    ]
+  },
+  "limits": {
+    "maximum_queues": 8,
+    "maximum_depth": 64,
+    "maximum_inflight_commands": 8,
+    "completion_latency_ticks": 1
+  },
+  "opcode_constraints": {
+    "CREATE": {
+      "request": {"queue_id": 0, "generation": 0, "sequence": 0, "arg0": "depth-in-1-through-64", "arg1": 0},
+      "success_ack": {"queue_id": "new-nonzero", "generation": "new-nonzero", "sequence": 0, "value": "accepted-depth", "error_code": 0},
+      "completion": "forbidden"
+    },
+    "DESTROY": {
+      "request": {"queue_id": "nonzero", "generation": "nonzero", "sequence": 0, "arg0": 0, "arg1": 0},
+      "success_ack": {"queue_id": "request-echo", "generation": "request-echo", "sequence": 0, "value": 0, "error_code": 0},
+      "completion": "forbidden"
+    },
+    "DOORBELL": {
+      "request": {"queue_id": "nonzero", "generation": "nonzero", "sequence": "nonzero-and-strictly-previous-plus-one", "arg0": "command-kind-0-1-or-2", "arg1": 0},
+      "success_ack": {"queue_id": "request-echo", "generation": "request-echo", "sequence": "request-echo", "value": 0, "error_code": 0},
+      "success_completion": {"command_kinds": [0, 1], "status": "OK", "queue_id": "request-echo", "generation": "request-echo", "sequence": "request-echo", "value": "command-kind", "error_code": 0, "sim_tick": "admission-tick-plus-one"},
+      "error_completion": {"command_kind": 2, "status": "INTERNAL", "queue_id": "request-echo", "generation": "request-echo", "sequence": "request-echo", "value": 2, "error_code": 1, "sim_tick": "admission-tick-plus-one"}
+    },
+    "failure_ack": "echo request_id, opcode, queue_id, generation, and sequence from the structurally decoded request; use the actual daemon UUID, current connection_id, and actual epoch in the response header; value and error_code are zero"
+  },
+  "error_precedence": [
+    "DROP_AND_CLOSE invalid envelope, CRC, message type, frame or payload length, header reserved field, or uncorrelatable request",
+    "MALFORMED correlatable queue flags, payload reserved field, opcode, or opcode-canonical-field error in a complete 64-byte payload",
+    "UNSUPPORTED_VERSION queue control version",
+    "INSTANCE_MISMATCH daemon UUID",
+    "PROTOCOL_STATE connection ID",
+    "TOPOLOGY_MISMATCH job epoch",
+    "UNSUPPORTED_CAPABILITY QUEUE_CONTROL_V1 not selected",
+    "PROTOCOL_STATE non-increasing request ID",
+    "queue lifecycle status"
+  ],
+  "semantics": {
+    "CREATE": "arg0 is depth in [1, maximum_depth]; queue_id and generation are zero in the request and nonzero in a successful ACK",
+    "DESTROY": "queue_id and generation must identify the client-owned queue; succeeds only when no command is pending",
+    "DOORBELL": "arg0 is command kind 0 (NOOP), 1 (CONTROL_TEST), or 2 (CONTROL_ERROR_TEST); sequence is strictly previous+1; kind 2 produces only the canonical asynchronous INTERNAL test completion; no address, pointer, packet, kernel, or memory payload is accepted",
+    "completion": "a successful DOORBELL ACK is followed by one QUEUE_COMPLETION on the gem5 event queue one tick later; both result headers echo the originating request_id",
+    "identity": "every established request must match the negotiated daemon UUID, connection ID, and job epoch; queue handles are scoped to client and generation; every ACK header uses the actual daemon UUID, current connection ID, and actual epoch even when rejecting a mismatched request",
+    "request_id": "nonzero and strictly increasing after the HELLO request_id for the established session; exhaustion fails without wrap or reuse; ACK and completion echo the originating value; tracker advances only after structural, version, identity, and capability validation succeeds",
+    "indeterminate_ack": "after a complete request record is sent, timeout, cancellation, EOF, or protocol failure before a canonical ACK poisons and closes the client session so daemon disconnect cleanup rolls back all queue state; a canonical non-OK ACK is determinate",
+    "completion_retry": "deadline and cancellation are checked before consuming a buffered completion; timeout or cancellation while waiting for a previously acknowledged DOORBELL leaves that sequence and any buffered completion pending and wait may be retried; a malformed, foreign, or noncanonical completion poisons the session",
+    "disconnect": "disconnect invalidates queues and pending callbacks; callbacks validate request_id, client fd generation, and queue generation before emitting a completion",
+    "runtime_handle_ownership": "sagr_queue_t is unique ownership; copied aliases must not be passed after successful destroy or instance close; deterministic stale rejection applies to wire queue_id plus generation while the local handle is alive",
+    "unsupported": "a connection without QUEUE_CONTROL_V1 receives UNSUPPORTED_CAPABILITY and no queue state is created"
+  },
+  "forbidden_scope": ["memory allocation", "memory transfer", "GPU packet submission", "code objects", "kernel execution", "collectives"],
+  "golden": {
+    "identity": {
+      "request_id_hex": "0123456789abcdf0",
+      "daemon_instance_uuid_hex": "00112233445566778899aabbccddeeff",
+      "connection_id_hex": "1122334455667788",
+      "job_epoch_hex": "0102030405060708",
+      "queue_id_hex": "1020304050607080",
+      "generation_hex": "8877665544332211",
+      "sequence_hex": "0100000000000002",
+      "command_kind": 1,
+      "ack_sim_tick_hex": "123456789abcdef0",
+      "completion_sim_tick_hex": "123456789abcdef1"
+    },
+    "doorbell_request": {
+      "frame_bytes": 144,
+      "crc32c_hex": "dfd3614c",
+      "frame_hex": "4753494d52504300000100000050000300000000000000400123456789abcdf000112233445566778899aabbccddeeff11223344556677880102030405060708dfd3614c00000000000000000000000000010000000300001020304050607080887766554433221101000000000000020000000000000001000000000000000000000000000000000000000000000000"
+    },
+    "doorbell_ack": {
+      "frame_bytes": 144,
+      "crc32c_hex": "21b4ea0e",
+      "frame_hex": "4753494d52504300000100000050000400000000000000400123456789abcdf000112233445566778899aabbccddeeff1122334455667788010203040506070821b4ea0e0000000000000000000000000001000000000000000300000000000010203040506070808877665544332211010000000000000200000000000000000000000000000000123456789abcdef0"
+    },
+    "doorbell_completion": {
+      "frame_bytes": 144,
+      "crc32c_hex": "cf22e2cd",
+      "frame_hex": "4753494d52504300000100000050000500000000000000400123456789abcdf000112233445566778899aabbccddeeff11223344556677880102030405060708cf22e2cd0000000000000000000000000001000000000000000300000000000010203040506070808877665544332211010000000000000200000000000000010000000000000000123456789abcdef1"
+    }
+  }
+}
