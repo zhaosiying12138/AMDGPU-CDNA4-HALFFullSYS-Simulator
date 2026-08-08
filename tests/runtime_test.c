@@ -51,6 +51,47 @@ static int expect_options_defaults(void) {
   return 0;
 }
 
+static int expect_queue_option_defaults(void) {
+  sagr_queue_create_options_t create_options;
+  sagr_queue_operation_options_t operation_options;
+  if (sagr_queue_create_options_init(
+          &create_options, (uint32_t)sizeof(create_options)) !=
+          SAGR_STATUS_SUCCESS ||
+      create_options.struct_size != (uint32_t)sizeof(create_options) ||
+      create_options.flags != 0 || create_options.depth != 1 ||
+      create_options.reserved0 != 0 ||
+      sagr_queue_operation_options_init(
+          &operation_options, (uint32_t)sizeof(operation_options)) !=
+          SAGR_STATUS_SUCCESS ||
+      operation_options.struct_size != (uint32_t)sizeof(operation_options) ||
+      operation_options.flags != 0 ||
+      operation_options.timeout_ns != SAGR_DEFAULT_OPEN_TIMEOUT_NS ||
+      operation_options.absolute_deadline_ns != 0 ||
+      operation_options.cancel_fd != -1 ||
+      operation_options.reserved0 != 0) {
+    fprintf(stderr, "unexpected queue option defaults\n");
+    return 1;
+  }
+  if (sagr_queue_create_options_init(
+          NULL, (uint32_t)sizeof(create_options)) !=
+          SAGR_STATUS_INVALID_ARGUMENT ||
+      sagr_queue_create_options_init(
+          &create_options, (uint32_t)sizeof(create_options) - 1U) !=
+          SAGR_STATUS_BUFFER_TOO_SMALL ||
+      create_options.struct_size != (uint32_t)sizeof(create_options) ||
+      sagr_queue_operation_options_init(
+          NULL, (uint32_t)sizeof(operation_options)) !=
+          SAGR_STATUS_INVALID_ARGUMENT ||
+      sagr_queue_operation_options_init(
+          &operation_options, (uint32_t)sizeof(operation_options) - 1U) !=
+          SAGR_STATUS_BUFFER_TOO_SMALL ||
+      operation_options.struct_size != (uint32_t)sizeof(operation_options)) {
+    fprintf(stderr, "unexpected queue option validation\n");
+    return 1;
+  }
+  return 0;
+}
+
 int main(void) {
   int failures = 0;
   const uint32_t abi_version = sagr_abi_version();
@@ -61,12 +102,22 @@ int main(void) {
                  "public instance info ABI size changed");
   _Static_assert(sizeof(sagr_error_info_t) == 160,
                  "public error info ABI size changed");
+  _Static_assert(sizeof(sagr_queue_operation_options_t) == 48,
+                 "public queue operation options ABI size changed");
+  _Static_assert(sizeof(sagr_queue_create_options_t) == 32,
+                 "public queue create options ABI size changed");
+  _Static_assert(sizeof(sagr_queue_info_t) == 80,
+                 "public queue info ABI size changed");
+  _Static_assert(sizeof(sagr_queue_completion_t) == 80,
+                 "public queue completion ABI size changed");
 
   if (abi_version != SAGR_ABI_VERSION ||
-      strcmp(SAGR_VERSION_STRING, "0.2.0") != 0 ||
+      strcmp(SAGR_VERSION_STRING, "0.3.0") != 0 ||
       SAGR_ABI_VERSION_DECODE_MAJOR(abi_version) != SAGR_ABI_VERSION_MAJOR ||
       SAGR_ABI_VERSION_DECODE_MINOR(abi_version) != SAGR_ABI_VERSION_MINOR ||
-      SAGR_ABI_VERSION_MAJOR != 1 || SAGR_ABI_VERSION_MINOR != 1) {
+      SAGR_ABI_VERSION_MAJOR != 1 || SAGR_ABI_VERSION_MINOR != 2 ||
+      SAGR_CAPABILITY_QUEUE_MASK != UINT64_C(2) ||
+      SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST != UINT64_C(2)) {
     fprintf(stderr, "unexpected ABI version: 0x%08x\n", abi_version);
     ++failures;
   }
@@ -114,6 +165,7 @@ int main(void) {
       sagr_status_string(SAGR_STATUS_CANCELLED), "cancelled");
   failures += expect_string(sagr_status_string(INT32_C(12345)), "unknown status");
   failures += expect_options_defaults();
+  failures += expect_queue_option_defaults();
 
   return failures == 0 ? 0 : 1;
 }

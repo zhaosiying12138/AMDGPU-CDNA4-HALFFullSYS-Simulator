@@ -22,12 +22,36 @@
 #include <unistd.h>
 
 #define SAGR_INSTANCE_MAGIC UINT64_C(0x53414752494e5354)
+#define SAGR_QUEUE_MAGIC UINT64_C(0x5341475251554555)
+
+struct sagr_queue;
 
 struct sagr_instance {
   uint64_t magic;
   int socket_fd;
   uint64_t next_request_id;
   sagr_instance_info_t info;
+  struct sagr_queue *queues;
+  uint32_t queue_count;
+  int operation_active;
+  int transport_poisoned;
+};
+
+struct sagr_queue {
+  uint64_t magic;
+  struct sagr_instance *instance;
+  uint64_t queue_id;
+  uint64_t generation;
+  uint64_t next_sequence;
+  uint32_t depth;
+  uint32_t pending_count;
+  uint64_t pending_sequences[SAGR_QUEUE_MAX_INFLIGHT];
+  uint64_t pending_kinds[SAGR_QUEUE_MAX_INFLIGHT];
+  uint64_t pending_request_ids[SAGR_QUEUE_MAX_INFLIGHT];
+  uint64_t pending_ack_ticks[SAGR_QUEUE_MAX_INFLIGHT];
+  uint32_t buffered_count;
+  sagr_wire_queue_response_t buffered[SAGR_QUEUE_MAX_INFLIGHT];
+  struct sagr_queue *next;
 };
 
 typedef struct monotonic_deadline {
@@ -94,6 +118,12 @@ static sagr_status_t validate_options(
     const sagr_instance_open_options_t *options) {
   uint32_t minimum;
   uint32_t maximum;
+  const int queue_offered =
+      (options->offered_capabilities[SAGR_CAPABILITY_QUEUE_WORD] &
+       SAGR_CAPABILITY_QUEUE_MASK) != 0;
+  const int queue_required =
+      (options->required_capabilities[SAGR_CAPABILITY_QUEUE_WORD] &
+       SAGR_CAPABILITY_QUEUE_MASK) != 0;
   if (options->struct_size < sizeof(*options) || options->flags != 0 ||
       options->cancel_fd < -1 || options->reserved0 != 0 ||
       !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
@@ -109,7 +139,29 @@ static sagr_status_t validate_options(
       (options->offered_capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] &
        SAGR_CAPABILITY_TOPOLOGY_MASK) == 0 ||
       (options->required_capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] &
-       SAGR_CAPABILITY_TOPOLOGY_MASK) == 0) {
+       SAGR_CAPABILITY_TOPOLOGY_MASK) == 0 ||
+      queue_offered != queue_required) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t validate_queue_create_options(
+    const sagr_queue_create_options_t *options) {
+  if (options->struct_size < sizeof(*options) || options->flags != 0 ||
+      options->depth == 0 || options->depth > SAGR_QUEUE_MAX_DEPTH ||
+      options->reserved0 != 0 ||
+      !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t validate_queue_operation_options(
+    const sagr_queue_operation_options_t *options) {
+  if (options->struct_size < sizeof(*options) || options->flags != 0 ||
+      options->cancel_fd < -1 || options->reserved0 != 0 ||
+      !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
     return SAGR_STATUS_INVALID_ARGUMENT;
   }
   return SAGR_STATUS_SUCCESS;
@@ -177,6 +229,47 @@ static int make_deadline(uint64_t timeout_ns, uint64_t absolute_deadline_ns,
   }
   deadline->time.tv_nsec = (long)nanoseconds;
   return 0;
+}
+
+static sagr_status_t prepare_queue_operation(
+    const sagr_queue_operation_options_t *options,
+    sagr_queue_operation_options_t *local_options,
+    monotonic_deadline_t *deadline, int *native_errno) {
+  sagr_status_t status;
+  if (options == NULL) {
+    status = sagr_queue_operation_options_init(
+        local_options, (uint32_t)sizeof(*local_options));
+    if (status != SAGR_STATUS_SUCCESS) {
+      return status;
+    }
+  } else {
+    if (options->struct_size < sizeof(*options)) {
+      return SAGR_STATUS_INVALID_ARGUMENT;
+    }
+    memcpy(local_options, options, sizeof(*local_options));
+  }
+  status = validate_queue_operation_options(local_options);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (local_options->cancel_fd >= 0) {
+    const int flags = fcntl(local_options->cancel_fd, F_GETFD);
+    if (flags < 0) {
+      *native_errno = errno;
+      return SAGR_STATUS_INVALID_ARGUMENT;
+    }
+    if ((flags & FD_CLOEXEC) == 0) {
+      *native_errno = EINVAL;
+      return SAGR_STATUS_INVALID_ARGUMENT;
+    }
+  }
+  if (make_deadline(local_options->timeout_ns,
+                    local_options->absolute_deadline_ns, deadline) != 0) {
+    *native_errno = errno;
+    return errno == EOVERFLOW ? SAGR_STATUS_INVALID_ARGUMENT
+                              : SAGR_STATUS_INTERNAL_ERROR;
+  }
+  return SAGR_STATUS_SUCCESS;
 }
 
 static int deadline_remaining_milliseconds(const monotonic_deadline_t *deadline,
@@ -556,6 +649,356 @@ static sagr_status_t receive_record(int socket_fd, uint8_t *frame,
   }
 }
 
+static int queue_capability_selected(const struct sagr_instance *instance) {
+  return (instance->info
+              .negotiated_capabilities[SAGR_CAPABILITY_QUEUE_WORD] &
+          SAGR_CAPABILITY_QUEUE_MASK) != 0;
+}
+
+static void poison_queue_transport(struct sagr_instance *instance) {
+  instance->transport_poisoned = 1;
+  if (instance->socket_fd >= 0) {
+    (void)close(instance->socket_fd);
+    instance->socket_fd = -1;
+  }
+}
+
+static sagr_status_t require_queue_transport(
+    const struct sagr_instance *instance, sagr_error_info_t *error,
+    uint32_t error_size) {
+  if (instance->transport_poisoned != 0 || instance->socket_fd < 0) {
+    return fail_open(error, error_size, SAGR_STATUS_CONNECTION_LOST, -1, 0,
+                     "queue transport is no longer reusable");
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static uint16_t queue_frame_type(const uint8_t *frame, size_t frame_size) {
+  if (frame == NULL || frame_size < 16) {
+    return 0;
+  }
+  return (uint16_t)(((uint16_t)frame[14] << 8) | frame[15]);
+}
+
+static struct sagr_queue *find_queue(struct sagr_instance *instance,
+                                     uint64_t queue_id,
+                                     uint64_t generation) {
+  struct sagr_queue *queue;
+  for (queue = instance->queues; queue != NULL; queue = queue->next) {
+    if (queue->magic == SAGR_QUEUE_MAGIC && queue->queue_id == queue_id &&
+        queue->generation == generation) {
+      return queue;
+    }
+  }
+  return NULL;
+}
+
+static int queue_id_is_active(const struct sagr_instance *instance,
+                              uint64_t queue_id) {
+  const struct sagr_queue *queue;
+  for (queue = instance->queues; queue != NULL; queue = queue->next) {
+    if (queue->magic == SAGR_QUEUE_MAGIC && queue->queue_id == queue_id) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static void queue_remove_pending(struct sagr_queue *queue, uint64_t sequence) {
+  uint32_t index;
+  for (index = 0; index < queue->pending_count; ++index) {
+    if (queue->pending_sequences[index] == sequence) {
+      if (index + 1U < queue->pending_count) {
+        memmove(&queue->pending_sequences[index],
+                &queue->pending_sequences[index + 1U],
+                (size_t)(queue->pending_count - index - 1U) *
+                    sizeof(queue->pending_sequences[0]));
+        memmove(&queue->pending_kinds[index], &queue->pending_kinds[index + 1U],
+                (size_t)(queue->pending_count - index - 1U) *
+                    sizeof(queue->pending_kinds[0]));
+        memmove(&queue->pending_request_ids[index],
+                &queue->pending_request_ids[index + 1U],
+                (size_t)(queue->pending_count - index - 1U) *
+                    sizeof(queue->pending_request_ids[0]));
+        memmove(&queue->pending_ack_ticks[index],
+                &queue->pending_ack_ticks[index + 1U],
+                (size_t)(queue->pending_count - index - 1U) *
+                    sizeof(queue->pending_ack_ticks[0]));
+      }
+      --queue->pending_count;
+      return;
+    }
+  }
+}
+
+static int queue_pending_kind(const struct sagr_queue *queue,
+                              uint64_t sequence, uint64_t *kind,
+                              uint64_t *request_id, uint64_t *ack_tick) {
+  uint32_t index;
+  for (index = 0; index < queue->pending_count; ++index) {
+    if (queue->pending_sequences[index] == sequence) {
+      *kind = queue->pending_kinds[index];
+      *request_id = queue->pending_request_ids[index];
+      *ack_tick = queue->pending_ack_ticks[index];
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int queue_completion_is_canonical(
+    const sagr_wire_queue_response_t *completion, uint64_t command_kind,
+    uint64_t ack_tick) {
+  if (completion->opcode != SAGR_WIRE_QUEUE_OPCODE_DOORBELL ||
+      ack_tick == UINT64_MAX || completion->sim_tick != ack_tick + UINT64_C(1)) {
+    return 0;
+  }
+  if (command_kind == SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST) {
+    return completion->status == SAGR_WIRE_STATUS_INTERNAL &&
+           completion->value == SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST &&
+           completion->error_code == UINT64_C(1);
+  }
+  return (command_kind == SAGR_QUEUE_COMMAND_NOOP ||
+          command_kind == SAGR_QUEUE_COMMAND_CONTROL_TEST) &&
+         completion->status == SAGR_WIRE_STATUS_OK &&
+         completion->value == command_kind && completion->error_code == 0;
+}
+
+static sagr_status_t buffer_completion(
+    struct sagr_instance *instance,
+    const sagr_wire_queue_response_t *completion) {
+  struct sagr_queue *queue = find_queue(instance, completion->queue_id,
+                                         completion->generation);
+  uint32_t index;
+  uint64_t expected_kind = 0;
+  uint64_t expected_request_id = 0;
+  uint64_t expected_ack_tick = 0;
+  if (queue == NULL || completion->opcode != SAGR_WIRE_QUEUE_OPCODE_DOORBELL ||
+      completion->sequence == 0) {
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (queue_pending_kind(queue, completion->sequence, &expected_kind,
+                         &expected_request_id, &expected_ack_tick)) {
+    if (completion->request_id != expected_request_id ||
+        !queue_completion_is_canonical(completion, expected_kind,
+                                       expected_ack_tick)) {
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+  } else {
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  for (index = 0; index < queue->buffered_count; ++index) {
+    if (queue->buffered[index].sequence == completion->sequence) {
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+  }
+  if (queue->buffered_count >= SAGR_QUEUE_MAX_INFLIGHT) {
+    return SAGR_STATUS_OUT_OF_RESOURCES;
+  }
+  queue->buffered[queue->buffered_count++] = *completion;
+  return SAGR_STATUS_SUCCESS;
+}
+
+static int take_buffered_completion(
+    struct sagr_queue *queue, uint64_t sequence, uint64_t request_id,
+    sagr_wire_queue_response_t *completion) {
+  uint32_t index;
+  for (index = 0; index < queue->buffered_count; ++index) {
+    if (queue->buffered[index].sequence == sequence &&
+        queue->buffered[index].request_id == request_id) {
+      *completion = queue->buffered[index];
+      if (index + 1U < queue->buffered_count) {
+        memmove(&queue->buffered[index], &queue->buffered[index + 1U],
+                (size_t)(queue->buffered_count - index - 1U) *
+                    sizeof(queue->buffered[0]));
+      }
+      --queue->buffered_count;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static sagr_status_t map_queue_wire_status(uint16_t opcode,
+                                           int32_t wire_status) {
+  if ((opcode == SAGR_WIRE_QUEUE_OPCODE_DESTROY ||
+       opcode == SAGR_WIRE_QUEUE_OPCODE_DOORBELL) &&
+      wire_status == SAGR_WIRE_STATUS_PROTOCOL_STATE) {
+    return SAGR_STATUS_INVALID_HANDLE;
+  }
+  if (wire_status < 0) {
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  return sagr_protocol_map_wire_status((uint32_t)wire_status);
+}
+
+static sagr_status_t exchange_queue_request(
+    struct sagr_instance *instance, const sagr_wire_queue_request_t *request,
+    const monotonic_deadline_t *deadline, int cancel_fd,
+    sagr_wire_queue_response_t *response, int32_t *wire_status,
+    int *native_errno, const char **reason, uint64_t *out_request_id) {
+  uint8_t request_frame[SAGR_WIRE_QUEUE_FRAME_BYTES];
+  uint8_t response_frame[SAGR_WIRE_MAX_RECORD_BYTES];
+  size_t request_size = 0;
+  uint64_t request_id = 0;
+  sagr_status_t status = sagr_protocol_allocate_request_id(
+      &instance->next_request_id, &request_id);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = "queue request ID space exhausted";
+    return status;
+  }
+  status = sagr_protocol_encode_queue_request(
+      &instance->info, request_id, request, request_frame,
+      sizeof(request_frame), &request_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = "could not encode queue request";
+    return status;
+  }
+  if (out_request_id != NULL) {
+    *out_request_id = request_id;
+  }
+  status = send_record(instance->socket_fd, request_frame, request_size,
+                       deadline, cancel_fd, native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = "queue request send failed";
+    return status;
+  }
+
+  for (;;) {
+    size_t response_size = 0;
+    uint16_t message_type;
+    int32_t decoded_wire_status = -1;
+    sagr_wire_queue_response_t decoded;
+    status = receive_record(instance->socket_fd, response_frame,
+                            sizeof(response_frame), &response_size, deadline,
+                            cancel_fd, native_errno);
+    if (status != SAGR_STATUS_SUCCESS) {
+      *reason = "queue response receive failed";
+      poison_queue_transport(instance);
+      return status;
+    }
+    message_type = queue_frame_type(response_frame, response_size);
+    if (message_type == SAGR_WIRE_MESSAGE_QUEUE_COMPLETION) {
+      status = sagr_protocol_decode_queue_response(
+          response_frame, response_size, &instance->info, 0,
+          SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &decoded,
+          &decoded_wire_status, reason);
+      if (status != SAGR_STATUS_SUCCESS && decoded_wire_status < 0) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      if (decoded.request_id == request_id) {
+        *reason = "queue completion arrived before its ACK";
+        poison_queue_transport(instance);
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      status = buffer_completion(instance, &decoded);
+      if (status != SAGR_STATUS_SUCCESS) {
+        *reason = "could not buffer queue completion";
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
+    status = sagr_protocol_decode_queue_response(
+        response_frame, response_size, &instance->info, request_id,
+        SAGR_WIRE_MESSAGE_QUEUE_ACK, &decoded, &decoded_wire_status, reason);
+    *wire_status = decoded_wire_status;
+    if (status != SAGR_STATUS_SUCCESS && decoded_wire_status < 0) {
+      poison_queue_transport(instance);
+      return status;
+    }
+    if (decoded.opcode != request->opcode) {
+      *reason = "queue ACK opcode mismatch";
+      poison_queue_transport(instance);
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+    *response = decoded;
+    if (status != SAGR_STATUS_SUCCESS && decoded_wire_status >= 0) {
+      if (sagr_protocol_validate_failed_queue_ack(request, &decoded) !=
+          SAGR_STATUS_SUCCESS) {
+        *reason = "noncanonical failed queue ACK";
+        poison_queue_transport(instance);
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      return map_queue_wire_status(request->opcode, decoded_wire_status);
+    }
+    return status;
+  }
+}
+
+static sagr_status_t receive_queue_completion(
+    struct sagr_queue *queue, uint64_t sequence, uint64_t request_id,
+    uint64_t command_kind, uint64_t ack_tick,
+    const monotonic_deadline_t *deadline, int cancel_fd,
+    sagr_wire_queue_response_t *completion, int32_t *wire_status,
+    int *native_errno, const char **reason) {
+  struct sagr_instance *instance = queue->instance;
+  uint8_t frame[SAGR_WIRE_MAX_RECORD_BYTES];
+  sagr_status_t state =
+      check_operation_state(deadline, cancel_fd, native_errno);
+  if (state != SAGR_STATUS_SUCCESS) {
+    *reason = "queue completion wait was cancelled or expired";
+    return state;
+  }
+  if (take_buffered_completion(queue, sequence, request_id, completion)) {
+    *wire_status = (int32_t)completion->status;
+    return map_queue_wire_status(completion->opcode, *wire_status);
+  }
+  for (;;) {
+    sagr_wire_queue_response_t decoded;
+    size_t frame_size = 0;
+    int32_t decoded_wire_status = -1;
+    sagr_status_t status = receive_record(
+        instance->socket_fd, frame, sizeof(frame), &frame_size, deadline,
+        cancel_fd, native_errno);
+    if (status != SAGR_STATUS_SUCCESS) {
+      *reason = "queue completion receive failed";
+      if (status != SAGR_STATUS_TIMED_OUT && status != SAGR_STATUS_CANCELLED) {
+        poison_queue_transport(instance);
+      }
+      return status;
+    }
+    if (queue_frame_type(frame, frame_size) !=
+        SAGR_WIRE_MESSAGE_QUEUE_COMPLETION) {
+      *reason = "unexpected record while waiting for queue completion";
+      poison_queue_transport(instance);
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+    status = sagr_protocol_decode_queue_response(
+        frame, frame_size, &instance->info, 0,
+        SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &decoded, &decoded_wire_status,
+        reason);
+    if (status != SAGR_STATUS_SUCCESS && decoded_wire_status < 0) {
+      poison_queue_transport(instance);
+      return status;
+    }
+    if (decoded.queue_id == queue->queue_id &&
+        decoded.generation == queue->generation &&
+        decoded.sequence == sequence) {
+      if (decoded.request_id != request_id) {
+        *reason = "queue completion request ID mismatch";
+        poison_queue_transport(instance);
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      if (!queue_completion_is_canonical(&decoded, command_kind, ack_tick)) {
+        *reason = "noncanonical queue completion";
+        poison_queue_transport(instance);
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      *completion = decoded;
+      *wire_status = decoded_wire_status;
+      return map_queue_wire_status(decoded.opcode, decoded_wire_status);
+    }
+    status = buffer_completion(instance, &decoded);
+    if (status != SAGR_STATUS_SUCCESS) {
+      *reason = "could not buffer out-of-order queue completion";
+      poison_queue_transport(instance);
+      return status;
+    }
+  }
+}
+
 sagr_status_t sagr_instance_open(
     const char *endpoint, const sagr_instance_open_options_t *options,
     sagr_instance_t *out_instance, sagr_error_info_t *out_error,
@@ -752,7 +1195,8 @@ sagr_status_t sagr_instance_open(
   }
   instance->magic = SAGR_INSTANCE_MAGIC;
   instance->socket_fd = socket_fd;
-  instance->next_request_id = request_id == UINT64_MAX ? 1 : request_id + 1;
+  instance->next_request_id =
+      request_id == UINT64_MAX ? 0 : request_id + UINT64_C(1);
   instance->info.struct_size = (uint32_t)sizeof(instance->info);
   instance->info.selected_version_major = result.selected_major;
   instance->info.selected_version_minor = result.selected_minor;
@@ -794,6 +1238,7 @@ sagr_status_t sagr_instance_get_info(sagr_instance_t instance,
 
 sagr_status_t sagr_instance_close(sagr_instance_t *instance) {
   struct sagr_instance *owned_instance;
+  struct sagr_queue *queue;
   if (instance == NULL) {
     return SAGR_STATUS_INVALID_ARGUMENT;
   }
@@ -810,7 +1255,461 @@ sagr_status_t sagr_instance_close(sagr_instance_t *instance) {
     (void)close(owned_instance->socket_fd);
     owned_instance->socket_fd = -1;
   }
+  queue = owned_instance->queues;
+  while (queue != NULL) {
+    struct sagr_queue *next = queue->next;
+    queue->magic = 0;
+    queue->instance = NULL;
+    memset(queue, 0, sizeof(*queue));
+    free(queue);
+    queue = next;
+  }
+  owned_instance->queues = NULL;
+  owned_instance->queue_count = 0;
   memset(&owned_instance->info, 0, sizeof(owned_instance->info));
   free(owned_instance);
+  return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t validate_error_output(sagr_error_info_t *error,
+                                           uint32_t error_size) {
+  initialize_error(error, error_size);
+  if (error == NULL && error_size != 0) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (error != NULL && error_size < sizeof(*error)) {
+    return SAGR_STATUS_BUFFER_TOO_SMALL;
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t prepare_sized_output(void *output, uint32_t output_size,
+                                          size_t required_size,
+                                          int required) {
+  size_t clear_size;
+  if (output == NULL) {
+    return required != 0 || output_size != 0 ? SAGR_STATUS_INVALID_ARGUMENT
+                                             : SAGR_STATUS_SUCCESS;
+  }
+  clear_size = output_size < required_size ? output_size : required_size;
+  memset(output, 0, clear_size);
+  if (output_size >= sizeof(uint32_t)) {
+    const uint32_t encoded_size = (uint32_t)required_size;
+    memcpy(output, &encoded_size, sizeof(encoded_size));
+  }
+  return (size_t)output_size < required_size ? SAGR_STATUS_BUFFER_TOO_SMALL
+                                              : SAGR_STATUS_SUCCESS;
+}
+
+static void fill_queue_info(const struct sagr_queue *queue,
+                            sagr_queue_info_t *info) {
+  info->struct_size = (uint32_t)sizeof(*info);
+  info->depth = queue->depth;
+  info->queue_id = queue->queue_id;
+  info->generation = queue->generation;
+  info->connection_id = queue->instance->info.connection_id;
+  info->epoch = queue->instance->info.epoch;
+  memcpy(info->daemon_uuid, queue->instance->info.daemon_uuid,
+         sizeof(info->daemon_uuid));
+}
+
+sagr_status_t sagr_queue_create(
+    sagr_instance_t instance, const sagr_queue_create_options_t *options,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_queue_t *out_queue, sagr_queue_info_t *out_info,
+    uint32_t info_size, sagr_error_info_t *out_error, uint32_t error_size) {
+  sagr_queue_create_options_t local_create;
+  sagr_queue_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_queue_request_t request;
+  sagr_wire_queue_response_t response;
+  struct sagr_queue *queue;
+  sagr_status_t status;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  const char *reason = "queue creation failed";
+
+  if (out_queue != NULL) {
+    *out_queue = NULL;
+  }
+  status = validate_error_output(out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = prepare_sized_output(out_info, info_size, sizeof(*out_info), 0);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, 0,
+                     "invalid queue info output buffer");
+  }
+  if (instance == NULL || instance->magic != SAGR_INSTANCE_MAGIC ||
+      out_queue == NULL) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "invalid instance or queue output");
+  }
+  if (options == NULL) {
+    status = sagr_queue_create_options_init(
+        &local_create, (uint32_t)sizeof(local_create));
+  } else if (options->struct_size < sizeof(*options)) {
+    status = SAGR_STATUS_INVALID_ARGUMENT;
+  } else {
+    memcpy(&local_create, options, sizeof(local_create));
+    status = validate_queue_create_options(&local_create);
+  }
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, 0,
+                     "invalid queue create options");
+  }
+  status = prepare_queue_operation(operation_options, &local_operation,
+                                   &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid queue operation options");
+  }
+  if (!queue_capability_selected(instance)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_NOT_SUPPORTED, -1, 0,
+                     "QUEUE_CONTROL_V1 was not negotiated");
+  }
+  status = require_queue_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (instance->queue_count >= 8U) {
+    return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES, -1, 0,
+                     "runtime queue limit reached");
+  }
+  if (instance->operation_active != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "another queue operation is active");
+  }
+  queue = (struct sagr_queue *)calloc(1, sizeof(*queue));
+  if (queue == NULL) {
+    return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES, -1,
+                     errno, "could not allocate queue handle");
+  }
+
+  memset(&request, 0, sizeof(request));
+  request.major = SAGR_QUEUE_PROTOCOL_MAJOR;
+  request.minor = SAGR_QUEUE_PROTOCOL_MINOR;
+  request.opcode = SAGR_WIRE_QUEUE_OPCODE_CREATE;
+  request.arg0 = local_create.depth;
+  instance->operation_active = 1;
+  status = exchange_queue_request(instance, &request, &deadline,
+                                  local_operation.cancel_fd, &response,
+                                  &wire_status, &native_errno, &reason, NULL);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS) {
+    free(queue);
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (response.queue_id == 0 || response.generation == 0 ||
+      response.sequence != 0 || response.value != local_create.depth ||
+      response.error_code != 0 ||
+      queue_id_is_active(instance, response.queue_id)) {
+    poison_queue_transport(instance);
+    free(queue);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0, "invalid successful CREATE ACK");
+  }
+
+  queue->magic = SAGR_QUEUE_MAGIC;
+  queue->instance = instance;
+  queue->queue_id = response.queue_id;
+  queue->generation = response.generation;
+  queue->next_sequence = 1;
+  queue->depth = local_create.depth;
+  queue->next = instance->queues;
+  instance->queues = queue;
+  ++instance->queue_count;
+  if (out_info != NULL) {
+    fill_queue_info(queue, out_info);
+  }
+  *out_queue = queue;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_queue_ring_doorbell(
+    sagr_queue_t queue, uint64_t command_kind,
+    const sagr_queue_operation_options_t *operation_options,
+    uint64_t *out_sequence, sagr_error_info_t *out_error,
+    uint32_t error_size) {
+  sagr_queue_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_queue_request_t request;
+  sagr_wire_queue_response_t response;
+  struct sagr_instance *instance;
+  sagr_status_t status;
+  uint64_t sequence;
+  uint64_t request_id = 0;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  const char *reason = "doorbell notification failed";
+
+  if (out_sequence != NULL) {
+    *out_sequence = 0;
+  }
+  status = validate_error_output(out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (queue == NULL || queue->magic != SAGR_QUEUE_MAGIC ||
+      queue->instance == NULL ||
+      queue->instance->magic != SAGR_INSTANCE_MAGIC || out_sequence == NULL) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "invalid queue handle or sequence output");
+  }
+  if (command_kind != SAGR_QUEUE_COMMAND_NOOP &&
+      command_kind != SAGR_QUEUE_COMMAND_CONTROL_TEST &&
+      command_kind != SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                     "unsupported control-only command kind");
+  }
+  status = prepare_queue_operation(operation_options, &local_operation,
+                                   &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid queue operation options");
+  }
+  instance = queue->instance;
+  if (!queue_capability_selected(instance)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_NOT_SUPPORTED, -1, 0,
+                     "QUEUE_CONTROL_V1 was not negotiated");
+  }
+  status = require_queue_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (queue->pending_count >= SAGR_QUEUE_MAX_INFLIGHT) {
+    return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES, -1, 0,
+                     "runtime queue in-flight limit reached");
+  }
+  if (queue->next_sequence == 0 || instance->operation_active != 0) {
+    return fail_open(out_error, error_size,
+                     queue->next_sequence == 0 ? SAGR_STATUS_OUT_OF_RESOURCES
+                                               : SAGR_STATUS_BUSY,
+                     -1, 0, queue->next_sequence == 0
+                                    ? "queue sequence space exhausted"
+                                    : "another queue operation is active");
+  }
+  sequence = queue->next_sequence;
+  memset(&request, 0, sizeof(request));
+  request.major = SAGR_QUEUE_PROTOCOL_MAJOR;
+  request.minor = SAGR_QUEUE_PROTOCOL_MINOR;
+  request.opcode = SAGR_WIRE_QUEUE_OPCODE_DOORBELL;
+  request.queue_id = queue->queue_id;
+  request.generation = queue->generation;
+  request.sequence = sequence;
+  request.arg0 = command_kind;
+  instance->operation_active = 1;
+  status = exchange_queue_request(instance, &request, &deadline,
+                                  local_operation.cancel_fd, &response,
+                                  &wire_status, &native_errno, &reason,
+                                  &request_id);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (response.queue_id != queue->queue_id ||
+      response.generation != queue->generation ||
+      response.sequence != sequence || response.value != 0 ||
+      response.error_code != 0 || response.sim_tick == UINT64_MAX) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0, "invalid successful DOORBELL ACK");
+  }
+  queue->pending_sequences[queue->pending_count] = sequence;
+  queue->pending_kinds[queue->pending_count] = command_kind;
+  queue->pending_request_ids[queue->pending_count] = request_id;
+  queue->pending_ack_ticks[queue->pending_count] = response.sim_tick;
+  ++queue->pending_count;
+  queue->next_sequence = sequence == UINT64_MAX ? 0 : sequence + 1;
+  *out_sequence = sequence;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_queue_wait(
+    sagr_queue_t queue, uint64_t sequence,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_queue_completion_t *out_completion, uint32_t completion_size,
+    sagr_error_info_t *out_error, uint32_t error_size) {
+  sagr_queue_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_queue_response_t completion;
+  struct sagr_instance *instance;
+  sagr_status_t status;
+  uint64_t command_kind = 0;
+  uint64_t request_id = 0;
+  uint64_t ack_tick = 0;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  const char *reason = "queue completion failed";
+
+  status = validate_error_output(out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = prepare_sized_output(out_completion, completion_size,
+                                sizeof(*out_completion), 1);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, 0,
+                     "invalid queue completion output buffer");
+  }
+  if (queue == NULL || queue->magic != SAGR_QUEUE_MAGIC ||
+      queue->instance == NULL ||
+      queue->instance->magic != SAGR_INSTANCE_MAGIC) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "invalid queue handle");
+  }
+  instance = queue->instance;
+  status = require_queue_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (sequence == 0 ||
+      !queue_pending_kind(queue, sequence, &command_kind, &request_id,
+                          &ack_tick)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                     "sequence is not pending on this queue");
+  }
+  status = prepare_queue_operation(operation_options, &local_operation,
+                                   &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid queue operation options");
+  }
+  if (instance->operation_active != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "another queue operation is active");
+  }
+  instance->operation_active = 1;
+  memset(&completion, 0, sizeof(completion));
+  status = receive_queue_completion(
+      queue, sequence, request_id, command_kind, ack_tick, &deadline,
+      local_operation.cancel_fd, &completion, &wire_status, &native_errno,
+      &reason);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS && wire_status < 0) {
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (completion.opcode != SAGR_WIRE_QUEUE_OPCODE_DOORBELL ||
+      completion.queue_id != queue->queue_id ||
+      completion.generation != queue->generation ||
+      completion.sequence != sequence) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0, "queue completion identity mismatch");
+  }
+  if (!queue_completion_is_canonical(&completion, command_kind, ack_tick)) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0, "queue completion result mismatch");
+  }
+  out_completion->status = status;
+  out_completion->wire_status = wire_status;
+  out_completion->queue_id = completion.queue_id;
+  out_completion->generation = completion.generation;
+  out_completion->sequence = completion.sequence;
+  out_completion->value = completion.value;
+  out_completion->error_code = completion.error_code;
+  out_completion->sim_tick = completion.sim_tick;
+  queue_remove_pending(queue, sequence);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_queue_destroy(
+    sagr_queue_t *queue,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_error_info_t *out_error, uint32_t error_size) {
+  sagr_queue_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_queue_request_t request;
+  sagr_wire_queue_response_t response;
+  struct sagr_instance *instance;
+  struct sagr_queue **link;
+  struct sagr_queue *owned_queue;
+  sagr_status_t status;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  const char *reason = "queue destruction failed";
+
+  status = validate_error_output(out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (queue == NULL) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                     "queue pointer is null");
+  }
+  if (*queue == NULL) {
+    return SAGR_STATUS_SUCCESS;
+  }
+  owned_queue = *queue;
+  if (owned_queue->magic != SAGR_QUEUE_MAGIC ||
+      owned_queue->instance == NULL ||
+      owned_queue->instance->magic != SAGR_INSTANCE_MAGIC) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "invalid queue handle");
+  }
+  instance = owned_queue->instance;
+  status = require_queue_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = prepare_queue_operation(operation_options, &local_operation,
+                                   &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid queue operation options");
+  }
+  if (owned_queue->pending_count != 0 || owned_queue->buffered_count != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "queue has pending completions");
+  }
+  if (instance->operation_active != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "another queue operation is active");
+  }
+  memset(&request, 0, sizeof(request));
+  request.major = SAGR_QUEUE_PROTOCOL_MAJOR;
+  request.minor = SAGR_QUEUE_PROTOCOL_MINOR;
+  request.opcode = SAGR_WIRE_QUEUE_OPCODE_DESTROY;
+  request.queue_id = owned_queue->queue_id;
+  request.generation = owned_queue->generation;
+  instance->operation_active = 1;
+  status = exchange_queue_request(instance, &request, &deadline,
+                                  local_operation.cancel_fd, &response,
+                                  &wire_status, &native_errno, &reason, NULL);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (response.queue_id != owned_queue->queue_id ||
+      response.generation != owned_queue->generation ||
+      response.sequence != 0 || response.value != 0 ||
+      response.error_code != 0) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0, "invalid successful DESTROY ACK");
+  }
+  link = &instance->queues;
+  while (*link != NULL && *link != owned_queue) {
+    link = &(*link)->next;
+  }
+  if (*link != owned_queue || instance->queue_count == 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INTERNAL_ERROR,
+                     wire_status, 0, "queue ownership list is inconsistent");
+  }
+  *link = owned_queue->next;
+  --instance->queue_count;
+  *queue = NULL;
+  memset(owned_queue, 0, sizeof(*owned_queue));
+  free(owned_queue);
   return SAGR_STATUS_SUCCESS;
 }

@@ -45,8 +45,19 @@ enum {
 
 #define SAGR_CAPABILITY_TOPOLOGY_WORD UINT32_C(0)
 #define SAGR_CAPABILITY_TOPOLOGY_MASK UINT64_C(1)
+#define SAGR_CAPABILITY_QUEUE_WORD UINT32_C(0)
+#define SAGR_CAPABILITY_QUEUE_MASK UINT64_C(2)
+
+#define SAGR_QUEUE_PROTOCOL_MAJOR UINT16_C(1)
+#define SAGR_QUEUE_PROTOCOL_MINOR UINT16_C(0)
+#define SAGR_QUEUE_MAX_DEPTH UINT32_C(64)
+#define SAGR_QUEUE_MAX_INFLIGHT UINT32_C(8)
+#define SAGR_QUEUE_COMMAND_NOOP UINT64_C(0)
+#define SAGR_QUEUE_COMMAND_CONTROL_TEST UINT64_C(1)
+#define SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST UINT64_C(2)
 
 typedef struct sagr_instance *sagr_instance_t;
+typedef struct sagr_queue *sagr_queue_t;
 
 /*
  * All public structures contain fixed-width fields only. Callers initialize
@@ -110,6 +121,54 @@ typedef struct sagr_error_info {
   uint8_t reserved[16];
 } sagr_error_info_t;
 
+/* Queue operation options use the same one-deadline/cancellation contract as
+ * the handshake. Callers initialize the structure and leave reserved fields
+ * zero. A zero timeout selects SAGR_DEFAULT_OPEN_TIMEOUT_NS. */
+typedef struct sagr_queue_operation_options {
+  uint32_t struct_size;
+  uint32_t flags;
+  uint64_t timeout_ns;
+  uint64_t absolute_deadline_ns;
+  int32_t cancel_fd;
+  uint32_t reserved0;
+  uint8_t reserved[16];
+} sagr_queue_operation_options_t;
+
+typedef struct sagr_queue_create_options {
+  uint32_t struct_size;
+  uint32_t flags;
+  uint32_t depth;
+  uint32_t reserved0;
+  uint8_t reserved[16];
+} sagr_queue_create_options_t;
+
+typedef struct sagr_queue_info {
+  uint32_t struct_size;
+  uint32_t flags;
+  uint32_t depth;
+  uint32_t reserved0;
+  uint64_t queue_id;
+  uint64_t generation;
+  uint64_t connection_id;
+  uint64_t epoch;
+  uint8_t daemon_uuid[SAGR_UUID_SIZE];
+  uint8_t reserved[16];
+} sagr_queue_info_t;
+
+typedef struct sagr_queue_completion {
+  uint32_t struct_size;
+  uint32_t flags;
+  sagr_status_t status;
+  int32_t wire_status;
+  uint64_t queue_id;
+  uint64_t generation;
+  uint64_t sequence;
+  uint64_t value;
+  uint64_t error_code;
+  uint64_t sim_tick;
+  uint8_t reserved[16];
+} sagr_queue_completion_t;
+
 SAGR_API uint32_t sagr_abi_version(void);
 SAGR_API const char *sagr_version_string(void);
 SAGR_API const char *sagr_status_string(sagr_status_t status);
@@ -117,6 +176,11 @@ SAGR_API const char *sagr_status_string(sagr_status_t status);
 /* Set protocol 1.0, a five-second relative deadline, and no cancellation FD. */
 SAGR_API sagr_status_t sagr_instance_open_options_init(
     sagr_instance_open_options_t *options, uint32_t options_size);
+
+SAGR_API sagr_status_t sagr_queue_operation_options_init(
+    sagr_queue_operation_options_t *options, uint32_t options_size);
+SAGR_API sagr_status_t sagr_queue_create_options_init(
+    sagr_queue_create_options_t *options, uint32_t options_size);
 
 /*
  * Open performs exactly one AF_UNIX SOCK_SEQPACKET handshake attempt. When no
@@ -132,8 +196,43 @@ SAGR_API sagr_status_t sagr_instance_open(
 SAGR_API sagr_status_t sagr_instance_get_info(
     sagr_instance_t instance, sagr_instance_info_t *info,
     uint32_t info_size);
-/* Local-only, idempotent for *instance == NULL, and always clears on success. */
+/*
+ * Handles have unique ownership. Copying aliases is unsupported; after close,
+ * no alias of the instance or its queues may be passed to any API. Close is
+ * local-only, idempotent for *instance == NULL, and clears on success.
+ */
 SAGR_API sagr_status_t sagr_instance_close(sagr_instance_t *instance);
+
+/*
+ * The caller must serialize queue APIs on each instance; concurrent calls on
+ * the same instance are not thread-safe. They exchange control metadata only:
+ * no host pointer, descriptor, memory payload, packet, or kernel is accepted.
+ * A successful doorbell returns a sequence token; wait consumes its matching
+ * asynchronous completion. A wait timeout or cancellation keeps that
+ * completion pending so wait may be retried. Failure after a request is sent
+ * but before a canonical ACK poisons the queue transport; later queue calls
+ * return CONNECTION_LOST and the caller must close the instance. A queue
+ * handle has unique ownership; copied aliases must not be passed after
+ * successful destroy or instance close.
+ */
+SAGR_API sagr_status_t sagr_queue_create(
+    sagr_instance_t instance, const sagr_queue_create_options_t *options,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_queue_t *out_queue, sagr_queue_info_t *out_info,
+    uint32_t info_size, sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_queue_ring_doorbell(
+    sagr_queue_t queue, uint64_t command_kind,
+    const sagr_queue_operation_options_t *operation_options,
+    uint64_t *out_sequence, sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_queue_wait(
+    sagr_queue_t queue, uint64_t sequence,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_queue_completion_t *out_completion, uint32_t completion_size,
+    sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_queue_destroy(
+    sagr_queue_t *queue,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_error_info_t *out_error, uint32_t error_size);
 
 #ifdef __cplusplus
 }

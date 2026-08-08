@@ -370,9 +370,6 @@ static int run_scenario(enum server_behavior behavior, uint32_t wire_status,
     options.maximum_version_major = 1;
     options.maximum_version_minor = 1;
   }
-  if (behavior == SERVER_SUCCESS_EXTRA_OFFER) {
-    options.offered_capabilities[0] |= UINT64_C(2);
-  }
   if (behavior == SERVER_SUCCESS_ABSOLUTE_DEADLINE) {
     struct timespec now;
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0 || now.tv_sec < 0 ||
@@ -546,6 +543,16 @@ static int test_public_validation(void) {
           SAGR_STATUS_INVALID_ARGUMENT ||
       instance != NULL) {
     fprintf(stderr, "missing required topology capability was accepted\n");
+    return 1;
+  }
+  initialize_options(&options);
+  options.offered_capabilities[0] |= SAGR_CAPABILITY_QUEUE_MASK;
+  instance = (sagr_instance_t)(uintptr_t)1;
+  if (sagr_instance_open("/unused", &options, &instance, &error,
+                         (uint32_t)sizeof(error)) !=
+          SAGR_STATUS_INVALID_ARGUMENT ||
+      instance != NULL) {
+    fprintf(stderr, "offered-only queue capability was accepted\n");
     return 1;
   }
   initialize_options(&options);
@@ -776,8 +783,6 @@ int main(void) {
   failures += run_scenario(SERVER_SUCCESS_ABSOLUTE_DEADLINE, 0,
                            SAGR_STATUS_SUCCESS, -1);
   failures += run_scenario(SERVER_SUCCESS_WIDE_RANGE, 0,
-                           SAGR_STATUS_SUCCESS, -1);
-  failures += run_scenario(SERVER_SUCCESS_EXTRA_OFFER, 0,
                            SAGR_STATUS_SUCCESS, -1);
   failures += run_scenario(SERVER_VERSION_REJECTION, 0,
                            SAGR_STATUS_VERSION_MISMATCH,

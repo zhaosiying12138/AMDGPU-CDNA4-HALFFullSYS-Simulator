@@ -27,6 +27,38 @@ static const char k_golden_ack[] =
     "000000000000000000010000000200000001000100000018"
     "102132435465768798a9bacbdcedfe0f0000000300000008";
 
+static const char k_golden_queue_request[] =
+    "4753494d5250430000010000005000030000000000000040"
+    "0123456789abcdf000112233445566778899aabbccddeeff"
+    "11223344556677880102030405060708dfd3614c00000000"
+    "000000000000000000010000000300001020304050607080"
+    "887766554433221101000000000000020000000000000001"
+    "000000000000000000000000000000000000000000000000";
+
+static const char k_golden_queue_ack[] =
+    "4753494d5250430000010000005000040000000000000040"
+    "0123456789abcdf000112233445566778899aabbccddeeff"
+    "1122334455667788010203040506070821b4ea0e00000000"
+    "000000000000000000010000000000000003000000000000"
+    "102030405060708088776655443322110100000000000002"
+    "00000000000000000000000000000000123456789abcdef0";
+
+static const char k_golden_queue_completion[] =
+    "4753494d5250430000010000005000050000000000000040"
+    "0123456789abcdf000112233445566778899aabbccddeeff"
+    "11223344556677880102030405060708cf22e2cd00000000"
+    "000000000000000000010000000000000003000000000000"
+    "102030405060708088776655443322110100000000000002"
+    "00000000000000010000000000000000123456789abcdef1";
+
+static const char k_golden_queue_error_completion[] =
+    "4753494d5250430000010000005000050000000000000040"
+    "0123456789abcdf000112233445566778899aabbccddeeff"
+    "11223344556677880102030405060708ee1cda8100000000"
+    "0000000000000000000100000000000a0003000000000000"
+    "102030405060708088776655443322110100000000000002"
+    "00000000000000020000000000000001123456789abcdef1";
+
 static const uint8_t k_daemon_uuid[16] = {
     0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
     0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
@@ -95,6 +127,59 @@ static void initialize_success_ack(sagr_wire_ack_fields_t *fields) {
   fields->rank = 3;
   fields->world_size = 8;
   fields->include_topology = 1;
+}
+
+static void initialize_queue_info(sagr_instance_info_t *info) {
+  memset(info, 0, sizeof(*info));
+  info->struct_size = (uint32_t)sizeof(*info);
+  info->maximum_record_bytes = SAGR_WIRE_MAX_RECORD_BYTES;
+  info->negotiated_capabilities[0] =
+      SAGR_CAPABILITY_TOPOLOGY_MASK | SAGR_CAPABILITY_QUEUE_MASK;
+  memcpy(info->daemon_uuid, k_daemon_uuid, 16);
+  info->connection_id = UINT64_C(0x1122334455667788);
+  info->epoch = UINT64_C(0x0102030405060708);
+}
+
+static void initialize_queue_request(sagr_wire_queue_request_t *request) {
+  memset(request, 0, sizeof(*request));
+  request->major = SAGR_QUEUE_PROTOCOL_MAJOR;
+  request->minor = SAGR_QUEUE_PROTOCOL_MINOR;
+  request->opcode = SAGR_WIRE_QUEUE_OPCODE_DOORBELL;
+  request->queue_id = UINT64_C(0x1020304050607080);
+  request->generation = UINT64_C(0x8877665544332211);
+  request->sequence = UINT64_C(0x0100000000000002);
+  request->arg0 = SAGR_QUEUE_COMMAND_CONTROL_TEST;
+}
+
+static void initialize_queue_response(sagr_wire_queue_response_t *response,
+                                      uint64_t sim_tick) {
+  memset(response, 0, sizeof(*response));
+  response->major = SAGR_QUEUE_PROTOCOL_MAJOR;
+  response->minor = SAGR_QUEUE_PROTOCOL_MINOR;
+  response->status = SAGR_WIRE_STATUS_OK;
+  response->opcode = SAGR_WIRE_QUEUE_OPCODE_DOORBELL;
+  response->queue_id = UINT64_C(0x1020304050607080);
+  response->generation = UINT64_C(0x8877665544332211);
+  response->sequence = UINT64_C(0x0100000000000002);
+  response->value = SAGR_QUEUE_COMMAND_CONTROL_TEST;
+  response->sim_tick = sim_tick;
+}
+
+static void store_u16(uint8_t *destination, uint16_t value) {
+  destination[0] = (uint8_t)(value >> 8);
+  destination[1] = (uint8_t)value;
+}
+
+static void store_u32(uint8_t *destination, uint32_t value) {
+  destination[0] = (uint8_t)(value >> 24);
+  destination[1] = (uint8_t)(value >> 16);
+  destination[2] = (uint8_t)(value >> 8);
+  destination[3] = (uint8_t)value;
+}
+
+static void store_u64(uint8_t *destination, uint64_t value) {
+  store_u32(destination, (uint32_t)(value >> 32));
+  store_u32(destination + 4, (uint32_t)value);
 }
 
 static int test_crc32c(void) {
@@ -369,6 +454,275 @@ static int test_invalid_success_topology(void) {
   return 0;
 }
 
+static int test_queue_golden_frames(void) {
+  sagr_instance_info_t info;
+  sagr_wire_queue_request_t request;
+  sagr_wire_queue_response_t response;
+  sagr_wire_queue_response_t decoded;
+  uint8_t frame[SAGR_WIRE_QUEUE_FRAME_BYTES];
+  size_t frame_size = 0;
+  int32_t wire_status = -1;
+  const char *reason = NULL;
+  const uint64_t request_id = UINT64_C(0x0123456789abcdf0);
+  const uint64_t ack_tick = UINT64_C(0x123456789abcdef0);
+
+  initialize_queue_info(&info);
+  initialize_queue_request(&request);
+  if (sagr_protocol_encode_queue_request(
+          &info, request_id, &request, frame, sizeof(frame), &frame_size) !=
+          SAGR_STATUS_SUCCESS ||
+      expect_equal("QUEUE_REQUEST", frame, frame_size,
+                   k_golden_queue_request) != 0) {
+      fprintf(stderr, "queue request golden encode failed\n");
+    return 1;
+  }
+  request.arg0 = SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST;
+  if (sagr_protocol_encode_queue_request(
+          &info, request_id, &request, frame, sizeof(frame), &frame_size) !=
+      SAGR_STATUS_SUCCESS) {
+    fprintf(stderr, "CONTROL_ERROR_TEST request encode failed\n");
+    return 1;
+  }
+  request.arg0 = UINT64_C(3);
+  if (sagr_protocol_encode_queue_request(
+          &info, request_id, &request, frame, sizeof(frame), &frame_size) !=
+      SAGR_STATUS_INVALID_ARGUMENT) {
+    fprintf(stderr, "unknown queue command kind was encoded\n");
+    return 1;
+  }
+
+  initialize_queue_response(&response, ack_tick);
+  response.value = 0;
+  if (sagr_protocol_encode_queue_response(
+          &info, request_id, SAGR_WIRE_MESSAGE_QUEUE_ACK, &response, frame,
+          sizeof(frame), &frame_size) != SAGR_STATUS_SUCCESS ||
+      expect_equal("QUEUE_ACK", frame, frame_size, k_golden_queue_ack) != 0 ||
+      sagr_protocol_decode_queue_response(
+          frame, frame_size, &info, request_id,
+          SAGR_WIRE_MESSAGE_QUEUE_ACK, &decoded, &wire_status, &reason) !=
+          SAGR_STATUS_SUCCESS ||
+      wire_status != SAGR_WIRE_STATUS_OK ||
+      decoded.request_id != request_id ||
+      decoded.queue_id != response.queue_id ||
+      decoded.generation != response.generation ||
+      decoded.sequence != response.sequence ||
+      decoded.value != response.value || decoded.sim_tick != response.sim_tick) {
+    fprintf(stderr, "queue ACK golden encode/decode failed: %s\n",
+            reason == NULL ? "no reason" : reason);
+    return 1;
+  }
+
+  initialize_queue_response(&response, ack_tick + UINT64_C(1));
+  if (sagr_protocol_encode_queue_response(
+          &info, request_id, SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &response,
+          frame, sizeof(frame), &frame_size) != SAGR_STATUS_SUCCESS ||
+      expect_equal("QUEUE_COMPLETION", frame, frame_size,
+                   k_golden_queue_completion) != 0 ||
+      sagr_protocol_decode_queue_response(
+          frame, frame_size, &info, request_id,
+          SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &decoded, &wire_status,
+          &reason) != SAGR_STATUS_SUCCESS ||
+      decoded.message_type != SAGR_WIRE_MESSAGE_QUEUE_COMPLETION ||
+      decoded.request_id != request_id || decoded.sim_tick != response.sim_tick ||
+      decoded.sim_tick != ack_tick + UINT64_C(1)) {
+    fprintf(stderr, "queue completion golden encode/decode failed: %s\n",
+            reason == NULL ? "no reason" : reason);
+    return 1;
+  }
+
+  response.status = SAGR_WIRE_STATUS_INTERNAL;
+  response.value = SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST;
+  response.error_code = UINT64_C(1);
+  if (sagr_protocol_encode_queue_response(
+          &info, request_id, SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &response,
+          frame, sizeof(frame), &frame_size) != SAGR_STATUS_SUCCESS ||
+      expect_equal("QUEUE_ERROR_COMPLETION", frame, frame_size,
+                   k_golden_queue_error_completion) != 0 ||
+      sagr_protocol_decode_queue_response(
+          frame, frame_size, &info, request_id,
+          SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &decoded, &wire_status,
+          &reason) != SAGR_STATUS_INTERNAL_ERROR ||
+      wire_status != SAGR_WIRE_STATUS_INTERNAL ||
+      decoded.value != SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST ||
+      decoded.error_code != UINT64_C(1) ||
+      decoded.sim_tick != ack_tick + UINT64_C(1)) {
+    fprintf(stderr, "queue error completion golden failed: %s\n",
+            reason == NULL ? "no reason" : reason);
+    return 1;
+  }
+  return 0;
+}
+
+static int expect_queue_decode_status(const uint8_t *frame, size_t frame_size,
+                                      const sagr_instance_info_t *info,
+                                      uint64_t request_id,
+                                      uint16_t message_type,
+                                      sagr_status_t expected) {
+  sagr_wire_queue_response_t decoded;
+  int32_t wire_status = -1;
+  const char *reason = NULL;
+  const sagr_status_t actual = sagr_protocol_decode_queue_response(
+      frame, frame_size, info, request_id, message_type, &decoded,
+      &wire_status, &reason);
+  if (actual != expected) {
+    fprintf(stderr, "queue mutation status=%d expected=%d: %s\n", actual,
+            expected, reason == NULL ? "no reason" : reason);
+    return 1;
+  }
+  return 0;
+}
+
+static int test_queue_response_mutations(void) {
+  sagr_instance_info_t info;
+  uint8_t golden[SAGR_WIRE_QUEUE_FRAME_BYTES];
+  uint8_t mutated[SAGR_WIRE_QUEUE_FRAME_BYTES];
+  size_t golden_size = 0;
+  const uint64_t request_id = UINT64_C(0x0123456789abcdf0);
+  initialize_queue_info(&info);
+  if (decode_hex(k_golden_queue_ack, golden, sizeof(golden), &golden_size) !=
+      0) {
+    return 1;
+  }
+
+#define EXPECT_QUEUE_MUTATION(MUTATION, EXPECTED)                            \
+  do {                                                                        \
+    memcpy(mutated, golden, golden_size);                                     \
+    MUTATION;                                                                 \
+    sagr_protocol_recompute_frame_crc(mutated, golden_size);                  \
+    if (expect_queue_decode_status(mutated, golden_size, &info, request_id,   \
+                                   SAGR_WIRE_MESSAGE_QUEUE_ACK, EXPECTED) !=  \
+        0) {                                                                  \
+      return 1;                                                               \
+    }                                                                         \
+  } while (0)
+
+  EXPECT_QUEUE_MUTATION(store_u16(mutated + 14,
+                                  SAGR_WIRE_MESSAGE_QUEUE_COMPLETION),
+                        SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_QUEUE_MUTATION(store_u64(mutated + 24, request_id + 1),
+                        SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_QUEUE_MUTATION(mutated[32] ^= 1, SAGR_STATUS_INSTANCE_MISMATCH);
+  EXPECT_QUEUE_MUTATION(store_u64(mutated + 48, info.connection_id + 1),
+                        SAGR_STATUS_TOPOLOGY_MISMATCH);
+  EXPECT_QUEUE_MUTATION(store_u64(mutated + 56, info.epoch + 1),
+                        SAGR_STATUS_TOPOLOGY_MISMATCH);
+  EXPECT_QUEUE_MUTATION(store_u16(mutated + SAGR_WIRE_HEADER_BYTES, 2),
+                        SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_QUEUE_MUTATION(store_u32(mutated + SAGR_WIRE_HEADER_BYTES + 4,
+                                  UINT32_MAX),
+                        SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_QUEUE_MUTATION(store_u16(mutated + SAGR_WIRE_HEADER_BYTES + 8, 99),
+                        SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_QUEUE_MUTATION(store_u16(mutated + SAGR_WIRE_HEADER_BYTES + 10, 1),
+                        SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_QUEUE_MUTATION(store_u32(mutated + SAGR_WIRE_HEADER_BYTES + 12, 1),
+                        SAGR_STATUS_PROTOCOL_ERROR);
+#undef EXPECT_QUEUE_MUTATION
+
+  memcpy(mutated, golden, golden_size);
+  mutated[golden_size - 1U] ^= 1;
+  if (expect_queue_decode_status(mutated, golden_size, &info, request_id,
+                                 SAGR_WIRE_MESSAGE_QUEUE_ACK,
+                                 SAGR_STATUS_CHECKSUM_ERROR) != 0 ||
+      expect_queue_decode_status(golden, golden_size - 1U, &info, request_id,
+                                 SAGR_WIRE_MESSAGE_QUEUE_ACK,
+                                 SAGR_STATUS_PROTOCOL_ERROR) != 0) {
+    return 1;
+  }
+  return 0;
+}
+
+static int test_queue_capability_must_be_required(void) {
+  sagr_wire_ack_fields_t fields;
+  sagr_instance_open_options_t options;
+  sagr_wire_ack_result_t result;
+  uint8_t frame[SAGR_WIRE_ACK_FRAME_BYTES];
+  size_t frame_size = 0;
+  int32_t wire_status = -1;
+  const char *reason = NULL;
+  initialize_success_ack(&fields);
+  fields.selected_capabilities[0] |= SAGR_CAPABILITY_QUEUE_MASK;
+  initialize_golden_options(&options);
+  options.offered_capabilities[0] |= SAGR_CAPABILITY_QUEUE_MASK;
+  if (sagr_protocol_encode_ack(&fields, frame, sizeof(frame), &frame_size) !=
+          SAGR_STATUS_SUCCESS ||
+      sagr_protocol_decode_ack(frame, frame_size, &options, fields.request_id,
+                               k_client_nonce, &result, &wire_status,
+                               &reason) != SAGR_STATUS_CAPABILITY_MISMATCH) {
+    fprintf(stderr, "offered-only queue capability ACK was accepted\n");
+    return 1;
+  }
+  options.required_capabilities[0] |= SAGR_CAPABILITY_QUEUE_MASK;
+  if (sagr_protocol_decode_ack(frame, frame_size, &options, fields.request_id,
+                               k_client_nonce, &result, &wire_status,
+                               &reason) != SAGR_STATUS_SUCCESS ||
+      (result.selected_capabilities[0] & SAGR_CAPABILITY_QUEUE_MASK) == 0) {
+    fprintf(stderr, "required queue capability ACK was rejected: %s\n",
+            reason == NULL ? "no reason" : reason);
+    return 1;
+  }
+  return 0;
+}
+
+static int test_failed_queue_ack_shape(void) {
+  sagr_wire_queue_request_t request;
+  sagr_wire_queue_response_t response;
+  initialize_queue_request(&request);
+  initialize_queue_response(&response, 0);
+  response.status = SAGR_WIRE_STATUS_PROTOCOL_STATE;
+  response.value = 0;
+
+  if (sagr_protocol_validate_failed_queue_ack(&request, &response) !=
+      SAGR_STATUS_SUCCESS) {
+    fprintf(stderr, "canonical failed queue ACK was rejected\n");
+    return 1;
+  }
+
+#define EXPECT_FAILED_ACK_REJECTED(MUTATION)                                 \
+  do {                                                                        \
+    sagr_wire_queue_response_t changed = response;                            \
+    MUTATION;                                                                 \
+    if (sagr_protocol_validate_failed_queue_ack(&request, &changed) !=        \
+        SAGR_STATUS_PROTOCOL_ERROR) {                                         \
+      fprintf(stderr, "noncanonical failed queue ACK was accepted\n");      \
+      return 1;                                                               \
+    }                                                                         \
+  } while (0)
+
+  EXPECT_FAILED_ACK_REJECTED(changed.opcode = SAGR_WIRE_QUEUE_OPCODE_CREATE);
+  EXPECT_FAILED_ACK_REJECTED(changed.queue_id ^= UINT64_C(1));
+  EXPECT_FAILED_ACK_REJECTED(changed.generation ^= UINT64_C(1));
+  EXPECT_FAILED_ACK_REJECTED(changed.sequence ^= UINT64_C(1));
+  EXPECT_FAILED_ACK_REJECTED(changed.value = UINT64_C(1));
+  EXPECT_FAILED_ACK_REJECTED(changed.error_code = UINT64_C(1));
+  EXPECT_FAILED_ACK_REJECTED(changed.status = SAGR_WIRE_STATUS_OK);
+#undef EXPECT_FAILED_ACK_REJECTED
+  return 0;
+}
+
+static int test_request_id_exhaustion(void) {
+  uint64_t next_request_id = UINT64_MAX - UINT64_C(1);
+  uint64_t request_id = 0;
+  if (sagr_protocol_allocate_request_id(&next_request_id, &request_id) !=
+          SAGR_STATUS_SUCCESS ||
+      request_id != UINT64_MAX - UINT64_C(1) ||
+      next_request_id != UINT64_MAX ||
+      sagr_protocol_allocate_request_id(&next_request_id, &request_id) !=
+          SAGR_STATUS_SUCCESS ||
+      request_id != UINT64_MAX || next_request_id != 0) {
+    fprintf(stderr, "request ID allocator did not reach exhaustion exactly\n");
+    return 1;
+  }
+  request_id = UINT64_C(42);
+  if (sagr_protocol_allocate_request_id(&next_request_id, &request_id) !=
+          SAGR_STATUS_OUT_OF_RESOURCES ||
+      request_id != 0 || next_request_id != 0) {
+    fprintf(stderr, "exhausted request ID allocator wrapped or reused an ID\n");
+    return 1;
+  }
+  return 0;
+}
+
 int main(void) {
   int failures = 0;
   failures += test_crc32c();
@@ -379,5 +733,10 @@ int main(void) {
   failures += test_ack_mutations();
   failures += test_noncanonical_failure_ack();
   failures += test_invalid_success_topology();
+  failures += test_queue_golden_frames();
+  failures += test_queue_response_mutations();
+  failures += test_queue_capability_must_be_required();
+  failures += test_failed_queue_ack_shape();
+  failures += test_request_id_exhaustion();
   return failures == 0 ? 0 : 1;
 }
