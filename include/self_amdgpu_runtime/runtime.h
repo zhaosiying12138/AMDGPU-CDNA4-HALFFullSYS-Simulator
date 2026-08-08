@@ -51,6 +51,8 @@ enum {
 #define SAGR_CAPABILITY_MEMORY_MASK UINT64_C(4)
 #define SAGR_CAPABILITY_SIGNAL_WORD UINT32_C(0)
 #define SAGR_CAPABILITY_SIGNAL_MASK UINT64_C(8)
+#define SAGR_CAPABILITY_DISPATCH_WORD UINT32_C(0)
+#define SAGR_CAPABILITY_DISPATCH_MASK UINT64_C(16)
 
 #define SAGR_QUEUE_PROTOCOL_MAJOR UINT16_C(1)
 #define SAGR_QUEUE_PROTOCOL_MINOR UINT16_C(0)
@@ -77,6 +79,16 @@ enum {
 #define SAGR_SIGNAL_CONDITION_NE UINT64_C(1)
 #define SAGR_SIGNAL_CONDITION_LT UINT64_C(2)
 #define SAGR_SIGNAL_CONDITION_GTE UINT64_C(3)
+
+#define SAGR_DISPATCH_PROTOCOL_MAJOR UINT16_C(1)
+#define SAGR_DISPATCH_PROTOCOL_MINOR UINT16_C(0)
+#define SAGR_DISPATCH_FIXTURE_GFX950_XOR_U8_V1 UINT64_C(1)
+#define SAGR_DISPATCH_FIXED_IO_BYTES UINT64_C(64)
+#define SAGR_DISPATCH_EXPECTED_SIGNAL_VALUE INT64_C(0)
+#define SAGR_DISPATCH_PACKET_CRC32C UINT32_C(0x8a912d83)
+#define SAGR_DISPATCH_OUTPUT_CRC32C UINT32_C(0x796671ec)
+#define SAGR_DISPATCH_FIXTURE_MANIFEST_SHA256_HEX \
+  "7500741873f9d39848e57f0aa9ffc6454df7db87b93e1c046501f54db1b7543c"
 
 typedef struct sagr_instance *sagr_instance_t;
 typedef struct sagr_queue *sagr_queue_t;
@@ -270,6 +282,68 @@ typedef struct sagr_signal_wait_result {
   uint8_t reserved[16];
 } sagr_signal_wait_result_t;
 
+/* CP-0008 exposes one protocol-pinned fixture only.  The options contain no
+ * packet, pointer, code-object, kernarg, or descriptor fields. */
+typedef struct sagr_pinned_dispatch_options {
+  uint32_t struct_size;
+  uint32_t flags;
+  uint64_t fixture_id;
+  uint8_t reserved[16];
+} sagr_pinned_dispatch_options_t;
+
+/* A ticket is an immutable identity tuple returned only after admission. */
+typedef struct sagr_dispatch_ticket {
+  uint32_t struct_size;
+  uint32_t flags;
+  uint64_t request_id;
+  uint64_t queue_id;
+  uint64_t queue_generation;
+  uint64_t queue_sequence;
+  uint64_t fixture_id;
+  uint64_t input_allocation_id;
+  uint64_t input_generation;
+  uint64_t output_allocation_id;
+  uint64_t output_generation;
+  uint64_t signal_id;
+  uint64_t signal_generation;
+  uint64_t trace_id;
+  uint64_t input_gpu_va;
+  uint64_t output_gpu_va;
+  uint32_t packet_crc32c;
+  uint32_t reserved0;
+  uint64_t admission_tick;
+  uint8_t reserved[16];
+} sagr_dispatch_ticket_t;
+
+/* Completion is published atomically after DISPATCH_COMPLETION validation. */
+typedef struct sagr_dispatch_completion {
+  uint32_t struct_size;
+  uint32_t flags;
+  sagr_status_t status;
+  int32_t wire_status;
+  uint64_t request_id;
+  uint64_t queue_id;
+  uint64_t queue_generation;
+  uint64_t queue_sequence;
+  uint64_t fixture_id;
+  uint64_t input_allocation_id;
+  uint64_t input_generation;
+  uint64_t output_allocation_id;
+  uint64_t output_generation;
+  uint64_t signal_id;
+  uint64_t signal_generation;
+  uint64_t trace_id;
+  uint64_t input_gpu_va;
+  uint64_t output_gpu_va;
+  uint32_t packet_crc32c;
+  uint32_t output_crc32c;
+  uint64_t admission_tick;
+  uint64_t start_tick;
+  uint64_t end_tick;
+  uint64_t retire_tick;
+  uint8_t reserved[16];
+} sagr_dispatch_completion_t;
+
 SAGR_API uint32_t sagr_abi_version(void);
 SAGR_API const char *sagr_version_string(void);
 SAGR_API const char *sagr_status_string(sagr_status_t status);
@@ -290,6 +364,8 @@ SAGR_API sagr_status_t sagr_signal_create_options_init(
     sagr_signal_create_options_t *options, uint32_t options_size);
 SAGR_API sagr_status_t sagr_signal_operation_options_init(
     sagr_signal_operation_options_t *options, uint32_t options_size);
+SAGR_API sagr_status_t sagr_pinned_dispatch_options_init(
+    sagr_pinned_dispatch_options_t *options, uint32_t options_size);
 
 /*
  * Open performs exactly one AF_UNIX SOCK_SEQPACKET handshake attempt. When no
@@ -341,6 +417,27 @@ SAGR_API sagr_status_t sagr_queue_wait(
 SAGR_API sagr_status_t sagr_queue_destroy(
     sagr_queue_t *queue,
     const sagr_queue_operation_options_t *operation_options,
+    sagr_error_info_t *out_error, uint32_t error_size);
+
+/*
+ * Submit and wait are deliberately separate. Submit admits one fixed fixture
+ * and returns a generation-safe ticket; wait consumes the matching completion.
+ * A wait timeout/cancellation retains the ticket and never resends the
+ * dispatch request. Queue, input/output memory, and signal handles must all
+ * belong to the same instance. The fixture requires two distinct allocations
+ * of at least 64 bytes and a live signed-one signal with an armed EQ-zero wait.
+ */
+SAGR_API sagr_status_t sagr_queue_submit_pinned_dispatch(
+    sagr_queue_t queue, sagr_memory_t input_memory,
+    sagr_memory_t output_memory, sagr_signal_t completion_signal,
+    const sagr_pinned_dispatch_options_t *options,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_dispatch_ticket_t *out_ticket, uint32_t ticket_size,
+    sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_queue_wait_pinned_dispatch(
+    sagr_queue_t queue, const sagr_dispatch_ticket_t *ticket,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_dispatch_completion_t *out_completion, uint32_t completion_size,
     sagr_error_info_t *out_error, uint32_t error_size);
 
 /*

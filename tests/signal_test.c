@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -777,6 +778,13 @@ static int test_lifecycle_retry_reuse(void) {
                        &short_operation, &result, (uint32_t)sizeof(result),
                        &error, (uint32_t)sizeof(error)) !=
           SAGR_STATUS_TIMED_OUT) {
+    failures = 1;
+  }
+  if (!failures && error.wire_status != -1) {
+    fprintf(stderr,
+            "local signal wait timeout exposed a daemon wire status: %" PRId32
+            "\n",
+            error.wire_status);
     failures = 1;
   }
   if (!failures &&

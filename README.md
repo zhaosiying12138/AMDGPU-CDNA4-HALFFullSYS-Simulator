@@ -13,8 +13,12 @@ monotonic deadline. Queue-control protocol 1.0 adds bounded queue lifecycle,
 control-only doorbell notification, and asynchronous completion matching.
 Simulated-memory protocol 1.0 adds bridge-owned allocation and real byte
 transfer through sealed `memfd` staging passed with `SCM_RIGHTS`.
-It does **not** submit GPU packets or kernels, expose packet-visible VRAM,
-model SDMA timing, reconnect, or expose HIP/HSA/OpenCL operations.
+Signal-event protocol 1.0 adds generation-safe signed signals and retryable
+waits. Pinned-dispatch protocol 1.0 admits one fixed gfx950 wave64 XOR fixture
+without exposing its daemon-owned packet or code image. It does **not** accept
+raw AQL, HSACO, kernargs, GPU pointers, or file descriptors as dispatch inputs,
+provide a general kernel ABI, model SDMA timing, reconnect, or expose
+HIP/HSA/OpenCL operations.
 
 ## ABI surface
 
@@ -31,8 +35,12 @@ The installed `<self_amdgpu_runtime/runtime.h>` header exposes:
 - size-tagged queue options/results plus create, ring, wait, and destroy APIs;
   and
 - size-tagged memory options/info plus allocate, query, H2D, D2H, and free APIs.
+- size-tagged signal options/results plus create, load, store, wait, and destroy
+  APIs; and
+- pinned-dispatch options, admission tickets, completion results, and separate
+  submit/wait APIs.
 
-The transport API is ABI version `1.4`; the project release is `0.5.0`.
+The transport API is ABI version `1.5`; the project release is `0.6.0`.
 Status values 0 through 3 retain their original meanings. Transport statuses
 are appended, and native `errno` values are diagnostic rather than primary.
 
@@ -62,8 +70,9 @@ Simulated memory requires capability bit 2 to be both offered and required.
 The v1 reference limits are 1024 live allocation slots, 2 GiB per allocation,
 4 GiB of total live requested bytes, and 16 MiB per transfer. Allocation is
 bridge-owned and sparse on the daemon side; a new or reused allocation reads
-as zero. Its returned simulated VA is functional transport metadata, not an
-address accepted by AMDGPU packet execution.
+as zero. Its returned simulated VA is not a host pointer or a general public
+packet address; CP-0008 may bind it only through the pinned daemon-owned
+fixture contract.
 
 Memory operations are synchronous and share the instance request-ID sequence
 with queue control. H2D sends one exact-size, mode-0600 memfd with
@@ -80,6 +89,31 @@ scratch allocation or `pread` failure and deadline/cancellation leave the
 caller buffer untouched and the known session reusable. Allocation handles
 have unique ownership; copied aliases must not be used after free or instance
 close.
+
+Signal events require capability bit 3 to be both offered and required. A wait
+has an admission ACK and a later completion. Timeout or cancellation after the
+ACK retains the same local wait and does not resend it. Signal IDs may be
+reused only with a strictly newer generation, and wait, store, queue, memory,
+and dispatch records share one strictly increasing request-ID sequence.
+
+Pinned dispatch requires capability bit 4 and selected queue, memory, and
+signal capabilities. CP-0008 exposes only fixture
+`gfx950-xor-u8-v1`: separate 64-byte input/output allocations, one wave64
+workgroup, and `output[lane] = input[lane] ^ 0x5a`. Admission requires a live
+signed-one signal with exactly one already-admitted unsatisfied EQ-zero wait.
+`sagr_queue_submit_pinned_dispatch()` publishes an immutable ticket only after
+a canonical ACK, including request ID, resource generations, trace ID, bound
+VAs, packet CRC, and admission tick. `sagr_queue_wait_pinned_dispatch()` uses a
+new deadline on every call; timeout or cancellation retains the ticket and
+never resends the request.
+
+The generation-valid CP-0007 signal completion at retire tick plus one must be
+received before the matching dispatch completion. Both records must agree with
+the ticket before the runtime permits D2H or resource cleanup. A canonical
+non-OK admission ACK is determinate and reusable; an indeterminate ACK or any
+malformed, foreign, reordered, CRC-inconsistent, or tick-inconsistent record
+poisons the shared session. Runtime mock tests validate this contract but are
+not evidence of successful execution on a real or simulated GPU pipeline.
 
 ## Build and test
 
@@ -171,6 +205,22 @@ sagr-handshake \
   --timeout-ms 5000
 ```
 
+For the pinned CP-0008 gate, `--dispatch-fixture gfx950-xor-u8-v1`
+automatically offers and requires capability bits 1 through 4. The tool creates
+the queue, allocations, and signed-one signal; writes the exact input and zero
+output sentinel; arms the EQ-zero wait; submits once; proves a cancelled
+post-ACK dispatch wait is retryable; consumes both completion records; verifies
+the exact 64-byte D2H result; and performs strict cleanup. Its JSON includes the
+four exact byte strings, ticket and completion echo fields, request/trace IDs,
+all timing fields, signal completion tick, and retry evidence:
+
+```sh
+sagr-handshake \
+  --endpoint /absolute/path/to/gemsim.sock \
+  --dispatch-fixture gfx950-xor-u8-v1 \
+  --timeout-ms 5000
+```
+
 ## Install and consume
 
 ```sh
@@ -180,7 +230,7 @@ cmake --install build --prefix "$PWD/install"
 Consumers can use the exported package without depending on this source tree:
 
 ```cmake
-find_package(SelfAmdgpuRuntime 0.5 CONFIG REQUIRED)
+find_package(SelfAmdgpuRuntime 0.6 CONFIG REQUIRED)
 target_link_libraries(my_target PRIVATE SelfAmdgpuRuntime::runtime)
 ```
 

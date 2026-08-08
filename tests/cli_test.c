@@ -26,15 +26,18 @@ static int test_complete_parse(void) {
   queue_cli_options_t queue_options;
   memory_cli_options_t memory_options;
   signal_cli_options_t signal_options;
+  dispatch_cli_options_t dispatch_options;
   const char *endpoint = NULL;
   uint64_t hold_ms = 0;
   memset(&queue_options, 0, sizeof(queue_options));
   memset(&memory_options, 0, sizeof(memory_options));
   memset(&signal_options, 0, sizeof(signal_options));
+  memset(&dispatch_options, 0, sizeof(dispatch_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (parse_arguments((int)(sizeof(arguments) / sizeof(arguments[0])),
                       arguments, &endpoint, &options, &hold_ms,
-                      &queue_options, &memory_options, &signal_options) != 0 ||
+                      &queue_options, &memory_options, &signal_options,
+                      &dispatch_options) != 0 ||
       endpoint == NULL || strcmp(endpoint, "/tmp/gemsim.sock") != 0 ||
       options.minimum_version_major != 0 ||
       options.minimum_version_minor != 9 ||
@@ -46,7 +49,8 @@ static int test_complete_parse(void) {
       options.offered_capabilities[0] != SAGR_CAPABILITY_TOPOLOGY_MASK ||
       options.required_capabilities[0] != SAGR_CAPABILITY_TOPOLOGY_MASK ||
       queue_options.enabled != 0 || memory_options.enabled != 0 ||
-      memory_options.alignment != SAGR_MEMORY_ALIGNMENT_4K) {
+      memory_options.alignment != SAGR_MEMORY_ALIGNMENT_4K ||
+      dispatch_options.enabled != 0) {
     fprintf(stderr, "complete CLI option parse failed\n");
     return 1;
   }
@@ -58,15 +62,17 @@ static int expect_invalid(char **arguments, size_t argument_count) {
   queue_cli_options_t queue_options;
   memory_cli_options_t memory_options;
   signal_cli_options_t signal_options;
+  dispatch_cli_options_t dispatch_options;
   const char *endpoint = NULL;
   uint64_t hold_ms = 0;
   memset(&queue_options, 0, sizeof(queue_options));
   memset(&memory_options, 0, sizeof(memory_options));
   memset(&signal_options, 0, sizeof(signal_options));
+  memset(&dispatch_options, 0, sizeof(dispatch_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   return parse_arguments((int)argument_count, arguments, &endpoint, &options,
                          &hold_ms, &queue_options, &memory_options,
-                         &signal_options) == -1
+                         &signal_options, &dispatch_options) == -1
              ? 0
              : 1;
 }
@@ -98,15 +104,18 @@ static int test_queue_parse(void) {
   queue_cli_options_t queue_options;
   memory_cli_options_t memory_options;
   signal_cli_options_t signal_options;
+  dispatch_cli_options_t dispatch_options;
   const char *endpoint = NULL;
   uint64_t hold_ms = 0;
   memset(&queue_options, 0, sizeof(queue_options));
   memset(&memory_options, 0, sizeof(memory_options));
   memset(&signal_options, 0, sizeof(signal_options));
+  memset(&dispatch_options, 0, sizeof(dispatch_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (parse_arguments((int)(sizeof(arguments) / sizeof(arguments[0])),
                       arguments, &endpoint, &options, &hold_ms,
-                      &queue_options, &memory_options, &signal_options) != 0 ||
+                      &queue_options, &memory_options, &signal_options,
+                      &dispatch_options) != 0 ||
       queue_options.enabled != 1 || queue_options.depth != 8 ||
       queue_options.doorbells != 3 ||
       queue_options.command_kind != SAGR_QUEUE_COMMAND_CONTROL_TEST ||
@@ -125,10 +134,12 @@ static int test_queue_parse(void) {
   memset(&queue_options, 0, sizeof(queue_options));
   memset(&memory_options, 0, sizeof(memory_options));
   memset(&signal_options, 0, sizeof(signal_options));
+  memset(&dispatch_options, 0, sizeof(dispatch_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (parse_arguments((int)(sizeof(arguments) / sizeof(arguments[0])),
                       arguments, &endpoint, &options, &hold_ms,
-                      &queue_options, &memory_options, &signal_options) != 0 ||
+                      &queue_options, &memory_options, &signal_options,
+                      &dispatch_options) != 0 ||
       queue_options.command_kind != SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST) {
     fprintf(stderr, "CONTROL_ERROR_TEST CLI option parse failed\n");
     return 1;
@@ -165,16 +176,19 @@ static int test_memory_parse(void) {
   queue_cli_options_t queue_options;
   memory_cli_options_t memory_options;
   signal_cli_options_t signal_options;
+  dispatch_cli_options_t dispatch_options;
   const char *endpoint = NULL;
   uint64_t hold_ms = 0;
 
   memset(&queue_options, 0, sizeof(queue_options));
   memset(&memory_options, 0, sizeof(memory_options));
   memset(&signal_options, 0, sizeof(signal_options));
+  memset(&dispatch_options, 0, sizeof(dispatch_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (parse_arguments((int)(sizeof(arguments) / sizeof(arguments[0])),
                       arguments, &endpoint, &options, &hold_ms,
-                      &queue_options, &memory_options, &signal_options) != 0 ||
+                      &queue_options, &memory_options, &signal_options,
+                      &dispatch_options) != 0 ||
       memory_options.enabled != 1 || memory_options.reuse != 1 ||
       memory_options.bytes != UINT64_C(65536) ||
       memory_options.alignment != SAGR_MEMORY_ALIGNMENT_64K ||
@@ -191,11 +205,12 @@ static int test_memory_parse(void) {
   memset(&queue_options, 0, sizeof(queue_options));
   memset(&memory_options, 0, sizeof(memory_options));
   memset(&signal_options, 0, sizeof(signal_options));
+  memset(&dispatch_options, 0, sizeof(dispatch_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (parse_arguments(
           (int)(sizeof(default_alignment) / sizeof(default_alignment[0])),
           default_alignment, &endpoint, &options, &hold_ms, &queue_options,
-          &memory_options, &signal_options) != 0 ||
+          &memory_options, &signal_options, &dispatch_options) != 0 ||
       memory_options.enabled != 1 || memory_options.reuse != 0 ||
       memory_options.bytes != UINT64_C(1) ||
       memory_options.alignment != SAGR_MEMORY_ALIGNMENT_4K ||
@@ -257,6 +272,48 @@ static int test_invalid_parse(void) {
   return 0;
 }
 
+static int test_dispatch_parse(void) {
+  char *arguments[] = {
+      (char *)"sagr-handshake", (char *)"--endpoint", (char *)"/tmp/gemsim.sock",
+      (char *)"--dispatch-fixture", (char *)"gfx950-xor-u8-v1"};
+  char *wrong_fixture[] = {
+      (char *)"tool", (char *)"--endpoint", (char *)"/x",
+      (char *)"--dispatch-fixture", (char *)"gfx950-store-u32-v1"};
+  char *mixed_mode[] = {
+      (char *)"tool", (char *)"--endpoint", (char *)"/x",
+      (char *)"--dispatch-fixture", (char *)"gfx950-xor-u8-v1",
+      (char *)"--queue-depth", (char *)"1", (char *)"--doorbells",
+      (char *)"0", (char *)"--command-kind", (char *)"0"};
+  sagr_instance_open_options_t options;
+  queue_cli_options_t queue_options;
+  memory_cli_options_t memory_options;
+  signal_cli_options_t signal_options;
+  dispatch_cli_options_t dispatch_options;
+  const char *endpoint = NULL;
+  uint64_t hold_ms = 0;
+  memset(&queue_options, 0, sizeof(queue_options));
+  memset(&memory_options, 0, sizeof(memory_options));
+  memset(&signal_options, 0, sizeof(signal_options));
+  memset(&dispatch_options, 0, sizeof(dispatch_options));
+  (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
+  if (parse_arguments((int)(sizeof(arguments) / sizeof(arguments[0])),
+                      arguments, &endpoint, &options, &hold_ms,
+                      &queue_options, &memory_options, &signal_options,
+                      &dispatch_options) != 0 ||
+      dispatch_options.enabled != 1 || queue_options.enabled != 0 ||
+      memory_options.enabled != 0 || signal_options.enabled != 0 ||
+      options.offered_capabilities[0] != UINT64_C(0x1f) ||
+      options.required_capabilities[0] != UINT64_C(0x1f) ||
+      expect_invalid(wrong_fixture,
+                     sizeof(wrong_fixture) / sizeof(wrong_fixture[0])) != 0 ||
+      expect_invalid(mixed_mode, sizeof(mixed_mode) / sizeof(mixed_mode[0])) !=
+          0) {
+    fprintf(stderr, "dispatch CLI option parse failed\n");
+    return 1;
+  }
+  return 0;
+}
+
 static int test_monotonic_hold(void) {
   struct timespec before;
   struct timespec after;
@@ -283,6 +340,7 @@ int main(void) {
   failures += test_invalid_parse();
   failures += test_queue_parse();
   failures += test_memory_parse();
+  failures += test_dispatch_parse();
   failures += test_monotonic_hold();
   return failures == 0 ? 0 : 1;
 }

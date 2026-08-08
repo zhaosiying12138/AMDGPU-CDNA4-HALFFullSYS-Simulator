@@ -211,6 +211,41 @@ static const char k_golden_signal_destroy_ack[] =
     "000000000000000788776655443322110000000000000000"
     "00000000000000000000000000000000123456789abcdefa";
 
+static const char k_golden_dispatch_request[] =
+    "4753494d52504300000100000050000b0000000000000080"
+    "0123456789abcdfa00112233445566778899aabbccddeeff"
+    "11223344556677880102030405060708cf679df800000000"
+    "000000000000000000010000000100001020304050607080"
+    "887766554433221101000000000000030000000000000001"
+    "000000000000000710000000000000010000000000000008"
+    "100000000000000200000000000000092000000000000001"
+    "00000000000000007500741873f9d39848e57f0aa9ffc645"
+    "4df7db87b93e1c046501f54db1b7543c";
+
+static const char k_golden_dispatch_ack[] =
+    "4753494d52504300000100000050000c00000000000000a0"
+    "0123456789abcdfa00112233445566778899aabbccddeeff"
+    "112233445566778801020304050607085c3070d800000000"
+    "000000000000000000010000000000000001000000000000"
+    "102030405060708088776655443322110100000000000003"
+    "000000000000000100000000000000071000000000000001"
+    "000000000000000810000000000000020000000000000009"
+    "200000000000000154524345000000010000100300000000"
+    "00001003800000008a912d8300000000123456789abcdf00"
+    "000000000000000000000000000000000000000000000000";
+
+static const char k_golden_dispatch_completion[] =
+    "4753494d52504300000100000050000d00000000000000a0"
+    "0123456789abcdfa00112233445566778899aabbccddeeff"
+    "112233445566778801020304050607085cf2625b00000000"
+    "000000000000000000010000000000000001000000000000"
+    "102030405060708088776655443322110100000000000003"
+    "000000000000000100000000000000071000000000000001"
+    "000000000000000810000000000000020000000000000009"
+    "200000000000000154524345000000010000100300000000"
+    "00001003800000008a912d83796671ec123456789abcdf00"
+    "123456789abcdf10123456789abcdf40123456789abcdf50";
+
 static const uint8_t k_daemon_uuid[16] = {
     0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
     0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
@@ -1508,6 +1543,349 @@ static int test_signal_capability_and_failed_ack(void) {
   return 0;
 }
 
+static void initialize_dispatch_info(sagr_instance_info_t *info) {
+  initialize_queue_info(info);
+  info->negotiated_capabilities[0] =
+      SAGR_CAPABILITY_TOPOLOGY_MASK | SAGR_CAPABILITY_QUEUE_MASK |
+      SAGR_CAPABILITY_MEMORY_MASK | SAGR_CAPABILITY_SIGNAL_MASK |
+      SAGR_CAPABILITY_DISPATCH_MASK;
+}
+
+static void initialize_dispatch_request(
+    sagr_wire_dispatch_request_t *request) {
+  memset(request, 0, sizeof(*request));
+  request->major = SAGR_DISPATCH_PROTOCOL_MAJOR;
+  request->minor = SAGR_DISPATCH_PROTOCOL_MINOR;
+  request->opcode = SAGR_WIRE_DISPATCH_OPCODE_SUBMIT_PINNED;
+  request->queue_id = UINT64_C(0x1020304050607080);
+  request->queue_generation = UINT64_C(0x8877665544332211);
+  request->queue_sequence = UINT64_C(0x0100000000000003);
+  request->fixture_id = SAGR_DISPATCH_FIXTURE_GFX950_XOR_U8_V1;
+  request->input_allocation_id = UINT64_C(7);
+  request->input_generation = UINT64_C(0x1000000000000001);
+  request->output_allocation_id = UINT64_C(8);
+  request->output_generation = UINT64_C(0x1000000000000002);
+  request->signal_id = UINT64_C(9);
+  request->signal_generation = UINT64_C(0x2000000000000001);
+  memcpy(request->fixture_manifest_sha256,
+         sagr_dispatch_fixture_manifest_sha256,
+         sizeof(request->fixture_manifest_sha256));
+}
+
+static void initialize_dispatch_response(
+    sagr_wire_dispatch_response_t *response,
+    const sagr_wire_dispatch_request_t *request) {
+  memset(response, 0, sizeof(*response));
+  response->major = SAGR_DISPATCH_PROTOCOL_MAJOR;
+  response->minor = SAGR_DISPATCH_PROTOCOL_MINOR;
+  response->status = SAGR_WIRE_STATUS_OK;
+  response->opcode = request->opcode;
+  response->queue_id = request->queue_id;
+  response->queue_generation = request->queue_generation;
+  response->queue_sequence = request->queue_sequence;
+  response->fixture_id = request->fixture_id;
+  response->input_allocation_id = request->input_allocation_id;
+  response->input_generation = request->input_generation;
+  response->output_allocation_id = request->output_allocation_id;
+  response->output_generation = request->output_generation;
+  response->signal_id = request->signal_id;
+  response->signal_generation = request->signal_generation;
+  response->trace_id = UINT64_C(0x5452434500000001);
+  response->input_gpu_va = UINT64_C(0x0000100300000000);
+  response->output_gpu_va = UINT64_C(0x0000100380000000);
+  response->packet_crc32c = SAGR_DISPATCH_PACKET_CRC32C;
+  response->admission_tick = UINT64_C(0x123456789abcdf00);
+}
+
+static int test_dispatch_golden_frames(void) {
+  sagr_instance_info_t info;
+  sagr_wire_dispatch_request_t request;
+  sagr_wire_dispatch_response_t response;
+  sagr_wire_dispatch_response_t decoded;
+  uint8_t frame[SAGR_WIRE_DISPATCH_RESULT_FRAME_BYTES];
+  size_t frame_size = 0;
+  int32_t wire_status = -1;
+  const char *reason = NULL;
+  const uint64_t request_id = UINT64_C(0x0123456789abcdfa);
+  initialize_dispatch_info(&info);
+  initialize_dispatch_request(&request);
+  if (sagr_protocol_encode_dispatch_request(
+          &info, request_id, &request, frame, sizeof(frame), &frame_size) !=
+          SAGR_STATUS_SUCCESS ||
+      frame_size != SAGR_WIRE_DISPATCH_REQUEST_FRAME_BYTES ||
+      expect_equal("DISPATCH_REQUEST", frame, frame_size,
+                   k_golden_dispatch_request) != 0) {
+    fprintf(stderr, "dispatch request golden encode failed\n");
+    return 1;
+  }
+
+  initialize_dispatch_response(&response, &request);
+  if (sagr_protocol_encode_dispatch_response(
+          &info, request_id, SAGR_WIRE_MESSAGE_DISPATCH_ACK, &response, frame,
+          sizeof(frame), &frame_size) != SAGR_STATUS_SUCCESS ||
+      expect_equal("DISPATCH_ACK", frame, frame_size,
+                   k_golden_dispatch_ack) != 0 ||
+      sagr_protocol_decode_dispatch_response(
+          frame, frame_size, &info, request_id,
+          SAGR_WIRE_MESSAGE_DISPATCH_ACK, &decoded, &wire_status, &reason) !=
+          SAGR_STATUS_SUCCESS ||
+      wire_status != SAGR_WIRE_STATUS_OK ||
+      decoded.message_type != SAGR_WIRE_MESSAGE_DISPATCH_ACK ||
+      decoded.request_id != request_id ||
+      decoded.queue_sequence != request.queue_sequence ||
+      decoded.trace_id != response.trace_id ||
+      decoded.input_gpu_va != response.input_gpu_va ||
+      decoded.output_gpu_va != response.output_gpu_va ||
+      decoded.packet_crc32c != SAGR_DISPATCH_PACKET_CRC32C ||
+      decoded.output_crc32c != 0 ||
+      decoded.admission_tick != response.admission_tick ||
+      decoded.start_tick != 0 || decoded.end_tick != 0 ||
+      decoded.retire_tick != 0) {
+    fprintf(stderr, "dispatch ACK golden encode/decode failed: %s\n",
+            reason == NULL ? "no reason" : reason);
+    return 1;
+  }
+
+  response.output_crc32c = SAGR_DISPATCH_OUTPUT_CRC32C;
+  response.start_tick = UINT64_C(0x123456789abcdf10);
+  response.end_tick = UINT64_C(0x123456789abcdf40);
+  response.retire_tick = UINT64_C(0x123456789abcdf50);
+  if (sagr_protocol_encode_dispatch_response(
+          &info, request_id, SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION, &response,
+          frame, sizeof(frame), &frame_size) != SAGR_STATUS_SUCCESS ||
+      expect_equal("DISPATCH_COMPLETION", frame, frame_size,
+                   k_golden_dispatch_completion) != 0 ||
+      sagr_protocol_decode_dispatch_response(
+          frame, frame_size, &info, request_id,
+          SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION, &decoded, &wire_status,
+          &reason) != SAGR_STATUS_SUCCESS ||
+      decoded.message_type != SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION ||
+      decoded.output_crc32c != SAGR_DISPATCH_OUTPUT_CRC32C ||
+      decoded.start_tick != response.start_tick ||
+      decoded.end_tick != response.end_tick ||
+      decoded.retire_tick != response.retire_tick) {
+    fprintf(stderr, "dispatch completion golden encode/decode failed: %s\n",
+            reason == NULL ? "no reason" : reason);
+    return 1;
+  }
+  return 0;
+}
+
+static int test_dispatch_request_structural_rules(void) {
+  sagr_instance_info_t info;
+  sagr_wire_dispatch_request_t request;
+  uint8_t frame[SAGR_WIRE_DISPATCH_REQUEST_FRAME_BYTES];
+  size_t frame_size = 0;
+  initialize_dispatch_info(&info);
+  initialize_dispatch_request(&request);
+  if (sagr_protocol_encode_dispatch_request(
+          &info, 1, &request, frame, sizeof(frame), &frame_size) !=
+      SAGR_STATUS_SUCCESS) {
+    return 1;
+  }
+#define EXPECT_DISPATCH_REQUEST_REJECTED(MUTATION)                           \
+  do {                                                                        \
+    sagr_wire_dispatch_request_t changed = request;                           \
+    MUTATION;                                                                 \
+    if (sagr_protocol_encode_dispatch_request(                               \
+            &info, 1, &changed, frame, sizeof(frame), &frame_size) !=        \
+        SAGR_STATUS_INVALID_ARGUMENT) {                                       \
+      fprintf(stderr, "noncanonical dispatch request was encoded\n");     \
+      return 1;                                                               \
+    }                                                                         \
+  } while (0)
+  EXPECT_DISPATCH_REQUEST_REJECTED(changed.major = 2);
+  EXPECT_DISPATCH_REQUEST_REJECTED(changed.flags = 1);
+  EXPECT_DISPATCH_REQUEST_REJECTED(changed.queue_sequence = 0);
+  EXPECT_DISPATCH_REQUEST_REJECTED(changed.fixture_id = 2);
+  EXPECT_DISPATCH_REQUEST_REJECTED(
+      changed.output_allocation_id = changed.input_allocation_id);
+  EXPECT_DISPATCH_REQUEST_REJECTED(changed.expected_signal_value_bits = 1);
+  EXPECT_DISPATCH_REQUEST_REJECTED(changed.fixture_manifest_sha256[0] ^= 1);
+#undef EXPECT_DISPATCH_REQUEST_REJECTED
+  if (sagr_protocol_encode_dispatch_request(
+          &info, 1, &request, frame, sizeof(frame) - 1U, &frame_size) !=
+      SAGR_STATUS_INVALID_ARGUMENT) {
+    fprintf(stderr, "undersized dispatch request frame was encoded\n");
+    return 1;
+  }
+  return 0;
+}
+
+static int expect_dispatch_decode_status(
+    const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
+    uint64_t request_id, uint16_t message_type, sagr_status_t expected) {
+  sagr_wire_dispatch_response_t decoded;
+  int32_t wire_status = -1;
+  const char *reason = NULL;
+  const sagr_status_t actual = sagr_protocol_decode_dispatch_response(
+      frame, frame_size, info, request_id, message_type, &decoded,
+      &wire_status, &reason);
+  if (actual != expected) {
+    fprintf(stderr, "dispatch mutation status=%d expected=%d: %s\n", actual,
+            expected, reason == NULL ? "no reason" : reason);
+    return 1;
+  }
+  return 0;
+}
+
+static int test_dispatch_response_mutations(void) {
+  sagr_instance_info_t info;
+  uint8_t golden[SAGR_WIRE_DISPATCH_RESULT_FRAME_BYTES];
+  uint8_t mutated[SAGR_WIRE_DISPATCH_RESULT_FRAME_BYTES];
+  size_t golden_size = 0;
+  const uint64_t request_id = UINT64_C(0x0123456789abcdfa);
+  initialize_dispatch_info(&info);
+  if (decode_hex(k_golden_dispatch_ack, golden, sizeof(golden),
+                 &golden_size) != 0) {
+    return 1;
+  }
+#define EXPECT_DISPATCH_MUTATION(MUTATION, EXPECTED)                         \
+  do {                                                                        \
+    memcpy(mutated, golden, golden_size);                                     \
+    MUTATION;                                                                 \
+    sagr_protocol_recompute_frame_crc(mutated, golden_size);                  \
+    if (expect_dispatch_decode_status(                                        \
+            mutated, golden_size, &info, request_id,                         \
+            SAGR_WIRE_MESSAGE_DISPATCH_ACK, EXPECTED) != 0) {                \
+      return 1;                                                               \
+    }                                                                         \
+  } while (0)
+  EXPECT_DISPATCH_MUTATION(
+      store_u16(mutated + 14, SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION),
+      SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_DISPATCH_MUTATION(store_u64(mutated + 24, request_id + 1),
+                           SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_DISPATCH_MUTATION(mutated[32] ^= 1, SAGR_STATUS_INSTANCE_MISMATCH);
+  EXPECT_DISPATCH_MUTATION(store_u64(mutated + 48, info.connection_id + 1),
+                           SAGR_STATUS_TOPOLOGY_MISMATCH);
+  EXPECT_DISPATCH_MUTATION(store_u64(mutated + 56, info.epoch + 1),
+                           SAGR_STATUS_TOPOLOGY_MISMATCH);
+  EXPECT_DISPATCH_MUTATION(store_u16(mutated + SAGR_WIRE_HEADER_BYTES, 2),
+                           SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_DISPATCH_MUTATION(
+      store_u16(mutated + SAGR_WIRE_HEADER_BYTES + 8, 99),
+      SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_DISPATCH_MUTATION(
+      store_u16(mutated + SAGR_WIRE_HEADER_BYTES + 10, 1),
+      SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_DISPATCH_MUTATION(
+      store_u32(mutated + SAGR_WIRE_HEADER_BYTES + 12, 1),
+      SAGR_STATUS_PROTOCOL_ERROR);
+#undef EXPECT_DISPATCH_MUTATION
+  memcpy(mutated, golden, golden_size);
+  mutated[golden_size - 1U] ^= 1;
+  return expect_dispatch_decode_status(
+             mutated, golden_size, &info, request_id,
+             SAGR_WIRE_MESSAGE_DISPATCH_ACK, SAGR_STATUS_CHECKSUM_ERROR) ||
+         expect_dispatch_decode_status(
+             golden, golden_size - 1U, &info, request_id,
+             SAGR_WIRE_MESSAGE_DISPATCH_ACK, SAGR_STATUS_PROTOCOL_ERROR);
+}
+
+static int test_dispatch_capability_and_failed_ack(void) {
+  const uint64_t all_caps =
+      SAGR_CAPABILITY_TOPOLOGY_MASK | SAGR_CAPABILITY_QUEUE_MASK |
+      SAGR_CAPABILITY_MEMORY_MASK | SAGR_CAPABILITY_SIGNAL_MASK |
+      SAGR_CAPABILITY_DISPATCH_MASK;
+  sagr_wire_ack_fields_t fields;
+  sagr_instance_open_options_t options;
+  sagr_wire_ack_result_t result;
+  sagr_wire_dispatch_request_t request;
+  sagr_wire_dispatch_response_t response;
+  sagr_wire_dispatch_response_t decoded;
+  sagr_instance_info_t info;
+  uint8_t frame[SAGR_WIRE_MAX_HANDSHAKE_BYTES];
+  size_t frame_size = 0;
+  int32_t wire_status = -1;
+  const char *reason = NULL;
+  initialize_success_ack(&fields);
+  fields.selected_capabilities[0] = all_caps;
+  initialize_golden_options(&options);
+  options.offered_capabilities[0] = all_caps;
+  options.required_capabilities[0] = all_caps & ~SAGR_CAPABILITY_DISPATCH_MASK;
+  if (sagr_protocol_encode_ack(&fields, frame, sizeof(frame), &frame_size) !=
+          SAGR_STATUS_SUCCESS ||
+      sagr_protocol_decode_ack(frame, frame_size, &options, fields.request_id,
+                               k_client_nonce, &result, &wire_status,
+                               &reason) != SAGR_STATUS_CAPABILITY_MISMATCH) {
+    fprintf(stderr, "offered-only dispatch capability ACK was accepted\n");
+    return 1;
+  }
+  options.required_capabilities[0] = all_caps;
+  if (sagr_protocol_decode_ack(frame, frame_size, &options, fields.request_id,
+                               k_client_nonce, &result, &wire_status,
+                               &reason) != SAGR_STATUS_SUCCESS ||
+      result.selected_capabilities[0] != all_caps) {
+    fprintf(stderr, "required dispatch capability ACK was rejected: %s\n",
+            reason == NULL ? "no reason" : reason);
+    return 1;
+  }
+  fields.selected_capabilities[0] &= ~SAGR_CAPABILITY_SIGNAL_MASK;
+  if (sagr_protocol_encode_ack(&fields, frame, sizeof(frame), &frame_size) !=
+          SAGR_STATUS_SUCCESS ||
+      sagr_protocol_decode_ack(frame, frame_size, &options, fields.request_id,
+                               k_client_nonce, &result, &wire_status,
+                               &reason) != SAGR_STATUS_CAPABILITY_MISMATCH) {
+    fprintf(stderr, "dispatch ACK without SIGNAL_EVENT_V1 was accepted\n");
+    return 1;
+  }
+
+  initialize_dispatch_request(&request);
+  initialize_dispatch_response(&response, &request);
+  response.status = SAGR_WIRE_STATUS_BUSY;
+  response.trace_id = 0;
+  response.input_gpu_va = 0;
+  response.output_gpu_va = 0;
+  response.packet_crc32c = 0;
+  response.admission_tick = 0;
+  if (sagr_protocol_validate_failed_dispatch_ack(&request, &response) !=
+      SAGR_STATUS_SUCCESS) {
+    fprintf(stderr, "canonical failed dispatch ACK was rejected\n");
+    return 1;
+  }
+#define EXPECT_FAILED_DISPATCH_ACK_REJECTED(MUTATION)                        \
+  do {                                                                        \
+    sagr_wire_dispatch_response_t changed = response;                         \
+    MUTATION;                                                                 \
+    if (sagr_protocol_validate_failed_dispatch_ack(&request, &changed) !=     \
+        SAGR_STATUS_PROTOCOL_ERROR) {                                         \
+      fprintf(stderr, "noncanonical failed dispatch ACK was accepted\n"); \
+      return 1;                                                               \
+    }                                                                         \
+  } while (0)
+  EXPECT_FAILED_DISPATCH_ACK_REJECTED(changed.queue_id ^= UINT64_C(1));
+  EXPECT_FAILED_DISPATCH_ACK_REJECTED(changed.queue_sequence ^= UINT64_C(1));
+  EXPECT_FAILED_DISPATCH_ACK_REJECTED(
+      changed.output_generation ^= UINT64_C(1));
+  EXPECT_FAILED_DISPATCH_ACK_REJECTED(changed.signal_id ^= UINT64_C(1));
+  EXPECT_FAILED_DISPATCH_ACK_REJECTED(changed.trace_id = UINT64_C(1));
+  EXPECT_FAILED_DISPATCH_ACK_REJECTED(changed.packet_crc32c = UINT32_C(1));
+  EXPECT_FAILED_DISPATCH_ACK_REJECTED(changed.admission_tick = UINT64_C(1));
+  EXPECT_FAILED_DISPATCH_ACK_REJECTED(changed.status = SAGR_WIRE_STATUS_OK);
+#undef EXPECT_FAILED_DISPATCH_ACK_REJECTED
+
+  initialize_dispatch_info(&info);
+  request.opcode = UINT16_C(99);
+  response.opcode = request.opcode;
+  response.status = SAGR_WIRE_STATUS_MALFORMED;
+  if (sagr_protocol_encode_dispatch_response(
+          &info, UINT64_C(77), SAGR_WIRE_MESSAGE_DISPATCH_ACK, &response,
+          frame, sizeof(frame), &frame_size) != SAGR_STATUS_SUCCESS ||
+      sagr_protocol_decode_dispatch_response(
+          frame, frame_size, &info, UINT64_C(77),
+          SAGR_WIRE_MESSAGE_DISPATCH_ACK, &decoded, &wire_status, &reason) !=
+          SAGR_STATUS_PROTOCOL_ERROR ||
+      wire_status != SAGR_WIRE_STATUS_MALFORMED ||
+      decoded.opcode != request.opcode ||
+      sagr_protocol_validate_failed_dispatch_ack(&request, &decoded) !=
+          SAGR_STATUS_SUCCESS) {
+    fprintf(stderr, "raw-opcode MALFORMED dispatch ACK was not preserved\n");
+    return 1;
+  }
+  return 0;
+}
+
 static int test_request_id_exhaustion(void) {
   uint64_t next_request_id = UINT64_MAX - UINT64_C(1);
   uint64_t request_id = 0;
@@ -1554,6 +1932,10 @@ int main(void) {
   failures += test_signal_request_structural_rules();
   failures += test_signal_response_mutations();
   failures += test_signal_capability_and_failed_ack();
+  failures += test_dispatch_golden_frames();
+  failures += test_dispatch_request_structural_rules();
+  failures += test_dispatch_response_mutations();
+  failures += test_dispatch_capability_and_failed_ack();
   failures += test_request_id_exhaustion();
   return failures == 0 ? 0 : 1;
 }

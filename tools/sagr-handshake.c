@@ -4,6 +4,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdint.h>
@@ -11,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <self_amdgpu_runtime/runtime.h>
 
@@ -26,7 +28,8 @@ static void usage(FILE *stream, const char *program) {
           "[--memory-reuse]] "
           "[--signal-initial I64 --signal-wait-condition eq|ne|lt|gte "
           "--signal-wait-compare I64 --signal-wait-timeout-ms N "
-          "--signal-store I64 [--signal-reuse]]\n",
+          "--signal-store I64 [--signal-reuse]] "
+          "[--dispatch-fixture gfx950-xor-u8-v1]\n",
           program);
 }
 
@@ -97,6 +100,37 @@ typedef struct signal_cli_result {
   sagr_signal_info_t reuse_info;
   uint32_t reuse_destroyed;
 } signal_cli_result_t;
+
+typedef struct dispatch_cli_options {
+  uint32_t enabled;
+} dispatch_cli_options_t;
+
+typedef struct dispatch_cli_result {
+  sagr_queue_info_t queue_info;
+  sagr_memory_info_t input_info;
+  sagr_memory_info_t output_info;
+  sagr_signal_info_t signal_info;
+  sagr_dispatch_ticket_t ticket;
+  sagr_dispatch_completion_t completion;
+  sagr_signal_wait_result_t signal_completion;
+  sagr_status_t armed_wait_status;
+  int32_t armed_wait_wire_status;
+  sagr_status_t first_wait_status;
+  int32_t first_wait_wire_status;
+  uint32_t dispatch_retried_without_send;
+  uint32_t input_crc32c;
+  uint32_t output_sentinel_crc32c;
+  uint32_t output_crc32c;
+  uint32_t output_match;
+  uint32_t queue_destroyed;
+  uint32_t input_freed;
+  uint32_t output_freed;
+  uint32_t signal_destroyed;
+  uint8_t input_bytes[64];
+  uint8_t initial_output_bytes[64];
+  uint8_t expected_output_bytes[64];
+  uint8_t output_bytes[64];
+} dispatch_cli_result_t;
 
 static int hex_value(char character) {
   if (character >= '0' && character <= '9') {
@@ -335,12 +369,22 @@ static void print_uuid(const uint8_t uuid[16]) {
   putchar('"');
 }
 
+static void print_hex_bytes(const uint8_t *bytes, size_t size) {
+  size_t index;
+  putchar('"');
+  for (index = 0; index < size; ++index) {
+    printf("%02x", (unsigned int)bytes[index]);
+  }
+  putchar('"');
+}
+
 static int parse_arguments(int argc, char **argv, const char **endpoint,
                            sagr_instance_open_options_t *options,
                            uint64_t *hold_ms,
                            queue_cli_options_t *queue_options,
                            memory_cli_options_t *memory_options,
-                           signal_cli_options_t *signal_options) {
+                           signal_cli_options_t *signal_options,
+                           dispatch_cli_options_t *dispatch_options) {
   int index;
   int have_job = 0;
   int have_rank = 0;
@@ -355,6 +399,7 @@ static int parse_arguments(int argc, char **argv, const char **endpoint,
   int have_signal_compare = 0;
   int have_signal_timeout = 0;
   int have_signal_store = 0;
+  int have_dispatch_fixture = 0;
   memory_options->alignment = SAGR_MEMORY_ALIGNMENT_4K;
   for (index = 1; index < argc; ++index) {
     const char *argument = argv[index];
@@ -502,6 +547,11 @@ static int parse_arguments(int argc, char **argv, const char **endpoint,
         return -1;
       }
       have_signal_store = 1;
+    } else if (strcmp(argument, "--dispatch-fixture") == 0) {
+      if (strcmp(argv[++index], "gfx950-xor-u8-v1") != 0) {
+        return -1;
+      }
+      have_dispatch_fixture = 1;
     } else {
       return -1;
     }
@@ -551,6 +601,19 @@ static int parse_arguments(int argc, char **argv, const char **endpoint,
         SAGR_CAPABILITY_SIGNAL_MASK;
     options->required_capabilities[SAGR_CAPABILITY_SIGNAL_WORD] |=
         SAGR_CAPABILITY_SIGNAL_MASK;
+  }
+  if (have_dispatch_fixture != 0) {
+    const uint64_t dependencies =
+        SAGR_CAPABILITY_QUEUE_MASK | SAGR_CAPABILITY_MEMORY_MASK |
+        SAGR_CAPABILITY_SIGNAL_MASK | SAGR_CAPABILITY_DISPATCH_MASK;
+    if (queue_options->enabled != 0 || memory_options->enabled != 0 ||
+        signal_options->enabled != 0 || memory_options->reuse != 0 ||
+        signal_options->reuse != 0) {
+      return -1;
+    }
+    dispatch_options->enabled = 1;
+    options->offered_capabilities[0] |= dependencies;
+    options->required_capabilities[0] |= dependencies;
   }
   return 0;
 }
@@ -899,6 +962,295 @@ static sagr_status_t run_signal_lifecycle(
   return SAGR_STATUS_SUCCESS;
 }
 
+static sagr_status_t run_pinned_dispatch(
+    sagr_instance_t instance, const sagr_instance_open_options_t *open_options,
+    dispatch_cli_result_t *result, sagr_error_info_t *error,
+    const char **phase) {
+  sagr_queue_create_options_t queue_create;
+  sagr_queue_operation_options_t queue_operation;
+  sagr_queue_operation_options_t cancelled_wait_operation;
+  sagr_memory_allocate_options_t memory_allocate;
+  sagr_memory_operation_options_t memory_operation;
+  sagr_signal_create_options_t signal_create;
+  sagr_signal_operation_options_t signal_operation;
+  sagr_signal_operation_options_t armed_wait_operation;
+  sagr_pinned_dispatch_options_t dispatch_options;
+  sagr_signal_wait_result_t armed_wait_result;
+  sagr_dispatch_completion_t cancelled_completion;
+  sagr_queue_t queue = NULL;
+  sagr_memory_t input = NULL;
+  sagr_memory_t output = NULL;
+  sagr_signal_t signal = NULL;
+  uint8_t input_bytes[64];
+  uint8_t output_sentinel[64];
+  uint8_t returned[64];
+  uint8_t expected[64];
+  sagr_status_t status;
+  int cancel_pipe[2] = {-1, -1};
+  size_t index;
+
+  memset(result, 0, sizeof(*result));
+  memset(input_bytes, 0, sizeof(input_bytes));
+  memset(output_sentinel, 0, sizeof(output_sentinel));
+  memset(returned, 0xa5, sizeof(returned));
+  memset(expected, 0, sizeof(expected));
+  for (index = 0; index < sizeof(input_bytes); ++index) {
+    input_bytes[index] = (uint8_t)index;
+    expected[index] = (uint8_t)(input_bytes[index] ^ UINT8_C(0x5a));
+  }
+  memcpy(result->input_bytes, input_bytes, sizeof(input_bytes));
+  memcpy(result->initial_output_bytes, output_sentinel,
+         sizeof(output_sentinel));
+  memcpy(result->expected_output_bytes, expected, sizeof(expected));
+  status = sagr_queue_create_options_init(
+      &queue_create, (uint32_t)sizeof(queue_create));
+  if (status == SAGR_STATUS_SUCCESS) {
+    status = sagr_queue_operation_options_init(
+        &queue_operation, (uint32_t)sizeof(queue_operation));
+  }
+  if (status == SAGR_STATUS_SUCCESS) {
+    status = sagr_queue_operation_options_init(
+        &cancelled_wait_operation,
+        (uint32_t)sizeof(cancelled_wait_operation));
+  }
+  if (status == SAGR_STATUS_SUCCESS) {
+    status = sagr_memory_allocate_options_init(
+        &memory_allocate, (uint32_t)sizeof(memory_allocate));
+  }
+  if (status == SAGR_STATUS_SUCCESS) {
+    status = sagr_memory_operation_options_init(
+        &memory_operation, (uint32_t)sizeof(memory_operation));
+  }
+  if (status == SAGR_STATUS_SUCCESS) {
+    status = sagr_signal_create_options_init(
+        &signal_create, (uint32_t)sizeof(signal_create));
+  }
+  if (status == SAGR_STATUS_SUCCESS) {
+    status = sagr_signal_operation_options_init(
+        &signal_operation, (uint32_t)sizeof(signal_operation));
+  }
+  if (status == SAGR_STATUS_SUCCESS) {
+    status = sagr_signal_operation_options_init(
+        &armed_wait_operation, (uint32_t)sizeof(armed_wait_operation));
+  }
+  if (status == SAGR_STATUS_SUCCESS) {
+    status = sagr_pinned_dispatch_options_init(
+        &dispatch_options, (uint32_t)sizeof(dispatch_options));
+  }
+  if (status != SAGR_STATUS_SUCCESS) {
+    set_local_error(error, status, 0,
+                    "could not initialize pinned dispatch options");
+    *phase = "dispatch_options";
+    return status;
+  }
+  queue_create.depth = 1;
+  queue_operation.timeout_ns = open_options->open_timeout_ns;
+  memory_allocate.size_bytes = SAGR_DISPATCH_FIXED_IO_BYTES;
+  memory_operation.timeout_ns = open_options->open_timeout_ns;
+  signal_create.initial_value = INT64_C(1);
+  signal_operation.timeout_ns = open_options->open_timeout_ns;
+  armed_wait_operation.timeout_ns = UINT64_C(1000000);
+
+  *phase = "dispatch_queue_create";
+  status = sagr_queue_create(instance, &queue_create, &queue_operation, &queue,
+                             &result->queue_info,
+                             (uint32_t)sizeof(result->queue_info), error,
+                             (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  *phase = "dispatch_input_allocate";
+  status = sagr_memory_allocate(
+      instance, &memory_allocate, &memory_operation, &input,
+      &result->input_info, (uint32_t)sizeof(result->input_info), error,
+      (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  *phase = "dispatch_output_allocate";
+  status = sagr_memory_allocate(
+      instance, &memory_allocate, &memory_operation, &output,
+      &result->output_info, (uint32_t)sizeof(result->output_info), error,
+      (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  result->input_crc32c = cli_crc32c(input_bytes, sizeof(input_bytes));
+  result->output_sentinel_crc32c =
+      cli_crc32c(output_sentinel, sizeof(output_sentinel));
+  *phase = "dispatch_input_h2d";
+  status = sagr_memory_copy_from_host(
+      input, 0, input_bytes, sizeof(input_bytes), &memory_operation, error,
+      (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  *phase = "dispatch_output_sentinel_h2d";
+  status = sagr_memory_copy_from_host(
+      output, 0, output_sentinel, sizeof(output_sentinel), &memory_operation,
+      error, (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  *phase = "dispatch_signal_create";
+  status = sagr_signal_create(
+      instance, &signal_create, &signal_operation, &signal,
+      &result->signal_info, (uint32_t)sizeof(result->signal_info), error,
+      (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  memset(&armed_wait_result, 0, sizeof(armed_wait_result));
+  *phase = "dispatch_signal_arm";
+  status = sagr_signal_wait(
+      signal, SAGR_SIGNAL_CONDITION_EQ, SAGR_DISPATCH_EXPECTED_SIGNAL_VALUE,
+      &armed_wait_operation, &armed_wait_result,
+      (uint32_t)sizeof(armed_wait_result), error,
+      (uint32_t)sizeof(*error));
+  result->armed_wait_status = status;
+  result->armed_wait_wire_status = error->wire_status;
+  if (status != SAGR_STATUS_TIMED_OUT) {
+    if (status == SAGR_STATUS_SUCCESS) {
+      status = SAGR_STATUS_PROTOCOL_ERROR;
+      set_local_error(error, status, 0,
+                      "dispatch signal wait was satisfied before admission");
+    }
+    return status;
+  }
+  *phase = "dispatch_submit";
+  status = sagr_queue_submit_pinned_dispatch(
+      queue, input, output, signal, &dispatch_options, &queue_operation,
+      &result->ticket, (uint32_t)sizeof(result->ticket), error,
+      (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  *phase = "dispatch_wait_cancel_setup";
+  if (pipe(cancel_pipe) != 0 ||
+      fcntl(cancel_pipe[0], F_SETFD, FD_CLOEXEC) != 0 ||
+      fcntl(cancel_pipe[1], F_SETFD, FD_CLOEXEC) != 0) {
+    const int native_error = errno;
+    if (cancel_pipe[0] >= 0) {
+      (void)close(cancel_pipe[0]);
+      (void)close(cancel_pipe[1]);
+    }
+    set_local_error(error, SAGR_STATUS_INTERNAL_ERROR, native_error,
+                    "could not create dispatch cancellation pipe");
+    return SAGR_STATUS_INTERNAL_ERROR;
+  }
+  {
+    const uint8_t cancel_byte = UINT8_C(1);
+    if (write(cancel_pipe[1], &cancel_byte, sizeof(cancel_byte)) !=
+        (ssize_t)sizeof(cancel_byte)) {
+      const int native_error = errno;
+      (void)close(cancel_pipe[0]);
+      (void)close(cancel_pipe[1]);
+      set_local_error(error, SAGR_STATUS_INTERNAL_ERROR, native_error,
+                      "could not arm dispatch cancellation pipe");
+      return SAGR_STATUS_INTERNAL_ERROR;
+    }
+  }
+  cancelled_wait_operation.timeout_ns = open_options->open_timeout_ns;
+  cancelled_wait_operation.cancel_fd = cancel_pipe[0];
+  memset(&cancelled_completion, 0xa5, sizeof(cancelled_completion));
+  *phase = "dispatch_wait_cancelled";
+  status = sagr_queue_wait_pinned_dispatch(
+      queue, &result->ticket, &cancelled_wait_operation,
+      &cancelled_completion, (uint32_t)sizeof(cancelled_completion), error,
+      (uint32_t)sizeof(*error));
+  result->first_wait_status = status;
+  result->first_wait_wire_status = error->wire_status;
+  (void)close(cancel_pipe[0]);
+  (void)close(cancel_pipe[1]);
+  cancel_pipe[0] = -1;
+  cancel_pipe[1] = -1;
+  if (status != SAGR_STATUS_CANCELLED ||
+      cancelled_completion.struct_size != sizeof(cancelled_completion) ||
+      cancelled_completion.request_id != 0 ||
+      cancelled_completion.trace_id != 0) {
+    if (status == SAGR_STATUS_SUCCESS) {
+      status = SAGR_STATUS_PROTOCOL_ERROR;
+      set_local_error(error, status, 0,
+                      "cancelled dispatch wait consumed its ticket");
+    }
+    return status;
+  }
+  result->dispatch_retried_without_send = 1;
+  *phase = "dispatch_wait";
+  status = sagr_queue_wait_pinned_dispatch(
+      queue, &result->ticket, &queue_operation, &result->completion,
+      (uint32_t)sizeof(result->completion), error,
+      (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (result->completion.request_id != result->ticket.request_id) {
+    status = SAGR_STATUS_PROTOCOL_ERROR;
+    set_local_error(error, status, 0,
+                    "dispatch completion request ID disagreed with ticket");
+    *phase = "dispatch_completion_identity";
+    return status;
+  }
+  *phase = "dispatch_signal_wait_retry";
+  status = sagr_signal_wait(
+      signal, SAGR_SIGNAL_CONDITION_EQ, SAGR_DISPATCH_EXPECTED_SIGNAL_VALUE,
+      &signal_operation, &result->signal_completion,
+      (uint32_t)sizeof(result->signal_completion), error,
+      (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  *phase = "dispatch_output_d2h";
+  status = sagr_memory_copy_to_host(
+      output, 0, returned, sizeof(returned), &memory_operation, error,
+      (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  result->output_crc32c = cli_crc32c(returned, sizeof(returned));
+  memcpy(result->output_bytes, returned, sizeof(returned));
+  result->output_match =
+      (uint32_t)(memcmp(returned, expected, sizeof(returned)) == 0 &&
+                 result->output_crc32c == SAGR_DISPATCH_OUTPUT_CRC32C &&
+                 result->completion.output_crc32c ==
+                     SAGR_DISPATCH_OUTPUT_CRC32C);
+  if (result->output_match == 0) {
+    status = SAGR_STATUS_CHECKSUM_ERROR;
+    set_local_error(error, status, 0,
+                    "pinned dispatch output did not match fixture authority");
+    *phase = "dispatch_output_compare";
+    return status;
+  }
+  *phase = "dispatch_output_free";
+  status = sagr_memory_free(&output, &memory_operation, error,
+                            (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  result->output_freed = 1;
+  *phase = "dispatch_input_free";
+  status = sagr_memory_free(&input, &memory_operation, error,
+                            (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  result->input_freed = 1;
+  *phase = "dispatch_signal_destroy";
+  status = sagr_signal_destroy(&signal, &signal_operation, error,
+                               (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  result->signal_destroyed = 1;
+  *phase = "dispatch_queue_destroy";
+  status = sagr_queue_destroy(&queue, &queue_operation, error,
+                              (uint32_t)sizeof(*error));
+  if (status == SAGR_STATUS_SUCCESS) {
+    result->queue_destroyed = 1;
+  }
+  return status;
+}
+
 static sagr_status_t run_queue_control(
     sagr_instance_t instance, const sagr_instance_open_options_t *open_options,
     const queue_cli_options_t *queue_options, queue_cli_result_t *result,
@@ -1005,6 +1357,8 @@ int main(int argc, char **argv) {
   memory_cli_result_t memory_result;
   signal_cli_options_t signal_options;
   signal_cli_result_t signal_result;
+  dispatch_cli_options_t dispatch_options;
+  dispatch_cli_result_t dispatch_result;
   const char *failure_phase = "handshake";
   uint32_t index;
   uint64_t hold_ms = 0;
@@ -1015,10 +1369,13 @@ int main(int argc, char **argv) {
   memset(&memory_result, 0, sizeof(memory_result));
   memset(&signal_options, 0, sizeof(signal_options));
   memset(&signal_result, 0, sizeof(signal_result));
+  memset(&dispatch_options, 0, sizeof(dispatch_options));
+  memset(&dispatch_result, 0, sizeof(dispatch_result));
   status = sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (status != SAGR_STATUS_SUCCESS ||
       parse_arguments(argc, argv, &endpoint, &options, &hold_ms,
-                      &queue_options, &memory_options, &signal_options) != 0) {
+                      &queue_options, &memory_options, &signal_options,
+                      &dispatch_options) != 0) {
     usage(stderr, argv[0]);
     return 2;
   }
@@ -1057,6 +1414,16 @@ int main(int argc, char **argv) {
   if (signal_options.enabled != 0) {
     status = run_signal_lifecycle(instance, &options, &signal_options,
                                   &signal_result, &error, &failure_phase);
+    if (status != SAGR_STATUS_SUCCESS) {
+      (void)sagr_instance_close(&instance);
+      print_failure_json(failure_phase, status, &error);
+      free(queue_result.sequences);
+      return 1;
+    }
+  }
+  if (dispatch_options.enabled != 0) {
+    status = run_pinned_dispatch(instance, &options, &dispatch_result, &error,
+                                 &failure_phase);
     if (status != SAGR_STATUS_SUCCESS) {
       (void)sagr_instance_close(&instance);
       print_failure_json(failure_phase, status, &error);
@@ -1169,6 +1536,135 @@ int main(int argc, char **argv) {
              signal_result.reuse_destroyed != 0 ? "true" : "false");
     }
     fputc('}', stdout);
+  }
+  if (dispatch_options.enabled != 0) {
+    printf(
+        ",\"dispatch\":{\"status\":0,\"fixture\":"
+        "\"gfx950-xor-u8-v1\",\"fixture_id\":\"0x%016" PRIx64
+        "\",\"fixture_manifest_sha256\":"
+        "\"%s\",\"input_crc32c\":\"0x%08" PRIx32
+        "\",\"output_sentinel_crc32c\":\"0x%08" PRIx32 "\",\"input_hex\":" ,
+        dispatch_result.ticket.fixture_id,
+        SAGR_DISPATCH_FIXTURE_MANIFEST_SHA256_HEX,
+        dispatch_result.input_crc32c,
+        dispatch_result.output_sentinel_crc32c);
+    print_hex_bytes(dispatch_result.input_bytes,
+                    sizeof(dispatch_result.input_bytes));
+    fputs(",\"initial_output_hex\":", stdout);
+    print_hex_bytes(dispatch_result.initial_output_bytes,
+                    sizeof(dispatch_result.initial_output_bytes));
+    fputs(",\"expected_output_hex\":", stdout);
+    print_hex_bytes(dispatch_result.expected_output_bytes,
+                    sizeof(dispatch_result.expected_output_bytes));
+    fputs(",\"d2h_output_hex\":", stdout);
+    print_hex_bytes(dispatch_result.output_bytes,
+                    sizeof(dispatch_result.output_bytes));
+    printf(
+        ",\"ticket\":{\"request_id\":\"0x%016" PRIx64
+        "\",\"queue_id\":\"0x%016" PRIx64
+        "\",\"queue_generation\":\"0x%016" PRIx64
+        "\",\"queue_sequence\":\"0x%016" PRIx64
+        "\",\"input_allocation_id\":\"0x%016" PRIx64
+        "\",\"input_generation\":\"0x%016" PRIx64
+        "\",\"output_allocation_id\":\"0x%016" PRIx64
+        "\",\"output_generation\":\"0x%016" PRIx64
+        "\",\"signal_id\":\"0x%016" PRIx64
+        "\",\"signal_generation\":\"0x%016" PRIx64
+        "\",\"trace_id\":\"0x%016" PRIx64
+        "\",\"input_gpu_va\":\"0x%016" PRIx64
+        "\",\"output_gpu_va\":\"0x%016" PRIx64
+        "\",\"packet_crc32c\":\"0x%08" PRIx32
+        "\",\"admission_tick\":\"0x%016" PRIx64
+        "\"},\"first_wait\":{\"status\":%" PRId32
+        ",\"status_name\":" ,
+        dispatch_result.ticket.request_id, dispatch_result.ticket.queue_id,
+        dispatch_result.ticket.queue_generation,
+        dispatch_result.ticket.queue_sequence,
+        dispatch_result.ticket.input_allocation_id,
+        dispatch_result.ticket.input_generation,
+        dispatch_result.ticket.output_allocation_id,
+        dispatch_result.ticket.output_generation,
+        dispatch_result.ticket.signal_id,
+        dispatch_result.ticket.signal_generation,
+        dispatch_result.ticket.trace_id, dispatch_result.ticket.input_gpu_va,
+        dispatch_result.ticket.output_gpu_va,
+        dispatch_result.ticket.packet_crc32c,
+        dispatch_result.ticket.admission_tick,
+        dispatch_result.first_wait_status);
+    print_json_string(stdout,
+                      sagr_status_string(dispatch_result.first_wait_status));
+    printf(
+        ",\"wire_status\":%" PRId32
+        ",\"retried_without_send\":%s},"
+        "\"completion\":{\"status\":%" PRId32
+        ",\"wire_status\":%" PRId32
+        ",\"request_id\":\"0x%016" PRIx64
+        "\",\"queue_id\":\"0x%016" PRIx64
+        "\",\"queue_generation\":\"0x%016" PRIx64
+        "\",\"queue_sequence\":\"0x%016" PRIx64
+        "\",\"fixture_id\":\"0x%016" PRIx64
+        "\",\"input_allocation_id\":\"0x%016" PRIx64
+        "\",\"input_generation\":\"0x%016" PRIx64
+        "\",\"output_allocation_id\":\"0x%016" PRIx64
+        "\",\"output_generation\":\"0x%016" PRIx64
+        "\",\"signal_id\":\"0x%016" PRIx64
+        "\",\"signal_generation\":\"0x%016" PRIx64
+        "\",\"trace_id\":\"0x%016" PRIx64
+        "\",\"input_gpu_va\":\"0x%016" PRIx64
+        "\",\"output_gpu_va\":\"0x%016" PRIx64
+        "\",\"packet_crc32c\":\"0x%08" PRIx32
+        "\",\"output_crc32c\":\"0x%08" PRIx32
+        "\",\"admission_tick\":\"0x%016" PRIx64
+        "\",\"start_tick\":\"0x%016" PRIx64
+        "\",\"end_tick\":\"0x%016" PRIx64
+        "\",\"retire_tick\":\"0x%016" PRIx64
+        "\"},\"signal\":{\"armed_wait_status\":%" PRId32
+        ",\"armed_wait_wire_status\":%" PRId32
+        ",\"armed_wait_status_name\":" ,
+        dispatch_result.first_wait_wire_status,
+        dispatch_result.dispatch_retried_without_send != 0 ? "true" : "false",
+        dispatch_result.completion.status,
+        dispatch_result.completion.wire_status,
+        dispatch_result.completion.request_id,
+        dispatch_result.completion.queue_id,
+        dispatch_result.completion.queue_generation,
+        dispatch_result.completion.queue_sequence,
+        dispatch_result.completion.fixture_id,
+        dispatch_result.completion.input_allocation_id,
+        dispatch_result.completion.input_generation,
+        dispatch_result.completion.output_allocation_id,
+        dispatch_result.completion.output_generation,
+        dispatch_result.completion.signal_id,
+        dispatch_result.completion.signal_generation,
+        dispatch_result.completion.trace_id,
+        dispatch_result.completion.input_gpu_va,
+        dispatch_result.completion.output_gpu_va,
+        dispatch_result.completion.packet_crc32c,
+        dispatch_result.completion.output_crc32c,
+        dispatch_result.completion.admission_tick,
+        dispatch_result.completion.start_tick,
+        dispatch_result.completion.end_tick,
+        dispatch_result.completion.retire_tick,
+        dispatch_result.armed_wait_status,
+        dispatch_result.armed_wait_wire_status);
+    print_json_string(stdout,
+                      sagr_status_string(dispatch_result.armed_wait_status));
+    printf(
+        ",\"observed_value\":%" PRId64
+        ",\"signal_completion_tick\":\"0x%016" PRIx64
+        "\",\"retried_without_send\":true},"
+        "\"output_crc32c\":\"0x%08" PRIx32
+        "\",\"output_match\":%s,\"cleanup\":{\"queue_destroyed\":%s,"
+        "\"input_freed\":%s,\"output_freed\":%s,"
+        "\"signal_destroyed\":%s}}",
+        dispatch_result.signal_completion.observed_value,
+        dispatch_result.signal_completion.completion_tick,
+        dispatch_result.output_crc32c,
+        dispatch_result.output_match != 0 ? "true" : "false",
+        dispatch_result.queue_destroyed != 0 ? "true" : "false",
+        dispatch_result.input_freed != 0 ? "true" : "false",
+        dispatch_result.output_freed != 0 ? "true" : "false",
+        dispatch_result.signal_destroyed != 0 ? "true" : "false");
   }
   fputs("}\n", stdout);
   if (fflush(stdout) != 0 || hold_connection(hold_ms) != 0) {

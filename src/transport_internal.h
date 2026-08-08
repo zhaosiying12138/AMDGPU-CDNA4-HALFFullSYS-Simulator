@@ -26,7 +26,13 @@ enum {
       SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_MEMORY_PAYLOAD_BYTES,
   SAGR_WIRE_SIGNAL_PAYLOAD_BYTES = 64,
   SAGR_WIRE_SIGNAL_FRAME_BYTES =
-      SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_SIGNAL_PAYLOAD_BYTES
+      SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_SIGNAL_PAYLOAD_BYTES,
+  SAGR_WIRE_DISPATCH_REQUEST_PAYLOAD_BYTES = 128,
+  SAGR_WIRE_DISPATCH_RESULT_PAYLOAD_BYTES = 160,
+  SAGR_WIRE_DISPATCH_REQUEST_FRAME_BYTES =
+      SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_DISPATCH_REQUEST_PAYLOAD_BYTES,
+  SAGR_WIRE_DISPATCH_RESULT_FRAME_BYTES =
+      SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_DISPATCH_RESULT_PAYLOAD_BYTES
 };
 
 enum {
@@ -70,6 +76,13 @@ enum {
   SAGR_WIRE_SIGNAL_OPCODE_LOAD = 3,
   SAGR_WIRE_SIGNAL_OPCODE_STORE = 4,
   SAGR_WIRE_SIGNAL_OPCODE_WAIT = 5
+};
+
+enum {
+  SAGR_WIRE_MESSAGE_DISPATCH_REQUEST = 11,
+  SAGR_WIRE_MESSAGE_DISPATCH_ACK = 12,
+  SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION = 13,
+  SAGR_WIRE_DISPATCH_OPCODE_SUBMIT_PINNED = 1
 };
 
 typedef struct sagr_wire_queue_request {
@@ -151,6 +164,55 @@ typedef struct sagr_wire_signal_response {
   uint64_t request_id;
   uint16_t message_type;
 } sagr_wire_signal_response_t;
+
+typedef struct sagr_wire_dispatch_request {
+  uint16_t major;
+  uint16_t minor;
+  uint16_t opcode;
+  uint16_t flags;
+  uint64_t queue_id;
+  uint64_t queue_generation;
+  uint64_t queue_sequence;
+  uint64_t fixture_id;
+  uint64_t input_allocation_id;
+  uint64_t input_generation;
+  uint64_t output_allocation_id;
+  uint64_t output_generation;
+  uint64_t signal_id;
+  uint64_t signal_generation;
+  uint64_t expected_signal_value_bits;
+  uint8_t fixture_manifest_sha256[32];
+} sagr_wire_dispatch_request_t;
+
+typedef struct sagr_wire_dispatch_response {
+  uint16_t major;
+  uint16_t minor;
+  uint32_t status;
+  uint16_t opcode;
+  uint64_t queue_id;
+  uint64_t queue_generation;
+  uint64_t queue_sequence;
+  uint64_t fixture_id;
+  uint64_t input_allocation_id;
+  uint64_t input_generation;
+  uint64_t output_allocation_id;
+  uint64_t output_generation;
+  uint64_t signal_id;
+  uint64_t signal_generation;
+  uint64_t trace_id;
+  uint64_t input_gpu_va;
+  uint64_t output_gpu_va;
+  uint32_t packet_crc32c;
+  uint32_t output_crc32c;
+  uint64_t admission_tick;
+  uint64_t start_tick;
+  uint64_t end_tick;
+  uint64_t retire_tick;
+  uint64_t request_id;
+  uint16_t message_type;
+} sagr_wire_dispatch_response_t;
+
+extern const uint8_t sagr_dispatch_fixture_manifest_sha256[32];
 
 typedef struct sagr_wire_ack_fields {
   uint16_t selected_major;
@@ -263,6 +325,26 @@ sagr_status_t sagr_protocol_decode_signal_response(
 sagr_status_t sagr_protocol_validate_failed_signal_ack(
     const sagr_wire_signal_request_t *request,
     const sagr_wire_signal_response_t *response);
+
+sagr_status_t sagr_protocol_encode_dispatch_request(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_wire_dispatch_request_t *request, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size);
+
+sagr_status_t sagr_protocol_encode_dispatch_response(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    uint16_t message_type, const sagr_wire_dispatch_response_t *response,
+    uint8_t *frame, size_t frame_capacity, size_t *frame_size);
+
+sagr_status_t sagr_protocol_decode_dispatch_response(
+    const uint8_t *frame, size_t frame_size,
+    const sagr_instance_info_t *info, uint64_t expected_request_id,
+    uint16_t expected_message_type, sagr_wire_dispatch_response_t *result,
+    int32_t *wire_status, const char **reason);
+
+sagr_status_t sagr_protocol_validate_failed_dispatch_ack(
+    const sagr_wire_dispatch_request_t *request,
+    const sagr_wire_dispatch_response_t *response);
 
 sagr_status_t sagr_protocol_map_wire_status(uint32_t status);
 

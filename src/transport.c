@@ -33,6 +33,7 @@
 struct sagr_queue;
 struct sagr_memory;
 struct sagr_signal;
+struct sagr_pending_dispatch;
 
 struct sagr_instance {
   uint64_t magic;
@@ -47,6 +48,7 @@ struct sagr_instance {
   uint32_t signal_count;
   uint32_t pending_signal_wait_count;
   uint64_t last_signal_generation;
+  struct sagr_pending_dispatch *pending_dispatch;
   int operation_active;
   int transport_poisoned;
 };
@@ -100,6 +102,23 @@ struct sagr_queue {
   uint32_t buffered_count;
   sagr_wire_queue_response_t buffered[SAGR_QUEUE_MAX_INFLIGHT];
   struct sagr_queue *next;
+};
+
+struct sagr_pending_dispatch {
+  struct sagr_queue *queue;
+  struct sagr_memory *input;
+  struct sagr_memory *output;
+  struct sagr_signal *signal;
+  uint64_t request_id;
+  uint64_t expected_signal_value_bits;
+  uint64_t signal_completion_value_bits;
+  uint64_t signal_completion_tick;
+  sagr_wire_dispatch_response_t ack;
+  int signal_completion_seen;
+  int completion_buffered;
+  int dispatch_completion_consumed;
+  int signal_completion_consumed;
+  sagr_wire_dispatch_response_t buffered_completion;
 };
 
 typedef struct monotonic_deadline {
@@ -184,6 +203,12 @@ static sagr_status_t validate_options(
   const int signal_required =
       (options->required_capabilities[SAGR_CAPABILITY_SIGNAL_WORD] &
        SAGR_CAPABILITY_SIGNAL_MASK) != 0;
+  const int dispatch_offered =
+      (options->offered_capabilities[SAGR_CAPABILITY_DISPATCH_WORD] &
+       SAGR_CAPABILITY_DISPATCH_MASK) != 0;
+  const int dispatch_required =
+      (options->required_capabilities[SAGR_CAPABILITY_DISPATCH_WORD] &
+       SAGR_CAPABILITY_DISPATCH_MASK) != 0;
   if (options->struct_size < sizeof(*options) || options->flags != 0 ||
       options->cancel_fd < -1 || options->reserved0 != 0 ||
       !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
@@ -199,9 +224,13 @@ static sagr_status_t validate_options(
       (options->offered_capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] &
        SAGR_CAPABILITY_TOPOLOGY_MASK) == 0 ||
       (options->required_capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] &
-       SAGR_CAPABILITY_TOPOLOGY_MASK) == 0 ||
+      SAGR_CAPABILITY_TOPOLOGY_MASK) == 0 ||
       queue_offered != queue_required || memory_offered != memory_required ||
-      signal_offered != signal_required) {
+      signal_offered != signal_required ||
+      dispatch_offered != dispatch_required ||
+      (dispatch_required != 0 &&
+       (queue_required == 0 || memory_required == 0 ||
+        signal_required == 0))) {
     return SAGR_STATUS_INVALID_ARGUMENT;
   }
   return SAGR_STATUS_SUCCESS;
@@ -263,6 +292,16 @@ static sagr_status_t validate_signal_operation_options(
     const sagr_signal_operation_options_t *options) {
   if (options->struct_size < sizeof(*options) || options->flags != 0 ||
       options->cancel_fd < -1 || options->reserved0 != 0 ||
+      !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t validate_pinned_dispatch_options(
+    const sagr_pinned_dispatch_options_t *options) {
+  if (options->struct_size < sizeof(*options) || options->flags != 0 ||
+      options->fixture_id != SAGR_DISPATCH_FIXTURE_GFX950_XOR_U8_V1 ||
       !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
     return SAGR_STATUS_INVALID_ARGUMENT;
   }
@@ -924,6 +963,12 @@ static int signal_capability_selected(const struct sagr_instance *instance) {
           SAGR_CAPABILITY_SIGNAL_MASK) != 0;
 }
 
+static int dispatch_capability_selected(const struct sagr_instance *instance) {
+  return (instance->info
+              .negotiated_capabilities[SAGR_CAPABILITY_DISPATCH_WORD] &
+          SAGR_CAPABILITY_DISPATCH_MASK) != 0;
+}
+
 static void poison_queue_transport(struct sagr_instance *instance) {
   instance->transport_poisoned = 1;
   if (instance->socket_fd >= 0) {
@@ -958,6 +1003,16 @@ static sagr_status_t require_signal_transport(
   if (instance->transport_poisoned != 0 || instance->socket_fd < 0) {
     return fail_open(error, error_size, SAGR_STATUS_CONNECTION_LOST, -1, 0,
                      "signal transport is no longer reusable");
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t require_dispatch_transport(
+    const struct sagr_instance *instance, sagr_error_info_t *error,
+    uint32_t error_size) {
+  if (instance->transport_poisoned != 0 || instance->socket_fd < 0) {
+    return fail_open(error, error_size, SAGR_STATUS_CONNECTION_LOST, -1, 0,
+                     "dispatch transport is no longer reusable");
   }
   return SAGR_STATUS_SUCCESS;
 }
@@ -1043,6 +1098,16 @@ static int signal_id_is_active(const struct sagr_instance *instance,
   return 0;
 }
 
+static int dispatch_owns_signal(const struct sagr_instance *instance,
+                                uint64_t signal_id,
+                                uint64_t generation) {
+  const struct sagr_pending_dispatch *pending = instance->pending_dispatch;
+  return pending != NULL && pending->signal != NULL &&
+         pending->signal->magic == SAGR_SIGNAL_MAGIC &&
+         pending->ack.signal_id == signal_id &&
+         pending->ack.signal_generation == generation;
+}
+
 static int signal_completion_is_canonical(
     const struct sagr_signal *signal,
     const sagr_wire_signal_response_t *completion,
@@ -1071,7 +1136,33 @@ static int signal_completion_is_canonical(
            completion->sim_tick == signal->wait_trigger_tick + UINT64_C(1) &&
            completion->value_bits == signal->wait_trigger_value_bits;
   }
-  return allow_untriggered != 0;
+  return allow_untriggered != 0 ||
+         (dispatch_owns_signal(signal->instance, completion->signal_id,
+                               completion->generation) &&
+          completion->value_bits == UINT64_C(0));
+}
+
+static int record_dispatch_signal_completion(
+    struct sagr_instance *instance,
+    const sagr_wire_signal_response_t *completion) {
+  struct sagr_pending_dispatch *pending = instance->pending_dispatch;
+  if (pending == NULL || pending->signal == NULL ||
+      pending->signal->magic != SAGR_SIGNAL_MAGIC ||
+      completion->signal_id != pending->ack.signal_id ||
+      completion->generation != pending->ack.signal_generation) {
+    return 1;
+  }
+  if (completion->value_bits != pending->expected_signal_value_bits ||
+      (pending->signal_completion_seen != 0 &&
+       (pending->signal_completion_value_bits != completion->value_bits ||
+        pending->signal_completion_tick != completion->sim_tick))) {
+    return 0;
+  }
+  pending->signal_completion_value_bits = completion->value_bits;
+  pending->signal_completion_tick = completion->sim_tick;
+  pending->signal_completion_seen = 1;
+  pending->signal->value = signal_bits_to_value(completion->value_bits);
+  return 1;
 }
 
 static sagr_status_t buffer_signal_completion(
@@ -1082,7 +1173,8 @@ static sagr_status_t buffer_signal_completion(
       find_signal(instance, completion->signal_id, completion->generation);
   if (signal == NULL || signal->completion_buffered != 0 ||
       !signal_completion_is_canonical(signal, completion,
-                                      allow_untriggered)) {
+                                      allow_untriggered) ||
+      !record_dispatch_signal_completion(instance, completion)) {
     return SAGR_STATUS_PROTOCOL_ERROR;
   }
   signal->buffered_completion = *completion;
@@ -1150,6 +1242,130 @@ static struct sagr_queue *find_queue(struct sagr_instance *instance,
     }
   }
   return NULL;
+}
+
+static int dispatch_response_identities_match(
+    const sagr_wire_dispatch_response_t *left,
+    const sagr_wire_dispatch_response_t *right) {
+  return left->queue_id == right->queue_id &&
+         left->queue_generation == right->queue_generation &&
+         left->queue_sequence == right->queue_sequence &&
+         left->fixture_id == right->fixture_id &&
+         left->input_allocation_id == right->input_allocation_id &&
+         left->input_generation == right->input_generation &&
+         left->output_allocation_id == right->output_allocation_id &&
+         left->output_generation == right->output_generation &&
+         left->signal_id == right->signal_id &&
+         left->signal_generation == right->signal_generation;
+}
+
+static int dispatch_completion_is_canonical(
+    const struct sagr_pending_dispatch *pending,
+    const sagr_wire_dispatch_response_t *completion) {
+  const sagr_wire_dispatch_response_t *ack;
+  if (pending == NULL || completion == NULL) {
+    return 0;
+  }
+  ack = &pending->ack;
+  if (completion->message_type != SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION ||
+      completion->status != SAGR_WIRE_STATUS_OK ||
+      completion->opcode != SAGR_WIRE_DISPATCH_OPCODE_SUBMIT_PINNED ||
+      completion->request_id != pending->request_id ||
+      !dispatch_response_identities_match(completion, ack) ||
+      completion->trace_id != ack->trace_id ||
+      completion->input_gpu_va != ack->input_gpu_va ||
+      completion->output_gpu_va != ack->output_gpu_va ||
+      completion->packet_crc32c != ack->packet_crc32c ||
+      completion->output_crc32c != SAGR_DISPATCH_OUTPUT_CRC32C ||
+      completion->admission_tick != ack->admission_tick ||
+      completion->admission_tick >= completion->start_tick ||
+      completion->start_tick > completion->end_tick ||
+      completion->end_tick > completion->retire_tick ||
+      pending->signal_completion_seen == 0 ||
+      pending->signal_completion_value_bits !=
+          pending->expected_signal_value_bits ||
+      completion->retire_tick == UINT64_MAX ||
+      pending->signal_completion_tick !=
+          completion->retire_tick + UINT64_C(1) ||
+      completion->admission_tick > UINT64_MAX - UINT64_C(2) ||
+      completion->retire_tick <= completion->admission_tick + UINT64_C(1)) {
+    return 0;
+  }
+  return 1;
+}
+
+static void observe_dispatch_signal_mirror(
+    struct sagr_pending_dispatch *pending) {
+  if (pending->signal != NULL &&
+      pending->signal->magic == SAGR_SIGNAL_MAGIC &&
+      pending->signal->signal_id == pending->ack.signal_id &&
+      pending->signal->generation == pending->ack.signal_generation) {
+    pending->signal->value = SAGR_DISPATCH_EXPECTED_SIGNAL_VALUE;
+  }
+}
+
+static sagr_status_t buffer_dispatch_completion(
+    struct sagr_instance *instance,
+    const sagr_wire_dispatch_response_t *completion) {
+  struct sagr_pending_dispatch *pending = instance->pending_dispatch;
+  if (pending == NULL || pending->completion_buffered != 0 ||
+      pending->dispatch_completion_consumed != 0 ||
+      !dispatch_completion_is_canonical(pending, completion)) {
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  pending->buffered_completion = *completion;
+  pending->completion_buffered = 1;
+  observe_dispatch_signal_mirror(pending);
+  return SAGR_STATUS_SUCCESS;
+}
+
+static int take_buffered_dispatch_completion(
+    struct sagr_pending_dispatch *pending,
+    sagr_wire_dispatch_response_t *completion) {
+  if (pending->completion_buffered == 0) {
+    return 0;
+  }
+  if (!dispatch_completion_is_canonical(pending,
+                                        &pending->buffered_completion)) {
+    return -1;
+  }
+  *completion = pending->buffered_completion;
+  memset(&pending->buffered_completion, 0,
+         sizeof(pending->buffered_completion));
+  pending->completion_buffered = 0;
+  observe_dispatch_signal_mirror(pending);
+  return 1;
+}
+
+static sagr_status_t decode_and_buffer_dispatch_completion(
+    struct sagr_instance *instance, const uint8_t *frame, size_t frame_size,
+    uint64_t active_request_id, const char **reason) {
+  sagr_wire_dispatch_response_t completion;
+  int32_t wire_status = -1;
+  sagr_status_t status = sagr_protocol_decode_dispatch_response(
+      frame, frame_size, &instance->info, 0,
+      SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION, &completion, &wire_status,
+      reason);
+  if (status != SAGR_STATUS_SUCCESS || wire_status != SAGR_WIRE_STATUS_OK ||
+      (active_request_id != 0 && completion.request_id == active_request_id)) {
+    *reason = "invalid dispatch completion while awaiting another record";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  status = buffer_dispatch_completion(instance, &completion);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = "could not buffer dispatch completion";
+  }
+  return status;
+}
+
+static void release_consumed_dispatch(struct sagr_instance *instance) {
+  struct sagr_pending_dispatch *pending = instance->pending_dispatch;
+  if (pending != NULL && pending->dispatch_completion_consumed != 0 &&
+      pending->signal_completion_consumed != 0) {
+    memset(pending, 0, sizeof(*pending));
+    free(pending);
+    instance->pending_dispatch = NULL;
+  }
 }
 
 static int queue_id_is_active(const struct sagr_instance *instance,
@@ -1368,6 +1584,15 @@ static sagr_status_t exchange_queue_request(
       }
       continue;
     }
+    if (message_type == SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION) {
+      status = decode_and_buffer_dispatch_completion(
+          instance, response_frame, response_size, request_id, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
     status = sagr_protocol_decode_queue_response(
         response_frame, response_size, &instance->info, request_id,
         SAGR_WIRE_MESSAGE_QUEUE_ACK, &decoded, &decoded_wire_status, reason);
@@ -1482,6 +1707,15 @@ static sagr_status_t exchange_memory_request(
       }
       continue;
     }
+    if (message_type == SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION) {
+      status = decode_and_buffer_dispatch_completion(
+          instance, response_frame, response_size, request_id, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
     status = sagr_protocol_decode_memory_response(
         response_frame, response_size, &instance->info, request_id, &decoded,
         &decoded_wire_status, reason);
@@ -1545,6 +1779,16 @@ static sagr_status_t receive_queue_completion(
         SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION) {
       status = decode_and_buffer_signal_completion(
           instance, frame, frame_size, 0, 0, 0, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
+    if (queue_frame_type(frame, frame_size) ==
+        SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION) {
+      status = decode_and_buffer_dispatch_completion(
+          instance, frame, frame_size, 0, reason);
       if (status != SAGR_STATUS_SUCCESS) {
         poison_queue_transport(instance);
         return status;
@@ -1684,6 +1928,15 @@ static sagr_status_t exchange_signal_request(
       }
       continue;
     }
+    if (message_type == SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION) {
+      status = decode_and_buffer_dispatch_completion(
+          instance, response_frame, response_size, request_id, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
     status = sagr_protocol_decode_signal_response(
         response_frame, response_size, &instance->info, request_id,
         SAGR_WIRE_MESSAGE_SIGNAL_ACK, &decoded, &decoded_wire_status, reason);
@@ -1708,6 +1961,217 @@ static sagr_status_t exchange_signal_request(
       return map_signal_wire_status(request->opcode, decoded_wire_status);
     }
     return SAGR_STATUS_SUCCESS;
+  }
+}
+
+static sagr_status_t map_dispatch_wire_status(int32_t wire_status) {
+  if (wire_status == SAGR_WIRE_STATUS_PROTOCOL_STATE) {
+    return SAGR_STATUS_INVALID_HANDLE;
+  }
+  if (wire_status < 0) {
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  return sagr_protocol_map_wire_status((uint32_t)wire_status);
+}
+
+static sagr_status_t exchange_dispatch_request(
+    struct sagr_instance *instance,
+    const sagr_wire_dispatch_request_t *request,
+    const monotonic_deadline_t *deadline, int cancel_fd,
+    sagr_wire_dispatch_response_t *response, int32_t *wire_status,
+    int *native_errno, const char **reason, uint64_t *out_request_id) {
+  uint8_t request_frame[SAGR_WIRE_DISPATCH_REQUEST_FRAME_BYTES];
+  uint8_t response_frame[SAGR_WIRE_MAX_RECORD_BYTES];
+  size_t request_size = 0;
+  uint64_t request_id = 0;
+  int record_sent = 0;
+  sagr_status_t status = sagr_protocol_allocate_request_id(
+      &instance->next_request_id, &request_id);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = "dispatch request ID space exhausted";
+    return status;
+  }
+  status = sagr_protocol_encode_dispatch_request(
+      &instance->info, request_id, request, request_frame,
+      sizeof(request_frame), &request_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = "could not encode dispatch request";
+    return status;
+  }
+  if (out_request_id != NULL) {
+    *out_request_id = request_id;
+  }
+  status = send_record(instance->socket_fd, request_frame, request_size,
+                       deadline, cancel_fd, native_errno, &record_sent);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = "dispatch request send failed";
+    if (record_sent != 0) {
+      poison_queue_transport(instance);
+    }
+    return status;
+  }
+
+  for (;;) {
+    size_t response_size = 0;
+    uint16_t message_type;
+    int32_t decoded_wire_status = -1;
+    sagr_wire_dispatch_response_t decoded;
+    status = receive_record(instance->socket_fd, response_frame,
+                            sizeof(response_frame), &response_size, deadline,
+                            cancel_fd, native_errno);
+    if (status != SAGR_STATUS_SUCCESS) {
+      *reason = "dispatch ACK receive failed";
+      poison_queue_transport(instance);
+      return status;
+    }
+    message_type = queue_frame_type(response_frame, response_size);
+    if (message_type == SAGR_WIRE_MESSAGE_QUEUE_COMPLETION) {
+      sagr_wire_queue_response_t completion;
+      status = sagr_protocol_decode_queue_response(
+          response_frame, response_size, &instance->info, 0,
+          SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &completion,
+          &decoded_wire_status, reason);
+      if ((status != SAGR_STATUS_SUCCESS && decoded_wire_status < 0) ||
+          completion.request_id == request_id ||
+          buffer_completion(instance, &completion) != SAGR_STATUS_SUCCESS) {
+        *reason = "invalid queue completion while waiting for dispatch ACK";
+        poison_queue_transport(instance);
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      continue;
+    }
+    if (message_type == SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION) {
+      status = decode_and_buffer_signal_completion(
+          instance, response_frame, response_size, request_id, 0, 0, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
+    if (message_type == SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION) {
+      status = decode_and_buffer_dispatch_completion(
+          instance, response_frame, response_size, request_id, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
+    status = sagr_protocol_decode_dispatch_response(
+        response_frame, response_size, &instance->info, request_id,
+        SAGR_WIRE_MESSAGE_DISPATCH_ACK, &decoded, &decoded_wire_status,
+        reason);
+    *wire_status = decoded_wire_status;
+    if (status != SAGR_STATUS_SUCCESS && decoded_wire_status < 0) {
+      poison_queue_transport(instance);
+      return status;
+    }
+    if (decoded.opcode != request->opcode) {
+      *reason = "dispatch ACK opcode mismatch";
+      poison_queue_transport(instance);
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+    *response = decoded;
+    if (status != SAGR_STATUS_SUCCESS) {
+      if (sagr_protocol_validate_failed_dispatch_ack(request, &decoded) !=
+          SAGR_STATUS_SUCCESS) {
+        *reason = "noncanonical failed dispatch ACK";
+        poison_queue_transport(instance);
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      return map_dispatch_wire_status(decoded_wire_status);
+    }
+    return SAGR_STATUS_SUCCESS;
+  }
+}
+
+static sagr_status_t receive_dispatch_completion(
+    struct sagr_pending_dispatch *pending,
+    const monotonic_deadline_t *deadline, int cancel_fd,
+    sagr_wire_dispatch_response_t *completion, int32_t *wire_status,
+    int *native_errno, const char **reason) {
+  struct sagr_instance *instance = pending->queue->instance;
+  uint8_t frame[SAGR_WIRE_MAX_RECORD_BYTES];
+  sagr_status_t state = check_operation_state(deadline, cancel_fd,
+                                               native_errno);
+  int buffered;
+  if (state != SAGR_STATUS_SUCCESS) {
+    *reason = "dispatch completion wait was cancelled or expired";
+    return state;
+  }
+  buffered = take_buffered_dispatch_completion(pending, completion);
+  if (buffered < 0) {
+    *reason = "buffered dispatch completion is noncanonical";
+    poison_queue_transport(instance);
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (buffered > 0) {
+    *wire_status = (int32_t)completion->status;
+    return SAGR_STATUS_SUCCESS;
+  }
+  for (;;) {
+    size_t frame_size = 0;
+    uint16_t message_type;
+    int32_t decoded_wire_status = -1;
+    sagr_status_t status = receive_record(
+        instance->socket_fd, frame, sizeof(frame), &frame_size, deadline,
+        cancel_fd, native_errno);
+    if (status != SAGR_STATUS_SUCCESS) {
+      *reason = "dispatch completion receive failed";
+      if (status != SAGR_STATUS_TIMED_OUT && status != SAGR_STATUS_CANCELLED) {
+        poison_queue_transport(instance);
+      }
+      return status;
+    }
+    message_type = queue_frame_type(frame, frame_size);
+    if (message_type == SAGR_WIRE_MESSAGE_QUEUE_COMPLETION) {
+      sagr_wire_queue_response_t queue_completion;
+      status = sagr_protocol_decode_queue_response(
+          frame, frame_size, &instance->info, 0,
+          SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &queue_completion,
+          &decoded_wire_status, reason);
+      if ((status != SAGR_STATUS_SUCCESS && decoded_wire_status < 0) ||
+          buffer_completion(instance, &queue_completion) !=
+              SAGR_STATUS_SUCCESS) {
+        *reason = "invalid queue completion while waiting for dispatch";
+        poison_queue_transport(instance);
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      continue;
+    }
+    if (message_type == SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION) {
+      status = decode_and_buffer_signal_completion(
+          instance, frame, frame_size, 0, 0, 0, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
+    if (message_type != SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION) {
+      *reason = "unexpected record while waiting for dispatch completion";
+      poison_queue_transport(instance);
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+    {
+      sagr_wire_dispatch_response_t decoded;
+      status = sagr_protocol_decode_dispatch_response(
+          frame, frame_size, &instance->info, 0,
+          SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION, &decoded,
+          &decoded_wire_status, reason);
+      if (status != SAGR_STATUS_SUCCESS ||
+          decoded_wire_status != SAGR_WIRE_STATUS_OK ||
+          !dispatch_completion_is_canonical(pending, &decoded)) {
+        *reason = "noncanonical dispatch completion";
+        poison_queue_transport(instance);
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      *completion = decoded;
+      *wire_status = decoded_wire_status;
+      observe_dispatch_signal_mirror(pending);
+      return SAGR_STATUS_SUCCESS;
+    }
   }
 }
 
@@ -1764,6 +2228,15 @@ static sagr_status_t receive_signal_completion(
       }
       continue;
     }
+    if (message_type == SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION) {
+      status = decode_and_buffer_dispatch_completion(
+          instance, frame, frame_size, 0, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
     if (message_type != SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION) {
       *reason = "unexpected record while waiting for signal completion";
       poison_queue_transport(instance);
@@ -1784,6 +2257,11 @@ static sagr_status_t receive_signal_completion(
           decoded.sequence == signal->wait_sequence) {
         if (!signal_completion_is_canonical(signal, &decoded, 0)) {
           *reason = "noncanonical signal completion";
+          poison_queue_transport(instance);
+          return SAGR_STATUS_PROTOCOL_ERROR;
+        }
+        if (!record_dispatch_signal_completion(instance, &decoded)) {
+          *reason = "dispatch signal completion mismatch";
           poison_queue_transport(instance);
           return SAGR_STATUS_PROTOCOL_ERROR;
         }
@@ -2059,6 +2537,12 @@ sagr_status_t sagr_instance_close(sagr_instance_t *instance) {
     (void)close(owned_instance->socket_fd);
     owned_instance->socket_fd = -1;
   }
+  if (owned_instance->pending_dispatch != NULL) {
+    memset(owned_instance->pending_dispatch, 0,
+           sizeof(*owned_instance->pending_dispatch));
+    free(owned_instance->pending_dispatch);
+    owned_instance->pending_dispatch = NULL;
+  }
   queue = owned_instance->queues;
   while (queue != NULL) {
     struct sagr_queue *next = queue->next;
@@ -2306,6 +2790,11 @@ sagr_status_t sagr_queue_ring_doorbell(
   if (status != SAGR_STATUS_SUCCESS) {
     return status;
   }
+  if (instance->pending_dispatch != NULL &&
+      instance->pending_dispatch->queue == queue) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "queue participates in a pinned dispatch");
+  }
   if (queue->pending_count >= SAGR_QUEUE_MAX_INFLIGHT) {
     return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES, -1, 0,
                      "runtime queue in-flight limit reached");
@@ -2494,7 +2983,9 @@ sagr_status_t sagr_queue_destroy(
     return fail_open(out_error, error_size, status, -1, native_errno,
                      "invalid queue operation options");
   }
-  if (owned_queue->pending_count != 0 || owned_queue->buffered_count != 0) {
+  if (owned_queue->pending_count != 0 || owned_queue->buffered_count != 0 ||
+      (instance->pending_dispatch != NULL &&
+       instance->pending_dispatch->queue == owned_queue)) {
     return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
                      "queue has pending completions");
   }
@@ -2883,6 +3374,12 @@ static sagr_status_t memory_copy(
   if (status != SAGR_STATUS_SUCCESS) {
     return status;
   }
+  if (instance->pending_dispatch != NULL &&
+      (instance->pending_dispatch->input == memory ||
+       instance->pending_dispatch->output == memory)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "allocation participates in a pinned dispatch");
+  }
   if (instance->operation_active != 0) {
     return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
                      "another instance operation is active");
@@ -3042,6 +3539,12 @@ sagr_status_t sagr_memory_free(
   if (status != SAGR_STATUS_SUCCESS) {
     return fail_open(out_error, error_size, status, -1, native_errno,
                      "invalid memory operation options");
+  }
+  if (instance->pending_dispatch != NULL &&
+      (instance->pending_dispatch->input == owned_memory ||
+       instance->pending_dispatch->output == owned_memory)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "allocation participates in a pinned dispatch");
   }
   if (instance->operation_active != 0) {
     return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
@@ -3300,6 +3803,12 @@ static sagr_status_t signal_value_operation(
   if (status != SAGR_STATUS_SUCCESS) {
     return status;
   }
+  if (opcode == SAGR_WIRE_SIGNAL_OPCODE_STORE &&
+      instance->pending_dispatch != NULL &&
+      instance->pending_dispatch->signal == signal) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "signal participates in a pinned dispatch");
+  }
   if (instance->operation_active != 0) {
     return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
                      "another instance operation is active");
@@ -3511,6 +4020,12 @@ sagr_status_t sagr_signal_wait(
       &native_errno, &reason);
   instance->operation_active = 0;
   if (status != SAGR_STATUS_SUCCESS) {
+    /* A canonical WAIT ACK may already have been admitted.  A subsequent
+     * local deadline/cancellation is not a daemon response, so do not expose
+     * the successful ACK status as if it were a failure ACK. */
+    if (status == SAGR_STATUS_TIMED_OUT || status == SAGR_STATUS_CANCELLED) {
+      wire_status = -1;
+    }
     return fail_open(out_error, error_size, status, wire_status, native_errno,
                      reason);
   }
@@ -3533,6 +4048,13 @@ sagr_status_t sagr_signal_wait(
   out_result->admission_tick = signal->wait_ack_tick;
   out_result->completion_tick = completion.sim_tick;
   out_result->ready_at_admission = (uint32_t)signal->wait_ready;
+  signal->value = signal_bits_to_value(completion.value_bits);
+  if (instance->pending_dispatch != NULL &&
+      instance->pending_dispatch->signal == signal &&
+      completion.value_bits ==
+          instance->pending_dispatch->expected_signal_value_bits) {
+    instance->pending_dispatch->signal_completion_consumed = 1;
+  }
   --instance->pending_signal_wait_count;
   signal->wait_pending = 0;
   signal->wait_sequence = 0;
@@ -3545,6 +4067,7 @@ sagr_status_t sagr_signal_wait(
   signal->wait_trigger_known = 0;
   signal->wait_trigger_value_bits = 0;
   signal->wait_trigger_tick = 0;
+  release_consumed_dispatch(instance);
   return SAGR_STATUS_SUCCESS;
 }
 
@@ -3592,7 +4115,9 @@ sagr_status_t sagr_signal_destroy(
                      "invalid signal operation options");
   }
   if (owned_signal->wait_pending != 0 ||
-      owned_signal->completion_buffered != 0) {
+      owned_signal->completion_buffered != 0 ||
+      (instance->pending_dispatch != NULL &&
+       instance->pending_dispatch->signal == owned_signal)) {
     return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
                      "signal has a pending wait completion");
   }
@@ -3633,5 +4158,336 @@ sagr_status_t sagr_signal_destroy(
   *signal = NULL;
   memset(owned_signal, 0, sizeof(*owned_signal));
   free(owned_signal);
+  return SAGR_STATUS_SUCCESS;
+}
+
+static void fill_dispatch_ticket(
+    const struct sagr_pending_dispatch *pending,
+    sagr_dispatch_ticket_t *ticket) {
+  const sagr_wire_dispatch_response_t *ack = &pending->ack;
+  ticket->struct_size = (uint32_t)sizeof(*ticket);
+  ticket->request_id = pending->request_id;
+  ticket->queue_id = ack->queue_id;
+  ticket->queue_generation = ack->queue_generation;
+  ticket->queue_sequence = ack->queue_sequence;
+  ticket->fixture_id = ack->fixture_id;
+  ticket->input_allocation_id = ack->input_allocation_id;
+  ticket->input_generation = ack->input_generation;
+  ticket->output_allocation_id = ack->output_allocation_id;
+  ticket->output_generation = ack->output_generation;
+  ticket->signal_id = ack->signal_id;
+  ticket->signal_generation = ack->signal_generation;
+  ticket->trace_id = ack->trace_id;
+  ticket->input_gpu_va = ack->input_gpu_va;
+  ticket->output_gpu_va = ack->output_gpu_va;
+  ticket->packet_crc32c = ack->packet_crc32c;
+  ticket->admission_tick = ack->admission_tick;
+}
+
+static int dispatch_ticket_matches(
+    const struct sagr_pending_dispatch *pending,
+    const sagr_dispatch_ticket_t *ticket) {
+  const sagr_wire_dispatch_response_t *ack = &pending->ack;
+  return ticket != NULL && ticket->struct_size >= sizeof(*ticket) &&
+         ticket->flags == 0 && ticket->reserved0 == 0 &&
+         reserved_is_zero(ticket->reserved, sizeof(ticket->reserved)) &&
+         ticket->request_id == pending->request_id &&
+         ticket->queue_id == ack->queue_id &&
+         ticket->queue_generation == ack->queue_generation &&
+         ticket->queue_sequence == ack->queue_sequence &&
+         ticket->fixture_id == ack->fixture_id &&
+         ticket->input_allocation_id == ack->input_allocation_id &&
+         ticket->input_generation == ack->input_generation &&
+         ticket->output_allocation_id == ack->output_allocation_id &&
+         ticket->output_generation == ack->output_generation &&
+         ticket->signal_id == ack->signal_id &&
+         ticket->signal_generation == ack->signal_generation &&
+         ticket->trace_id == ack->trace_id &&
+         ticket->input_gpu_va == ack->input_gpu_va &&
+         ticket->output_gpu_va == ack->output_gpu_va &&
+         ticket->packet_crc32c == ack->packet_crc32c &&
+         ticket->admission_tick == ack->admission_tick;
+}
+
+static void fill_dispatch_completion(
+    const sagr_wire_dispatch_response_t *wire,
+    sagr_dispatch_completion_t *completion, int32_t wire_status) {
+  completion->struct_size = (uint32_t)sizeof(*completion);
+  completion->status = SAGR_STATUS_SUCCESS;
+  completion->wire_status = wire_status;
+  completion->request_id = wire->request_id;
+  completion->queue_id = wire->queue_id;
+  completion->queue_generation = wire->queue_generation;
+  completion->queue_sequence = wire->queue_sequence;
+  completion->fixture_id = wire->fixture_id;
+  completion->input_allocation_id = wire->input_allocation_id;
+  completion->input_generation = wire->input_generation;
+  completion->output_allocation_id = wire->output_allocation_id;
+  completion->output_generation = wire->output_generation;
+  completion->signal_id = wire->signal_id;
+  completion->signal_generation = wire->signal_generation;
+  completion->trace_id = wire->trace_id;
+  completion->input_gpu_va = wire->input_gpu_va;
+  completion->output_gpu_va = wire->output_gpu_va;
+  completion->packet_crc32c = wire->packet_crc32c;
+  completion->output_crc32c = wire->output_crc32c;
+  completion->admission_tick = wire->admission_tick;
+  completion->start_tick = wire->start_tick;
+  completion->end_tick = wire->end_tick;
+  completion->retire_tick = wire->retire_tick;
+}
+
+sagr_status_t sagr_queue_submit_pinned_dispatch(
+    sagr_queue_t queue, sagr_memory_t input_memory,
+    sagr_memory_t output_memory, sagr_signal_t completion_signal,
+    const sagr_pinned_dispatch_options_t *options,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_dispatch_ticket_t *out_ticket, uint32_t ticket_size,
+    sagr_error_info_t *out_error, uint32_t error_size) {
+  sagr_pinned_dispatch_options_t local_options;
+  sagr_queue_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_dispatch_request_t request;
+  sagr_wire_dispatch_response_t response;
+  struct sagr_pending_dispatch *pending;
+  struct sagr_instance *instance;
+  sagr_status_t status;
+  uint64_t request_id = 0;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  const char *reason = "pinned dispatch submission failed";
+
+  status = validate_error_output(out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = prepare_sized_output(out_ticket, ticket_size, sizeof(*out_ticket), 1);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, 0,
+                     "invalid dispatch ticket output buffer");
+  }
+  if (queue == NULL || queue->magic != SAGR_QUEUE_MAGIC ||
+      !memory_handle_is_valid(input_memory) ||
+      !memory_handle_is_valid(output_memory) ||
+      !signal_handle_is_valid(completion_signal)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "invalid dispatch resource handle");
+  }
+  instance = queue->instance;
+  if (instance == NULL || instance->magic != SAGR_INSTANCE_MAGIC ||
+      input_memory->instance != instance || output_memory->instance != instance ||
+      completion_signal->instance != instance) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INSTANCE_MISMATCH, -1, 0,
+                     "dispatch resources belong to different instances");
+  }
+  if (options == NULL) {
+    status = sagr_pinned_dispatch_options_init(
+        &local_options, (uint32_t)sizeof(local_options));
+  } else if (options->struct_size < sizeof(*options)) {
+    status = SAGR_STATUS_INVALID_ARGUMENT;
+  } else {
+    memcpy(&local_options, options, sizeof(local_options));
+    status = validate_pinned_dispatch_options(&local_options);
+  }
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, 0,
+                     "invalid pinned dispatch options");
+  }
+  status = prepare_queue_operation(operation_options, &local_operation,
+                                   &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid dispatch operation options");
+  }
+  if (!dispatch_capability_selected(instance) ||
+      !queue_capability_selected(instance) ||
+      !memory_capability_selected(instance) ||
+      !signal_capability_selected(instance)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_NOT_SUPPORTED, -1, 0,
+                     "PINNED_DISPATCH_V1 prerequisites were not negotiated");
+  }
+  status = require_dispatch_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (instance->pending_dispatch != NULL || queue->pending_count != 0 ||
+      queue->buffered_count != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "queue or session already has pending work");
+  }
+  if (input_memory == output_memory ||
+      input_memory->allocation_id == output_memory->allocation_id ||
+      input_memory->size_bytes < SAGR_DISPATCH_FIXED_IO_BYTES ||
+      output_memory->size_bytes < SAGR_DISPATCH_FIXED_IO_BYTES ||
+      input_memory->simulated_va == 0 || output_memory->simulated_va == 0 ||
+      input_memory->simulated_va == output_memory->simulated_va) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                     "dispatch allocations are aliased or undersized");
+  }
+  if (completion_signal->value != INT64_C(1) ||
+      completion_signal->wait_pending == 0 ||
+      completion_signal->wait_condition != SAGR_SIGNAL_CONDITION_EQ ||
+      completion_signal->wait_compare_bits != UINT64_C(0) ||
+      completion_signal->wait_ready != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                     "dispatch signal must be signed one with an armed EQ-zero wait");
+  }
+  if (queue->next_sequence == 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES, -1, 0,
+                     "queue sequence space exhausted");
+  }
+  if (instance->operation_active != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "another instance operation is active");
+  }
+  pending = (struct sagr_pending_dispatch *)calloc(1, sizeof(*pending));
+  if (pending == NULL) {
+    return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES, -1,
+                     errno, "could not allocate dispatch ticket state");
+  }
+
+  memset(&request, 0, sizeof(request));
+  request.major = SAGR_DISPATCH_PROTOCOL_MAJOR;
+  request.minor = SAGR_DISPATCH_PROTOCOL_MINOR;
+  request.opcode = SAGR_WIRE_DISPATCH_OPCODE_SUBMIT_PINNED;
+  request.queue_id = queue->queue_id;
+  request.queue_generation = queue->generation;
+  request.queue_sequence = queue->next_sequence;
+  request.fixture_id = local_options.fixture_id;
+  request.input_allocation_id = input_memory->allocation_id;
+  request.input_generation = input_memory->generation;
+  request.output_allocation_id = output_memory->allocation_id;
+  request.output_generation = output_memory->generation;
+  request.signal_id = completion_signal->signal_id;
+  request.signal_generation = completion_signal->generation;
+  request.expected_signal_value_bits = UINT64_C(0);
+  memcpy(request.fixture_manifest_sha256,
+         sagr_dispatch_fixture_manifest_sha256,
+         sizeof(request.fixture_manifest_sha256));
+  instance->operation_active = 1;
+  status = exchange_dispatch_request(
+      instance, &request, &deadline, local_operation.cancel_fd, &response,
+      &wire_status, &native_errno, &reason, &request_id);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS) {
+    memset(pending, 0, sizeof(*pending));
+    free(pending);
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (response.message_type != SAGR_WIRE_MESSAGE_DISPATCH_ACK ||
+      response.opcode != request.opcode ||
+      response.queue_id != request.queue_id ||
+      response.queue_generation != request.queue_generation ||
+      response.queue_sequence != request.queue_sequence ||
+      response.fixture_id != request.fixture_id ||
+      response.input_allocation_id != request.input_allocation_id ||
+      response.input_generation != request.input_generation ||
+      response.output_allocation_id != request.output_allocation_id ||
+      response.output_generation != request.output_generation ||
+      response.signal_id != request.signal_id ||
+      response.signal_generation != request.signal_generation ||
+      response.trace_id == 0 ||
+      response.input_gpu_va != input_memory->simulated_va ||
+      response.output_gpu_va != output_memory->simulated_va ||
+      response.packet_crc32c != SAGR_DISPATCH_PACKET_CRC32C ||
+      response.output_crc32c != 0 || response.start_tick != 0 ||
+      response.end_tick != 0 || response.retire_tick != 0) {
+    poison_queue_transport(instance);
+    memset(pending, 0, sizeof(*pending));
+    free(pending);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0, "invalid successful dispatch ACK");
+  }
+  pending->queue = queue;
+  pending->input = input_memory;
+  pending->output = output_memory;
+  pending->signal = completion_signal;
+  pending->request_id = request_id;
+  pending->expected_signal_value_bits = request.expected_signal_value_bits;
+  pending->ack = response;
+  instance->pending_dispatch = pending;
+  queue->next_sequence = request.queue_sequence == UINT64_MAX
+                             ? 0
+                             : request.queue_sequence + UINT64_C(1);
+  fill_dispatch_ticket(pending, out_ticket);
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_queue_wait_pinned_dispatch(
+    sagr_queue_t queue, const sagr_dispatch_ticket_t *ticket,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_dispatch_completion_t *out_completion, uint32_t completion_size,
+    sagr_error_info_t *out_error, uint32_t error_size) {
+  sagr_queue_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_dispatch_response_t completion;
+  struct sagr_pending_dispatch *pending;
+  struct sagr_instance *instance;
+  sagr_status_t status;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  const char *reason = "pinned dispatch completion failed";
+
+  status = validate_error_output(out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = prepare_sized_output(out_completion, completion_size,
+                                sizeof(*out_completion), 1);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, 0,
+                     "invalid dispatch completion output buffer");
+  }
+  if (queue == NULL || queue->magic != SAGR_QUEUE_MAGIC ||
+      queue->instance == NULL ||
+      queue->instance->magic != SAGR_INSTANCE_MAGIC) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "invalid dispatch queue handle");
+  }
+  instance = queue->instance;
+  status = require_dispatch_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  pending = instance->pending_dispatch;
+  if (pending == NULL || pending->queue != queue ||
+      pending->dispatch_completion_consumed != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                     "dispatch ticket is not pending on this queue");
+  }
+  if (!dispatch_ticket_matches(pending, ticket)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "a different pinned dispatch tuple is pending");
+  }
+  status = prepare_queue_operation(operation_options, &local_operation,
+                                   &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid dispatch wait options");
+  }
+  if (instance->operation_active != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "another instance operation is active");
+  }
+  instance->operation_active = 1;
+  memset(&completion, 0, sizeof(completion));
+  status = receive_dispatch_completion(
+      pending, &deadline, local_operation.cancel_fd, &completion,
+      &wire_status, &native_errno, &reason);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (!dispatch_completion_is_canonical(pending, &completion)) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0, "dispatch completion result mismatch");
+  }
+  fill_dispatch_completion(&completion, out_completion, wire_status);
+  pending->dispatch_completion_consumed = 1;
+  observe_dispatch_signal_mirror(pending);
+  release_consumed_dispatch(instance);
   return SAGR_STATUS_SUCCESS;
 }

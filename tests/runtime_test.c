@@ -171,6 +171,28 @@ static int expect_signal_option_defaults(void) {
   return 0;
 }
 
+static int expect_dispatch_option_defaults(void) {
+  sagr_pinned_dispatch_options_t options;
+  if (sagr_pinned_dispatch_options_init(
+          &options, (uint32_t)sizeof(options)) != SAGR_STATUS_SUCCESS ||
+      options.struct_size != (uint32_t)sizeof(options) ||
+      options.flags != 0 ||
+      options.fixture_id != SAGR_DISPATCH_FIXTURE_GFX950_XOR_U8_V1) {
+    fprintf(stderr, "unexpected pinned dispatch option defaults\n");
+    return 1;
+  }
+  if (sagr_pinned_dispatch_options_init(NULL, (uint32_t)sizeof(options)) !=
+          SAGR_STATUS_INVALID_ARGUMENT ||
+      sagr_pinned_dispatch_options_init(
+          &options, (uint32_t)sizeof(options) - 1U) !=
+          SAGR_STATUS_BUFFER_TOO_SMALL ||
+      options.struct_size != (uint32_t)sizeof(options)) {
+    fprintf(stderr, "unexpected pinned dispatch option validation\n");
+    return 1;
+  }
+  return 0;
+}
+
 int main(void) {
   int failures = 0;
   const uint32_t abi_version = sagr_abi_version();
@@ -203,16 +225,28 @@ int main(void) {
                  "public signal info ABI size changed");
   _Static_assert(sizeof(sagr_signal_wait_result_t) == 88,
                  "public signal wait result ABI size changed");
+  _Static_assert(sizeof(sagr_pinned_dispatch_options_t) == 32,
+                 "public pinned dispatch options ABI size changed");
+  _Static_assert(sizeof(sagr_dispatch_ticket_t) == 152,
+                 "public dispatch ticket ABI size changed");
+  _Static_assert(sizeof(sagr_dispatch_completion_t) == 184,
+                 "public dispatch completion ABI size changed");
 
   if (abi_version != SAGR_ABI_VERSION ||
-      strcmp(SAGR_VERSION_STRING, "0.5.0") != 0 ||
+      strcmp(SAGR_VERSION_STRING, "0.6.0") != 0 ||
       SAGR_ABI_VERSION_DECODE_MAJOR(abi_version) != SAGR_ABI_VERSION_MAJOR ||
       SAGR_ABI_VERSION_DECODE_MINOR(abi_version) != SAGR_ABI_VERSION_MINOR ||
-      SAGR_ABI_VERSION_MAJOR != 1 || SAGR_ABI_VERSION_MINOR != 4 ||
+      SAGR_ABI_VERSION_MAJOR != 1 || SAGR_ABI_VERSION_MINOR != 5 ||
       SAGR_CAPABILITY_QUEUE_MASK != UINT64_C(2) ||
       SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST != UINT64_C(2) ||
       SAGR_CAPABILITY_MEMORY_MASK != UINT64_C(4) ||
-      SAGR_MEMORY_MAX_TRANSFER_BYTES != UINT64_C(16777216)) {
+      SAGR_MEMORY_MAX_TRANSFER_BYTES != UINT64_C(16777216) ||
+      SAGR_CAPABILITY_SIGNAL_MASK != UINT64_C(8) ||
+      SAGR_CAPABILITY_DISPATCH_MASK != UINT64_C(16) ||
+      SAGR_DISPATCH_FIXTURE_GFX950_XOR_U8_V1 != UINT64_C(1) ||
+      SAGR_DISPATCH_FIXED_IO_BYTES != UINT64_C(64) ||
+      SAGR_DISPATCH_PACKET_CRC32C != UINT32_C(0x8a912d83) ||
+      SAGR_DISPATCH_OUTPUT_CRC32C != UINT32_C(0x796671ec)) {
     fprintf(stderr, "unexpected ABI version: 0x%08x\n", abi_version);
     ++failures;
   }
@@ -263,6 +297,7 @@ int main(void) {
   failures += expect_queue_option_defaults();
   failures += expect_memory_option_defaults();
   failures += expect_signal_option_defaults();
+  failures += expect_dispatch_option_defaults();
 
   return failures == 0 ? 0 : 1;
 }

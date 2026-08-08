@@ -137,6 +137,35 @@ add_test(
   COMMAND self_amdgpu_runtime_signal_test)
 set_tests_properties(self_amdgpu_runtime.signal PROPERTIES TIMEOUT 30)
 
+add_executable(
+  self_amdgpu_runtime_dispatch_test
+  dispatch_test.c
+  ../src/transport_codec.c)
+target_compile_features(self_amdgpu_runtime_dispatch_test PRIVATE c_std_11)
+target_include_directories(
+  self_amdgpu_runtime_dispatch_test
+  PRIVATE ../src ../include)
+target_link_libraries(
+  self_amdgpu_runtime_dispatch_test
+  PRIVATE SelfAmdgpuRuntime::runtime Threads::Threads)
+if(SELF_AMDGPU_RUNTIME_BUILD_TOOLS)
+  target_compile_definitions(
+    self_amdgpu_runtime_dispatch_test
+    PRIVATE SAGR_DISPATCH_CLI_PATH="$<TARGET_FILE:sagr-handshake>")
+  add_dependencies(self_amdgpu_runtime_dispatch_test sagr-handshake)
+endif()
+if(MSVC)
+  target_compile_options(self_amdgpu_runtime_dispatch_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    self_amdgpu_runtime_dispatch_test
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(
+  NAME self_amdgpu_runtime.dispatch
+  COMMAND self_amdgpu_runtime_dispatch_test)
+set_tests_properties(self_amdgpu_runtime.dispatch PROPERTIES TIMEOUT 30)
+
 add_executable(self_amdgpu_runtime_cli_test cli_test.c)
 target_compile_features(self_amdgpu_runtime_cli_test PRIVATE c_std_11)
 target_link_libraries(
