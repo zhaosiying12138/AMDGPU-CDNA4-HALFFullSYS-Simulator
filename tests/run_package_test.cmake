@@ -2,7 +2,10 @@
 
 foreach(required_variable IN ITEMS SELF_AMDGPU_RUNTIME_BUILD_DIR
                                    SELF_AMDGPU_RUNTIME_PACKAGE_SOURCE_DIR
-                                   SELF_AMDGPU_RUNTIME_PACKAGE_TEST_DIR)
+                                   SELF_AMDGPU_RUNTIME_PACKAGE_TEST_DIR
+                                   CMAKE_INSTALL_BINDIR
+                                   CMAKE_INSTALL_LIBDIR
+                                   SELF_AMDGPU_RUNTIME_BUILD_TOOLS)
   if(NOT DEFINED ${required_variable} OR "${${required_variable}}" STREQUAL "")
     message(FATAL_ERROR "${required_variable} is required")
   endif()
@@ -19,6 +22,22 @@ execute_process(
   COMMAND_ECHO STDOUT)
 if(NOT command_result EQUAL 0)
   message(FATAL_ERROR "package install failed: ${command_result}")
+endif()
+
+if(SELF_AMDGPU_RUNTIME_BUILD_TOOLS AND
+   EXISTS "${install_prefix}/${CMAKE_INSTALL_LIBDIR}/libself_amdgpu_runtime.so.1")
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env --unset=LD_LIBRARY_PATH
+            "${install_prefix}/${CMAKE_INSTALL_BINDIR}/sagr-handshake" --help
+    RESULT_VARIABLE command_result
+    OUTPUT_VARIABLE tool_stdout
+    ERROR_VARIABLE tool_stderr)
+  if(NOT command_result EQUAL 0 OR
+     NOT tool_stdout MATCHES "usage:.*sagr-handshake")
+    message(FATAL_ERROR
+      "installed shared sagr-handshake is not self-contained: "
+      "${command_result}\n${tool_stdout}\n${tool_stderr}")
+  endif()
 endif()
 
 execute_process(

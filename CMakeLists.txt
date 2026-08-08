@@ -4,16 +4,30 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   self_amdgpu_runtime
-  VERSION 0.1.0
+  VERSION 0.2.0
   DESCRIPTION "Host-side C runtime foundation for the self-amdgpu gem5 transport"
   LANGUAGES C)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
-option(SELF_AMDGPU_RUNTIME_BUILD_TESTS "Build self-amdgpu-runtime tests" ON)
+file(
+  RELATIVE_PATH SELF_AMDGPU_RUNTIME_INSTALL_LIBDIR_FROM_BINDIR
+  "${CMAKE_INSTALL_FULL_BINDIR}"
+  "${CMAKE_INSTALL_FULL_LIBDIR}")
 
-add_library(self_amdgpu_runtime src/runtime.c)
+option(SELF_AMDGPU_RUNTIME_BUILD_TESTS "Build self-amdgpu-runtime tests" ON)
+option(SELF_AMDGPU_RUNTIME_BUILD_TOOLS "Build self-amdgpu-runtime tools" ON)
+option(
+  SELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE
+  "Test the installed package with an independent default-toolchain consumer"
+  ON)
+
+add_library(
+  self_amdgpu_runtime
+  src/runtime.c
+  src/transport.c
+  src/transport_codec.c)
 add_library(SelfAmdgpuRuntime::runtime ALIAS self_amdgpu_runtime)
 
 set_target_properties(
@@ -37,6 +51,24 @@ target_include_directories(
   self_amdgpu_runtime
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+if(SELF_AMDGPU_RUNTIME_BUILD_TOOLS)
+  add_executable(sagr-handshake tools/sagr-handshake.c)
+  set_target_properties(
+    sagr-handshake
+    PROPERTIES INSTALL_RPATH
+               "$ORIGIN/${SELF_AMDGPU_RUNTIME_INSTALL_LIBDIR_FROM_BINDIR}")
+  target_compile_features(sagr-handshake PRIVATE c_std_11)
+  target_link_libraries(sagr-handshake PRIVATE SelfAmdgpuRuntime::runtime)
+  if(MSVC)
+    target_compile_options(sagr-handshake PRIVATE /W4 /WX)
+  else()
+    target_compile_options(
+      sagr-handshake
+      PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+  endif()
+  install(TARGETS sagr-handshake RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+endif()
 
 if(MSVC)
   target_compile_options(self_amdgpu_runtime PRIVATE /W4 /WX)
