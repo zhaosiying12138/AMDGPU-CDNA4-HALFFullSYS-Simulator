@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0016",
+  "checkpoint_id": "CP-0004",
+  "question_or_symptom": "Separately timed connect, send, receive, and validation steps can each consume the full timeout, while an OK ACK may be treated as established before all bytes are sent.",
+  "observation": "A relative timeout applied at each syscall is neither an end-to-end deadline nor deterministic under EINTR, backpressure, cancellation, or simultaneous readiness. Session ownership also changes observable BUSY and PROTOCOL_STATE behavior, so it cannot precede successful ACK transmission.",
+  "evidence_ids": ["EV-0006", "EV-0007", "EV-0008"],
+  "conclusion": "The handshake needs one monotonic absolute deadline and an explicit commit point after the complete successful response leaves the server.",
+  "decision": "Convert the caller's relative duration once after synchronous API validation and before randomness or transport I/O. Reuse that absolute CLOCK_MONOTONIC deadline across connect, send, receive, and ACK validation; deadline wins over simultaneous cancellation. On gem5, process socket readiness nonblockingly and commit the session only after the complete OK ACK is sent, so pipelined or competing HELLO records receive deterministic state errors.",
+  "invalidated_assumptions": [
+    "Applying the same relative timeout independently to every I/O phase enforces the public API timeout.",
+    "Encoding an OK ACK is equivalent to establishing the server-side session."
+  ],
+  "applies_to": [
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "docs/host-transport-v1.md"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

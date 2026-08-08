@@ -1,0 +1,239 @@
+{
+  "schema": "amdgpu-sim.host-transport.v1",
+  "title": "GemSim host transport framing and handshake version 1.0",
+  "transport": {
+    "address_family": "AF_UNIX",
+    "endpoint_kind": "pathname",
+    "socket_type": "SOCK_SEQPACKET",
+    "record_framing": "one-record-one-frame",
+    "byte_order": "big-endian",
+    "max_record_bytes": 65536,
+    "max_handshake_record_bytes": 4096
+  },
+  "framing_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "header": {
+    "bytes": 80,
+    "crc32c_offset": 64,
+    "fields": [
+      {"name": "magic", "offset": 0, "bytes": 8, "type": "bytes", "constant_hex": "4753494d52504300"},
+      {"name": "framing_major", "offset": 8, "bytes": 2, "type": "u16", "constant": 1},
+      {"name": "framing_minor", "offset": 10, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "header_bytes", "offset": 12, "bytes": 2, "type": "u16", "constant": 80},
+      {"name": "message_type", "offset": 14, "bytes": 2, "type": "u16"},
+      {"name": "flags", "offset": 16, "bytes": 4, "type": "u32", "constant": 0},
+      {"name": "payload_bytes", "offset": 20, "bytes": 4, "type": "u32"},
+      {"name": "request_id", "offset": 24, "bytes": 8, "type": "u64", "constraint": "nonzero"},
+      {"name": "daemon_instance_uuid", "offset": 32, "bytes": 16, "type": "bytes"},
+      {"name": "connection_id", "offset": 48, "bytes": 8, "type": "u64"},
+      {"name": "job_epoch", "offset": 56, "bytes": 8, "type": "u64"},
+      {"name": "crc32c", "offset": 64, "bytes": 4, "type": "u32"},
+      {"name": "reserved0", "offset": 68, "bytes": 4, "type": "u32", "constant": 0},
+      {"name": "reserved1", "offset": 72, "bytes": 8, "type": "u64", "constant": 0}
+    ]
+  },
+  "messages": {
+    "HELLO": {
+      "value": 1,
+      "fixed_payload_bytes": 96,
+      "fields": [
+        {"name": "minimum_major", "offset": 0, "bytes": 2, "type": "u16"},
+        {"name": "minimum_minor", "offset": 2, "bytes": 2, "type": "u16"},
+        {"name": "maximum_major", "offset": 4, "bytes": 2, "type": "u16"},
+        {"name": "maximum_minor", "offset": 6, "bytes": 2, "type": "u16"},
+        {"name": "client_nonce", "offset": 8, "bytes": 16, "type": "bytes", "constraint": "nonzero"},
+        {"name": "offered_capabilities", "offset": 24, "bytes": 32, "type": "bitmap"},
+        {"name": "required_capabilities", "offset": 56, "bytes": 32, "type": "bitmap"},
+        {"name": "rx_max_record", "offset": 88, "bytes": 4, "type": "u32", "minimum": 4096, "maximum": 65536},
+        {"name": "role", "offset": 92, "bytes": 2, "type": "u16", "constant": 1},
+        {"name": "reserved", "offset": 94, "bytes": 2, "type": "u16", "constant": 0}
+      ]
+    },
+    "HELLO_ACK": {
+      "value": 2,
+      "fixed_payload_bytes": 80,
+      "fields": [
+        {"name": "selected_major", "offset": 0, "bytes": 2, "type": "u16"},
+        {"name": "selected_minor", "offset": 2, "bytes": 2, "type": "u16"},
+        {"name": "status", "offset": 4, "bytes": 4, "type": "u32"},
+        {"name": "client_nonce_echo", "offset": 8, "bytes": 16, "type": "bytes"},
+        {"name": "server_nonce", "offset": 24, "bytes": 16, "type": "bytes"},
+        {"name": "selected_capabilities", "offset": 40, "bytes": 32, "type": "bitmap"},
+        {"name": "max_record", "offset": 72, "bytes": 4, "type": "u32", "minimum": 4096, "maximum": 65536},
+        {"name": "role", "offset": 76, "bytes": 2, "type": "u16", "constant": 2},
+        {"name": "reserved", "offset": 78, "bytes": 2, "type": "u16", "constant": 0}
+      ]
+    }
+  },
+  "roles": {
+    "RUNTIME": 1,
+    "DAEMON": 2
+  },
+  "statuses": {
+    "OK": 0,
+    "MALFORMED": 1,
+    "UNSUPPORTED_VERSION": 2,
+    "UNSUPPORTED_CAPABILITY": 3,
+    "INSTANCE_MISMATCH": 4,
+    "TOPOLOGY_MISMATCH": 5,
+    "UNAUTHORIZED": 6,
+    "BUSY": 7,
+    "RESOURCE_EXHAUSTED": 8,
+    "PROTOCOL_STATE": 9,
+    "INTERNAL": 10
+  },
+  "handshake_rules": {
+    "server_versions": ["1.0"],
+    "required_session_capabilities": ["TOPOLOGY_IDENTITY_V1"],
+    "hello_constraints": {
+      "connection_id": 0,
+      "nonce": "nonzero",
+      "version_range": "lexicographically-ordered-and-must-include-server-version-1.0",
+      "required_subset_of_offered": true,
+      "topology_tlv": "exactly-once-iff-capability-bit-0-offered",
+      "capability_bit_0": "must-be-both-offered-and-required-for-success"
+    },
+    "correlatable_hello": {
+      "requires_valid_envelope": true,
+      "minimum_payload_bytes": 96,
+      "requires_nonzero_client_nonce": true,
+      "otherwise": "silent-drop"
+    },
+    "await_hello_error_precedence": [
+      "MALFORMED",
+      "UNSUPPORTED_VERSION",
+      "UNSUPPORTED_CAPABILITY",
+      "INSTANCE_MISMATCH",
+      "TOPOLOGY_MISMATCH",
+      "BUSY",
+      "RESOURCE_EXHAUSTED",
+      "INTERNAL"
+    ],
+    "established_error_precedence": [
+      "MALFORMED",
+      "PROTOCOL_STATE",
+      "INTERNAL"
+    ],
+    "failure_ack": {
+      "selected_version": "0.0",
+      "daemon_instance_uuid": "actual-nonzero",
+      "connection_id": 0,
+      "job_epoch": "actual-nonzero",
+      "server_nonce": "all-zero",
+      "selected_capabilities": "all-zero",
+      "max_record": "daemon-configured-limit",
+      "tlvs": "none",
+      "client_validation": "correlate-request-and-nonce;require-known-status-and-canonical-zero-fields-and-legal-max-record;apply-expected-identity-only-on-OK",
+      "daemon_conformance": "max-record-equals-configured-limit"
+    },
+    "success_ack": {
+      "selected_version": "1.0",
+      "daemon_instance_uuid": "actual-nonzero",
+      "connection_id": "new-nonzero-not-reused-within-process",
+      "job_epoch": "actual-nonzero",
+      "selected_capabilities": ["TOPOLOGY_IDENTITY_V1"],
+      "topology_tlv": "exactly-one-actual-identity"
+    },
+    "wildcards": {
+      "daemon_instance_uuid": "all-zero",
+      "job_epoch": 0,
+      "topology": "job-uuid-all-zero,rank-uint32-max,world-size-zero-as-one-tuple",
+      "tp_supervisor": "must-use-exact-nonzero-job-and-epoch-plus-rank-and-world"
+    },
+    "state_machine": {
+      "server_initial": "accept-HELLO-only;other-types-silent-drop",
+      "client_waiting": "accept-HELLO_ACK-only;other-types-protocol-error",
+      "server_established": "after-envelope-and-structural-validation-second-HELLO-canonical-PROTOCOL_STATE-before-negotiation-failure-ACK-then-close",
+      "disconnect": "no-session-replay-or-transparent-reconnect"
+    }
+  },
+  "validation_algorithms": {
+    "record_length": "after-bounding-record-size-compare-payload-bytes-to-record-size-minus-80",
+    "tlv_length": "require-remaining-at-least-8-then-value-length-at-most-remaining-minus-8-then-bound-padding",
+    "crc32c": "validate-bounds-before-checksum"
+  },
+  "endpoint_security": {
+    "absolute_path_only": true,
+    "same_effective_uid_required": true,
+    "parent": "existing-owner-euid-no-group-or-other-bits-no-symlink-components;all-ancestor-directory-entries-protected-from-untrusted-uid-rename-exchange-or-mount-rebind",
+    "parent_filesystem": "supports-hard-links-to-pathname-socket-inodes",
+    "lock": "same-directory-regular-no-follow-0600-exclusive-flock-fresh-path-identity-for-listener-lifetime-retained-on-exit",
+    "stale_removal": "record-dev-inode-owner-type;probe-econnrefused;fresh-dirfd-fstatat-no-follow-exact-match;unlinkat",
+    "bind_publication": "bind-random-private-basename;opath-pin;proc-self-fd-chmod-0600;listen;linkat-no-replace-final-name;unlink-private-name;fresh-final-identity;final-absolute-parent-check-after-published-validation-before-readiness",
+    "shutdown_removal": "close-listener;four-immediate-retries-per-cleanup-invocation;ordinary-error-retains-pending-alias-retained-opath-pin-dirfd-lock-inode-and-errno-for-later-shutdown-or-destructor-retry;fresh-dirfd-identity-match-retained-opath-pin;unlinkat;process-exit-may-leave-path-for-verified-stale-recovery;preserve-inspection-errno-and-use-estale-only-for-identity-mismatch",
+    "coordination_threat_model": "trusted-ancestor-namespace-plus-0700-parent-excludes-other-uids;same-euid-processes-must-honor-lock;no-claim-against-malicious-same-euid-directory-rewrite",
+    "descriptor_flags": ["CLOEXEC", "NONBLOCK"],
+    "send_flag": "MSG_NOSIGNAL",
+    "receive_reject_flags": ["MSG_TRUNC", "MSG_CTRUNC"]
+  },
+  "deadline": {
+    "clock": "CLOCK_MONOTONIC",
+    "scope": "one-absolute-deadline-for-connect-send-hello-receive-and-validate-ack",
+    "client_input": "absolute-nanoseconds-or-relative-duration-converted-once-after-synchronous-validation-before-randomness-or-transport-io",
+    "cancellation": "optional-caller-owned-cloexec-pollable-fd-readability-hangup-or-error",
+    "deadline_cancellation_precedence": "expired-deadline-before-ready-cancellation",
+    "retries": 0,
+    "eintr": "recompute-remaining-from-original-absolute-deadline"
+  },
+  "capabilities": {
+    "bitmap_bytes": 32,
+    "bit_numbering": "byte[n/8] mask 1<<(n%8)",
+    "TOPOLOGY_IDENTITY_V1": 0
+  },
+  "tlv": {
+    "header_bytes": 8,
+    "alignment_bytes": 8,
+    "critical_flag": 1,
+    "allowed_flags_mask": 1,
+    "types": {
+      "TOPOLOGY_IDENTITY": {
+        "value": 1,
+        "required_capability": "TOPOLOGY_IDENTITY_V1",
+        "required_flags": 1,
+        "value_bytes": 24,
+        "fields": [
+          {"name": "job_uuid", "offset": 0, "bytes": 16, "type": "bytes"},
+          {"name": "rank", "offset": 16, "bytes": 4, "type": "u32"},
+          {"name": "world_size", "offset": 20, "bytes": 4, "type": "u32"}
+        ]
+      }
+    }
+  },
+  "crc32c": {
+    "name": "CRC-32C Castagnoli",
+    "reflected_polynomial_hex": "82f63b78",
+    "initial_xor_hex": "ffffffff",
+    "final_xor_hex": "ffffffff",
+    "frame_rule": "compute over the entire frame with header bytes 64 through 67 set to zero",
+    "check_input_ascii": "123456789",
+    "check_value_hex": "e3069283"
+  },
+  "golden": {
+    "identity": {
+      "request_id_hex": "0123456789abcdef",
+      "daemon_instance_uuid_hex": "00112233445566778899aabbccddeeff",
+      "connection_id_hex": "1122334455667788",
+      "job_epoch_hex": "0102030405060708",
+      "job_uuid_hex": "102132435465768798a9bacbdcedfe0f",
+      "rank": 3,
+      "world_size": 8,
+      "client_nonce_hex": "000102030405060708090a0b0c0d0e0f",
+      "server_nonce_hex": "f0e0d0c0b0a090807060504030201001",
+      "rx_max_record": 65536
+    },
+    "hello_success_request": {
+      "frame_bytes": 208,
+      "payload_bytes": 128,
+      "crc32c_hex": "508ae012",
+      "frame_hex": "4753494d52504300000100000050000100000000000000800123456789abcdef00112233445566778899aabbccddeeff00000000000000000102030405060708508ae0120000000000000000000000000001000000010000000102030405060708090a0b0c0d0e0f0100000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000010000000100000001000100000018102132435465768798a9bacbdcedfe0f0000000300000008"
+    },
+    "hello_success_ack": {
+      "frame_bytes": 192,
+      "payload_bytes": 112,
+      "crc32c_hex": "c09c2612",
+      "frame_hex": "4753494d52504300000100000050000200000000000000700123456789abcdef00112233445566778899aabbccddeeff11223344556677880102030405060708c09c26120000000000000000000000000001000000000000000102030405060708090a0b0c0d0e0ff0e0d0c0b0a090807060504030201001010000000000000000000000000000000000000000000000000000000000000000010000000200000001000100000018102132435465768798a9bacbdcedfe0f0000000300000008"
+    }
+  }
+}

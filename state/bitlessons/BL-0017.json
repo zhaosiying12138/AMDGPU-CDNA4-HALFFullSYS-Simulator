@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0017",
+  "checkpoint_id": "CP-0004",
+  "question_or_symptom": "SCons exited zero for the requested gem5.opt target but produced no binary after an earlier libelf generation failure, and a cached optional linker-flag probe kept reactivating the failed libelf node.",
+  "observation": "The SystemC CheckLinkFlag probe used the shared main environment after libelf.a had been appended to LIBS. SConf therefore pulled the libelf build graph into an unrelated optional flag test and replayed the cached failed node; the top-level target was pruned without a nonzero process status.",
+  "evidence_ids": ["EV-0006"],
+  "conclusion": "A successful build process status is insufficient artifact evidence, and configure probes must not inherit unrelated target libraries from a mutable shared construction environment.",
+  "decision": "Run the optional link-flag probe in a cloned environment with LIBS and LIBPATH cleared, disable autoadd, and append the flag to the real environment only after the isolated probe succeeds. Acceptance captures both the full link transcript and the final gem5.opt build-info and SHA-256 identity.",
+  "invalidated_assumptions": [
+    "SCons exit zero proves that every explicitly requested target was produced.",
+    "A linker-flag probe is isolated merely because it uses a Configure context."
+  ],
+  "applies_to": [
+    "projects/gem5/src/systemc/core/SConscript",
+    "gem5 build evidence",
+    "future SCons configure probes"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

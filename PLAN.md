@@ -2,8 +2,8 @@
 
 **Plan ID:** `AMDGPU-SIM-V1`  
 **Revision:** `1`  
-**Revision date:** `2026-08-07`  
-**State at this commit:** `P0-SELF-01-authored-runtime-baseline-complete; next-P1-HOST-01`
+**Revision date:** `2026-08-08`
+**State at this commit:** `P1-HOST-01-versioned-handshake-complete; next-P1-QUEUE-01`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -223,6 +223,16 @@ queue/signal lifecycle, code-object handoff, tracing, and a 1-CU fast config.
 Gate: a host client allocates, copies, launches a trivial kernel, waits, and
 verifies bytes; no guest KMD/UMD and no host arithmetic.
 
+Accepted sub-boundary: CP-0004 freezes host transport 1.0 before queue or
+memory work begins. The runtime and gem5 now share byte-exact framing,
+capability negotiation, request and instance identity, topology, deterministic
+reject status, one absolute deadline, and a secure pathname `SOCK_SEQPACKET`
+endpoint lifecycle. Real-process gates pass for N=1/2/3/4/8 and bounded
+admission, but this boundary deliberately implements no allocation, copy,
+doorbell, packet submission, or GPU execution. The next sub-gate adds a
+versioned single-daemon queue lifecycle and doorbell control path without
+advancing the phase-level trivial-kernel claim.
+
 ### P2 — ROCr/libhsakmt provider
 
 Fork the pinned ROCr core and implement `libhsakmt_gem5` against the daemon.
@@ -425,16 +435,20 @@ licenses into a false aggregate claim.
 
 ## 10. Current handoff boundary
 
-`CP-0003` retains the CP-0002 official Qwen and six-upstream source freeze, then
-adds the separately governed GPL `self-amdgpu-runtime` initial baseline. Its
-public ABI is deliberately limited to version and status discovery; no
-transport, queue, memory, or GPU execution claim is made at this boundary.
+`CP-0004` retains the CP-0002 official Qwen and six-upstream source freeze plus
+the CP-0003 authored runtime baseline. It advances only gem5 and
+`self-amdgpu-runtime` to the shared host-transport-v1 handshake boundary. The
+accepted gate covers byte-exact protocol behavior, endpoint security,
+deadlines, failure status, bounded client admission, and independent daemon
+identity through N=8; it makes no queue, memory-transfer, packet-submission,
+code-object, kernel, collective, PyTorch, or vLLM execution claim.
 
-The next unique action is `P1-HOST-01`: create a CP-0004 two-child transaction
-for gem5 and `self-amdgpu-runtime`, define the versioned transport handshake,
-and validate both endpoints against the same wire contract before extending
-the runtime API. `SOURCE_LOCK.json` remains byte-immutable, and existing
-`PROJECT_LANES` declarations remain historically anchored and append-only.
+The next unique action is `P1-QUEUE-01`: create a CP-0005 two-child transaction
+for gem5 and `self-amdgpu-runtime`, then implement and validate a versioned
+single-daemon queue lifecycle, doorbell/command notification, and gem5
+event-queue completion/error path. `SOURCE_LOCK.json` remains byte-immutable,
+and existing `PROJECT_LANES` declarations remain historically anchored and
+append-only.
 
 The exact blank-context continuation contract remains in `GOAL.md`; the
 machine-executable argv, prerequisites, expected gate, and rollback boundary

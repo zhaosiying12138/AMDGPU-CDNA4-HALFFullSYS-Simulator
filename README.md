@@ -32,8 +32,10 @@ PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、最新 checkpoint �
 bitlesson，运行 scripts/resume.sh --verify；不要重做已通过的工作。
 ```
 
-`CP-0003` is the accepted authored-runtime baseline boundary. The standalone
-runtime currently exposes only its version/status ABI and does not pretend to
-transport GPU work. The next action is `P1-HOST-01`: implement and test a
-versioned handshake across `self-amdgpu-runtime` and the gem5 host endpoint.
-The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.
+`CP-0004` is the accepted host-transport-v1 handshake boundary. The standalone
+runtime and gem5 now pass byte-exact framing, identity, capability, deadline,
+endpoint-lifecycle, failure, and N=1/2/3/4/8 isolation gates, but do not yet
+allocate memory, submit packets, or execute GPU work. The next action is
+`P1-QUEUE-01`: implement and test the versioned single-daemon queue lifecycle,
+doorbell notification, and gem5 event-queue completion/error path. The frozen
+`SOURCE_LOCK.json` and registered project baseline remain immutable.

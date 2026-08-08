@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0018",
+  "checkpoint_id": "CP-0004",
+  "question_or_symptom": "An installed-package consumer of an AddressSanitizer-instrumented shared library failed even though the library and its direct tests built correctly.",
+  "observation": "Clang does not make an instrumented shared library self-sufficient for an uninstrumented downstream executable; the final process must link a compatible sanitizer runtime. That constraint is different from ordinary release package installability.",
+  "evidence_ids": ["EV-0007"],
+  "conclusion": "Sanitizer execution and release package consumption are separate validation dimensions and should not be made to infer or silently disable each other.",
+  "decision": "Keep the installed-package consumer enabled by default and prove it in fresh static and shared RelWithDebInfo matrices. Disable it only explicitly in the Clang ASan and UBSan matrix, where the four instrumented API, protocol, transport, and CLI tests still run. Record both gates independently in evidence.",
+  "invalidated_assumptions": [
+    "A shared library built with AddressSanitizer can be loaded by an uninstrumented downstream executable without matching link flags.",
+    "Detecting sanitizer flags is a sound reason for the build system to silently skip package validation."
+  ],
+  "applies_to": [
+    "projects/self-amdgpu-runtime/CMakeLists.txt",
+    "projects/self-amdgpu-runtime/tests/CMakeLists.txt",
+    "runtime build matrices"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

@@ -3,11 +3,11 @@
   "goal_id": "GSIM-001",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 1,
-  "checkpoint_id": "CP-0003",
-  "checkpoint_sha256": "62e979b1c4b5d6d2c6bbccd988cb1e1148736dae11ae2ecc13a65664b1afb290",
+  "checkpoint_id": "CP-0004",
+  "checkpoint_sha256": "95b640406d0f2a9aa7f75fa31397fe0a997742a495330dc34db523b4d466121f",
   "phase_id": "P1",
   "state": "ready",
-  "next_action_id": "P1-HOST-01",
-  "next_action_summary": "Implement and validate the versioned self-amdgpu-runtime to gem5 transport handshake.",
+  "next_action_id": "P1-QUEUE-01",
+  "next_action_summary": "Implement and validate the versioned single-daemon queue and doorbell control path.",
   "resume_command": "scripts/resume.sh --verify"
 }

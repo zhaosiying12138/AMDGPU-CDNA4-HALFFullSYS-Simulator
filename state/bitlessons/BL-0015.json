@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0015",
+  "checkpoint_id": "CP-0004",
+  "question_or_symptom": "The ninth client was intended to receive RESOURCE_EXHAUSTED, but an accept-time one-shot read could close it before HELLO arrived and could not run during gem5's blocking startup wait.",
+  "observation": "Connection establishment and the first SOCK_SEQPACKET record are separate readiness events. Scheduling one nonblocking recv immediately after accept makes EAGAIN a race-dependent close, while a queued gem5 event is not serviced during the startup wall-clock wait.",
+  "evidence_ids": ["EV-0006", "EV-0008"],
+  "conclusion": "A bounded rejection client is still a protocol client and must use the same readiness, deadline, ancillary cleanup, and partial-send state machine as an admitted client.",
+  "decision": "Track eight regular and eight resource-limited clients with independent admission counters. Both classes receive PollEvent and timerfd ownership plus nonblocking outbound retry; negotiation marks limited clients RESOURCE_EXHAUSTED. The real gate exercises an immediate ninth HELLO during startup and a ninth connection held idle before HELLO in steady state, then proves slot and file-descriptor recovery.",
+  "invalidated_assumptions": [
+    "A client that exceeds the regular capacity will always have sent HELLO by the first accept callback.",
+    "An event scheduled at tick zero is serviced while startup is blocked in an external poll loop."
+  ],
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_connection_state.hh",
+    "scripts/test_host_transport_integration.py"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

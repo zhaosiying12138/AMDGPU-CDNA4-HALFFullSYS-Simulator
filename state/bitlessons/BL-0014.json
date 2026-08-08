@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0014",
+  "checkpoint_id": "CP-0004",
+  "question_or_symptom": "A pathname Unix socket can be replaced, followed through a symlink, or unlinked by a second daemon between stale probing, permission changes, publication, and shutdown cleanup.",
+  "observation": "Binding directly to the final pathname or unlinking it by name cannot prove that the path still identifies the daemon's socket. A 0700 endpoint directory protects entries inside it from other UIDs, but its ancestors and same-UID coordination remain explicit deployment boundaries.",
+  "evidence_ids": ["EV-0006", "EV-0008"],
+  "conclusion": "Endpoint safety requires an inode identity and a trusted namespace boundary, not just an absolute pathname and filesystem permissions.",
+  "decision": "Open every parent component without following symlinks, hold a same-directory 0600 flock, bind a randomized private name, pin its socket inode with O_PATH, chmod and validate through the pin, listen before an atomic no-replace linkat publication, and remove aliases only after fresh dirfd-relative identity checks. Ordinary cleanup errors retain the pin, dirfd, lock, inode, alias, and errno for bounded later retries; identity mismatch leaves the replacement untouched.",
+  "invalidated_assumptions": [
+    "A successful bind to the final pathname is sufficient protection against endpoint replacement races.",
+    "An unlink failure during shutdown can be ignored after closing the inode pin and endpoint lock."
+  ],
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_socket_utils.cc",
+    "docs/host-transport-v1.md"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}
