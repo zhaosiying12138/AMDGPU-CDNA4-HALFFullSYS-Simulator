@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the CP-0004 handshake and CP-0005 queue-control integration matrix."""
+"""Run the CP-0004 through CP-0006 host-transport integration matrix."""
 
 from __future__ import annotations
 
@@ -946,6 +946,59 @@ class Harness:
                 f"runtime connected to the wrong daemon process: {payload}")
         return payload
 
+    def validate_memory_success(
+        self,
+        payload: dict[str, Any],
+        *,
+        expected_bytes: int,
+        expected_alignment: int,
+        require_reuse: bool,
+    ) -> dict[str, Any]:
+        memory = payload.get("memory")
+        require(isinstance(memory, dict), f"memory result is missing: {payload}")
+        require(memory.get("status") == 0, f"memory status is wrong: {memory}")
+        allocation_id = int(memory.get("allocation_id", "0"), 0)
+        generation = int(memory.get("generation", "0"), 0)
+        simulated_va = int(memory.get("simulated_va", "0"), 0)
+        require(1 <= allocation_id <= 1024,
+                f"memory allocation ID is out of range: {memory}")
+        require(generation != 0, f"memory generation is zero: {memory}")
+        expected_va = 0x0000100000000000 + (allocation_id - 1) * 0x80000000
+        require(simulated_va == expected_va,
+                f"memory simulated VA does not match its slot: {memory}")
+        require(memory.get("size_bytes") == expected_bytes and
+                memory.get("alignment_bytes") == expected_alignment,
+                f"memory size or alignment is wrong: {memory}")
+        require(memory.get("initial_zero") is True,
+                f"new allocation was not zero-filled: {memory}")
+        require(memory.get("match") is True,
+                f"memory roundtrip bytes did not match: {memory}")
+        require(memory.get("freed") is True,
+                f"memory allocation was not freed: {memory}")
+        pattern_crc = int(memory.get("pattern_crc32c", "-1"), 0)
+        returned_crc = int(memory.get("returned_crc32c", "-2"), 0)
+        require(0 <= pattern_crc <= 0xFFFFFFFF and
+                pattern_crc == returned_crc,
+                f"memory roundtrip CRC is wrong: {memory}")
+
+        reuse = memory.get("reuse")
+        if require_reuse:
+            require(isinstance(reuse, dict),
+                    f"memory reuse result is missing: {memory}")
+            require(int(reuse.get("allocation_id", "0"), 0) == allocation_id,
+                    f"memory slot was not deterministically reused: {reuse}")
+            reuse_generation = int(reuse.get("generation", "0"), 0)
+            require(reuse_generation != 0 and reuse_generation != generation,
+                    f"memory reuse generation did not change: {reuse}")
+            require(int(reuse.get("simulated_va", "0"), 0) == simulated_va,
+                    f"memory reuse changed the slot VA: {reuse}")
+            require(reuse.get("initial_zero") is True and
+                    reuse.get("freed") is True,
+                    f"reused allocation was not zero-filled and freed: {reuse}")
+        else:
+            require(reuse is None, f"unexpected memory reuse result: {memory}")
+        return memory
+
     def exact_client(self, daemon: Daemon, **kwargs: Any) -> ClientResult:
         return self.run_client_argv(
             self.client_argv(daemon.endpoint, daemon.identity, **kwargs)
@@ -964,7 +1017,7 @@ class Harness:
 
         result = self.exact_client(
             daemon,
-            extra=("--offer-cap-bit", "2", "--require-cap-bit", "2"),
+            extra=("--offer-cap-bit", "3", "--require-cap-bit", "3"),
         )
         self.expect_failure(result, 5, "capability mismatch", 3)
 
@@ -1066,6 +1119,47 @@ class Harness:
             success_peer_pid=success["peer_pid"],
             error_peer_pid=error["peer_pid"],
             error_wire_status=error_queue["completion_wire_status"],
+        )
+
+    def check_memory_transfer(self) -> None:
+        expected_capabilities = [
+            "0x0000000000000005", "0x0000000000000000",
+            "0x0000000000000000", "0x0000000000000000",
+        ]
+        memory_bytes = 2 * 65536 + 17
+        alignment = 65536
+        identity = make_identity(22, 1, 0)
+        daemon = Daemon(
+            self, "simulated-memory", identity,
+            exit_on_handshake=False, run_timeout_ms=12000,
+        )
+        daemon.launch()
+        result = self.exact_client(
+            daemon,
+            extra=(
+                "--memory-bytes", str(memory_bytes),
+                "--memory-alignment", str(alignment),
+                "--memory-reuse",
+            ),
+        )
+        success = self.validate_success(
+            result, identity, daemon, expected_capabilities
+        )
+        memory = self.validate_memory_success(
+            success,
+            expected_bytes=memory_bytes,
+            expected_alignment=alignment,
+            require_reuse=True,
+        )
+        daemon.stop()
+        self.add_check(
+            "simulated_memory_roundtrip",
+            bytes=memory_bytes,
+            allocation_id=memory["allocation_id"],
+            generation=memory["generation"],
+            simulated_va=memory["simulated_va"],
+            crc32c=memory["returned_crc32c"],
+            peer_pid=success["peer_pid"],
         )
 
     def check_busy(self) -> None:
@@ -1861,6 +1955,7 @@ class Harness:
         self.check_raw_resource_exhausted()
         self.check_reject_then_success()
         self.check_queue_control()
+        self.check_memory_transfer()
         self.check_busy()
         for world_size in WORLD_SIZES:
             self.check_world_isolation(world_size)
@@ -1895,9 +1990,10 @@ def file_path(value: str) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the real CP-0004/CP-0005 runtime CLI against HostGPUBridge "
-            "processes. This validates the handshake and bounded queue-control "
-            "events, not memory access or GPU execution."
+            "Run the real CP-0004 through CP-0006 runtime CLI against "
+            "HostGPUBridge processes. This validates handshake, bounded "
+            "queue-control events, and bridge-owned simulated-memory byte "
+            "transfer, not packet submission or GPU execution."
         )
     )
     parser.add_argument("--gem5", required=True, type=executable_path)
@@ -1940,7 +2036,7 @@ def main() -> int:
         return 1
 
     work_dir = Path(tempfile.mkdtemp(
-        prefix="cp5-host-",
+        prefix="cp6-host-",
         dir=str(args.work_root) if args.work_root is not None else None,
     )).resolve()
     os.chmod(work_dir, 0o700)
@@ -1970,8 +2066,9 @@ def main() -> int:
         "schema": "amdgpu-sim.host-transport.integration.v1",
         "status": status,
         "scope": (
-            "CP-0004 host transport handshake and CP-0005 bounded queue-control "
-            "events only; no memory access, packet submission, or GPU execution"
+            "CP-0004 handshake, CP-0005 bounded queue control, and CP-0006 "
+            "bridge-owned simulated allocation and byte transfer; no "
+            "packet-visible VRAM, packet submission, or GPU execution"
         ),
         "checks": harness.checks,
         "world_sizes": list(WORLD_SIZES),

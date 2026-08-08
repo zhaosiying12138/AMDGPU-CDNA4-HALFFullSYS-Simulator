@@ -1,0 +1,187 @@
+{
+  "schema": "amdgpu-sim.host-transport-v1.memory.v1",
+  "title": "GemSim host transport simulated-memory extension",
+  "base_protocol": "protocol/host-transport-v1.json",
+  "queue_protocol": "protocol/host-transport-v1-queue.json",
+  "scope": "bounded bridge-owned simulated allocation and memfd transfer only",
+  "capability": {
+    "name": "SIMULATED_MEMORY_V1",
+    "bit": 2,
+    "byte_index": 0,
+    "mask_hex": "04",
+    "negotiation": "selected if and only if both offered and required by the client; offered-only is not selected; required-not-offered is the base subset failure; independent of QUEUE_CONTROL_V1"
+  },
+  "transport": {
+    "header_bytes": 80,
+    "byte_order": "big-endian",
+    "message_types": {
+      "MEMORY_REQUEST": 6,
+      "MEMORY_ACK": 7
+    },
+    "payload_bytes": 64,
+    "frame_bytes": 144,
+    "crc": "base protocol CRC-32C covers the control frame but not memfd contents"
+  },
+  "request_payload": {
+    "bytes": 64,
+    "fields": [
+      {"name": "memory_major", "offset": 0, "bytes": 2, "type": "u16", "constant": 1},
+      {"name": "memory_minor", "offset": 2, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "opcode", "offset": 4, "bytes": 2, "type": "u16", "values": {"ALLOC": 1, "FREE": 2, "COPY_H2D": 3, "COPY_D2H": 4}},
+      {"name": "flags", "offset": 6, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "allocation_id", "offset": 8, "bytes": 8, "type": "u64"},
+      {"name": "generation", "offset": 16, "bytes": 8, "type": "u64"},
+      {"name": "offset", "offset": 24, "bytes": 8, "type": "u64"},
+      {"name": "byte_count", "offset": 32, "bytes": 8, "type": "u64"},
+      {"name": "argument", "offset": 40, "bytes": 8, "type": "u64"},
+      {"name": "reserved0", "offset": 48, "bytes": 8, "type": "u64", "constant": 0},
+      {"name": "reserved1", "offset": 56, "bytes": 8, "type": "u64", "constant": 0}
+    ]
+  },
+  "ack_payload": {
+    "bytes": 64,
+    "fields": [
+      {"name": "memory_major", "offset": 0, "bytes": 2, "type": "u16", "constant": 1},
+      {"name": "memory_minor", "offset": 2, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "status", "offset": 4, "bytes": 4, "type": "u32", "source": "base protocol statuses"},
+      {"name": "opcode", "offset": 8, "bytes": 2, "type": "u16"},
+      {"name": "reserved_opcode", "offset": 10, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "reserved_status", "offset": 12, "bytes": 4, "type": "u32", "constant": 0},
+      {"name": "allocation_id", "offset": 16, "bytes": 8, "type": "u64"},
+      {"name": "generation", "offset": 24, "bytes": 8, "type": "u64"},
+      {"name": "value0", "offset": 32, "bytes": 8, "type": "u64"},
+      {"name": "value1", "offset": 40, "bytes": 8, "type": "u64"},
+      {"name": "value2", "offset": 48, "bytes": 8, "type": "u64"},
+      {"name": "sim_tick", "offset": 56, "bytes": 8, "type": "u64"}
+    ]
+  },
+  "limits": {
+    "maximum_live_allocations": 1024,
+    "maximum_single_allocation_bytes": 2147483648,
+    "maximum_total_live_bytes": 4294967296,
+    "maximum_transfer_bytes": 16777216,
+    "allowed_alignment_bytes": [4096, 65536],
+    "sparse_chunk_bytes": 65536,
+    "simulated_va_base_hex": "0000100000000000",
+    "simulated_va_slot_stride_bytes": 2147483648
+  },
+  "opcode_constraints": {
+    "ALLOC": {
+      "request": {"allocation_id": 0, "generation": 0, "offset": 0, "byte_count": "nonzero-u64", "argument": "4096-or-65536", "fd_count": 0},
+      "success_ack": {"allocation_id": "integer-1-through-1024", "generation": "new-nonzero", "value0": "base-plus-allocation-id-minus-one-times-slot-stride", "value1": "request-byte-count", "value2": "request-alignment"}
+    },
+    "FREE": {
+      "request": {"allocation_id": "nonzero", "generation": "nonzero", "offset": 0, "byte_count": 0, "argument": 0, "fd_count": 0},
+      "success_ack": {"allocation_id": "request-echo", "generation": "request-echo", "value0": 0, "value1": 0, "value2": 0}
+    },
+    "COPY_H2D": {
+      "request": {"allocation_id": "nonzero", "generation": "nonzero", "offset": "u64", "byte_count": "nonzero-u64-with-offset-plus-count-no-wrap", "argument": "zero-extended-content-crc32c", "fd_count": 1},
+      "success_ack": {"allocation_id": "request-echo", "generation": "request-echo", "value0": "offset-echo", "value1": "byte-count-echo", "value2": "verified-content-crc32c"}
+    },
+    "COPY_D2H": {
+      "request": {"allocation_id": "nonzero", "generation": "nonzero", "offset": "u64", "byte_count": "nonzero-u64-with-offset-plus-count-no-wrap", "argument": 0, "fd_count": 1},
+      "success_ack": {"allocation_id": "request-echo", "generation": "request-echo", "value0": "offset-echo", "value1": "byte-count-echo", "value2": "written-content-crc32c"}
+    },
+    "failure_ack": "known nonzero status; echo request_id, opcode, allocation_id, and generation from the structurally decoded request; protocol version is 1.0; reserved fields, values, and sim_tick are zero; response header uses actual daemon UUID, current connection ID, and actual epoch; no descriptor"
+  },
+  "ack_rules": {
+    "common": "exactly one 144-byte MEMORY_ACK with no ancillary data; framing and memory version 1.0, known status, request_id echo, actual daemon UUID, current connection ID, actual epoch, and all reserved fields are exact",
+    "ALLOC_success": "status OK; allocation_id in 1 through 1024; generation nonzero; value0 equals base + (allocation_id - 1) * slot stride without overflow; value1 and value2 exactly echo requested size and alignment",
+    "FREE_success": "status OK; opcode, allocation_id, and generation exactly echo the request; value0, value1, and value2 are zero",
+    "COPY_H2D_success": "status OK; opcode, allocation_id, and generation exactly echo; value0 and value1 echo offset and byte_count; value2 equals the zero-extended request CRC32C",
+    "COPY_D2H_success": "status OK; opcode, allocation_id, and generation exactly echo; value0 and value1 echo offset and byte_count; value2 is the zero-extended immutable carrier CRC32C",
+    "failure": "status is a known nonzero base status; opcode, allocation_id, and generation exactly echo; value0, value1, value2, and sim_tick are zero",
+    "runtime_validation": "any ACK shape, identity, request correlation, reserved-field, value, descriptor, size, seal, or CRC mismatch after send poisons and closes the session"
+  },
+  "carrier": {
+    "kind": "receiver-verifiable anonymous sealable regular staging object transferred by SCM_RIGHTS",
+    "runtime_creation": "a conforming runtime creates the object with memfd_create(MFD_CLOEXEC | MFD_ALLOW_SEALING), truncates it to the exact byte count, and sets mode 0600 before sealing or sending",
+    "common": {
+      "exact_size": "request byte_count",
+      "mode_octal": "0600",
+      "owner": "peer effective uid",
+      "regular_file": true,
+      "link_count": 0,
+      "receiver_fd_cloexec": "required and established by recvmsg MSG_CMSG_CLOEXEC; this does not prove sender creation flags",
+      "file_offset": "ignored; all IO uses pread or pwrite from offset zero"
+    },
+    "COPY_H2D": {
+      "access": "readable",
+      "exact_seals": ["F_SEAL_SHRINK", "F_SEAL_GROW", "F_SEAL_WRITE", "F_SEAL_SEAL"],
+      "commit": "daemon reads all bytes, verifies CRC-32C, prepares sparse chunks, then atomically mutates simulated memory"
+    },
+    "COPY_D2H": {
+      "initial_access": "O_RDWR",
+      "initial_exact_seals": ["F_SEAL_SHRINK", "F_SEAL_GROW"],
+      "final_exact_seals": ["F_SEAL_SHRINK", "F_SEAL_GROW", "F_SEAL_WRITE", "F_SEAL_SEAL"],
+      "commit": "daemon snapshots simulated bytes, writes all bytes, applies final seals, re-reads the now-immutable complete contents, computes CRC-32C, and only then sends the terminal ACK",
+      "failure_status": "a client-created writable mapping that prevents F_SEAL_WRITE is UNAUTHORIZED; carrier ENOSPC is RESOURCE_EXHAUSTED; other pwrite, seal, or final verification failures are INTERNAL"
+    }
+  },
+  "ancillary_rules": {
+    "drop_and_close": "MSG_CTRUNC, malformed or unknown cmsg, more than one descriptor, or any descriptor attached to HELLO, QUEUE, ACK, or an unknown message type",
+    "malformed_ack": "a complete memory request whose opcode has the wrong zero-or-one descriptor cardinality",
+    "unauthorized_ack": "a correctly cardinalized carrier with the wrong type, owner, mode, size, access mode, CLOEXEC state, link count, or seals",
+    "ownership": "every visible received descriptor enters move-only RAII immediately and is closed on every completion, rejection, disconnect, and shutdown path"
+  },
+  "error_precedence": [
+    "DROP_AND_CLOSE invalid envelope, CRC, message type, frame or payload length, header reserved field, uncorrelatable request, or unsafe ancillary structure",
+    "MALFORMED correlatable flags, payload reserved field, opcode, opcode-canonical-field, or descriptor-cardinality error",
+    "UNSUPPORTED_VERSION memory protocol version",
+    "INSTANCE_MISMATCH daemon UUID",
+    "PROTOCOL_STATE connection ID",
+    "TOPOLOGY_MISMATCH job epoch",
+    "UNSUPPORTED_CAPABILITY SIMULATED_MEMORY_V1 not selected",
+    "PROTOCOL_STATE non-increasing request ID",
+    "PROTOCOL_STATE stale, foreign, freed, or out-of-range allocation",
+    "RESOURCE_EXHAUSTED allocation or byte ceiling",
+    "UNAUTHORIZED carrier policy",
+    "INTERNAL carrier IO, host allocation, or sealing failure",
+    "MALFORMED COPY_H2D content CRC mismatch"
+  ],
+  "semantics": {
+    "storage": "bridge-owned sparse 64-KiB chunks; missing chunks read as zero; allocation does not eagerly commit requested host RAM",
+    "allocation_identity": "slot IDs 1 through 1024 may be reused only with a new daemon-lifetime monotonic nonzero generation; generation never wraps",
+    "simulated_va": "for allocation_id in 1 through 1024, address equals base + (allocation_id - 1) * slot stride with checked u64 arithmetic; this functional address is not yet packet-visible GPU VRAM",
+    "range": "validate offset <= allocation size and byte_count <= allocation size minus offset before conversion to size_t or off_t",
+    "event_queue": "all decode, allocation state mutation, sparse-byte mutation, and terminal ACK construction occur on the gem5 event queue; PollEvent only schedules service",
+    "request_id": "the HELLO-seeded session-wide strictly increasing tracker is shared by queue and memory requests and never wraps; every admitted request that can receive a canonical ACK consumes its ID, including lifecycle, resource, carrier-policy, carrier-IO, and H2D CRC failures",
+    "indeterminate_ack": "after a complete memory request and any required descriptor are sent, timeout, cancellation, EOF, or noncanonical ACK poisons and closes the session; a canonical non-OK ACK is determinate",
+    "deadline": "one CLOCK_MONOTONIC absolute deadline is formed once after synchronous argument validation and covers memfd creation, staging, sealing, send, ACK, and successful D2H post-ACK validation; deadline precedes cancellation; timeout or cancellation before canonical ACK poisons after send; ALLOC, FREE, COPY_H2D, and every non-OK ACK are terminal immediately after canonical ACK validation; only successful COPY_D2H checks deadline and cancellation again before caller-buffer mutation, leaving output untouched and the known session usable if either wins; after final validated bytes are copied success is terminal without another cancellation check",
+    "queue_completion_interleave": "while awaiting MEMORY_ACK, a canonical CP-0005 QUEUE_COMPLETION for a previously acknowledged queue request is validated and buffered without changing the memory request; a completion using the active memory request_id, or any other record type or noncanonical completion, poisons and closes the session",
+    "copy_atomicity": "COPY_H2D changes no simulated bytes until carrier and CRC validation plus sparse-chunk preparation succeed; COPY_D2H changes no caller bytes until ACK, final seals, size, and CRC all validate",
+    "disconnect": "disconnect frees all allocations owned by the client fd generation and closes every pending staging descriptor",
+    "runtime_handle_ownership": "the opaque allocation handle is unique ownership; copied aliases must not be passed after successful free or instance close"
+  },
+  "forbidden_scope": [
+    "packet-visible GPU VRAM",
+    "SDMA or DMA timing",
+    "GPU packet submission",
+    "code objects",
+    "kernel execution",
+    "collectives"
+  ],
+  "golden": {
+    "identity": {
+      "daemon_instance_uuid_hex": "00112233445566778899aabbccddeeff",
+      "connection_id_hex": "1122334455667788",
+      "job_epoch_hex": "0102030405060708",
+      "allocation_id_hex": "0000000000000007",
+      "generation_hex": "8877665544332211",
+      "simulated_va_hex": "0000100300000000",
+      "size_bytes": 65536,
+      "alignment_bytes": 65536,
+      "copy_offset": 4096,
+      "carrier_hex": "00112233445566778899aabbccddeeff",
+      "carrier_crc32c_hex": "48dfe982"
+    },
+    "alloc_request": {"frame_bytes": 144, "crc32c_hex": "91fdb84e", "frame_hex": "4753494d52504300000100000050000600000000000000400123456789abcdf100112233445566778899aabbccddeeff1122334455667788010203040506070891fdb84e00000000000000000000000000010000000100000000000000000000000000000000000000000000000000000000000000010000000000000001000000000000000000000000000000000000"},
+    "alloc_ack": {"frame_bytes": 144, "crc32c_hex": "c6f7e530", "frame_hex": "4753494d52504300000100000050000700000000000000400123456789abcdf100112233445566778899aabbccddeeff11223344556677880102030405060708c6f7e5300000000000000000000000000001000000000000000100000000000000000000000000078877665544332211000010030000000000000000000100000000000000010000123456789abcdef2"},
+    "h2d_request": {"frame_bytes": 144, "crc32c_hex": "5d4ceda6", "frame_hex": "4753494d52504300000100000050000600000000000000400123456789abcdf200112233445566778899aabbccddeeff112233445566778801020304050607085d4ceda6000000000000000000000000000100000003000000000000000000078877665544332211000000000000100000000000000000100000000048dfe98200000000000000000000000000000000"},
+    "h2d_ack": {"frame_bytes": 144, "crc32c_hex": "7f6468ee", "frame_hex": "4753494d52504300000100000050000700000000000000400123456789abcdf200112233445566778899aabbccddeeff112233445566778801020304050607087f6468ee0000000000000000000000000001000000000000000300000000000000000000000000078877665544332211000000000000100000000000000000100000000048dfe982123456789abcdef3"},
+    "d2h_request": {"frame_bytes": 144, "crc32c_hex": "9cc6b0a7", "frame_hex": "4753494d52504300000100000050000600000000000000400123456789abcdf300112233445566778899aabbccddeeff112233445566778801020304050607089cc6b0a700000000000000000000000000010000000400000000000000000007887766554433221100000000000010000000000000000010000000000000000000000000000000000000000000000000"},
+    "d2h_ack": {"frame_bytes": 144, "crc32c_hex": "9465fa5e", "frame_hex": "4753494d52504300000100000050000700000000000000400123456789abcdf300112233445566778899aabbccddeeff112233445566778801020304050607089465fa5e0000000000000000000000000001000000000000000400000000000000000000000000078877665544332211000000000000100000000000000000100000000048dfe982123456789abcdef4"},
+    "free_request": {"frame_bytes": 144, "crc32c_hex": "a966c7a9", "frame_hex": "4753494d52504300000100000050000600000000000000400123456789abcdf400112233445566778899aabbccddeeff11223344556677880102030405060708a966c7a900000000000000000000000000010000000200000000000000000007887766554433221100000000000000000000000000000000000000000000000000000000000000000000000000000000"},
+    "free_ack": {"frame_bytes": 144, "crc32c_hex": "e6b8578e", "frame_hex": "4753494d52504300000100000050000700000000000000400123456789abcdf400112233445566778899aabbccddeeff11223344556677880102030405060708e6b8578e0000000000000000000000000001000000000000000200000000000000000000000000078877665544332211000000000000000000000000000000000000000000000000123456789abcdef5"}
+  }
+}

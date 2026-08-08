@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0026",
+  "checkpoint_id": "CP-0006",
+  "question_or_symptom": "A multi-gigabyte logical allocation limit would make an eager in-process backing store consume unbounded host memory and obscure atomic transfer failure.",
+  "observation": "Most new allocation bytes are zero and a bounded transfer touches only a small set of 64 KiB chunks. Updating chunks while reading a carrier would leave partial state if CRC, allocation, or range validation failed later.",
+  "evidence_ids": ["EV-0012", "EV-0014"],
+  "conclusion": "Logical allocation accounting and resident sparse backing accounting require distinct limits and commit points.",
+  "decision": "Represent absent chunks as implicit zero, enforce independent live-allocation, logical-byte, transfer-byte, and resident-chunk bounds, prepare every H2D chunk and verify the full carrier CRC before atomically publishing any changed bytes, and reclaim all owned chunks on free or disconnect.",
+  "invalidated_assumptions": [
+    "A logical allocation must eagerly reserve an equal amount of host memory.",
+    "Per-chunk writes are acceptably atomic for a multi-chunk transfer."
+  ],
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_memory_state.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_memory_state.test.cc",
+    "protocol/host-transport-v1-memory.json"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

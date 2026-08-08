@@ -32,12 +32,13 @@ PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、最新 checkpoint �
 bitlesson，运行 scripts/resume.sh --verify；不要重做已通过的工作。
 ```
 
-`CP-0005` is the accepted bounded queue-control boundary. The standalone
-runtime and gem5 preserve the CP-0004 byte-exact handshake and
-N=1/2/3/4/8 isolation gates while adding versioned create/destroy, strictly
-ordered control-only doorbells, and correlated gem5 event-queue completion and
-error behavior. They do not yet allocate or transfer simulated memory, submit
-packets, load code objects, or execute GPU work. The next action is
-`P1-MEM-01`: implement and test bounded generation-safe allocation/free plus
-host-to-simulated-device and simulated-device-to-host byte transfer. The frozen
-`SOURCE_LOCK.json` and registered project baseline remain immutable.
+`CP-0006` is the accepted functional simulated-memory boundary. The standalone
+runtime and gem5 preserve the CP-0004 byte-exact handshake, CP-0005 bounded
+queue control, and N=1/2/3/4/8 isolation gates while adding sparse
+allocation/free, deterministic functional VA, sealed-memfd H2D/D2H transfer,
+caller-buffer atomicity, and generation-safe slot reuse. This storage is still
+bridge-private: the stack does not yet submit AQL packets, load code objects, or
+execute GPU work. The next action is `P1-SIGNAL-01`: implement and test a
+bounded generation-safe signal/event lifecycle and gem5 event-queue completion
+delivery. The frozen `SOURCE_LOCK.json` and registered project baseline remain
+immutable.

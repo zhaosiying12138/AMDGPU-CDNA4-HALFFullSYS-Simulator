@@ -287,6 +287,61 @@ class HostTransportIntegrationHarnessTest(unittest.TestCase):
                 7,
             )
 
+    def test_memory_result_validation_is_generation_and_va_strict(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cp6-harness-test-") as temp:
+            harness = integration.Harness(harness_args(), Path(temp))
+            payload = {
+                "memory": {
+                    "status": 0,
+                    "allocation_id": "0x0000000000000007",
+                    "generation": "0x0000000000000011",
+                    "simulated_va": "0x0000100300000000",
+                    "size_bytes": 131089,
+                    "alignment_bytes": 65536,
+                    "initial_zero": True,
+                    "pattern_crc32c": "0x48dfe982",
+                    "returned_crc32c": "0x48dfe982",
+                    "match": True,
+                    "freed": True,
+                    "reuse": {
+                        "allocation_id": "0x0000000000000007",
+                        "generation": "0x0000000000000012",
+                        "simulated_va": "0x0000100300000000",
+                        "initial_zero": True,
+                        "freed": True,
+                    },
+                }
+            }
+            self.assertEqual(
+                harness.validate_memory_success(
+                    payload,
+                    expected_bytes=131089,
+                    expected_alignment=65536,
+                    require_reuse=True,
+                ),
+                payload["memory"],
+            )
+
+            bad_generation = json.loads(json.dumps(payload))
+            bad_generation["memory"]["reuse"]["generation"] = "0x11"
+            with self.assertRaises(integration.CheckFailure):
+                harness.validate_memory_success(
+                    bad_generation,
+                    expected_bytes=131089,
+                    expected_alignment=65536,
+                    require_reuse=True,
+                )
+
+            bad_va = json.loads(json.dumps(payload))
+            bad_va["memory"]["simulated_va"] = "0x0000100380000000"
+            with self.assertRaises(integration.CheckFailure):
+                harness.validate_memory_success(
+                    bad_va,
+                    expected_bytes=131089,
+                    expected_alignment=65536,
+                    require_reuse=True,
+                )
+
     @unittest.skipUnless(
         hasattr(socket, "SOCK_SEQPACKET") and Path("/proc/net/unix").exists(),
         "Linux seqpacket and procfs are required",

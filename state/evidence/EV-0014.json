@@ -1,0 +1,608 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0014",
+  "checkpoint_id": "CP-0006",
+  "type": "simulated-memory-integration-acceptance",
+  "claim": "The committed gem5 and self-amdgpu-runtime CP-0006 child histories implement the same frozen simulated-memory extension and pass independent golden, carrier, sparse-state, sanitizer, real-process, durability, and recovery gates while retaining every CP-0004 handshake and CP-0005 queue guarantee and making no packet-visible VRAM or GPU execution claim.",
+  "command_argv": [
+    [
+      "python3",
+      "scripts/test_host_transport_integration.py",
+      "--gem5",
+      "artifacts/evidence/CP-0006/gem5.opt",
+      "--runtime-cli",
+      "artifacts/evidence/CP-0006/sagr-handshake",
+      "--work-root",
+      "artifacts/evidence/CP-0006",
+      "--keep-work-dir"
+    ],
+    [
+      "git",
+      "fsck",
+      "--strict",
+      "--no-dangling"
+    ],
+    [
+      "git",
+      "fsck",
+      "--strict",
+      "--no-dangling"
+    ],
+    [
+      "scripts/transaction.py",
+      "record-child",
+      "--checkpoint",
+      "CP-0006",
+      "--id",
+      "gem5",
+      "--path",
+      "projects/gem5",
+      "--head",
+      "299a79212ff4f9abcb4a6a6fbd434f5bd443a1d5",
+      "--tree",
+      "cf2ecf29ee2341f67f464b4f787e5dd83327a986"
+    ],
+    [
+      "scripts/transaction.py",
+      "record-child",
+      "--checkpoint",
+      "CP-0006",
+      "--id",
+      "self-amdgpu-runtime",
+      "--path",
+      "projects/self-amdgpu-runtime",
+      "--head",
+      "69a42c8b7d7766f8a11165840ec5cdd1a6d8aedf",
+      "--tree",
+      "3ffe3c762053ec91ecf2c50ea689e378bc9a0a85"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-p",
+      "test_host_transport_*.py",
+      "-v"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-v"
+    ],
+    [
+      "python3",
+      "-m",
+      "py_compile",
+      "scripts/test_host_transport_integration.py",
+      "tests/test_host_transport_integration_harness.py",
+      "tests/test_host_transport_protocol.py",
+      "tests/test_host_transport_queue_spec.py",
+      "tests/test_host_transport_memory_spec.py"
+    ],
+    [
+      "python3",
+      "-m",
+      "json.tool",
+      "protocol/host-transport-v1-memory.json"
+    ],
+    [
+      "git",
+      "diff",
+      "HEAD",
+      "--check"
+    ],
+    [
+      "scripts/resume.sh",
+      "--verify"
+    ]
+  ],
+  "cwd": ".",
+  "started_at": "2026-08-08T04:14:47+00:00",
+  "ended_at": "2026-08-08T04:23:25+00:00",
+  "exit_code": 0,
+  "result": "Committed child trees cf2ecf29ee2341f67f464b4f787e5dd83327a986 and 3ffe3c762053ec91ecf2c50ea689e378bc9a0a85 passed durable recording and strict fsck; the final binaries passed 22 real-process checks, 42 host-transport tests, and all 160 root tests; pending recovery reports both exact targets.",
+  "command_results": [
+    {
+      "id": "host-integration-final",
+      "argv": [
+        "python3",
+        "scripts/test_host_transport_integration.py",
+        "--gem5",
+        "artifacts/evidence/CP-0006/gem5.opt",
+        "--runtime-cli",
+        "artifacts/evidence/CP-0006/sagr-handshake",
+        "--work-root",
+        "artifacts/evidence/CP-0006",
+        "--keep-work-dir"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-08T04:14:47+00:00",
+      "ended_at": "2026-08-08T04:15:04+00:00",
+      "exit_code": 0,
+      "result": "All 22 real-process handshake, endpoint, queue, simulated-memory, recovery, and N=1/2/3/4/8 isolation checks passed with zero client retries, including sealed-memfd allocation, three-chunk roundtrip, free, and generation-safe slot reuse.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0006/host-integration-final.json",
+        "size": 830,
+        "sha256": "8d1dd5918a12d1aeccb20d1cefe11177a0ca3a4882f92e6f1a15d8a8d7818c4c",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0006/host-integration-final.stdout",
+        "size": 5522,
+        "sha256": "a6d8da466d5b4e8f06be053c4c3d5799d35883bfc7d66ff8d72c8d8cd51490e9",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0006/host-integration-final.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "gem5-fsck",
+      "argv": [
+        "git",
+        "fsck",
+        "--strict",
+        "--no-dangling"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-08T04:19:07+00:00",
+      "ended_at": "2026-08-08T04:19:09+00:00",
+      "exit_code": 0,
+      "result": "The gem5 baseline and all accepted CP-0004 through CP-0006 progress commits passed strict reachable-object verification.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0006/gem5-fsck.json",
+        "size": 605,
+        "sha256": "cbece21f07a5bb8c0667ab7f82bbaec3f276eb89a415744e02802e3e7bba2d7b",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0006/gem5-fsck.stdout",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0006/gem5-fsck.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-fsck",
+      "argv": [
+        "git",
+        "fsck",
+        "--strict",
+        "--no-dangling"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T04:19:07+00:00",
+      "ended_at": "2026-08-08T04:19:07+00:00",
+      "exit_code": 0,
+      "result": "The authored runtime baseline and all accepted CP-0004 through CP-0006 progress commits passed strict reachable-object verification.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0006/runtime-fsck.json",
+        "size": 626,
+        "sha256": "0350dd3eb7fdd615c950e6fb0c2bce19b572d7b76fd93636c3c6d546ee9a6a08",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0006/runtime-fsck.stdout",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0006/runtime-fsck.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "gem5-record-child",
+      "argv": [
+        "scripts/transaction.py",
+        "record-child",
+        "--checkpoint",
+        "CP-0006",
+        "--id",
+        "gem5",
+        "--path",
+        "projects/gem5",
+        "--head",
+        "299a79212ff4f9abcb4a6a6fbd434f5bd443a1d5",
+        "--tree",
+        "cf2ecf29ee2341f67f464b4f787e5dd83327a986"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-08T04:19:23+00:00",
+      "ended_at": "2026-08-08T04:19:23+00:00",
+      "exit_code": 0,
+      "result": "The gem5 CP-0006 target passed the durable child object, ref, filesystem, identity, tree, and clean-worktree barrier.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0006/gem5-record-child.json",
+        "size": 818,
+        "sha256": "ddba1771e9558a7bf31b0649532655c121c1e9661acef3a77d6377e3eecee654",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0006/gem5-record-child.stdout",
+        "size": 58,
+        "sha256": "b3189b4f1df506e31816eca414d6cb206bd0d32ff32b67322ccbb25fddd6884d",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0006/gem5-record-child.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-record-child",
+      "argv": [
+        "scripts/transaction.py",
+        "record-child",
+        "--checkpoint",
+        "CP-0006",
+        "--id",
+        "self-amdgpu-runtime",
+        "--path",
+        "projects/self-amdgpu-runtime",
+        "--head",
+        "69a42c8b7d7766f8a11165840ec5cdd1a6d8aedf",
+        "--tree",
+        "3ffe3c762053ec91ecf2c50ea689e378bc9a0a85"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-08T04:19:36+00:00",
+      "ended_at": "2026-08-08T04:19:37+00:00",
+      "exit_code": 0,
+      "result": "The runtime CP-0006 target passed the durable child object, ref, filesystem, identity, tree, and clean-worktree barrier.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0006/runtime-record-child.json",
+        "size": 854,
+        "sha256": "11693df133836d61e51fe5719fd7634f03bf569a55301f9fabebf74ecac3a9ba",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0006/runtime-record-child.stdout",
+        "size": 73,
+        "sha256": "313e486afc94dfe3bb5674a96fce4b2336b5a041b6bae2640867d757e0036762",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0006/runtime-record-child.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "root-host-transport-tests",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_host_transport_*.py",
+        "-v"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-08T04:22:29+00:00",
+      "ended_at": "2026-08-08T04:22:29+00:00",
+      "exit_code": 0,
+      "result": "All 42 independent Python handshake, integration-fixture, queue, and memory layout, CRC, golden-vector, lifecycle, and scope tests passed.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0006/root-host-transport-tests.json",
+        "size": 700,
+        "sha256": "9d560b878d33b9f319239f0f9cc4c7bf96fe21e9ef2530c3a54581b4afa08652",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0006/root-host-transport-tests.stdout",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0006/root-host-transport-tests.stderr",
+        "size": 6761,
+        "sha256": "31d977c11eb9a438d8551c799cb86632425402f542cb3229b3ca9a288d39fa7d",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "root-full-tests",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-08T04:22:29+00:00",
+      "ended_at": "2026-08-08T04:22:32+00:00",
+      "exit_code": 0,
+      "result": "All 160 root control-plane, evidence, transaction, source, protocol, integration, queue, and memory tests passed.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0006/root-full-tests.json",
+        "size": 640,
+        "sha256": "c204e3d68d7ba1a2fd382148136fe6134efa848109ecd0ea2e4c3738b58f9571",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0006/root-full-tests.stdout",
+        "size": 68,
+        "sha256": "35b1a747b15631480e6cb9d46c70ce56fb50a5d26b7b0c0f9ec50a41ff4784cb",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0006/root-full-tests.stderr",
+        "size": 30155,
+        "sha256": "d2e18229801f6bb572ceda8a460384c1c34a63962f0746c0d21a21ecb0e89ec2",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "root-python-syntax",
+      "argv": [
+        "python3",
+        "-m",
+        "py_compile",
+        "scripts/test_host_transport_integration.py",
+        "tests/test_host_transport_integration_harness.py",
+        "tests/test_host_transport_protocol.py",
+        "tests/test_host_transport_queue_spec.py",
+        "tests/test_host_transport_memory_spec.py"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-08T04:22:29+00:00",
+      "ended_at": "2026-08-08T04:22:29+00:00",
+      "exit_code": 0,
+      "result": "The CP-0006 integration script and all four host-transport root test modules compiled successfully.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0006/root-python-syntax.json",
+        "size": 840,
+        "sha256": "3235ff60aa080320f7a34fe3a3dbcd520cc790adf3a23df8ada18801e32ba1df",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0006/root-python-syntax.stdout",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0006/root-python-syntax.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "memory-protocol-json",
+      "argv": [
+        "python3",
+        "-m",
+        "json.tool",
+        "protocol/host-transport-v1-memory.json"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-08T04:22:29+00:00",
+      "ended_at": "2026-08-08T04:22:29+00:00",
+      "exit_code": 0,
+      "result": "The canonical simulated-memory protocol document parses as JSON.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0006/memory-protocol-json.json",
+        "size": 647,
+        "sha256": "d661cffd399788f8b16f880cb567339cbf875918ed890bff0195ad4240e4c3ce",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0006/memory-protocol-json.stdout",
+        "size": 20207,
+        "sha256": "d462754924f631ebaa959656acb651ce8639098b78d3cf5b914338c62956cf38",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0006/memory-protocol-json.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "root-diff-check",
+      "argv": [
+        "git",
+        "diff",
+        "HEAD",
+        "--check"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-08T04:23:25+00:00",
+      "ended_at": "2026-08-08T04:23:25+00:00",
+      "exit_code": 0,
+      "result": "The complete root candidate patch has no whitespace errors.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0006/root-diff-check.json",
+        "size": 595,
+        "sha256": "eee996694c3a2878c571b64429f406affb5b231e9b35d73286c07b7864525574",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0006/root-diff-check.stdout",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0006/root-diff-check.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "pending-resume",
+      "argv": [
+        "scripts/resume.sh",
+        "--verify"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-08T04:23:05+00:00",
+      "ended_at": "2026-08-08T04:23:05+00:00",
+      "exit_code": 20,
+      "result": "Reserved exit code 20 identified the active CP-0006 prepare transaction and both exact clean child targets without advancing the CP-0005 visible root.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0006/pending-resume.json",
+        "size": 588,
+        "sha256": "1d243830435cf018d615ab6112ff1cf05c10e3806e515bb9bad6959b891b93f1",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0006/pending-resume.stdout",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0006/pending-resume.stderr",
+        "size": 1013,
+        "sha256": "44173308bbb2d6cfae3b34b6351b5ebe44ef8b6193b2b7353a7d3a3a15bef6d7",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    }
+  ],
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0006/cp6-host-gq37gvqw/raw-wire.jsonl",
+      "size": 11145,
+      "sha256": "df9f4b6fb095940bd0bbfe4a881430d0d1e339ca3f364aa99432dbaab03771a4",
+      "tracked": false,
+      "required_at_acceptance": true,
+      "required_for_resume": false
+    }
+  ],
+  "includes": {
+    "EV-0012": "9c556f0baf6c4169ca67b5701f68e906cc012fdad45eda90ac0a708c8ea542ea",
+    "EV-0013": "9c894a5b094ca931d65cd1d5578c147c11e69896255efd13288aadd6f27e24e2"
+  },
+  "environment_fingerprint": {
+    "kernel": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+    "python": "3.14.6",
+    "gem5_binary_sha256": "bab276e1cb709a3b7ce331e6103e684c9cc008223be8d12f595b52ee226c5672",
+    "runtime_cli_sha256": "353190045c2b212c7b5d3c8a7fd4936af6b0ae9a12f88064b479ec69e923b4d3",
+    "transport": "Linux pathname AF_UNIX SOCK_SEQPACKET plus sealed memfd SCM_RIGHTS payload",
+    "memory_transfer_bytes": "131089",
+    "memory_sparse_chunks": "3",
+    "world_sizes": "1,2,3,4,8",
+    "runtime_cli_retries": "0",
+    "raw_client_retries": "0",
+    "timezone": "Asia/Shanghai"
+  },
+  "limitations": [
+    "CP-0006 proves the preserved CP-0004 handshake and CP-0005 queue control plus bridge-private functional allocation, free, sealed-memfd H2D and D2H byte transfer, and generation-safe slot reuse. It implements no packet-visible VRAM, SDMA timing, packet submission, code-object loading, kernel execution, collective, PyTorch, vLLM, HIP, HSA, or OpenCL execution.",
+    "The real-process memory gate covers a positive three-sparse-chunk roundtrip, free, deterministic slot reuse with a new generation, and fresh zero state. Adversarial carrier, poison, deadline, cancellation, and atomicity cases are covered by the child unit and mock suites rather than the live process gate.",
+    "The N=1/2/3/4/8 cases continue to validate independent daemon identity and topology routing, not cross-rank memory, tensor-parallel collectives, or simulated GPU work.",
+    "The retained raw wire log contains protocol frames and deterministic status only; carrier payload bytes remain in ephemeral sealed memfds and are not retained in the log.",
+    "Build trees, binaries, caches, and full process logs remain ignored external artifacts and are not committed."
+  ],
+  "redactions": []
+}

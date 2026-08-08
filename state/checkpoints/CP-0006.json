@@ -1,0 +1,223 @@
+{
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "id": "CP-0006",
+  "sequence": 6,
+  "parent_checkpoint": "CP-0005",
+  "created_at": "2026-08-08T12:25:00+08:00",
+  "goal_id": "GSIM-001",
+  "phase_id": "P1",
+  "status": "accepted",
+  "root_parent_commit": "72f6bd6380afbc298561e13bd892b894d38005d3",
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "plan_sha256": "b43a26643d223bc5b9ea0782ab48da762699a8370c79c860a488eee530f24333",
+  "goal_sha256": "03288abf06e36e0e7c8e32cb1460281f657e6ef9295083fbe2d5a2a891fae15d",
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "id": "gem5",
+      "path": "projects/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "head": "299a79212ff4f9abcb4a6a6fbd434f5bd443a1d5",
+      "tree": "cf2ecf29ee2341f67f464b4f787e5dd83327a986",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "administrative_git_dir": "modules/gem5",
+      "clean": true
+    },
+    {
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "administrative_git_dir": "modules/rocm-systems",
+      "clean": true
+    },
+    {
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "administrative_git_dir": "modules/llvm-project",
+      "clean": true
+    },
+    {
+      "id": "triton",
+      "path": "projects/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "administrative_git_dir": "modules/triton",
+      "clean": true
+    },
+    {
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "administrative_git_dir": "modules/pytorch",
+      "clean": true
+    },
+    {
+      "id": "vllm",
+      "path": "projects/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "administrative_git_dir": "modules/vllm",
+      "clean": true
+    },
+    {
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "head": "69a42c8b7d7766f8a11165840ec5cdd1a6d8aedf",
+      "tree": "3ffe3c762053ec91ecf2c50ea689e378bc9a0a85",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "clean": true
+    }
+  ],
+  "changes": [
+    "Extended the frozen host transport with capability-gated, byte-exact 64-byte simulated-memory request and ACK payloads while preserving every CP-0004 handshake and CP-0005 queue frame.",
+    "Added a bounded gem5 bridge-private sparse memory state with zero-filled allocation, deterministic functional VA, generation-safe slot reuse, exact resource accounting, atomic H2D publication, D2H snapshot, and disconnect cleanup on the simulator event queue.",
+    "Added strict single-memfd SCM_RIGHTS carriers with exact descriptor, owner, mode, access, size, link, CLOEXEC, seal, immutable reread, byte, and CRC validation before observable transfer commit.",
+    "Advanced self-amdgpu-runtime to ABI 1.3 and release 0.4.0 with unique-owner memory handles, allocation information, H2D/D2H/free APIs, deadline and cancellation semantics, caller-buffer atomicity, queue-completion interleave, canonical rejection reuse, and indeterminate-ACK poison.",
+    "Added independent JSON and golden verification plus a real-process 131089-byte three-chunk roundtrip, free, deterministic slot reuse with new generation and fresh zero state, while preserving all handshake, queue, endpoint, failure, and N=1/2/3/4/8 isolation gates.",
+    "Preserved SOURCE_LOCK and PROJECT_LANES byte identities while advancing only the audited gem5 and self-amdgpu-runtime descendant heads."
+  ],
+  "validation": [
+    {
+      "command": "full and final-link VEGA_X86 gem5.opt builds plus build-info and SHA-256 identity",
+      "cwd": "projects/gem5",
+      "exit_code": 0,
+      "result": "gem5 25.1.0.1 linked the final CP-0006 protocol, socket-carrier, bridge, and sparse-memory objects into binary bab276e1cb709a3b7ce331e6103e684c9cc008223be8d12f595b52ee226c5672",
+      "evidence_id": "EV-0012"
+    },
+    {
+      "command": "host_gpu_protocol, host_gpu_queue_state, host_gpu_socket_utils, and host_gpu_memory_state GTests",
+      "cwd": "projects/gem5",
+      "exit_code": 0,
+      "result": "protocol 26/26, queue regression 12/12, socket and connection state 23/23, and sparse memory state 8/8 passed",
+      "evidence_id": "EV-0012"
+    },
+    {
+      "command": "fresh static and shared release plus Clang ASan and UBSan configure, build, ctest, and freshness matrices",
+      "cwd": "projects/self-amdgpu-runtime",
+      "exit_code": 0,
+      "result": "static 7/7, shared 7/7, sanitizer 6/6, and all three no-work freshness gates passed",
+      "evidence_id": "EV-0013"
+    },
+    {
+      "command": "python3 scripts/test_host_transport_integration.py <retained final gem5 and runtime binaries>",
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "all 22 real-process handshake, endpoint, queue, simulated-memory, recovery, and N-rank isolation checks passed with no retries",
+      "evidence_id": "EV-0014"
+    },
+    {
+      "command": "scripts/transaction.py record-child <gem5/runtime exact CP-0006 targets>",
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "both child targets passed durable pack, ref, filesystem, identity, tree, and clean-worktree barriers",
+      "evidence_id": "EV-0014"
+    },
+    {
+      "command": "python3 -m unittest discover -s tests -v",
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "all 160 root tests passed",
+      "evidence_id": "EV-0014"
+    },
+    {
+      "command": "scripts/resume.sh --verify",
+      "cwd": ".",
+      "exit_code": 20,
+      "result": "expected pre-coordinator pending transaction with both exact clean CP-0006 child targets",
+      "evidence_id": "EV-0014"
+    }
+  ],
+  "evidence_ids": [
+    "EV-0012",
+    "EV-0013",
+    "EV-0014"
+  ],
+  "evidence_sha256": {
+    "EV-0012": "9c556f0baf6c4169ca67b5701f68e906cc012fdad45eda90ac0a708c8ea542ea",
+    "EV-0013": "9c894a5b094ca931d65cd1d5578c147c11e69896255efd13288aadd6f27e24e2",
+    "EV-0014": "1f6480657fce78979cddd505e9ee6b7e0112e82c1ec81fb8cf47a09f1877ed26"
+  },
+  "evidence_manifest_id": "EV-0014",
+  "evidence_manifest_sha256": "1f6480657fce78979cddd505e9ee6b7e0112e82c1ec81fb8cf47a09f1877ed26",
+  "bitlesson_ids": [
+    "BL-0025",
+    "BL-0026",
+    "BL-0027",
+    "BL-0028",
+    "BL-0029",
+    "BL-0030"
+  ],
+  "bitlesson_sha256": {
+    "BL-0025": "812609d43bb0d5a6591aa2bb4a2644baef900611c259d3a5cc4ad9f56c59896a",
+    "BL-0026": "6066be21347c17a9c87d08abc2eb0fd66edbe3774a9e3265dd53d20391567835",
+    "BL-0027": "4212171f1274ff3418f1b14be76657a9f0189a47b5ba0e66cb28e084871fc995",
+    "BL-0028": "b50d90754dd245ef6f636369601fc684f4bd8a5ddddd1a1f67eab46d458bfe7f",
+    "BL-0029": "16ae85df95e028f8a25fc7a3875cd71c24b3648965b2e6a3f39e175e391ff297",
+    "BL-0030": "9f240b79670fc36fcc5562904c1871562d1123a37b0e831fad8f67a6fe8f9aaf"
+  },
+  "change_kind": "code",
+  "baseline_commit_marker": "N/A",
+  "blockers": [],
+  "limitations": [
+    "CP-0006 proves the preserved CP-0004 handshake and CP-0005 queue lifecycle plus bridge-private functional allocation, free, sealed-memfd H2D and D2H byte transfer, and generation-safe slot reuse. It implements no packet-visible VRAM, SDMA timing, packet submission, code object, kernel execution, collective, HIP, HSA, OpenCL, Triton, PyTorch, or vLLM inference path.",
+    "The deterministic simulated virtual address is a functional bridge allocation identity and is not yet bound to GPU page tables or packet execution.",
+    "The real-process memory gate covers a positive three-sparse-chunk roundtrip and reuse path; adversarial carrier, resource, poison, deadline, cancellation, and atomicity behavior is covered by child unit and mock tests.",
+    "N=1/2/3/4/8 validates independent daemon identity and topology routing, not cross-rank memory, tensor-parallel collectives, or simulated GPU work.",
+    "Build trees, binaries, caches, memfd carrier bytes, and raw process logs remain ignored external artifacts and are not committed."
+  ],
+  "next_action": {
+    "id": "P1-SIGNAL-01",
+    "cwd": ".",
+    "argv": [
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0007",
+      "--intent",
+      "Implement the versioned single-daemon signal and event completion path",
+      "--participant",
+      "gem5=projects/gem5",
+      "--participant",
+      "self-amdgpu-runtime=projects/self-amdgpu-runtime"
+    ],
+    "prerequisites": [
+      "CP-0006 is accepted and scripts/resume.sh --verify passes offline.",
+      "No transaction journal is active.",
+      "SOURCE_LOCK.json and existing PROJECT_LANES declarations remain byte-identical to their historical anchors.",
+      "The CP-0004 handshake, CP-0005 queue-control, and CP-0006 simulated-memory gates remain passing at the accepted child heads."
+    ],
+    "expected": "Both children implement and validate bounded generation-safe single-daemon signal and event lifecycle, value query and update, deadline and cancellation-aware waits, and gem5 event-queue completion delivery without claiming AQL packet submission, code-object loading, kernel execution, or collectives.",
+    "rollback_boundary": "Keep CP-0006 visible until both CP-0007 child commits and evidence are complete; preserve prepared commits and the active journal on interruption, and never weaken the frozen handshake, queue, memory, source, or project-baseline authorities."
+  }
+}

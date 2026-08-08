@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0028",
+  "checkpoint_id": "CP-0006",
+  "question_or_symptom": "A memfd can have the expected byte size and ordinary permission bits while still carrying unsafe special mode bits, wrong access, mutable seals, extra links, or unexpected ownership.",
+  "observation": "Checking only mode 0777 accepts setuid, setgid, or sticky bits. Checking only file contents ignores writable mappings and size-changing races that can invalidate CRC and caller-buffer atomicity.",
+  "evidence_ids": ["EV-0012", "EV-0013"],
+  "conclusion": "A carrier is a compound kernel-object identity and policy, not merely a file descriptor containing bytes.",
+  "decision": "Require a regular anonymous file with exact effective UID, link count zero, exact size, CLOEXEC, operation-specific access mode, and `(st_mode & 07777) == 0600`; require exact H2D and D2H seal states, classify writable-map EBUSY as unauthorized and ENOSPC as resource exhaustion, and reread immutable D2H bytes before ACK.",
+  "invalidated_assumptions": [
+    "Masking st_mode with 0777 proves exact mode 0600.",
+    "A matching length and CRC before final sealing makes D2H immutable."
+  ],
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_socket_utils.cc",
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "docs/host-transport-v1-memory.md"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

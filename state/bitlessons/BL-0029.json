@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0029",
+  "checkpoint_id": "CP-0006",
+  "question_or_symptom": "H2D and D2H copies expose mutation on opposite sides of the transport, so one generic success boundary can leave partial daemon bytes or a partially overwritten caller buffer.",
+  "observation": "H2D must not change sparse backing until the complete immutable carrier is validated. D2H must not change caller output until the daemon has sealed and acknowledged a complete carrier and the runtime has revalidated its final shape and CRC under the caller deadline and cancellation policy.",
+  "evidence_ids": ["EV-0012", "EV-0013", "EV-0014"],
+  "conclusion": "Copy direction determines the observable commit point, but both directions require a private preparation phase followed by one publication step.",
+  "decision": "For H2D, validate range, carrier, complete bytes, CRC, and every replacement chunk before publishing sparse state. For D2H, snapshot daemon bytes, write and seal the carrier, reread and compare immutable bytes before ACK, then read into runtime scratch and perform exactly one final caller-buffer copy only after seal, size, CRC, deadline, and cancellation validation.",
+  "invalidated_assumptions": [
+    "Successful partial reads or writes may be exposed and repaired by a retry.",
+    "A canonical D2H ACK alone authorizes immediate incremental writes to caller memory."
+  ],
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_memory_state.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/self-amdgpu-runtime/src/transport.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

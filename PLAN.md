@@ -3,7 +3,7 @@
 **Plan ID:** `AMDGPU-SIM-V1`  
 **Revision:** `1`  
 **Revision date:** `2026-08-08`
-**State at this commit:** `P1-QUEUE-01-bounded-control-complete; next-P1-MEM-01`
+**State at this commit:** `P1-MEM-01-simulated-memory-complete; next-P1-SIGNAL-01`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -244,6 +244,22 @@ real-process gate. This boundary still implements no simulated allocation,
 byte transfer, packet submission, code-object loading, or GPU execution. The
 next sub-gate adds bounded simulated memory ownership and transfer only.
 
+Accepted sub-boundary: CP-0006 adds capability bit 2 and a bounded functional
+memory service without changing the frozen envelope, handshake, or queue
+frames. The bridge owns sparse zero-filled allocations, deterministic
+functional virtual addresses, generation-safe slot reuse, and exact transfer
+commit points. H2D and D2H payloads use single sealed memfd carriers transferred
+with SCM_RIGHTS; both endpoints validate descriptor cardinality, type, owner,
+mode, access, size, link count, CLOEXEC state, seals, bytes, and CRC before
+observable mutation. Runtime timeout, cancellation, determinate rejection, and
+indeterminate-ACK poison rules preserve caller-buffer atomicity. The
+real-process gate covers allocation, three-chunk byte roundtrip, free, and slot
+reuse while retaining every CP-0004/CP-0005 gate. This remains bridge-private
+functional storage: it is not packet-visible VRAM, SDMA timing, packet
+submission, code-object loading, or GPU execution. The next sub-gate adds a
+bounded signal and event lifecycle without advancing the phase-level trivial
+kernel claim.
+
 ### P2 — ROCr/libhsakmt provider
 
 Fork the pinned ROCr core and implement `libhsakmt_gem5` against the daemon.
@@ -446,22 +462,22 @@ licenses into a false aggregate claim.
 
 ## 10. Current handoff boundary
 
-`CP-0005` retains the CP-0002 official Qwen and six-upstream source freeze plus
+`CP-0006` retains the CP-0002 official Qwen and six-upstream source freeze plus
 the CP-0003 authored runtime baseline. It advances only gem5 and
-`self-amdgpu-runtime` from the CP-0004 handshake boundary to the shared bounded
-queue-control extension. The accepted gate preserves byte-exact handshake,
-endpoint, deadline, failure, admission, and N=1/2/3/4/8 isolation behavior and
-adds versioned create/destroy, strictly ordered control-only doorbells,
-correlated event-queue completion, deterministic error completion, and stale
-generation cleanup. It makes no memory-transfer, packet-submission, code-object,
+`self-amdgpu-runtime` from the CP-0005 queue boundary to the shared functional
+memory extension. The accepted gate preserves byte-exact handshake, endpoint,
+deadline, failure, queue, completion, and N=1/2/3/4/8 isolation behavior and
+adds bounded sparse allocation/free, deterministic functional VA, sealed-memfd
+H2D/D2H transfer, caller-buffer atomicity, and generation-safe slot reuse. It
+makes no packet-visible VRAM, SDMA timing, packet-submission, code-object,
 kernel, collective, PyTorch, or vLLM execution claim.
 
-The next unique action is `P1-MEM-01`: create a CP-0006 two-child transaction
-for gem5 and `self-amdgpu-runtime`, then implement and validate bounded,
-generation-safe single-daemon allocation/free plus host-to-simulated-device and
-simulated-device-to-host byte transfer. `SOURCE_LOCK.json` remains
-byte-immutable, and existing `PROJECT_LANES` declarations remain historically
-anchored and append-only.
+The next unique action is `P1-SIGNAL-01`: create a CP-0007 two-child
+transaction for gem5 and `self-amdgpu-runtime`, then implement and validate a
+bounded generation-safe signal/event lifecycle, value query/update,
+deadline/cancellation-aware waits, and gem5 event-queue completion delivery.
+`SOURCE_LOCK.json` remains byte-immutable, and existing `PROJECT_LANES`
+declarations remain historically anchored and append-only.
 
 The exact blank-context continuation contract remains in `GOAL.md`; the
 machine-executable argv, prerequisites, expected gate, and rollback boundary

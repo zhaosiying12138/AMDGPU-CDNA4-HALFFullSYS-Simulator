@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0030",
+  "checkpoint_id": "CP-0006",
+  "question_or_symptom": "A memory request can mutate remote state before its ACK is validated while queue completions from earlier acknowledged work may legitimately arrive first.",
+  "observation": "Retrying an ambiguous ALLOC, FREE, H2D, or D2H request can duplicate or reverse mutation. Rejecting every interleaved queue completion breaks a valid shared session, while accepting an uncorrelated or current-request completion hides protocol drift.",
+  "evidence_ids": ["EV-0012", "EV-0013", "EV-0014"],
+  "conclusion": "Session reuse depends on a precise distinction between determinate remote outcomes, indeterminate request outcomes, and local post-ACK completion work.",
+  "decision": "Share one strictly increasing request-ID sequence across queue and memory records; buffer only canonical completions for previously ACKed pending queue commands; keep canonical non-OK memory ACKs reusable; poison on any complete-send timeout, cancellation, EOF, identity, shape, carrier, or CRC ambiguity before canonical ACK; and allow a successful D2H ACK followed only by local deadline or cancellation to preserve output and session for explicit FREE.",
+  "invalidated_assumptions": [
+    "Every timeout can be retried on the same session because the operation is synchronous.",
+    "Any queue completion may be buffered while a memory ACK is outstanding."
+  ],
+  "applies_to": [
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "projects/self-amdgpu-runtime/tests/memory_test.c",
+    "protocol/host-transport-v1-memory.json"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

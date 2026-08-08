@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0025",
+  "checkpoint_id": "CP-0006",
+  "question_or_symptom": "A deterministic simulated virtual address can look like a packet-executable GPU virtual address even when the bridge only owns a functional byte store.",
+  "observation": "The current bridge has no packet processor, GPU page-table binding, or shader-visible memory path. An allocation slot and arithmetic address formula establish stable host-protocol identity, not execution visibility.",
+  "evidence_ids": ["EV-0012", "EV-0013", "EV-0014"],
+  "conclusion": "Functional allocation identity and packet-executable GPU VA are separate claims that must not be collapsed.",
+  "decision": "Key every functional allocation by client file descriptor, client generation, allocation slot, and allocation generation; derive one deterministic functional VA per slot; reject stale ownership; and explicitly withhold packet-visible VRAM or execution claims until a later page-table and dispatch gate proves them.",
+  "invalidated_assumptions": [
+    "A stable numeric virtual address is sufficient evidence that GPU packets can dereference it.",
+    "An allocation ID alone remains unique after disconnect or slot reuse."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-memory.json",
+    "projects/gem5/src/dev/amdgpu/host_gpu_memory_state.cc",
+    "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/runtime.h"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

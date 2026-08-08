@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0027",
+  "checkpoint_id": "CP-0006",
+  "question_or_symptom": "A malformed or truncated SCM_RIGHTS message can install visible file descriptors before the receiver decides that the control record is invalid.",
+  "observation": "MSG_CTRUNC, duplicate descriptors, wrong message types, and unexpected ancillary data are rejection conditions, but every descriptor already delivered by recvmsg is process-owned and leaks unless closed explicitly.",
+  "evidence_ids": ["EV-0012", "EV-0013"],
+  "conclusion": "Ancillary parsing must acquire resource ownership before it evaluates protocol validity.",
+  "decision": "Provide bounded control storage, request MSG_CMSG_CLOEXEC, immediately move every visible SCM_RIGHTS descriptor into RAII ownership, then validate truncation, level, type, count, and operation cardinality; close all descriptors on every rejection, disconnect, or carrier failure path.",
+  "invalidated_assumptions": [
+    "A rejected recvmsg cannot leak descriptors because the payload was not accepted.",
+    "MSG_CTRUNC means no usable descriptors were installed."
+  ],
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_socket_utils.cc",
+    "projects/self-amdgpu-runtime/src/transport.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

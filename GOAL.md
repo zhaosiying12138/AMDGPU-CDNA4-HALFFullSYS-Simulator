@@ -2,7 +2,7 @@
 
 **Goal ID:** `GSIM-001`  
 **Plan:** `AMDGPU-SIM-V1`, revision `1`  
-**Current state:** `P1-HOST-01-versioned-handshake-accepted`
+**Current state:** `P1-MEM-01-simulated-memory-accepted`
 **Current phase:** `P1`
 **Model correction:** the official target is `Qwen/Qwen3.5-0.8B`; there is no
 official `Qwen3.5-0.9B` checkpoint in this project.
@@ -56,13 +56,14 @@ advance a phase without a new checkpoint and root coordinator commit.
 继续执行 amdgpu-sim 计划。当前目录是 /home/zhaosiying/amdgpu-sim。
 先读取 PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、其引用的
 最新 checkpoint/bitlesson/evidence，运行 scripts/resume.sh --verify。
-根据 current 指向的 CP-0005 唯一 next_action，从 P1-MEM-01 继续；不要
+根据 current 指向的 CP-0006 唯一 next_action，从 P1-SIGNAL-01 继续；不要
 重做 bootstrap、source freeze、authored runtime baseline 或已通过的 host
-transport handshake/queue-control gates，也不要修改已冻结的 SOURCE_LOCK.json
+transport handshake/queue-control/memory gates，也不要修改已冻结的 SOURCE_LOCK.json
 或已登记的 PROJECT_LANES baseline。先在 gem5 与 self-amdgpu-runtime 两个
-child 中实现并验证 bounded generation-safe single-daemon allocation/free、
-host-to-simulated-device 和 simulated-device-to-host byte transfer；不要提前
-声称 packet submission、code-object loading 或 kernel execution。
+child 中实现并验证 bounded generation-safe single-daemon signal/event
+lifecycle、value query/update、deadline/cancellation-aware wait 和 gem5
+event-queue completion delivery；不要提前声称 AQL packet submission、
+code-object loading 或 kernel execution。
 每个原子进展使用新的 Checkpoint-ID，先提交 child 再提交 root coordinator
 commit，并同步 checkpoint、bitlesson、evidence。遇到长耗时或 token 切换，
 先形成 coherent partial checkpoint，再暂停。

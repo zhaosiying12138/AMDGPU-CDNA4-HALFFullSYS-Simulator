@@ -1,7 +1,8 @@
-# CP-0004/CP-0005 Host Transport Integration
+# CP-0004 Through CP-0006 Host Transport Integration
 
 `scripts/test_host_transport_integration.py` is the real cross-process gate for
-the frozen host transport 1.0 handshake and its bounded queue-control extension.
+the frozen host transport 1.0 handshake, its bounded queue-control extension,
+and the bridge-owned simulated-memory data path.
 It starts the supplied gem5 binary with the `HostGPUBridge` SimObject and invokes
 the supplied `sagr-handshake` runtime CLI against its pathname `SOCK_SEQPACKET`
 endpoints.
@@ -45,6 +46,10 @@ The script emits one machine-readable JSON summary. A successful run covers:
   doorbells, their correlated asynchronous completions, and DESTROY;
 - a separate queue session whose accepted control-error command completes with
   the canonical deterministic `INTERNAL` status and error code;
+- a memory-capable session that allocates a three-chunk sparse range, verifies
+  initial zero-fill, performs real sealed-memfd H2D and D2H transfer, compares
+  bytes and CRC, frees the allocation, reuses its slot with a new generation,
+  verifies zero-fill again, and frees the reused allocation;
 - one established runtime holding the daemon while a second runtime receives
   `BUSY`;
 - independent daemon endpoints and exact identities for world sizes 1, 2, 3,
@@ -80,7 +85,7 @@ starting gem5:
 python3 -m unittest discover -s tests -p 'test_host_transport_*.py' -v
 ```
 
-This gate proves only framing, negotiation, identity, endpoint lifecycle,
-deadline behavior, and the bounded control-queue/event path. It does not prove
-packet submission, memory allocation or transfer, code object execution,
-collectives, or any GPU computation.
+This gate proves framing, negotiation, identity, endpoint lifecycle, deadline
+behavior, the bounded control-queue/event path, and functional bytes stored by
+the gem5 bridge. It does not prove packet-visible GPU VRAM, SDMA timing, packet
+submission, code object execution, collectives, or any GPU computation.

@@ -3,11 +3,11 @@
   "goal_id": "GSIM-001",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 1,
-  "checkpoint_id": "CP-0005",
-  "checkpoint_sha256": "d4633f34dd250d4bac9661bd13b0214919782c420cccd25b92c571b397d49997",
+  "checkpoint_id": "CP-0006",
+  "checkpoint_sha256": "400fd2c985ab4966d7d418b76fdd020bafa05fa214c34fa58a7082380166fd05",
   "phase_id": "P1",
   "state": "ready",
-  "next_action_id": "P1-MEM-01",
-  "next_action_summary": "Implement and validate the bounded single-daemon simulated memory allocation and byte-transfer path.",
+  "next_action_id": "P1-SIGNAL-01",
+  "next_action_summary": "Implement and validate the bounded single-daemon signal and event completion path.",
   "resume_command": "scripts/resume.sh --verify"
 }
