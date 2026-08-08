@@ -25,14 +25,16 @@ static int test_complete_parse(void) {
   sagr_instance_open_options_t options;
   queue_cli_options_t queue_options;
   memory_cli_options_t memory_options;
+  signal_cli_options_t signal_options;
   const char *endpoint = NULL;
   uint64_t hold_ms = 0;
   memset(&queue_options, 0, sizeof(queue_options));
   memset(&memory_options, 0, sizeof(memory_options));
+  memset(&signal_options, 0, sizeof(signal_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (parse_arguments((int)(sizeof(arguments) / sizeof(arguments[0])),
                       arguments, &endpoint, &options, &hold_ms,
-                      &queue_options, &memory_options) != 0 ||
+                      &queue_options, &memory_options, &signal_options) != 0 ||
       endpoint == NULL || strcmp(endpoint, "/tmp/gemsim.sock") != 0 ||
       options.minimum_version_major != 0 ||
       options.minimum_version_minor != 9 ||
@@ -55,13 +57,16 @@ static int expect_invalid(char **arguments, size_t argument_count) {
   sagr_instance_open_options_t options;
   queue_cli_options_t queue_options;
   memory_cli_options_t memory_options;
+  signal_cli_options_t signal_options;
   const char *endpoint = NULL;
   uint64_t hold_ms = 0;
   memset(&queue_options, 0, sizeof(queue_options));
   memset(&memory_options, 0, sizeof(memory_options));
+  memset(&signal_options, 0, sizeof(signal_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   return parse_arguments((int)argument_count, arguments, &endpoint, &options,
-                         &hold_ms, &queue_options, &memory_options) == -1
+                         &hold_ms, &queue_options, &memory_options,
+                         &signal_options) == -1
              ? 0
              : 1;
 }
@@ -92,14 +97,16 @@ static int test_queue_parse(void) {
   sagr_instance_open_options_t options;
   queue_cli_options_t queue_options;
   memory_cli_options_t memory_options;
+  signal_cli_options_t signal_options;
   const char *endpoint = NULL;
   uint64_t hold_ms = 0;
   memset(&queue_options, 0, sizeof(queue_options));
   memset(&memory_options, 0, sizeof(memory_options));
+  memset(&signal_options, 0, sizeof(signal_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (parse_arguments((int)(sizeof(arguments) / sizeof(arguments[0])),
                       arguments, &endpoint, &options, &hold_ms,
-                      &queue_options, &memory_options) != 0 ||
+                      &queue_options, &memory_options, &signal_options) != 0 ||
       queue_options.enabled != 1 || queue_options.depth != 8 ||
       queue_options.doorbells != 3 ||
       queue_options.command_kind != SAGR_QUEUE_COMMAND_CONTROL_TEST ||
@@ -117,10 +124,11 @@ static int test_queue_parse(void) {
   hold_ms = 0;
   memset(&queue_options, 0, sizeof(queue_options));
   memset(&memory_options, 0, sizeof(memory_options));
+  memset(&signal_options, 0, sizeof(signal_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (parse_arguments((int)(sizeof(arguments) / sizeof(arguments[0])),
                       arguments, &endpoint, &options, &hold_ms,
-                      &queue_options, &memory_options) != 0 ||
+                      &queue_options, &memory_options, &signal_options) != 0 ||
       queue_options.command_kind != SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST) {
     fprintf(stderr, "CONTROL_ERROR_TEST CLI option parse failed\n");
     return 1;
@@ -156,15 +164,17 @@ static int test_memory_parse(void) {
   sagr_instance_open_options_t options;
   queue_cli_options_t queue_options;
   memory_cli_options_t memory_options;
+  signal_cli_options_t signal_options;
   const char *endpoint = NULL;
   uint64_t hold_ms = 0;
 
   memset(&queue_options, 0, sizeof(queue_options));
   memset(&memory_options, 0, sizeof(memory_options));
+  memset(&signal_options, 0, sizeof(signal_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (parse_arguments((int)(sizeof(arguments) / sizeof(arguments[0])),
                       arguments, &endpoint, &options, &hold_ms,
-                      &queue_options, &memory_options) != 0 ||
+                      &queue_options, &memory_options, &signal_options) != 0 ||
       memory_options.enabled != 1 || memory_options.reuse != 1 ||
       memory_options.bytes != UINT64_C(65536) ||
       memory_options.alignment != SAGR_MEMORY_ALIGNMENT_64K ||
@@ -180,11 +190,12 @@ static int test_memory_parse(void) {
   hold_ms = 0;
   memset(&queue_options, 0, sizeof(queue_options));
   memset(&memory_options, 0, sizeof(memory_options));
+  memset(&signal_options, 0, sizeof(signal_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (parse_arguments(
           (int)(sizeof(default_alignment) / sizeof(default_alignment[0])),
           default_alignment, &endpoint, &options, &hold_ms, &queue_options,
-          &memory_options) != 0 ||
+          &memory_options, &signal_options) != 0 ||
       memory_options.enabled != 1 || memory_options.reuse != 0 ||
       memory_options.bytes != UINT64_C(1) ||
       memory_options.alignment != SAGR_MEMORY_ALIGNMENT_4K ||

@@ -155,3 +155,37 @@ sagr_status_t sagr_memory_operation_options_init(
   options->cancel_fd = -1;
   return SAGR_STATUS_SUCCESS;
 }
+
+sagr_status_t sagr_signal_create_options_init(
+    sagr_signal_create_options_t *options, uint32_t options_size) {
+  if (options == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (options_size < sizeof(*options)) {
+    if (options_size >= sizeof(options->struct_size)) {
+      options->struct_size = (uint32_t)sizeof(*options);
+    }
+    return SAGR_STATUS_BUFFER_TOO_SMALL;
+  }
+  memset(options, 0, options_size);
+  options->struct_size = options_size;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_signal_operation_options_init(
+    sagr_signal_operation_options_t *options, uint32_t options_size) {
+  if (options == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (options_size < sizeof(*options)) {
+    if (options_size >= sizeof(options->struct_size)) {
+      options->struct_size = (uint32_t)sizeof(*options);
+    }
+    return SAGR_STATUS_BUFFER_TOO_SMALL;
+  }
+  memset(options, 0, options_size);
+  options->struct_size = options_size;
+  options->timeout_ns = SAGR_DEFAULT_OPEN_TIMEOUT_NS;
+  options->cancel_fd = -1;
+  return SAGR_STATUS_SUCCESS;
+}

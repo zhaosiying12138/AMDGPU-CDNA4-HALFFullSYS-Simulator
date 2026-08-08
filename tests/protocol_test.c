@@ -123,6 +123,94 @@ static const char k_golden_memory_free_ack[] =
     "000000000000000788776655443322110000000000000000"
     "00000000000000000000000000000000123456789abcdef5";
 
+static const char k_golden_signal_create_request[] =
+    "4753494d5250430000010000005000080000000000000040"
+    "0123456789abcdf500112233445566778899aabbccddeeff"
+    "11223344556677880102030405060708b095ba9900000000"
+    "000000000000000000010000000100000000000000000000"
+    "00000000000000000000000000000000fffffffffffffff9"
+    "000000000000000000000000000000000000000000000000";
+
+static const char k_golden_signal_create_ack[] =
+    "4753494d5250430000010000005000090000000000000040"
+    "0123456789abcdf500112233445566778899aabbccddeeff"
+    "11223344556677880102030405060708dda8e6fc00000000"
+    "000000000000000000010000000000000001000000000000"
+    "000000000000000788776655443322110000000000000000"
+    "fffffffffffffff90000000000000000123456789abcdef5";
+
+static const char k_golden_signal_load_request[] =
+    "4753494d5250430000010000005000080000000000000040"
+    "0123456789abcdf600112233445566778899aabbccddeeff"
+    "11223344556677880102030405060708601dbdee00000000"
+    "000000000000000000010000000300000000000000000007"
+    "887766554433221100000000000000000000000000000000"
+    "000000000000000000000000000000000000000000000000";
+
+static const char k_golden_signal_load_ack[] =
+    "4753494d5250430000010000005000090000000000000040"
+    "0123456789abcdf600112233445566778899aabbccddeeff"
+    "112233445566778801020304050607082fa9d5b600000000"
+    "000000000000000000010000000000000003000000000000"
+    "000000000000000788776655443322110000000000000000"
+    "fffffffffffffff90000000000000000123456789abcdef6";
+
+static const char k_golden_signal_wait_request[] =
+    "4753494d5250430000010000005000080000000000000040"
+    "0123456789abcdf700112233445566778899aabbccddeeff"
+    "1122334455667788010203040506070860ce276f00000000"
+    "000000000000000000010000000500000000000000000007"
+    "887766554433221101000000000000020000000000000000"
+    "000000000000000300000000000000000000000000000000";
+
+static const char k_golden_signal_wait_ack[] =
+    "4753494d5250430000010000005000090000000000000040"
+    "0123456789abcdf700112233445566778899aabbccddeeff"
+    "11223344556677880102030405060708593564c300000000"
+    "000000000000000000010000000000000005000000000000"
+    "000000000000000788776655443322110100000000000002"
+    "fffffffffffffff90000000000000000123456789abcdef7";
+
+static const char k_golden_signal_store_request[] =
+    "4753494d5250430000010000005000080000000000000040"
+    "0123456789abcdf800112233445566778899aabbccddeeff"
+    "11223344556677880102030405060708302bee2300000000"
+    "000000000000000000010000000400000000000000000007"
+    "88776655443322110000000000000000000000000000002a"
+    "000000000000000000000000000000000000000000000000";
+
+static const char k_golden_signal_store_ack[] =
+    "4753494d5250430000010000005000090000000000000040"
+    "0123456789abcdf800112233445566778899aabbccddeeff"
+    "11223344556677880102030405060708c6b5892c00000000"
+    "000000000000000000010000000000000004000000000000"
+    "000000000000000788776655443322110000000000000000"
+    "000000000000002a0000000000000000123456789abcdef8";
+
+static const char k_golden_signal_wait_completion[] =
+    "4753494d52504300000100000050000a0000000000000040"
+    "0123456789abcdf700112233445566778899aabbccddeeff"
+    "112233445566778801020304050607085b15367900000000"
+    "000000000000000000010000000000000005000000000000"
+    "000000000000000788776655443322110100000000000002"
+    "000000000000002a0000000000000000123456789abcdef9";
+
+static const char k_golden_signal_destroy_request[] =
+    "4753494d5250430000010000005000080000000000000040"
+    "0123456789abcdf900112233445566778899aabbccddeeff"
+    "112233445566778801020304050607084580308000000000"
+    "000000000000000000010000000200000000000000000007"
+    "887766554433221100000000000000000000000000000000"
+    "000000000000000000000000000000000000000000000000";
+
+static const char k_golden_signal_destroy_ack[] =
+    "4753494d5250430000010000005000090000000000000040"
+    "0123456789abcdf900112233445566778899aabbccddeeff"
+    "11223344556677880102030405060708544d9c8300000000"
+    "000000000000000000010000000000000002000000000000"
+    "000000000000000788776655443322110000000000000000"
+    "00000000000000000000000000000000123456789abcdefa";
+
 static const uint8_t k_daemon_uuid[16] = {
     0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
     0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
@@ -202,6 +290,12 @@ static void initialize_queue_info(sagr_instance_info_t *info) {
   memcpy(info->daemon_uuid, k_daemon_uuid, 16);
   info->connection_id = UINT64_C(0x1122334455667788);
   info->epoch = UINT64_C(0x0102030405060708);
+}
+
+static void initialize_signal_info(sagr_instance_info_t *info) {
+  initialize_queue_info(info);
+  info->negotiated_capabilities[0] =
+      SAGR_CAPABILITY_TOPOLOGY_MASK | SAGR_CAPABILITY_SIGNAL_MASK;
 }
 
 static void initialize_queue_request(sagr_wire_queue_request_t *request) {
@@ -1069,6 +1163,351 @@ static int test_failed_memory_ack_shape(void) {
   return 0;
 }
 
+static int expect_signal_case(
+    const char *name, const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_wire_signal_request_t *request,
+    const sagr_wire_signal_response_t *response, uint16_t response_type,
+    const char *request_golden, const char *response_golden) {
+  uint8_t frame[SAGR_WIRE_SIGNAL_FRAME_BYTES];
+  size_t frame_size = 0;
+  sagr_wire_signal_response_t decoded;
+  int32_t wire_status = -1;
+  const char *reason = NULL;
+  if (request_golden != NULL &&
+      (sagr_protocol_encode_signal_request(
+           info, request_id, request, frame, sizeof(frame), &frame_size) !=
+           SAGR_STATUS_SUCCESS ||
+       expect_equal(name, frame, frame_size, request_golden) != 0)) {
+    fprintf(stderr, "%s signal request golden encode failed\n", name);
+    return 1;
+  }
+  if (sagr_protocol_encode_signal_response(
+          info, request_id, response_type, response, frame, sizeof(frame),
+          &frame_size) != SAGR_STATUS_SUCCESS ||
+      expect_equal(name, frame, frame_size, response_golden) != 0 ||
+      sagr_protocol_decode_signal_response(
+          frame, frame_size, info, request_id, response_type, &decoded,
+          &wire_status, &reason) != SAGR_STATUS_SUCCESS ||
+      wire_status != SAGR_WIRE_STATUS_OK ||
+      decoded.opcode != response->opcode ||
+      decoded.signal_id != response->signal_id ||
+      decoded.generation != response->generation ||
+      decoded.sequence != response->sequence ||
+      decoded.value_bits != response->value_bits ||
+      decoded.ready != response->ready ||
+      decoded.sim_tick != response->sim_tick ||
+      decoded.request_id != request_id || decoded.message_type != response_type) {
+    fprintf(stderr, "%s signal response golden encode/decode failed: %s\n",
+            name, reason == NULL ? "no reason" : reason);
+    return 1;
+  }
+  return 0;
+}
+
+static void initialize_signal_request(sagr_wire_signal_request_t *request,
+                                      uint16_t opcode) {
+  memset(request, 0, sizeof(*request));
+  request->major = SAGR_SIGNAL_PROTOCOL_MAJOR;
+  request->minor = SAGR_SIGNAL_PROTOCOL_MINOR;
+  request->opcode = opcode;
+  if (opcode != SAGR_WIRE_SIGNAL_OPCODE_CREATE) {
+    request->signal_id = UINT64_C(7);
+    request->generation = UINT64_C(0x8877665544332211);
+  }
+}
+
+static void initialize_signal_response(sagr_wire_signal_response_t *response,
+                                       const sagr_wire_signal_request_t *request,
+                                       uint64_t value_bits,
+                                       uint64_t sim_tick) {
+  memset(response, 0, sizeof(*response));
+  response->major = SAGR_SIGNAL_PROTOCOL_MAJOR;
+  response->minor = SAGR_SIGNAL_PROTOCOL_MINOR;
+  response->status = SAGR_WIRE_STATUS_OK;
+  response->opcode = request->opcode;
+  response->signal_id = request->signal_id;
+  response->generation = request->generation;
+  response->sequence = request->sequence;
+  response->value_bits = value_bits;
+  response->sim_tick = sim_tick;
+}
+
+static int test_signal_golden_frames(void) {
+  sagr_instance_info_t info;
+  sagr_wire_signal_request_t request;
+  sagr_wire_signal_response_t response;
+  const uint64_t initial = UINT64_C(0xfffffffffffffff9);
+  const uint64_t generation = UINT64_C(0x8877665544332211);
+  initialize_signal_info(&info);
+
+  initialize_signal_request(&request, SAGR_WIRE_SIGNAL_OPCODE_CREATE);
+  request.value_bits = initial;
+  initialize_signal_response(&response, &request, initial,
+                             UINT64_C(0x123456789abcdef5));
+  response.signal_id = UINT64_C(7);
+  response.generation = generation;
+  if (expect_signal_case("SIGNAL_CREATE", &info,
+                         UINT64_C(0x0123456789abcdf5), &request, &response,
+                         SAGR_WIRE_MESSAGE_SIGNAL_ACK,
+                         k_golden_signal_create_request,
+                         k_golden_signal_create_ack) != 0) {
+    return 1;
+  }
+
+  initialize_signal_request(&request, SAGR_WIRE_SIGNAL_OPCODE_LOAD);
+  initialize_signal_response(&response, &request, initial,
+                             UINT64_C(0x123456789abcdef6));
+  if (expect_signal_case("SIGNAL_LOAD", &info,
+                         UINT64_C(0x0123456789abcdf6), &request, &response,
+                         SAGR_WIRE_MESSAGE_SIGNAL_ACK,
+                         k_golden_signal_load_request,
+                         k_golden_signal_load_ack) != 0) {
+    return 1;
+  }
+
+  initialize_signal_request(&request, SAGR_WIRE_SIGNAL_OPCODE_WAIT);
+  request.sequence = UINT64_C(0x0100000000000002);
+  request.condition = SAGR_SIGNAL_CONDITION_GTE;
+  initialize_signal_response(&response, &request, initial,
+                             UINT64_C(0x123456789abcdef7));
+  if (expect_signal_case("SIGNAL_WAIT", &info,
+                         UINT64_C(0x0123456789abcdf7), &request, &response,
+                         SAGR_WIRE_MESSAGE_SIGNAL_ACK,
+                         k_golden_signal_wait_request,
+                         k_golden_signal_wait_ack) != 0) {
+    return 1;
+  }
+
+  initialize_signal_request(&request, SAGR_WIRE_SIGNAL_OPCODE_STORE);
+  request.value_bits = UINT64_C(42);
+  initialize_signal_response(&response, &request, UINT64_C(42),
+                             UINT64_C(0x123456789abcdef8));
+  if (expect_signal_case("SIGNAL_STORE", &info,
+                         UINT64_C(0x0123456789abcdf8), &request, &response,
+                         SAGR_WIRE_MESSAGE_SIGNAL_ACK,
+                         k_golden_signal_store_request,
+                         k_golden_signal_store_ack) != 0) {
+    return 1;
+  }
+
+  initialize_signal_request(&request, SAGR_WIRE_SIGNAL_OPCODE_WAIT);
+  request.sequence = UINT64_C(0x0100000000000002);
+  request.condition = SAGR_SIGNAL_CONDITION_GTE;
+  initialize_signal_response(&response, &request, UINT64_C(42),
+                             UINT64_C(0x123456789abcdef9));
+  if (expect_signal_case("SIGNAL_COMPLETION", &info,
+                         UINT64_C(0x0123456789abcdf7), &request, &response,
+                         SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION, NULL,
+                         k_golden_signal_wait_completion) != 0) {
+    return 1;
+  }
+
+  initialize_signal_request(&request, SAGR_WIRE_SIGNAL_OPCODE_DESTROY);
+  initialize_signal_response(&response, &request, 0,
+                             UINT64_C(0x123456789abcdefa));
+  return expect_signal_case("SIGNAL_DESTROY", &info,
+                            UINT64_C(0x0123456789abcdf9), &request, &response,
+                            SAGR_WIRE_MESSAGE_SIGNAL_ACK,
+                            k_golden_signal_destroy_request,
+                            k_golden_signal_destroy_ack);
+}
+
+static int test_signal_request_structural_rules(void) {
+  sagr_instance_info_t info;
+  sagr_wire_signal_request_t request;
+  uint8_t frame[SAGR_WIRE_SIGNAL_FRAME_BYTES];
+  size_t frame_size = 0;
+  initialize_signal_info(&info);
+  initialize_signal_request(&request, SAGR_WIRE_SIGNAL_OPCODE_WAIT);
+  request.sequence = 1;
+  request.condition = SAGR_SIGNAL_CONDITION_GTE;
+  if (sagr_protocol_encode_signal_request(
+          &info, 1, &request, frame, sizeof(frame), &frame_size) !=
+      SAGR_STATUS_SUCCESS) {
+    return 1;
+  }
+  request.condition = UINT64_C(4);
+  if (sagr_protocol_encode_signal_request(
+          &info, 1, &request, frame, sizeof(frame), &frame_size) !=
+      SAGR_STATUS_INVALID_ARGUMENT) {
+    fprintf(stderr, "unknown signal wait condition was encoded\n");
+    return 1;
+  }
+  request.condition = SAGR_SIGNAL_CONDITION_EQ;
+  request.sequence = 0;
+  if (sagr_protocol_encode_signal_request(
+          &info, 1, &request, frame, sizeof(frame), &frame_size) !=
+      SAGR_STATUS_INVALID_ARGUMENT) {
+    fprintf(stderr, "zero signal wait sequence was encoded\n");
+    return 1;
+  }
+  initialize_signal_request(&request, SAGR_WIRE_SIGNAL_OPCODE_LOAD);
+  request.value_bits = 1;
+  if (sagr_protocol_encode_signal_request(
+          &info, 1, &request, frame, sizeof(frame), &frame_size) !=
+      SAGR_STATUS_INVALID_ARGUMENT) {
+    fprintf(stderr, "noncanonical signal load was encoded\n");
+    return 1;
+  }
+  return 0;
+}
+
+static int expect_signal_decode_status(
+    const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
+    uint64_t request_id, uint16_t message_type, sagr_status_t expected) {
+  sagr_wire_signal_response_t decoded;
+  int32_t wire_status = -1;
+  const char *reason = NULL;
+  const sagr_status_t actual = sagr_protocol_decode_signal_response(
+      frame, frame_size, info, request_id, message_type, &decoded,
+      &wire_status, &reason);
+  if (actual != expected) {
+    fprintf(stderr, "signal mutation status=%d expected=%d: %s\n", actual,
+            expected, reason == NULL ? "no reason" : reason);
+    return 1;
+  }
+  return 0;
+}
+
+static int test_signal_response_mutations(void) {
+  sagr_instance_info_t info;
+  uint8_t golden[SAGR_WIRE_SIGNAL_FRAME_BYTES];
+  uint8_t mutated[SAGR_WIRE_SIGNAL_FRAME_BYTES];
+  size_t golden_size = 0;
+  const uint64_t request_id = UINT64_C(0x0123456789abcdf7);
+  initialize_signal_info(&info);
+  if (decode_hex(k_golden_signal_wait_ack, golden, sizeof(golden),
+                 &golden_size) != 0) {
+    return 1;
+  }
+#define EXPECT_SIGNAL_MUTATION(MUTATION, EXPECTED)                           \
+  do {                                                                        \
+    memcpy(mutated, golden, golden_size);                                     \
+    MUTATION;                                                                 \
+    sagr_protocol_recompute_frame_crc(mutated, golden_size);                  \
+    if (expect_signal_decode_status(mutated, golden_size, &info, request_id,  \
+                                    SAGR_WIRE_MESSAGE_SIGNAL_ACK, EXPECTED) != \
+        0) {                                                                  \
+      return 1;                                                               \
+    }                                                                         \
+  } while (0)
+  EXPECT_SIGNAL_MUTATION(store_u16(mutated + 14,
+                                   SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION),
+                         SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_SIGNAL_MUTATION(store_u64(mutated + 24, request_id + 1),
+                         SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_SIGNAL_MUTATION(mutated[32] ^= 1, SAGR_STATUS_INSTANCE_MISMATCH);
+  EXPECT_SIGNAL_MUTATION(store_u64(mutated + 48, info.connection_id + 1),
+                         SAGR_STATUS_TOPOLOGY_MISMATCH);
+  EXPECT_SIGNAL_MUTATION(store_u16(mutated + SAGR_WIRE_HEADER_BYTES, 2),
+                         SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_SIGNAL_MUTATION(store_u16(mutated + SAGR_WIRE_HEADER_BYTES + 8, 99),
+                         SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_SIGNAL_MUTATION(store_u16(mutated + SAGR_WIRE_HEADER_BYTES + 10, 1),
+                         SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_SIGNAL_MUTATION(store_u32(mutated + SAGR_WIRE_HEADER_BYTES + 12, 1),
+                         SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_SIGNAL_MUTATION(store_u64(mutated + SAGR_WIRE_HEADER_BYTES + 48, 2),
+                         SAGR_STATUS_PROTOCOL_ERROR);
+#undef EXPECT_SIGNAL_MUTATION
+  memcpy(mutated, golden, golden_size);
+  mutated[golden_size - 1U] ^= 1;
+  return expect_signal_decode_status(
+             mutated, golden_size, &info, request_id,
+             SAGR_WIRE_MESSAGE_SIGNAL_ACK, SAGR_STATUS_CHECKSUM_ERROR) ||
+         expect_signal_decode_status(
+             golden, golden_size - 1U, &info, request_id,
+             SAGR_WIRE_MESSAGE_SIGNAL_ACK, SAGR_STATUS_PROTOCOL_ERROR);
+}
+
+static int test_signal_capability_and_failed_ack(void) {
+  sagr_wire_ack_fields_t fields;
+  sagr_instance_open_options_t options;
+  sagr_wire_ack_result_t result;
+  sagr_instance_info_t signal_info;
+  sagr_wire_signal_request_t request;
+  sagr_wire_signal_response_t response;
+  sagr_wire_signal_response_t decoded;
+  uint8_t frame[SAGR_WIRE_ACK_FRAME_BYTES];
+  size_t frame_size = 0;
+  int32_t wire_status = -1;
+  const char *reason = NULL;
+  initialize_success_ack(&fields);
+  fields.selected_capabilities[0] |= SAGR_CAPABILITY_SIGNAL_MASK;
+  initialize_golden_options(&options);
+  options.offered_capabilities[0] |= SAGR_CAPABILITY_SIGNAL_MASK;
+  if (sagr_protocol_encode_ack(&fields, frame, sizeof(frame), &frame_size) !=
+          SAGR_STATUS_SUCCESS ||
+      sagr_protocol_decode_ack(frame, frame_size, &options, fields.request_id,
+                               k_client_nonce, &result, &wire_status,
+                               &reason) != SAGR_STATUS_CAPABILITY_MISMATCH) {
+    fprintf(stderr, "offered-only signal capability ACK was accepted\n");
+    return 1;
+  }
+  options.required_capabilities[0] |= SAGR_CAPABILITY_SIGNAL_MASK;
+  if (sagr_protocol_decode_ack(frame, frame_size, &options, fields.request_id,
+                               k_client_nonce, &result, &wire_status,
+                               &reason) != SAGR_STATUS_SUCCESS) {
+    fprintf(stderr, "required signal capability ACK was rejected\n");
+    return 1;
+  }
+  initialize_signal_request(&request, SAGR_WIRE_SIGNAL_OPCODE_WAIT);
+  request.sequence = 1;
+  request.condition = SAGR_SIGNAL_CONDITION_GTE;
+  initialize_signal_response(&response, &request, 0, 0);
+  response.status = SAGR_WIRE_STATUS_BUSY;
+  if (sagr_protocol_validate_failed_signal_ack(&request, &response) !=
+      SAGR_STATUS_SUCCESS) {
+    fprintf(stderr, "canonical failed signal ACK was rejected\n");
+    return 1;
+  }
+#define EXPECT_FAILED_SIGNAL_ACK_REJECTED(MUTATION)                          \
+  do {                                                                        \
+    sagr_wire_signal_response_t changed = response;                           \
+    MUTATION;                                                                 \
+    if (sagr_protocol_validate_failed_signal_ack(&request, &changed) !=       \
+        SAGR_STATUS_PROTOCOL_ERROR) {                                         \
+      fprintf(stderr, "noncanonical failed signal ACK was accepted\n");   \
+      return 1;                                                               \
+    }                                                                         \
+  } while (0)
+  EXPECT_FAILED_SIGNAL_ACK_REJECTED(changed.signal_id ^= UINT64_C(1));
+  EXPECT_FAILED_SIGNAL_ACK_REJECTED(changed.generation ^= UINT64_C(1));
+  EXPECT_FAILED_SIGNAL_ACK_REJECTED(changed.sequence ^= UINT64_C(1));
+  EXPECT_FAILED_SIGNAL_ACK_REJECTED(changed.value_bits = UINT64_C(1));
+  EXPECT_FAILED_SIGNAL_ACK_REJECTED(changed.ready = UINT64_C(1));
+  EXPECT_FAILED_SIGNAL_ACK_REJECTED(changed.sim_tick = UINT64_C(1));
+  EXPECT_FAILED_SIGNAL_ACK_REJECTED(changed.status = SAGR_WIRE_STATUS_OK);
+#undef EXPECT_FAILED_SIGNAL_ACK_REJECTED
+
+  initialize_signal_info(&signal_info);
+  request.opcode = UINT16_C(99);
+  response.status = SAGR_WIRE_STATUS_MALFORMED;
+  response.opcode = request.opcode;
+  if (sagr_protocol_encode_signal_response(
+          &signal_info, UINT64_C(77), SAGR_WIRE_MESSAGE_SIGNAL_ACK, &response,
+          frame, sizeof(frame), &frame_size) != SAGR_STATUS_SUCCESS ||
+      sagr_protocol_decode_signal_response(
+          frame, frame_size, &signal_info, UINT64_C(77),
+          SAGR_WIRE_MESSAGE_SIGNAL_ACK, &decoded, &wire_status, &reason) !=
+          SAGR_STATUS_PROTOCOL_ERROR ||
+      wire_status != SAGR_WIRE_STATUS_MALFORMED ||
+      decoded.opcode != request.opcode ||
+      sagr_protocol_validate_failed_signal_ack(&request, &decoded) !=
+          SAGR_STATUS_SUCCESS) {
+    fprintf(stderr, "raw-opcode MALFORMED signal ACK was not preserved\n");
+    return 1;
+  }
+  response.status = SAGR_WIRE_STATUS_OK;
+  if (sagr_protocol_encode_signal_response(
+          &signal_info, UINT64_C(78), SAGR_WIRE_MESSAGE_SIGNAL_ACK, &response,
+          frame, sizeof(frame), &frame_size) != SAGR_STATUS_INVALID_ARGUMENT) {
+    fprintf(stderr, "raw opcode was accepted in successful signal ACK\n");
+    return 1;
+  }
+  return 0;
+}
+
 static int test_request_id_exhaustion(void) {
   uint64_t next_request_id = UINT64_MAX - UINT64_C(1);
   uint64_t request_id = 0;
@@ -1111,6 +1550,10 @@ int main(void) {
   failures += test_memory_response_mutations();
   failures += test_memory_capability_must_be_required();
   failures += test_failed_memory_ack_shape();
+  failures += test_signal_golden_frames();
+  failures += test_signal_request_structural_rules();
+  failures += test_signal_response_mutations();
+  failures += test_signal_capability_and_failed_ack();
   failures += test_request_id_exhaustion();
   return failures == 0 ? 0 : 1;
 }

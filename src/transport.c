@@ -26,11 +26,13 @@
 #define SAGR_INSTANCE_MAGIC UINT64_C(0x53414752494e5354)
 #define SAGR_QUEUE_MAGIC UINT64_C(0x5341475251554555)
 #define SAGR_MEMORY_MAGIC UINT64_C(0x534147524d454d59)
+#define SAGR_SIGNAL_MAGIC UINT64_C(0x534147525349474e)
 #define SAGR_MEMORY_SIMULATED_VA_BASE UINT64_C(0x0000100000000000)
 #define SAGR_MEMORY_SIMULATED_VA_STRIDE UINT64_C(2147483648)
 
 struct sagr_queue;
 struct sagr_memory;
+struct sagr_signal;
 
 struct sagr_instance {
   uint64_t magic;
@@ -41,8 +43,35 @@ struct sagr_instance {
   uint32_t queue_count;
   struct sagr_memory *memories;
   uint32_t memory_count;
+  struct sagr_signal *signals;
+  uint32_t signal_count;
+  uint32_t pending_signal_wait_count;
+  uint64_t last_signal_generation;
   int operation_active;
   int transport_poisoned;
+};
+
+struct sagr_signal {
+  uint64_t magic;
+  struct sagr_instance *instance;
+  uint64_t signal_id;
+  uint64_t generation;
+  int64_t value;
+  uint64_t next_sequence;
+  int wait_pending;
+  uint64_t wait_sequence;
+  uint64_t wait_condition;
+  uint64_t wait_compare_bits;
+  uint64_t wait_request_id;
+  uint64_t wait_ack_value_bits;
+  uint64_t wait_ack_tick;
+  uint64_t wait_ready;
+  int wait_trigger_known;
+  uint64_t wait_trigger_value_bits;
+  uint64_t wait_trigger_tick;
+  int completion_buffered;
+  sagr_wire_signal_response_t buffered_completion;
+  struct sagr_signal *next;
 };
 
 struct sagr_memory {
@@ -149,6 +178,12 @@ static sagr_status_t validate_options(
   const int memory_required =
       (options->required_capabilities[SAGR_CAPABILITY_MEMORY_WORD] &
        SAGR_CAPABILITY_MEMORY_MASK) != 0;
+  const int signal_offered =
+      (options->offered_capabilities[SAGR_CAPABILITY_SIGNAL_WORD] &
+       SAGR_CAPABILITY_SIGNAL_MASK) != 0;
+  const int signal_required =
+      (options->required_capabilities[SAGR_CAPABILITY_SIGNAL_WORD] &
+       SAGR_CAPABILITY_SIGNAL_MASK) != 0;
   if (options->struct_size < sizeof(*options) || options->flags != 0 ||
       options->cancel_fd < -1 || options->reserved0 != 0 ||
       !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
@@ -165,7 +200,8 @@ static sagr_status_t validate_options(
        SAGR_CAPABILITY_TOPOLOGY_MASK) == 0 ||
       (options->required_capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] &
        SAGR_CAPABILITY_TOPOLOGY_MASK) == 0 ||
-      queue_offered != queue_required || memory_offered != memory_required) {
+      queue_offered != queue_required || memory_offered != memory_required ||
+      signal_offered != signal_required) {
     return SAGR_STATUS_INVALID_ARGUMENT;
   }
   return SAGR_STATUS_SUCCESS;
@@ -206,6 +242,25 @@ static sagr_status_t validate_queue_create_options(
 
 static sagr_status_t validate_queue_operation_options(
     const sagr_queue_operation_options_t *options) {
+  if (options->struct_size < sizeof(*options) || options->flags != 0 ||
+      options->cancel_fd < -1 || options->reserved0 != 0 ||
+      !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t validate_signal_create_options(
+    const sagr_signal_create_options_t *options) {
+  if (options->struct_size < sizeof(*options) || options->flags != 0 ||
+      !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t validate_signal_operation_options(
+    const sagr_signal_operation_options_t *options) {
   if (options->struct_size < sizeof(*options) || options->flags != 0 ||
       options->cancel_fd < -1 || options->reserved0 != 0 ||
       !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
@@ -337,6 +392,47 @@ static sagr_status_t prepare_memory_operation(
     memcpy(local_options, options, sizeof(*local_options));
   }
   status = validate_memory_operation_options(local_options);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (local_options->cancel_fd >= 0) {
+    const int flags = fcntl(local_options->cancel_fd, F_GETFD);
+    if (flags < 0) {
+      *native_errno = errno;
+      return SAGR_STATUS_INVALID_ARGUMENT;
+    }
+    if ((flags & FD_CLOEXEC) == 0) {
+      *native_errno = EINVAL;
+      return SAGR_STATUS_INVALID_ARGUMENT;
+    }
+  }
+  if (make_deadline(local_options->timeout_ns,
+                    local_options->absolute_deadline_ns, deadline) != 0) {
+    *native_errno = errno;
+    return errno == EOVERFLOW ? SAGR_STATUS_INVALID_ARGUMENT
+                              : SAGR_STATUS_INTERNAL_ERROR;
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t prepare_signal_operation(
+    const sagr_signal_operation_options_t *options,
+    sagr_signal_operation_options_t *local_options,
+    monotonic_deadline_t *deadline, int *native_errno) {
+  sagr_status_t status;
+  if (options == NULL) {
+    status = sagr_signal_operation_options_init(
+        local_options, (uint32_t)sizeof(*local_options));
+    if (status != SAGR_STATUS_SUCCESS) {
+      return status;
+    }
+  } else {
+    if (options->struct_size < sizeof(*options)) {
+      return SAGR_STATUS_INVALID_ARGUMENT;
+    }
+    memcpy(local_options, options, sizeof(*local_options));
+  }
+  status = validate_signal_operation_options(local_options);
   if (status != SAGR_STATUS_SUCCESS) {
     return status;
   }
@@ -614,7 +710,10 @@ static sagr_status_t send_record(int socket_fd, const uint8_t *frame,
                                  size_t frame_size,
                                  const monotonic_deadline_t *deadline,
                                  int cancel_fd,
-                                 int *native_errno) {
+                                 int *native_errno, int *record_sent) {
+  if (record_sent != NULL) {
+    *record_sent = 0;
+  }
   for (;;) {
     struct iovec vector;
     struct msghdr message;
@@ -631,9 +730,15 @@ static sagr_status_t send_record(int socket_fd, const uint8_t *frame,
     message.msg_iovlen = 1;
     count = sendmsg(socket_fd, &message, MSG_NOSIGNAL);
     if (count == (ssize_t)frame_size) {
+      if (record_sent != NULL) {
+        *record_sent = 1;
+      }
       return SAGR_STATUS_SUCCESS;
     }
     if (count >= 0) {
+      if (record_sent != NULL) {
+        *record_sent = 1;
+      }
       *native_errno = EIO;
       return SAGR_STATUS_CONNECTION_LOST;
     }
@@ -813,6 +918,12 @@ static int memory_capability_selected(const struct sagr_instance *instance) {
           SAGR_CAPABILITY_MEMORY_MASK) != 0;
 }
 
+static int signal_capability_selected(const struct sagr_instance *instance) {
+  return (instance->info
+              .negotiated_capabilities[SAGR_CAPABILITY_SIGNAL_WORD] &
+          SAGR_CAPABILITY_SIGNAL_MASK) != 0;
+}
+
 static void poison_queue_transport(struct sagr_instance *instance) {
   instance->transport_poisoned = 1;
   if (instance->socket_fd >= 0) {
@@ -841,6 +952,16 @@ static sagr_status_t require_memory_transport(
   return SAGR_STATUS_SUCCESS;
 }
 
+static sagr_status_t require_signal_transport(
+    const struct sagr_instance *instance, sagr_error_info_t *error,
+    uint32_t error_size) {
+  if (instance->transport_poisoned != 0 || instance->socket_fd < 0) {
+    return fail_open(error, error_size, SAGR_STATUS_CONNECTION_LOST, -1, 0,
+                     "signal transport is no longer reusable");
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
 static int memory_id_is_active(const struct sagr_instance *instance,
                                uint64_t allocation_id) {
   const struct sagr_memory *memory;
@@ -864,6 +985,151 @@ static int memory_range_overlaps(const struct sagr_instance *instance,
     }
   }
   return 0;
+}
+
+static uint64_t signal_value_to_bits(int64_t value) {
+  uint64_t bits;
+  memcpy(&bits, &value, sizeof(bits));
+  return bits;
+}
+
+static int64_t signal_bits_to_value(uint64_t bits) {
+  int64_t value;
+  memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
+static int signal_predicate_satisfied(uint64_t condition,
+                                      uint64_t value_bits,
+                                      uint64_t compare_bits) {
+  const int64_t value = signal_bits_to_value(value_bits);
+  const int64_t compare = signal_bits_to_value(compare_bits);
+  switch (condition) {
+    case SAGR_SIGNAL_CONDITION_EQ:
+      return value == compare;
+    case SAGR_SIGNAL_CONDITION_NE:
+      return value != compare;
+    case SAGR_SIGNAL_CONDITION_LT:
+      return value < compare;
+    case SAGR_SIGNAL_CONDITION_GTE:
+      return value >= compare;
+    default:
+      return 0;
+  }
+}
+
+static struct sagr_signal *find_signal(struct sagr_instance *instance,
+                                       uint64_t signal_id,
+                                       uint64_t generation) {
+  struct sagr_signal *signal;
+  for (signal = instance->signals; signal != NULL; signal = signal->next) {
+    if (signal->magic == SAGR_SIGNAL_MAGIC &&
+        signal->signal_id == signal_id && signal->generation == generation) {
+      return signal;
+    }
+  }
+  return NULL;
+}
+
+static int signal_id_is_active(const struct sagr_instance *instance,
+                               uint64_t signal_id) {
+  const struct sagr_signal *signal;
+  for (signal = instance->signals; signal != NULL; signal = signal->next) {
+    if (signal->magic == SAGR_SIGNAL_MAGIC &&
+        signal->signal_id == signal_id) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int signal_completion_is_canonical(
+    const struct sagr_signal *signal,
+    const sagr_wire_signal_response_t *completion,
+    int allow_untriggered) {
+  if (!signal->wait_pending ||
+      completion->message_type != SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION ||
+      completion->status != SAGR_WIRE_STATUS_OK ||
+      completion->opcode != SAGR_WIRE_SIGNAL_OPCODE_WAIT ||
+      completion->signal_id != signal->signal_id ||
+      completion->generation != signal->generation ||
+      completion->sequence != signal->wait_sequence ||
+      completion->request_id != signal->wait_request_id ||
+      completion->ready != 0 || completion->sim_tick <= signal->wait_ack_tick ||
+      !signal_predicate_satisfied(signal->wait_condition,
+                                  completion->value_bits,
+                                  signal->wait_compare_bits)) {
+    return 0;
+  }
+  if (signal->wait_ready != 0) {
+    return signal->wait_ack_tick != UINT64_MAX &&
+           completion->sim_tick == signal->wait_ack_tick + UINT64_C(1) &&
+           completion->value_bits == signal->wait_ack_value_bits;
+  }
+  if (signal->wait_trigger_known != 0) {
+    return signal->wait_trigger_tick != UINT64_MAX &&
+           completion->sim_tick == signal->wait_trigger_tick + UINT64_C(1) &&
+           completion->value_bits == signal->wait_trigger_value_bits;
+  }
+  return allow_untriggered != 0;
+}
+
+static sagr_status_t buffer_signal_completion(
+    struct sagr_instance *instance,
+    const sagr_wire_signal_response_t *completion,
+    int allow_untriggered) {
+  struct sagr_signal *signal =
+      find_signal(instance, completion->signal_id, completion->generation);
+  if (signal == NULL || signal->completion_buffered != 0 ||
+      !signal_completion_is_canonical(signal, completion,
+                                      allow_untriggered)) {
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  signal->buffered_completion = *completion;
+  signal->completion_buffered = 1;
+  return SAGR_STATUS_SUCCESS;
+}
+
+static int take_buffered_signal_completion(
+    struct sagr_signal *signal, sagr_wire_signal_response_t *completion) {
+  if (signal->completion_buffered == 0) {
+    return 0;
+  }
+  if (!signal_completion_is_canonical(signal, &signal->buffered_completion,
+                                      0)) {
+    return -1;
+  }
+  *completion = signal->buffered_completion;
+  memset(&signal->buffered_completion, 0,
+         sizeof(signal->buffered_completion));
+  signal->completion_buffered = 0;
+  return 1;
+}
+
+static sagr_status_t decode_and_buffer_signal_completion(
+    struct sagr_instance *instance, const uint8_t *frame, size_t frame_size,
+    uint64_t active_request_id, uint64_t untriggered_signal_id,
+    uint64_t untriggered_generation, const char **reason) {
+  sagr_wire_signal_response_t completion;
+  int32_t wire_status = -1;
+  sagr_status_t status = sagr_protocol_decode_signal_response(
+      frame, frame_size, &instance->info, 0,
+      SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION, &completion, &wire_status, reason);
+  if (status != SAGR_STATUS_SUCCESS ||
+      (active_request_id != 0 &&
+       completion.request_id == active_request_id)) {
+    *reason = "invalid signal completion while awaiting another record";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  status = buffer_signal_completion(
+      instance, &completion,
+      untriggered_signal_id != 0 &&
+          completion.signal_id == untriggered_signal_id &&
+          completion.generation == untriggered_generation);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = "could not buffer signal completion";
+  }
+  return status;
 }
 
 static uint16_t queue_frame_type(const uint8_t *frame, size_t frame_size) {
@@ -1051,7 +1317,7 @@ static sagr_status_t exchange_queue_request(
     *out_request_id = request_id;
   }
   status = send_record(instance->socket_fd, request_frame, request_size,
-                       deadline, cancel_fd, native_errno);
+                       deadline, cancel_fd, native_errno, NULL);
   if (status != SAGR_STATUS_SUCCESS) {
     *reason = "queue request send failed";
     return status;
@@ -1071,6 +1337,15 @@ static sagr_status_t exchange_queue_request(
       return status;
     }
     message_type = queue_frame_type(response_frame, response_size);
+    if (message_type == SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION) {
+      status = decode_and_buffer_signal_completion(
+          instance, response_frame, response_size, request_id, 0, 0, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
     if (message_type == SAGR_WIRE_MESSAGE_QUEUE_COMPLETION) {
       status = sagr_protocol_decode_queue_response(
           response_frame, response_size, &instance->info, 0,
@@ -1180,6 +1455,15 @@ static sagr_status_t exchange_memory_request(
       return status;
     }
     message_type = queue_frame_type(response_frame, response_size);
+    if (message_type == SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION) {
+      status = decode_and_buffer_signal_completion(
+          instance, response_frame, response_size, request_id, 0, 0, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
     if (message_type == SAGR_WIRE_MESSAGE_QUEUE_COMPLETION) {
       sagr_wire_queue_response_t completion;
       status = sagr_protocol_decode_queue_response(
@@ -1257,6 +1541,16 @@ static sagr_status_t receive_queue_completion(
       }
       return status;
     }
+    if (queue_frame_type(frame, frame_size) ==
+        SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION) {
+      status = decode_and_buffer_signal_completion(
+          instance, frame, frame_size, 0, 0, 0, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
     if (queue_frame_type(frame, frame_size) !=
         SAGR_WIRE_MESSAGE_QUEUE_COMPLETION) {
       *reason = "unexpected record while waiting for queue completion";
@@ -1293,6 +1587,216 @@ static sagr_status_t receive_queue_completion(
       *reason = "could not buffer out-of-order queue completion";
       poison_queue_transport(instance);
       return status;
+    }
+  }
+}
+
+static sagr_status_t map_signal_wire_status(uint16_t opcode,
+                                            int32_t wire_status) {
+  if (opcode != SAGR_WIRE_SIGNAL_OPCODE_CREATE &&
+      wire_status == SAGR_WIRE_STATUS_PROTOCOL_STATE) {
+    return SAGR_STATUS_INVALID_HANDLE;
+  }
+  if (wire_status < 0) {
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  return sagr_protocol_map_wire_status((uint32_t)wire_status);
+}
+
+static sagr_status_t exchange_signal_request(
+    struct sagr_instance *instance, const sagr_wire_signal_request_t *request,
+    const monotonic_deadline_t *deadline, int cancel_fd,
+    sagr_wire_signal_response_t *response, int32_t *wire_status,
+    int *native_errno, const char **reason, uint64_t *out_request_id) {
+  uint8_t request_frame[SAGR_WIRE_SIGNAL_FRAME_BYTES];
+  uint8_t response_frame[SAGR_WIRE_MAX_RECORD_BYTES];
+  size_t request_size = 0;
+  uint64_t request_id = 0;
+  int record_sent = 0;
+  sagr_status_t status = sagr_protocol_allocate_request_id(
+      &instance->next_request_id, &request_id);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = "signal request ID space exhausted";
+    return status;
+  }
+  status = sagr_protocol_encode_signal_request(
+      &instance->info, request_id, request, request_frame,
+      sizeof(request_frame), &request_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = "could not encode signal request";
+    return status;
+  }
+  if (out_request_id != NULL) {
+    *out_request_id = request_id;
+  }
+  status = send_record(instance->socket_fd, request_frame, request_size,
+                       deadline, cancel_fd, native_errno, &record_sent);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = "signal request send failed";
+    if (record_sent != 0) {
+      poison_queue_transport(instance);
+    }
+    return status;
+  }
+
+  for (;;) {
+    size_t response_size = 0;
+    uint16_t message_type;
+    int32_t decoded_wire_status = -1;
+    sagr_wire_signal_response_t decoded;
+    status = receive_record(instance->socket_fd, response_frame,
+                            sizeof(response_frame), &response_size, deadline,
+                            cancel_fd, native_errno);
+    if (status != SAGR_STATUS_SUCCESS) {
+      *reason = "signal ACK receive failed";
+      poison_queue_transport(instance);
+      return status;
+    }
+    message_type = queue_frame_type(response_frame, response_size);
+    if (message_type == SAGR_WIRE_MESSAGE_QUEUE_COMPLETION) {
+      sagr_wire_queue_response_t completion;
+      status = sagr_protocol_decode_queue_response(
+          response_frame, response_size, &instance->info, 0,
+          SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &completion,
+          &decoded_wire_status, reason);
+      if ((status != SAGR_STATUS_SUCCESS && decoded_wire_status < 0) ||
+          completion.request_id == request_id ||
+          buffer_completion(instance, &completion) != SAGR_STATUS_SUCCESS) {
+        *reason = "invalid queue completion while waiting for signal ACK";
+        poison_queue_transport(instance);
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      continue;
+    }
+    if (message_type == SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION) {
+      status = decode_and_buffer_signal_completion(
+          instance, response_frame, response_size, request_id,
+          request->opcode == SAGR_WIRE_SIGNAL_OPCODE_STORE
+              ? request->signal_id
+              : 0,
+          request->opcode == SAGR_WIRE_SIGNAL_OPCODE_STORE
+              ? request->generation
+              : 0,
+          reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
+    status = sagr_protocol_decode_signal_response(
+        response_frame, response_size, &instance->info, request_id,
+        SAGR_WIRE_MESSAGE_SIGNAL_ACK, &decoded, &decoded_wire_status, reason);
+    *wire_status = decoded_wire_status;
+    if (status != SAGR_STATUS_SUCCESS && decoded_wire_status < 0) {
+      poison_queue_transport(instance);
+      return status;
+    }
+    if (decoded.opcode != request->opcode) {
+      *reason = "signal ACK opcode mismatch";
+      poison_queue_transport(instance);
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+    *response = decoded;
+    if (status != SAGR_STATUS_SUCCESS) {
+      if (sagr_protocol_validate_failed_signal_ack(request, &decoded) !=
+          SAGR_STATUS_SUCCESS) {
+        *reason = "noncanonical failed signal ACK";
+        poison_queue_transport(instance);
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      return map_signal_wire_status(request->opcode, decoded_wire_status);
+    }
+    return SAGR_STATUS_SUCCESS;
+  }
+}
+
+static sagr_status_t receive_signal_completion(
+    struct sagr_signal *signal, const monotonic_deadline_t *deadline,
+    int cancel_fd, sagr_wire_signal_response_t *completion,
+    int32_t *wire_status, int *native_errno, const char **reason) {
+  struct sagr_instance *instance = signal->instance;
+  uint8_t frame[SAGR_WIRE_MAX_RECORD_BYTES];
+  sagr_status_t state = check_operation_state(deadline, cancel_fd,
+                                               native_errno);
+  int buffered;
+  if (state != SAGR_STATUS_SUCCESS) {
+    *reason = "signal completion wait was cancelled or expired";
+    return state;
+  }
+  buffered = take_buffered_signal_completion(signal, completion);
+  if (buffered < 0) {
+    *reason = "buffered signal completion is noncanonical";
+    poison_queue_transport(instance);
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (buffered > 0) {
+    *wire_status = (int32_t)completion->status;
+    return SAGR_STATUS_SUCCESS;
+  }
+  for (;;) {
+    size_t frame_size = 0;
+    uint16_t message_type;
+    int32_t decoded_wire_status = -1;
+    sagr_status_t status = receive_record(
+        instance->socket_fd, frame, sizeof(frame), &frame_size, deadline,
+        cancel_fd, native_errno);
+    if (status != SAGR_STATUS_SUCCESS) {
+      *reason = "signal completion receive failed";
+      if (status != SAGR_STATUS_TIMED_OUT && status != SAGR_STATUS_CANCELLED) {
+        poison_queue_transport(instance);
+      }
+      return status;
+    }
+    message_type = queue_frame_type(frame, frame_size);
+    if (message_type == SAGR_WIRE_MESSAGE_QUEUE_COMPLETION) {
+      sagr_wire_queue_response_t queue_completion;
+      status = sagr_protocol_decode_queue_response(
+          frame, frame_size, &instance->info, 0,
+          SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &queue_completion,
+          &decoded_wire_status, reason);
+      if ((status != SAGR_STATUS_SUCCESS && decoded_wire_status < 0) ||
+          buffer_completion(instance, &queue_completion) !=
+              SAGR_STATUS_SUCCESS) {
+        *reason = "invalid queue completion while waiting for signal";
+        poison_queue_transport(instance);
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      continue;
+    }
+    if (message_type != SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION) {
+      *reason = "unexpected record while waiting for signal completion";
+      poison_queue_transport(instance);
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+    {
+      sagr_wire_signal_response_t decoded;
+      status = sagr_protocol_decode_signal_response(
+          frame, frame_size, &instance->info, 0,
+          SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION, &decoded,
+          &decoded_wire_status, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      if (decoded.signal_id == signal->signal_id &&
+          decoded.generation == signal->generation &&
+          decoded.sequence == signal->wait_sequence) {
+        if (!signal_completion_is_canonical(signal, &decoded, 0)) {
+          *reason = "noncanonical signal completion";
+          poison_queue_transport(instance);
+          return SAGR_STATUS_PROTOCOL_ERROR;
+        }
+        *completion = decoded;
+        *wire_status = decoded_wire_status;
+        return SAGR_STATUS_SUCCESS;
+      }
+      status = buffer_signal_completion(instance, &decoded, 0);
+      if (status != SAGR_STATUS_SUCCESS) {
+        *reason = "could not buffer out-of-order signal completion";
+        poison_queue_transport(instance);
+        return status;
+      }
     }
   }
 }
@@ -1440,7 +1944,7 @@ sagr_status_t sagr_instance_open(
                                       hello, sizeof(hello), &hello_size);
   if (status == SAGR_STATUS_SUCCESS) {
     status = send_record(socket_fd, hello, hello_size, &deadline,
-                         local_options.cancel_fd, &native_errno);
+                         local_options.cancel_fd, &native_errno, NULL);
   }
   if (status == SAGR_STATUS_SUCCESS) {
     status = receive_record(socket_fd, ack, sizeof(ack), &ack_size, &deadline,
@@ -1538,6 +2042,7 @@ sagr_status_t sagr_instance_close(sagr_instance_t *instance) {
   struct sagr_instance *owned_instance;
   struct sagr_queue *queue;
   struct sagr_memory *memory;
+  struct sagr_signal *signal;
   if (instance == NULL) {
     return SAGR_STATUS_INVALID_ARGUMENT;
   }
@@ -1576,6 +2081,18 @@ sagr_status_t sagr_instance_close(sagr_instance_t *instance) {
   }
   owned_instance->memories = NULL;
   owned_instance->memory_count = 0;
+  signal = owned_instance->signals;
+  while (signal != NULL) {
+    struct sagr_signal *next = signal->next;
+    signal->magic = 0;
+    signal->instance = NULL;
+    memset(signal, 0, sizeof(*signal));
+    free(signal);
+    signal = next;
+  }
+  owned_instance->signals = NULL;
+  owned_instance->signal_count = 0;
+  owned_instance->pending_signal_wait_count = 0;
   memset(&owned_instance->info, 0, sizeof(owned_instance->info));
   free(owned_instance);
   return SAGR_STATUS_SUCCESS;
@@ -2565,5 +3082,556 @@ sagr_status_t sagr_memory_free(
   *memory = NULL;
   memset(owned_memory, 0, sizeof(*owned_memory));
   free(owned_memory);
+  return SAGR_STATUS_SUCCESS;
+}
+
+static int signal_handle_is_valid(const struct sagr_signal *signal) {
+  return signal != NULL && signal->magic == SAGR_SIGNAL_MAGIC &&
+         signal->instance != NULL &&
+         signal->instance->magic == SAGR_INSTANCE_MAGIC;
+}
+
+static void fill_signal_info(const struct sagr_signal *signal,
+                             sagr_signal_info_t *info) {
+  info->struct_size = (uint32_t)sizeof(*info);
+  info->signal_id = signal->signal_id;
+  info->generation = signal->generation;
+  info->value = signal->value;
+  info->connection_id = signal->instance->info.connection_id;
+  info->epoch = signal->instance->info.epoch;
+  memcpy(info->daemon_uuid, signal->instance->info.daemon_uuid,
+         sizeof(info->daemon_uuid));
+}
+
+static void initialize_signal_request_for_handle(
+    sagr_wire_signal_request_t *request, uint16_t opcode,
+    const struct sagr_signal *signal) {
+  memset(request, 0, sizeof(*request));
+  request->major = SAGR_SIGNAL_PROTOCOL_MAJOR;
+  request->minor = SAGR_SIGNAL_PROTOCOL_MINOR;
+  request->opcode = opcode;
+  if (signal != NULL) {
+    request->signal_id = signal->signal_id;
+    request->generation = signal->generation;
+  }
+}
+
+sagr_status_t sagr_signal_create(
+    sagr_instance_t instance, const sagr_signal_create_options_t *options,
+    const sagr_signal_operation_options_t *operation_options,
+    sagr_signal_t *out_signal, sagr_signal_info_t *out_info,
+    uint32_t info_size, sagr_error_info_t *out_error, uint32_t error_size) {
+  sagr_signal_create_options_t local_create;
+  sagr_signal_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_signal_request_t request;
+  sagr_wire_signal_response_t response;
+  struct sagr_signal *signal;
+  sagr_status_t status;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  const char *reason = "signal creation failed";
+
+  if (out_signal != NULL) {
+    *out_signal = NULL;
+  }
+  status = validate_error_output(out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = prepare_sized_output(out_info, info_size, sizeof(*out_info), 0);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, 0,
+                     "invalid signal info output buffer");
+  }
+  if (instance == NULL || instance->magic != SAGR_INSTANCE_MAGIC ||
+      out_signal == NULL) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "invalid instance or signal output");
+  }
+  if (options == NULL) {
+    status = sagr_signal_create_options_init(
+        &local_create, (uint32_t)sizeof(local_create));
+  } else if (options->struct_size < sizeof(*options)) {
+    status = SAGR_STATUS_INVALID_ARGUMENT;
+  } else {
+    memcpy(&local_create, options, sizeof(local_create));
+    status = validate_signal_create_options(&local_create);
+  }
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, 0,
+                     "invalid signal create options");
+  }
+  status = prepare_signal_operation(operation_options, &local_operation,
+                                    &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid signal operation options");
+  }
+  if (!signal_capability_selected(instance)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_NOT_SUPPORTED, -1, 0,
+                     "SIGNAL_EVENT_V1 was not negotiated");
+  }
+  status = require_signal_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (instance->signal_count >= SAGR_SIGNAL_MAX_LIVE_SIGNALS) {
+    return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES, -1, 0,
+                     "runtime signal-handle limit reached");
+  }
+  if (instance->operation_active != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "another instance operation is active");
+  }
+  signal = (struct sagr_signal *)calloc(1, sizeof(*signal));
+  if (signal == NULL) {
+    return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES, -1,
+                     errno, "could not allocate signal handle");
+  }
+  initialize_signal_request_for_handle(
+      &request, SAGR_WIRE_SIGNAL_OPCODE_CREATE, NULL);
+  request.value_bits = signal_value_to_bits(local_create.initial_value);
+  instance->operation_active = 1;
+  status = exchange_signal_request(
+      instance, &request, &deadline, local_operation.cancel_fd, &response,
+      &wire_status, &native_errno, &reason, NULL);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS) {
+    free(signal);
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (response.signal_id == 0 ||
+      response.signal_id > SAGR_SIGNAL_MAX_LIVE_SIGNALS ||
+      response.generation == 0 ||
+      response.generation <= instance->last_signal_generation ||
+      response.sequence != 0 ||
+      response.value_bits != request.value_bits || response.ready != 0 ||
+      signal_id_is_active(instance, response.signal_id)) {
+    poison_queue_transport(instance);
+    free(signal);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0, "invalid successful signal CREATE ACK");
+  }
+  signal->magic = SAGR_SIGNAL_MAGIC;
+  signal->instance = instance;
+  signal->signal_id = response.signal_id;
+  signal->generation = response.generation;
+  signal->value = local_create.initial_value;
+  signal->next_sequence = UINT64_C(1);
+  signal->next = instance->signals;
+  instance->signals = signal;
+  ++instance->signal_count;
+  instance->last_signal_generation = response.generation;
+  if (out_info != NULL) {
+    fill_signal_info(signal, out_info);
+  }
+  *out_signal = signal;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_signal_get_info(sagr_signal_t signal,
+                                   sagr_signal_info_t *info,
+                                   uint32_t info_size) {
+  if (info == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (info_size < sizeof(*info)) {
+    memset(info, 0, info_size);
+    if (info_size >= sizeof(info->struct_size)) {
+      info->struct_size = (uint32_t)sizeof(*info);
+    }
+    return SAGR_STATUS_BUFFER_TOO_SMALL;
+  }
+  memset(info, 0, sizeof(*info));
+  if (!signal_handle_is_valid(signal)) {
+    return SAGR_STATUS_INVALID_HANDLE;
+  }
+  fill_signal_info(signal, info);
+  return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t signal_value_operation(
+    sagr_signal_t signal, uint16_t opcode, int64_t store_value,
+    const sagr_signal_operation_options_t *operation_options,
+    int64_t *out_value, sagr_error_info_t *out_error, uint32_t error_size) {
+  sagr_signal_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_signal_request_t request;
+  sagr_wire_signal_response_t response;
+  struct sagr_instance *instance;
+  struct sagr_signal candidate;
+  sagr_status_t status;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  int buffered_before;
+  const char *reason = opcode == SAGR_WIRE_SIGNAL_OPCODE_LOAD
+                           ? "signal load failed"
+                           : "signal store failed";
+
+  if (out_value != NULL) {
+    *out_value = 0;
+  }
+  status = validate_error_output(out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (!signal_handle_is_valid(signal)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "invalid signal handle");
+  }
+  if (opcode == SAGR_WIRE_SIGNAL_OPCODE_LOAD && out_value == NULL) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                     "signal load output is null");
+  }
+  status = prepare_signal_operation(operation_options, &local_operation,
+                                    &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid signal operation options");
+  }
+  instance = signal->instance;
+  if (!signal_capability_selected(instance)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_NOT_SUPPORTED, -1, 0,
+                     "SIGNAL_EVENT_V1 was not negotiated");
+  }
+  status = require_signal_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (instance->operation_active != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "another instance operation is active");
+  }
+  initialize_signal_request_for_handle(&request, opcode, signal);
+  if (opcode == SAGR_WIRE_SIGNAL_OPCODE_STORE) {
+    request.value_bits = signal_value_to_bits(store_value);
+  }
+  buffered_before = signal->completion_buffered;
+  instance->operation_active = 1;
+  status = exchange_signal_request(
+      instance, &request, &deadline, local_operation.cancel_fd, &response,
+      &wire_status, &native_errno, &reason, NULL);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS) {
+    if (opcode == SAGR_WIRE_SIGNAL_OPCODE_STORE &&
+        signal->wait_pending != 0 && signal->wait_ready == 0 &&
+        signal->wait_trigger_known == 0 && buffered_before == 0 &&
+        signal->completion_buffered != 0) {
+      poison_queue_transport(instance);
+      return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                       wire_status, native_errno,
+                       "completion accompanied a rejected signal STORE");
+    }
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (response.signal_id != signal->signal_id ||
+      response.generation != signal->generation || response.sequence != 0 ||
+      response.ready != 0 ||
+      (opcode == SAGR_WIRE_SIGNAL_OPCODE_STORE &&
+       response.value_bits != request.value_bits)) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0,
+                     "invalid successful signal LOAD or STORE ACK");
+  }
+  candidate = *signal;
+  candidate.value = signal_bits_to_value(response.value_bits);
+  if (opcode == SAGR_WIRE_SIGNAL_OPCODE_STORE && signal->wait_pending != 0 &&
+      signal->wait_ready == 0 && signal->wait_trigger_known == 0) {
+    if (signal_predicate_satisfied(signal->wait_condition,
+                                   response.value_bits,
+                                   signal->wait_compare_bits)) {
+      if (response.sim_tick == UINT64_MAX) {
+        poison_queue_transport(instance);
+        return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                         wire_status, 0,
+                         "successful STORE cannot trigger at maximum tick");
+      }
+      candidate.wait_trigger_known = 1;
+      candidate.wait_trigger_value_bits = response.value_bits;
+      candidate.wait_trigger_tick = response.sim_tick;
+    } else if (buffered_before == 0 && signal->completion_buffered != 0) {
+      poison_queue_transport(instance);
+      return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                       wire_status, 0,
+                       "signal completion preceded an unsatisfied STORE");
+    }
+  }
+  if (signal->completion_buffered != 0 &&
+      !signal_completion_is_canonical(&candidate, &signal->buffered_completion,
+                                      0)) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0,
+                     "buffered signal completion disagrees with STORE ACK");
+  }
+  signal->value = candidate.value;
+  signal->wait_trigger_known = candidate.wait_trigger_known;
+  signal->wait_trigger_value_bits = candidate.wait_trigger_value_bits;
+  signal->wait_trigger_tick = candidate.wait_trigger_tick;
+  if (out_value != NULL) {
+    *out_value = signal->value;
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_signal_load(
+    sagr_signal_t signal,
+    const sagr_signal_operation_options_t *operation_options,
+    int64_t *out_value, sagr_error_info_t *out_error, uint32_t error_size) {
+  return signal_value_operation(
+      signal, SAGR_WIRE_SIGNAL_OPCODE_LOAD, 0, operation_options, out_value,
+      out_error, error_size);
+}
+
+sagr_status_t sagr_signal_store(
+    sagr_signal_t signal, int64_t value,
+    const sagr_signal_operation_options_t *operation_options,
+    sagr_error_info_t *out_error, uint32_t error_size) {
+  return signal_value_operation(
+      signal, SAGR_WIRE_SIGNAL_OPCODE_STORE, value, operation_options, NULL,
+      out_error, error_size);
+}
+
+sagr_status_t sagr_signal_wait(
+    sagr_signal_t signal, uint64_t condition, int64_t compare_value,
+    const sagr_signal_operation_options_t *operation_options,
+    sagr_signal_wait_result_t *out_result, uint32_t result_size,
+    sagr_error_info_t *out_error, uint32_t error_size) {
+  sagr_signal_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_signal_request_t request;
+  sagr_wire_signal_response_t response;
+  sagr_wire_signal_response_t completion;
+  struct sagr_instance *instance;
+  sagr_status_t status;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  uint64_t request_id = 0;
+  const uint64_t compare_bits = signal_value_to_bits(compare_value);
+  const char *reason = "signal wait failed";
+
+  status = validate_error_output(out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = prepare_sized_output(out_result, result_size, sizeof(*out_result), 1);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, 0,
+                     "invalid signal wait result buffer");
+  }
+  if (!signal_handle_is_valid(signal)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "invalid signal handle");
+  }
+  if (condition > SAGR_SIGNAL_CONDITION_GTE) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                     "invalid signal wait condition");
+  }
+  status = prepare_signal_operation(operation_options, &local_operation,
+                                    &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid signal operation options");
+  }
+  instance = signal->instance;
+  if (!signal_capability_selected(instance)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_NOT_SUPPORTED, -1, 0,
+                     "SIGNAL_EVENT_V1 was not negotiated");
+  }
+  status = require_signal_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (signal->wait_pending != 0 &&
+      (signal->wait_condition != condition ||
+       signal->wait_compare_bits != compare_bits)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "signal already has a different pending wait");
+  }
+  if (instance->operation_active != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "another instance operation is active");
+  }
+  if (signal->wait_pending == 0) {
+    if (instance->pending_signal_wait_count >=
+            SAGR_SIGNAL_MAX_PENDING_WAITS ||
+        signal->next_sequence == 0) {
+      return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES, -1,
+                       0, "runtime pending signal-wait limit reached");
+    }
+    initialize_signal_request_for_handle(
+        &request, SAGR_WIRE_SIGNAL_OPCODE_WAIT, signal);
+    request.sequence = signal->next_sequence;
+    request.value_bits = compare_bits;
+    request.condition = condition;
+    instance->operation_active = 1;
+    status = exchange_signal_request(
+        instance, &request, &deadline, local_operation.cancel_fd, &response,
+        &wire_status, &native_errno, &reason, &request_id);
+    instance->operation_active = 0;
+    if (status != SAGR_STATUS_SUCCESS) {
+      return fail_open(out_error, error_size, status, wire_status,
+                       native_errno, reason);
+    }
+    if (response.signal_id != signal->signal_id ||
+        response.generation != signal->generation ||
+        response.sequence != request.sequence || response.ready > 1 ||
+        response.sim_tick == UINT64_MAX ||
+        response.ready !=
+            (uint64_t)signal_predicate_satisfied(condition,
+                                                  response.value_bits,
+                                                  compare_bits)) {
+      poison_queue_transport(instance);
+      return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                       wire_status, 0, "invalid successful signal WAIT ACK");
+    }
+    signal->value = signal_bits_to_value(response.value_bits);
+    signal->wait_pending = 1;
+    signal->wait_sequence = request.sequence;
+    signal->wait_condition = condition;
+    signal->wait_compare_bits = compare_bits;
+    signal->wait_request_id = request_id;
+    signal->wait_ack_value_bits = response.value_bits;
+    signal->wait_ack_tick = response.sim_tick;
+    signal->wait_ready = response.ready;
+    signal->next_sequence = request.sequence == UINT64_MAX
+                                ? 0
+                                : request.sequence + UINT64_C(1);
+    ++instance->pending_signal_wait_count;
+  }
+
+  instance->operation_active = 1;
+  memset(&completion, 0, sizeof(completion));
+  status = receive_signal_completion(
+      signal, &deadline, local_operation.cancel_fd, &completion, &wire_status,
+      &native_errno, &reason);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (instance->pending_signal_wait_count == 0) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_INTERNAL_ERROR,
+                     wire_status, 0,
+                     "pending signal-wait accounting underflow");
+  }
+
+  /* Publish the result only after the completion has passed every canonicality
+   * check. Timeout, cancellation, and protocol failures leave only the
+   * initialized struct_size in the caller's buffer. */
+  out_result->status = SAGR_STATUS_SUCCESS;
+  out_result->wire_status = wire_status;
+  out_result->signal_id = signal->signal_id;
+  out_result->generation = signal->generation;
+  out_result->sequence = signal->wait_sequence;
+  out_result->observed_value = signal_bits_to_value(completion.value_bits);
+  out_result->admission_tick = signal->wait_ack_tick;
+  out_result->completion_tick = completion.sim_tick;
+  out_result->ready_at_admission = (uint32_t)signal->wait_ready;
+  --instance->pending_signal_wait_count;
+  signal->wait_pending = 0;
+  signal->wait_sequence = 0;
+  signal->wait_condition = 0;
+  signal->wait_compare_bits = 0;
+  signal->wait_request_id = 0;
+  signal->wait_ack_value_bits = 0;
+  signal->wait_ack_tick = 0;
+  signal->wait_ready = 0;
+  signal->wait_trigger_known = 0;
+  signal->wait_trigger_value_bits = 0;
+  signal->wait_trigger_tick = 0;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_signal_destroy(
+    sagr_signal_t *signal,
+    const sagr_signal_operation_options_t *operation_options,
+    sagr_error_info_t *out_error, uint32_t error_size) {
+  sagr_signal_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_signal_request_t request;
+  sagr_wire_signal_response_t response;
+  struct sagr_signal *owned_signal;
+  struct sagr_signal **link;
+  struct sagr_instance *instance;
+  sagr_status_t status;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  const char *reason = "signal destruction failed";
+
+  status = validate_error_output(out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (signal == NULL) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                     "signal pointer is null");
+  }
+  if (*signal == NULL) {
+    return SAGR_STATUS_SUCCESS;
+  }
+  owned_signal = *signal;
+  if (!signal_handle_is_valid(owned_signal)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "invalid signal handle");
+  }
+  instance = owned_signal->instance;
+  status = require_signal_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = prepare_signal_operation(operation_options, &local_operation,
+                                    &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid signal operation options");
+  }
+  if (owned_signal->wait_pending != 0 ||
+      owned_signal->completion_buffered != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "signal has a pending wait completion");
+  }
+  if (instance->operation_active != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "another instance operation is active");
+  }
+  initialize_signal_request_for_handle(
+      &request, SAGR_WIRE_SIGNAL_OPCODE_DESTROY, owned_signal);
+  instance->operation_active = 1;
+  status = exchange_signal_request(
+      instance, &request, &deadline, local_operation.cancel_fd, &response,
+      &wire_status, &native_errno, &reason, NULL);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (response.signal_id != owned_signal->signal_id ||
+      response.generation != owned_signal->generation ||
+      response.sequence != 0 || response.value_bits != 0 ||
+      response.ready != 0) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0,
+                     "invalid successful signal DESTROY ACK");
+  }
+  link = &instance->signals;
+  while (*link != NULL && *link != owned_signal) {
+    link = &(*link)->next;
+  }
+  if (*link != owned_signal || instance->signal_count == 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INTERNAL_ERROR,
+                     wire_status, 0, "signal ownership list is inconsistent");
+  }
+  *link = owned_signal->next;
+  --instance->signal_count;
+  *signal = NULL;
+  memset(owned_signal, 0, sizeof(*owned_signal));
+  free(owned_signal);
   return SAGR_STATUS_SUCCESS;
 }

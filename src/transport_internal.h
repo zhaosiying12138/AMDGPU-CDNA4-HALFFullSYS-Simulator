@@ -23,7 +23,10 @@ enum {
       SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_QUEUE_PAYLOAD_BYTES,
   SAGR_WIRE_MEMORY_PAYLOAD_BYTES = 64,
   SAGR_WIRE_MEMORY_FRAME_BYTES =
-      SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_MEMORY_PAYLOAD_BYTES
+      SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_MEMORY_PAYLOAD_BYTES,
+  SAGR_WIRE_SIGNAL_PAYLOAD_BYTES = 64,
+  SAGR_WIRE_SIGNAL_FRAME_BYTES =
+      SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_SIGNAL_PAYLOAD_BYTES
 };
 
 enum {
@@ -56,6 +59,17 @@ enum {
   SAGR_WIRE_MEMORY_OPCODE_FREE = 2,
   SAGR_WIRE_MEMORY_OPCODE_COPY_H2D = 3,
   SAGR_WIRE_MEMORY_OPCODE_COPY_D2H = 4
+};
+
+enum {
+  SAGR_WIRE_MESSAGE_SIGNAL_REQUEST = 8,
+  SAGR_WIRE_MESSAGE_SIGNAL_ACK = 9,
+  SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION = 10,
+  SAGR_WIRE_SIGNAL_OPCODE_CREATE = 1,
+  SAGR_WIRE_SIGNAL_OPCODE_DESTROY = 2,
+  SAGR_WIRE_SIGNAL_OPCODE_LOAD = 3,
+  SAGR_WIRE_SIGNAL_OPCODE_STORE = 4,
+  SAGR_WIRE_SIGNAL_OPCODE_WAIT = 5
 };
 
 typedef struct sagr_wire_queue_request {
@@ -110,6 +124,33 @@ typedef struct sagr_wire_memory_response {
   uint64_t sim_tick;
   uint64_t request_id;
 } sagr_wire_memory_response_t;
+
+typedef struct sagr_wire_signal_request {
+  uint16_t major;
+  uint16_t minor;
+  uint16_t opcode;
+  uint16_t flags;
+  uint64_t signal_id;
+  uint64_t generation;
+  uint64_t sequence;
+  uint64_t value_bits;
+  uint64_t condition;
+} sagr_wire_signal_request_t;
+
+typedef struct sagr_wire_signal_response {
+  uint16_t major;
+  uint16_t minor;
+  uint32_t status;
+  uint16_t opcode;
+  uint64_t signal_id;
+  uint64_t generation;
+  uint64_t sequence;
+  uint64_t value_bits;
+  uint64_t ready;
+  uint64_t sim_tick;
+  uint64_t request_id;
+  uint16_t message_type;
+} sagr_wire_signal_response_t;
 
 typedef struct sagr_wire_ack_fields {
   uint16_t selected_major;
@@ -202,6 +243,26 @@ sagr_status_t sagr_protocol_decode_memory_response(
 sagr_status_t sagr_protocol_validate_failed_memory_ack(
     const sagr_wire_memory_request_t *request,
     const sagr_wire_memory_response_t *response);
+
+sagr_status_t sagr_protocol_encode_signal_request(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_wire_signal_request_t *request, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size);
+
+sagr_status_t sagr_protocol_encode_signal_response(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    uint16_t message_type, const sagr_wire_signal_response_t *response,
+    uint8_t *frame, size_t frame_capacity, size_t *frame_size);
+
+sagr_status_t sagr_protocol_decode_signal_response(
+    const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
+    uint64_t expected_request_id, uint16_t expected_message_type,
+    sagr_wire_signal_response_t *result, int32_t *wire_status,
+    const char **reason);
+
+sagr_status_t sagr_protocol_validate_failed_signal_ack(
+    const sagr_wire_signal_request_t *request,
+    const sagr_wire_signal_response_t *response);
 
 sagr_status_t sagr_protocol_map_wire_status(uint32_t status);
 

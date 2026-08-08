@@ -49,6 +49,8 @@ enum {
 #define SAGR_CAPABILITY_QUEUE_MASK UINT64_C(2)
 #define SAGR_CAPABILITY_MEMORY_WORD UINT32_C(0)
 #define SAGR_CAPABILITY_MEMORY_MASK UINT64_C(4)
+#define SAGR_CAPABILITY_SIGNAL_WORD UINT32_C(0)
+#define SAGR_CAPABILITY_SIGNAL_MASK UINT64_C(8)
 
 #define SAGR_QUEUE_PROTOCOL_MAJOR UINT16_C(1)
 #define SAGR_QUEUE_PROTOCOL_MINOR UINT16_C(0)
@@ -67,9 +69,19 @@ enum {
 #define SAGR_MEMORY_ALIGNMENT_4K UINT64_C(4096)
 #define SAGR_MEMORY_ALIGNMENT_64K UINT64_C(65536)
 
+#define SAGR_SIGNAL_PROTOCOL_MAJOR UINT16_C(1)
+#define SAGR_SIGNAL_PROTOCOL_MINOR UINT16_C(0)
+#define SAGR_SIGNAL_MAX_LIVE_SIGNALS UINT32_C(1024)
+#define SAGR_SIGNAL_MAX_PENDING_WAITS UINT32_C(8)
+#define SAGR_SIGNAL_CONDITION_EQ UINT64_C(0)
+#define SAGR_SIGNAL_CONDITION_NE UINT64_C(1)
+#define SAGR_SIGNAL_CONDITION_LT UINT64_C(2)
+#define SAGR_SIGNAL_CONDITION_GTE UINT64_C(3)
+
 typedef struct sagr_instance *sagr_instance_t;
 typedef struct sagr_queue *sagr_queue_t;
 typedef struct sagr_memory *sagr_memory_t;
+typedef struct sagr_signal *sagr_signal_t;
 
 /*
  * All public structures contain fixed-width fields only. Callers initialize
@@ -213,6 +225,51 @@ typedef struct sagr_memory_info {
   uint8_t reserved[16];
 } sagr_memory_info_t;
 
+typedef struct sagr_signal_create_options {
+  uint32_t struct_size;
+  uint32_t flags;
+  int64_t initial_value;
+  uint8_t reserved[16];
+} sagr_signal_create_options_t;
+
+typedef struct sagr_signal_operation_options {
+  uint32_t struct_size;
+  uint32_t flags;
+  uint64_t timeout_ns;
+  uint64_t absolute_deadline_ns;
+  int32_t cancel_fd;
+  uint32_t reserved0;
+  uint8_t reserved[16];
+} sagr_signal_operation_options_t;
+
+typedef struct sagr_signal_info {
+  uint32_t struct_size;
+  uint32_t flags;
+  uint64_t signal_id;
+  uint64_t generation;
+  int64_t value;
+  uint64_t connection_id;
+  uint64_t epoch;
+  uint8_t daemon_uuid[SAGR_UUID_SIZE];
+  uint8_t reserved[16];
+} sagr_signal_info_t;
+
+typedef struct sagr_signal_wait_result {
+  uint32_t struct_size;
+  uint32_t flags;
+  sagr_status_t status;
+  int32_t wire_status;
+  uint64_t signal_id;
+  uint64_t generation;
+  uint64_t sequence;
+  int64_t observed_value;
+  uint64_t admission_tick;
+  uint64_t completion_tick;
+  uint32_t ready_at_admission;
+  uint32_t reserved0;
+  uint8_t reserved[16];
+} sagr_signal_wait_result_t;
+
 SAGR_API uint32_t sagr_abi_version(void);
 SAGR_API const char *sagr_version_string(void);
 SAGR_API const char *sagr_status_string(sagr_status_t status);
@@ -229,6 +286,10 @@ SAGR_API sagr_status_t sagr_memory_allocate_options_init(
     sagr_memory_allocate_options_t *options, uint32_t options_size);
 SAGR_API sagr_status_t sagr_memory_operation_options_init(
     sagr_memory_operation_options_t *options, uint32_t options_size);
+SAGR_API sagr_status_t sagr_signal_create_options_init(
+    sagr_signal_create_options_t *options, uint32_t options_size);
+SAGR_API sagr_status_t sagr_signal_operation_options_init(
+    sagr_signal_operation_options_t *options, uint32_t options_size);
 
 /*
  * Open performs exactly one AF_UNIX SOCK_SEQPACKET handshake attempt. When no
@@ -314,6 +375,41 @@ SAGR_API sagr_status_t sagr_memory_copy_to_host(
 SAGR_API sagr_status_t sagr_memory_free(
     sagr_memory_t *memory,
     const sagr_memory_operation_options_t *operation_options,
+    sagr_error_info_t *out_error, uint32_t error_size);
+
+/*
+ * Signal operations are caller-serialized with queue and memory APIs on the
+ * owning instance. A first wait sends one WAIT request and, after its canonical
+ * ACK, retains exactly one pending predicate on the signal. Timeout or
+ * cancellation while awaiting completion is retryable: an identical wait
+ * resumes locally without sending another request. A different predicate or
+ * destroy is locally BUSY until the completion is consumed. Signal handles
+ * have unique ownership; copied aliases must not be used after destroy or
+ * instance close.
+ */
+SAGR_API sagr_status_t sagr_signal_create(
+    sagr_instance_t instance, const sagr_signal_create_options_t *options,
+    const sagr_signal_operation_options_t *operation_options,
+    sagr_signal_t *out_signal, sagr_signal_info_t *out_info,
+    uint32_t info_size, sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_signal_get_info(
+    sagr_signal_t signal, sagr_signal_info_t *info, uint32_t info_size);
+SAGR_API sagr_status_t sagr_signal_load(
+    sagr_signal_t signal,
+    const sagr_signal_operation_options_t *operation_options,
+    int64_t *out_value, sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_signal_store(
+    sagr_signal_t signal, int64_t value,
+    const sagr_signal_operation_options_t *operation_options,
+    sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_signal_wait(
+    sagr_signal_t signal, uint64_t condition, int64_t compare_value,
+    const sagr_signal_operation_options_t *operation_options,
+    sagr_signal_wait_result_t *out_result, uint32_t result_size,
+    sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_signal_destroy(
+    sagr_signal_t *signal,
+    const sagr_signal_operation_options_t *operation_options,
     sagr_error_info_t *out_error, uint32_t error_size);
 
 #ifdef __cplusplus

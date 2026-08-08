@@ -132,6 +132,45 @@ static int expect_memory_option_defaults(void) {
   return 0;
 }
 
+static int expect_signal_option_defaults(void) {
+  sagr_signal_create_options_t create_options;
+  sagr_signal_operation_options_t operation_options;
+  if (sagr_signal_create_options_init(
+          &create_options, (uint32_t)sizeof(create_options)) !=
+          SAGR_STATUS_SUCCESS ||
+      create_options.struct_size != (uint32_t)sizeof(create_options) ||
+      create_options.flags != 0 || create_options.initial_value != 0 ||
+      sagr_signal_operation_options_init(
+          &operation_options, (uint32_t)sizeof(operation_options)) !=
+          SAGR_STATUS_SUCCESS ||
+      operation_options.struct_size != (uint32_t)sizeof(operation_options) ||
+      operation_options.flags != 0 ||
+      operation_options.timeout_ns != SAGR_DEFAULT_OPEN_TIMEOUT_NS ||
+      operation_options.absolute_deadline_ns != 0 ||
+      operation_options.cancel_fd != -1 || operation_options.reserved0 != 0) {
+    fprintf(stderr, "unexpected signal option defaults\n");
+    return 1;
+  }
+  if (sagr_signal_create_options_init(
+          NULL, (uint32_t)sizeof(create_options)) !=
+          SAGR_STATUS_INVALID_ARGUMENT ||
+      sagr_signal_create_options_init(
+          &create_options, (uint32_t)sizeof(create_options) - 1U) !=
+          SAGR_STATUS_BUFFER_TOO_SMALL ||
+      create_options.struct_size != (uint32_t)sizeof(create_options) ||
+      sagr_signal_operation_options_init(
+          NULL, (uint32_t)sizeof(operation_options)) !=
+          SAGR_STATUS_INVALID_ARGUMENT ||
+      sagr_signal_operation_options_init(
+          &operation_options, (uint32_t)sizeof(operation_options) - 1U) !=
+          SAGR_STATUS_BUFFER_TOO_SMALL ||
+      operation_options.struct_size != (uint32_t)sizeof(operation_options)) {
+    fprintf(stderr, "unexpected signal option validation\n");
+    return 1;
+  }
+  return 0;
+}
+
 int main(void) {
   int failures = 0;
   const uint32_t abi_version = sagr_abi_version();
@@ -156,12 +195,20 @@ int main(void) {
                  "public memory operation options ABI size changed");
   _Static_assert(sizeof(sagr_memory_info_t) == 96,
                  "public memory info ABI size changed");
+  _Static_assert(sizeof(sagr_signal_create_options_t) == 32,
+                 "public signal create options ABI size changed");
+  _Static_assert(sizeof(sagr_signal_operation_options_t) == 48,
+                 "public signal operation options ABI size changed");
+  _Static_assert(sizeof(sagr_signal_info_t) == 80,
+                 "public signal info ABI size changed");
+  _Static_assert(sizeof(sagr_signal_wait_result_t) == 88,
+                 "public signal wait result ABI size changed");
 
   if (abi_version != SAGR_ABI_VERSION ||
-      strcmp(SAGR_VERSION_STRING, "0.4.0") != 0 ||
+      strcmp(SAGR_VERSION_STRING, "0.5.0") != 0 ||
       SAGR_ABI_VERSION_DECODE_MAJOR(abi_version) != SAGR_ABI_VERSION_MAJOR ||
       SAGR_ABI_VERSION_DECODE_MINOR(abi_version) != SAGR_ABI_VERSION_MINOR ||
-      SAGR_ABI_VERSION_MAJOR != 1 || SAGR_ABI_VERSION_MINOR != 3 ||
+      SAGR_ABI_VERSION_MAJOR != 1 || SAGR_ABI_VERSION_MINOR != 4 ||
       SAGR_CAPABILITY_QUEUE_MASK != UINT64_C(2) ||
       SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST != UINT64_C(2) ||
       SAGR_CAPABILITY_MEMORY_MASK != UINT64_C(4) ||
@@ -215,6 +262,7 @@ int main(void) {
   failures += expect_options_defaults();
   failures += expect_queue_option_defaults();
   failures += expect_memory_option_defaults();
+  failures += expect_signal_option_defaults();
 
   return failures == 0 ? 0 : 1;
 }

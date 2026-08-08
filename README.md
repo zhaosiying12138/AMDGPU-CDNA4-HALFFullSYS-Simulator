@@ -32,7 +32,7 @@ The installed `<self_amdgpu_runtime/runtime.h>` header exposes:
   and
 - size-tagged memory options/info plus allocate, query, H2D, D2H, and free APIs.
 
-The transport API is ABI version `1.3`; the project release is `0.4.0`.
+The transport API is ABI version `1.4`; the project release is `0.5.0`.
 Status values 0 through 3 retain their original meanings. Transport statuses
 are appended, and native `errno` values are diagnostic rather than primary.
 
@@ -180,7 +180,7 @@ cmake --install build --prefix "$PWD/install"
 Consumers can use the exported package without depending on this source tree:
 
 ```cmake
-find_package(SelfAmdgpuRuntime 0.4 CONFIG REQUIRED)
+find_package(SelfAmdgpuRuntime 0.5 CONFIG REQUIRED)
 target_link_libraries(my_target PRIVATE SelfAmdgpuRuntime::runtime)
 ```
 

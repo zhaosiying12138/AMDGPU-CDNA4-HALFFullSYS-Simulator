@@ -23,7 +23,10 @@ static void usage(FILE *stream, const char *program) {
           "[--require-cap-bit N] [--timeout-ms N|infinite] [--hold-ms N] "
           "[--queue-depth N --doorbells N --command-kind 0|1|2] "
           "[--memory-bytes N [--memory-alignment 4096|65536] "
-          "[--memory-reuse]]\n",
+          "[--memory-reuse]] "
+          "[--signal-initial I64 --signal-wait-condition eq|ne|lt|gte "
+          "--signal-wait-compare I64 --signal-wait-timeout-ms N "
+          "--signal-store I64 [--signal-reuse]]\n",
           program);
 }
 
@@ -65,6 +68,35 @@ typedef struct memory_cli_result {
   uint64_t reuse_simulated_va;
   uint32_t reuse_freed;
 } memory_cli_result_t;
+
+typedef struct signal_cli_options {
+  uint32_t enabled;
+  uint32_t reuse;
+  int64_t initial_value;
+  uint64_t wait_condition;
+  int64_t wait_compare;
+  uint64_t wait_timeout_ms;
+  int64_t store_value;
+} signal_cli_options_t;
+
+typedef struct signal_cli_result {
+  sagr_signal_info_t info;
+  int64_t initial_value;
+  int64_t load_before;
+  sagr_status_t first_status;
+  int32_t first_wire_status;
+  sagr_status_t completion_status;
+  int32_t completion_wire_status;
+  int64_t observed_value;
+  uint64_t sequence;
+  uint32_t retried_without_send;
+  int64_t stored_value;
+  int64_t load_after;
+  uint32_t destroyed;
+  uint32_t reused;
+  sagr_signal_info_t reuse_info;
+  uint32_t reuse_destroyed;
+} signal_cli_result_t;
 
 static int hex_value(char character) {
   if (character >= '0' && character <= '9') {
@@ -130,6 +162,60 @@ static int parse_u64(const char *text, uint64_t *value) {
   }
   *value = (uint64_t)parsed;
   return 0;
+}
+
+static int parse_i64(const char *text, int64_t *value) {
+  char *end = NULL;
+  long long parsed;
+  const unsigned char *cursor;
+  if (text == NULL || text[0] == '\0') {
+    return -1;
+  }
+  for (cursor = (const unsigned char *)text; *cursor != 0; ++cursor) {
+    if (isspace(*cursor) != 0) {
+      return -1;
+    }
+  }
+  errno = 0;
+  parsed = strtoll(text, &end, 0);
+  if (errno != 0 || end == text || *end != '\0') {
+    return -1;
+  }
+  *value = (int64_t)parsed;
+  return 0;
+}
+
+static int parse_signal_condition(const char *text, uint64_t *condition) {
+  if (text == NULL || condition == NULL) {
+    return -1;
+  }
+  if (strcmp(text, "eq") == 0) {
+    *condition = SAGR_SIGNAL_CONDITION_EQ;
+  } else if (strcmp(text, "ne") == 0) {
+    *condition = SAGR_SIGNAL_CONDITION_NE;
+  } else if (strcmp(text, "lt") == 0) {
+    *condition = SAGR_SIGNAL_CONDITION_LT;
+  } else if (strcmp(text, "gte") == 0) {
+    *condition = SAGR_SIGNAL_CONDITION_GTE;
+  } else {
+    return -1;
+  }
+  return 0;
+}
+
+static const char *signal_condition_name(uint64_t condition) {
+  switch (condition) {
+    case SAGR_SIGNAL_CONDITION_EQ:
+      return "eq";
+    case SAGR_SIGNAL_CONDITION_NE:
+      return "ne";
+    case SAGR_SIGNAL_CONDITION_LT:
+      return "lt";
+    case SAGR_SIGNAL_CONDITION_GTE:
+      return "gte";
+    default:
+      return "unknown";
+  }
 }
 
 static int parse_u32(const char *text, uint32_t *value) {
@@ -253,7 +339,8 @@ static int parse_arguments(int argc, char **argv, const char **endpoint,
                            sagr_instance_open_options_t *options,
                            uint64_t *hold_ms,
                            queue_cli_options_t *queue_options,
-                           memory_cli_options_t *memory_options) {
+                           memory_cli_options_t *memory_options,
+                           signal_cli_options_t *signal_options) {
   int index;
   int have_job = 0;
   int have_rank = 0;
@@ -263,6 +350,11 @@ static int parse_arguments(int argc, char **argv, const char **endpoint,
   int have_command_kind = 0;
   int have_memory_bytes = 0;
   int have_memory_alignment = 0;
+  int have_signal_initial = 0;
+  int have_signal_condition = 0;
+  int have_signal_compare = 0;
+  int have_signal_timeout = 0;
+  int have_signal_store = 0;
   memory_options->alignment = SAGR_MEMORY_ALIGNMENT_4K;
   for (index = 1; index < argc; ++index) {
     const char *argument = argv[index];
@@ -272,6 +364,10 @@ static int parse_arguments(int argc, char **argv, const char **endpoint,
     }
     if (strcmp(argument, "--memory-reuse") == 0) {
       memory_options->reuse = 1;
+      continue;
+    }
+    if (strcmp(argument, "--signal-reuse") == 0) {
+      signal_options->reuse = 1;
       continue;
     }
     if (index + 1 >= argc) {
@@ -380,6 +476,32 @@ static int parse_arguments(int argc, char **argv, const char **endpoint,
         return -1;
       }
       have_memory_alignment = 1;
+    } else if (strcmp(argument, "--signal-initial") == 0) {
+      if (parse_i64(argv[++index], &signal_options->initial_value) != 0) {
+        return -1;
+      }
+      have_signal_initial = 1;
+    } else if (strcmp(argument, "--signal-wait-condition") == 0) {
+      if (parse_signal_condition(argv[++index],
+                                 &signal_options->wait_condition) != 0) {
+        return -1;
+      }
+      have_signal_condition = 1;
+    } else if (strcmp(argument, "--signal-wait-compare") == 0) {
+      if (parse_i64(argv[++index], &signal_options->wait_compare) != 0) {
+        return -1;
+      }
+      have_signal_compare = 1;
+    } else if (strcmp(argument, "--signal-wait-timeout-ms") == 0) {
+      if (parse_u64(argv[++index], &signal_options->wait_timeout_ms) != 0) {
+        return -1;
+      }
+      have_signal_timeout = 1;
+    } else if (strcmp(argument, "--signal-store") == 0) {
+      if (parse_i64(argv[++index], &signal_options->store_value) != 0) {
+        return -1;
+      }
+      have_signal_store = 1;
     } else {
       return -1;
     }
@@ -415,6 +537,20 @@ static int parse_arguments(int argc, char **argv, const char **endpoint,
         SAGR_CAPABILITY_MEMORY_MASK;
     options->required_capabilities[SAGR_CAPABILITY_MEMORY_WORD] |=
         SAGR_CAPABILITY_MEMORY_MASK;
+  }
+  if (have_signal_initial != have_signal_condition ||
+      have_signal_initial != have_signal_compare ||
+      have_signal_initial != have_signal_timeout ||
+      have_signal_initial != have_signal_store ||
+      (signal_options->reuse != 0 && have_signal_initial == 0)) {
+    return -1;
+  }
+  if (have_signal_initial != 0) {
+    signal_options->enabled = 1;
+    options->offered_capabilities[SAGR_CAPABILITY_SIGNAL_WORD] |=
+        SAGR_CAPABILITY_SIGNAL_MASK;
+    options->required_capabilities[SAGR_CAPABILITY_SIGNAL_WORD] |=
+        SAGR_CAPABILITY_SIGNAL_MASK;
   }
   return 0;
 }
@@ -621,6 +757,148 @@ done:
   return status;
 }
 
+static sagr_status_t run_signal_lifecycle(
+    sagr_instance_t instance, const sagr_instance_open_options_t *open_options,
+    const signal_cli_options_t *signal_options, signal_cli_result_t *result,
+    sagr_error_info_t *error, const char **phase) {
+  sagr_signal_create_options_t create_options;
+  sagr_signal_operation_options_t operation_options;
+  sagr_signal_operation_options_t wait_options;
+  sagr_signal_wait_result_t wait_result;
+  sagr_signal_t signal = NULL;
+  sagr_signal_t reuse_signal = NULL;
+  sagr_status_t status;
+
+  memset(result, 0, sizeof(*result));
+  result->initial_value = signal_options->initial_value;
+  result->stored_value = signal_options->store_value;
+  status = sagr_signal_create_options_init(
+      &create_options, (uint32_t)sizeof(create_options));
+  if (status == SAGR_STATUS_SUCCESS) {
+    status = sagr_signal_operation_options_init(
+        &operation_options, (uint32_t)sizeof(operation_options));
+  }
+  if (status == SAGR_STATUS_SUCCESS) {
+    status = sagr_signal_operation_options_init(
+        &wait_options, (uint32_t)sizeof(wait_options));
+  }
+  if (status != SAGR_STATUS_SUCCESS) {
+    set_local_error(error, status, 0, "could not initialize signal options");
+    *phase = "signal_options";
+    return status;
+  }
+  create_options.initial_value = signal_options->initial_value;
+  operation_options.timeout_ns = open_options->open_timeout_ns;
+  if (signal_options->wait_timeout_ms > UINT64_MAX / UINT64_C(1000000)) {
+    set_local_error(error, SAGR_STATUS_INVALID_ARGUMENT, 0,
+                    "signal wait timeout is too large");
+    *phase = "signal_wait_options";
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  wait_options.timeout_ns = signal_options->wait_timeout_ms * UINT64_C(1000000);
+
+  *phase = "signal_create";
+  status = sagr_signal_create(
+      instance, &create_options, &operation_options, &signal, &result->info,
+      (uint32_t)sizeof(result->info), error, (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+
+  *phase = "signal_load_before";
+  status = sagr_signal_load(signal, &operation_options, &result->load_before,
+                            error, (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+
+  memset(&wait_result, 0, sizeof(wait_result));
+  *phase = "signal_wait_first";
+  status = sagr_signal_wait(
+      signal, signal_options->wait_condition, signal_options->wait_compare,
+      &wait_options, &wait_result, (uint32_t)sizeof(wait_result), error,
+      (uint32_t)sizeof(*error));
+  result->first_status = status;
+  result->first_wire_status = error->wire_status;
+  if (status == SAGR_STATUS_SUCCESS) {
+    result->completion_status = wait_result.status;
+    result->completion_wire_status = wait_result.wire_status;
+    result->observed_value = wait_result.observed_value;
+    result->sequence = wait_result.sequence;
+  } else if (status != SAGR_STATUS_TIMED_OUT &&
+             status != SAGR_STATUS_CANCELLED) {
+    return status;
+  }
+
+  *phase = "signal_store";
+  status = sagr_signal_store(signal, signal_options->store_value,
+                             &operation_options, error,
+                             (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+
+  if (result->first_status != SAGR_STATUS_SUCCESS) {
+    result->retried_without_send = 1;
+    memset(&wait_result, 0, sizeof(wait_result));
+    *phase = "signal_wait_retry";
+    status = sagr_signal_wait(
+        signal, signal_options->wait_condition, signal_options->wait_compare,
+        &wait_options, &wait_result, (uint32_t)sizeof(wait_result), error,
+        (uint32_t)sizeof(*error));
+    if (status != SAGR_STATUS_SUCCESS) {
+      return status;
+    }
+    result->completion_status = wait_result.status;
+    result->completion_wire_status = wait_result.wire_status;
+    result->observed_value = wait_result.observed_value;
+    result->sequence = wait_result.sequence;
+  }
+
+  *phase = "signal_load_after";
+  status = sagr_signal_load(signal, &operation_options, &result->load_after,
+                            error, (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  *phase = "signal_destroy";
+  status = sagr_signal_destroy(&signal, &operation_options, error,
+                               (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  result->destroyed = 1;
+
+  if (signal_options->reuse != 0) {
+    *phase = "signal_reuse_create";
+    status = sagr_signal_create(
+        instance, &create_options, &operation_options, &reuse_signal,
+        &result->reuse_info, (uint32_t)sizeof(result->reuse_info), error,
+        (uint32_t)sizeof(*error));
+    if (status != SAGR_STATUS_SUCCESS) {
+      return status;
+    }
+    result->reused = 1;
+    if (result->reuse_info.signal_id != result->info.signal_id ||
+        result->reuse_info.generation == 0 ||
+        result->reuse_info.generation <= result->info.generation ||
+        result->reuse_info.value != signal_options->initial_value) {
+      set_local_error(error, SAGR_STATUS_PROTOCOL_ERROR, 0,
+                      "reallocated signal did not reuse the slot canonically");
+      *phase = "signal_reuse_identity";
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+    *phase = "signal_reuse_destroy";
+    status = sagr_signal_destroy(&reuse_signal, &operation_options, error,
+                                 (uint32_t)sizeof(*error));
+    if (status != SAGR_STATUS_SUCCESS) {
+      return status;
+    }
+    result->reuse_destroyed = 1;
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
 static sagr_status_t run_queue_control(
     sagr_instance_t instance, const sagr_instance_open_options_t *open_options,
     const queue_cli_options_t *queue_options, queue_cli_result_t *result,
@@ -725,6 +1003,8 @@ int main(int argc, char **argv) {
   queue_cli_result_t queue_result;
   memory_cli_options_t memory_options;
   memory_cli_result_t memory_result;
+  signal_cli_options_t signal_options;
+  signal_cli_result_t signal_result;
   const char *failure_phase = "handshake";
   uint32_t index;
   uint64_t hold_ms = 0;
@@ -733,10 +1013,12 @@ int main(int argc, char **argv) {
   memset(&queue_result, 0, sizeof(queue_result));
   memset(&memory_options, 0, sizeof(memory_options));
   memset(&memory_result, 0, sizeof(memory_result));
+  memset(&signal_options, 0, sizeof(signal_options));
+  memset(&signal_result, 0, sizeof(signal_result));
   status = sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (status != SAGR_STATUS_SUCCESS ||
       parse_arguments(argc, argv, &endpoint, &options, &hold_ms,
-                      &queue_options, &memory_options) != 0) {
+                      &queue_options, &memory_options, &signal_options) != 0) {
     usage(stderr, argv[0]);
     return 2;
   }
@@ -765,6 +1047,16 @@ int main(int argc, char **argv) {
   if (memory_options.enabled != 0) {
     status = run_memory_roundtrip(instance, &options, &memory_options,
                                   &memory_result, &error, &failure_phase);
+    if (status != SAGR_STATUS_SUCCESS) {
+      (void)sagr_instance_close(&instance);
+      print_failure_json(failure_phase, status, &error);
+      free(queue_result.sequences);
+      return 1;
+    }
+  }
+  if (signal_options.enabled != 0) {
+    status = run_signal_lifecycle(instance, &options, &signal_options,
+                                  &signal_result, &error, &failure_phase);
     if (status != SAGR_STATUS_SUCCESS) {
       (void)sagr_instance_close(&instance);
       print_failure_json(failure_phase, status, &error);
@@ -837,6 +1129,44 @@ int main(int argc, char **argv) {
              memory_result.reuse_simulated_va,
              memory_result.reuse_zero != 0 ? "true" : "false",
              memory_result.reuse_freed != 0 ? "true" : "false");
+    }
+    fputc('}', stdout);
+  }
+  if (signal_options.enabled != 0) {
+    printf(",\"signal\":{\"status\":0,\"signal_id\":\"0x%016" PRIx64
+           "\",\"generation\":\"0x%016" PRIx64
+           "\",\"initial_value\":%" PRId64
+           ",\"load_before\":%" PRId64
+           ",\"wait\":{\"condition\":",
+           signal_result.info.signal_id, signal_result.info.generation,
+           signal_result.initial_value, signal_result.load_before);
+    print_json_string(stdout,
+                      signal_condition_name(signal_options.wait_condition));
+    printf(",\"compare\":%" PRId64 ",\"first_status\":%" PRId32
+           ",\"first_status_name\":",
+           signal_options.wait_compare, signal_result.first_status);
+    print_json_string(stdout, sagr_status_string(signal_result.first_status));
+    printf(",\"completion_status\":%" PRId32
+           ",\"completion_status_name\":",
+           signal_result.completion_status);
+    print_json_string(stdout,
+                      sagr_status_string(signal_result.completion_status));
+    printf(",\"observed_value\":%" PRId64
+           ",\"sequence\":\"0x%016" PRIx64
+           "\",\"retried_without_send\":%s},\"stored_value\":%" PRId64
+           ",\"load_after\":%" PRId64 ",\"destroyed\":%s",
+           signal_result.observed_value, signal_result.sequence,
+           signal_result.retried_without_send != 0 ? "true" : "false",
+           signal_result.stored_value, signal_result.load_after,
+           signal_result.destroyed != 0 ? "true" : "false");
+    if (signal_options.reuse != 0) {
+      printf(",\"reuse\":{\"signal_id\":\"0x%016" PRIx64
+             "\",\"generation\":\"0x%016" PRIx64
+             "\",\"initial_value\":%" PRId64 ",\"destroyed\":%s}",
+             signal_result.reuse_info.signal_id,
+             signal_result.reuse_info.generation,
+             signal_result.reuse_info.value,
+             signal_result.reuse_destroyed != 0 ? "true" : "false");
     }
     fputc('}', stdout);
   }

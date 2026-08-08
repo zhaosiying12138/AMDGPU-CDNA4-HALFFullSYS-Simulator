@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(self_amdgpu_runtime_package_consumer LANGUAGES C)
 
-find_package(SelfAmdgpuRuntime 0.4 CONFIG REQUIRED)
+find_package(SelfAmdgpuRuntime 0.5 CONFIG REQUIRED)
 
 add_executable(self_amdgpu_runtime_package_consumer main.c)
 target_link_libraries(
