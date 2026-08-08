@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "protocol/host-transport-v1-kmt.json",
+    "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/kmt_shim.h"
+  ],
+  "checkpoint_id": "CP-0010",
+  "conclusion": "Fixed-width copied data is the portable boundary.",
+  "confidence": "high",
+  "decision": "Use IDs, generations, buffers, and capacities; never serialize pointers or FDs.",
+  "evidence_ids": [
+    "EV-0024",
+    "EV-0025"
+  ],
+  "id": "BL-0048",
+  "invalidated_assumptions": [
+    "Never treat a wire integer as a pointer or file descriptor."
+  ],
+  "observation": "The KMT records use fixed-width IDs and copied buffers with CRC validation.",
+  "question_or_symptom": "Raw host pointers or file descriptors cannot cross the daemon boundary safely.",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

@@ -1,0 +1,338 @@
+{
+  "checkpoint_id": "CP-0010",
+  "claim": "The CP-0010 self-amdgpu-runtime child exposes typed KMT shim wrappers over the fixed-width transport envelope. GCC and Clang ASan/UBSan matrices, direct KMT tests, authority checks, and source diff checks pass; the shim validates ownership/generations, copied-buffer CRCs, canonical node fixture, per-provider sequences, and deterministic unsupported behavior.",
+  "command_argv": [
+    [
+      "ctest",
+      "--test-dir",
+      "build/cp10-shim-dev",
+      "--output-on-failure"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "build/cp10-shim-asan",
+      "--output-on-failure"
+    ],
+    [
+      "sha256sum",
+      "projects/self-amdgpu-runtime/build/cp10-shim-dev/sagr-handshake",
+      "projects/self-amdgpu-runtime/build/cp10-shim-dev/libself_amdgpu_runtime.a",
+      "projects/self-amdgpu-runtime/build/cp10-shim-dev/tests/self_amdgpu_runtime_kmt_shim_test",
+      "projects/self-amdgpu-runtime/build/cp10-shim-asan/libself_amdgpu_runtime.so.0.6.0",
+      "projects/self-amdgpu-runtime/build/cp10-shim-asan/tests/self_amdgpu_runtime_kmt_shim_test"
+    ],
+    [
+      "git",
+      "diff",
+      "--check"
+    ],
+    [
+      "build/cp10-shim-dev/tests/self_amdgpu_runtime_kmt_shim_test"
+    ],
+    [
+      "python3",
+      "tests/test_host_transport_kmt_spec.py"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build/cp10-shim-dev",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T22:48:56+00:00",
+      "exit_code": 0,
+      "id": "runtime-ctest-dev",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0010/runtime-ctest-dev.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "aecec6af27ed5d600f17a7d52a8b32c392a04502d366d98eeb5fceba5d5bd532",
+        "size": 664,
+        "tracked": false
+      },
+      "result": "GCC runtime CTest passed 11/11.",
+      "started_at": "2026-08-08T22:48:52+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0010/runtime-ctest-dev.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0010/runtime-ctest-dev.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8061e741a7aff5869ea214f96b22b149a8cd4cf150187a49ed0685371775ad5a",
+        "size": 1610,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build/cp10-shim-asan",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T22:48:57+00:00",
+      "exit_code": 0,
+      "id": "runtime-ctest-asan",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0010/runtime-ctest-asan.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4f4ebafff64e1b71f7897c3bcab49a4de5df76b22407d0c90f46b1c4f9c66d0b",
+        "size": 667,
+        "tracked": false
+      },
+      "result": "Clang ASan/UBSan runtime CTest passed 11/11.",
+      "started_at": "2026-08-08T22:48:53+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0010/runtime-ctest-asan.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0010/runtime-ctest-asan.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5c8f8bdd7f309109aef82f44c0e3374a5d1288c00d96a792bcf58c7c57c232f1",
+        "size": 1612,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "projects/self-amdgpu-runtime/build/cp10-shim-dev/sagr-handshake",
+        "projects/self-amdgpu-runtime/build/cp10-shim-dev/libself_amdgpu_runtime.a",
+        "projects/self-amdgpu-runtime/build/cp10-shim-dev/tests/self_amdgpu_runtime_kmt_shim_test",
+        "projects/self-amdgpu-runtime/build/cp10-shim-asan/libself_amdgpu_runtime.so.0.6.0",
+        "projects/self-amdgpu-runtime/build/cp10-shim-asan/tests/self_amdgpu_runtime_kmt_shim_test"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T22:50:38+00:00",
+      "exit_code": 0,
+      "id": "runtime-artifact-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0010/runtime-artifact-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3f690ac42856ae4f71a0349fbccd59764461301a3790b7ef47f03f9ae8f86c23",
+        "size": 1014,
+        "tracked": false
+      },
+      "result": "Current static/shared sanitizer runtime artifacts were hashed after the final shim fixes.",
+      "started_at": "2026-08-08T22:50:38+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0010/runtime-artifact-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0010/runtime-artifact-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "750a4c67c335e0d3ea157fa7d883b9c644464ec50d77d8d00f27b2b90777ec76",
+        "size": 729,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T22:50:38+00:00",
+      "exit_code": 0,
+      "id": "runtime-diff-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0010/runtime-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6edfb44795044cbea10a574fad4c61c981200e1bf7c51f5c41397bfedb1914a1",
+        "size": 616,
+        "tracked": false
+      },
+      "result": "Runtime child diff check passed.",
+      "started_at": "2026-08-08T22:50:38+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0010/runtime-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0010/runtime-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "build/cp10-shim-dev/tests/self_amdgpu_runtime_kmt_shim_test"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T22:50:38+00:00",
+      "exit_code": 0,
+      "id": "runtime-kmt-test-direct",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0010/runtime-kmt-test-direct.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "cfbf9c80d26b37601831610bb85383788dcfba3b5fe368de757a1e3b64b66bdb",
+        "size": 656,
+        "tracked": false
+      },
+      "result": "Direct typed KMT shim regression passed.",
+      "started_at": "2026-08-08T22:50:38+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0010/runtime-kmt-test-direct.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0010/runtime-kmt-test-direct.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "fb70614d2f6760cd104c08eba0b2f0853b774a8f3160cf6923f14801fed76800",
+        "size": 22,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "tests/test_host_transport_kmt_spec.py"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T22:48:53+00:00",
+      "exit_code": 0,
+      "id": "root-kmt-spec",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0010/root-kmt-spec.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "aaf5d3a443df613618179df58f11529ad5a0db72391ca3a52e522a2d87cdaf0e",
+        "size": 603,
+        "tracked": false
+      },
+      "result": "Frozen KMT authority specification tests passed 10/10.",
+      "started_at": "2026-08-08T22:48:53+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0010/root-kmt-spec.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "cf8d3a2572a7898fcf32a4c2dd1445509b3d59e66061853243c4627f80695068",
+        "size": 109,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0010/root-kmt-spec.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-08T22:50:38+00:00",
+  "environment_fingerprint": {
+    "authority_json_sha256": "2389eaae9a110ae7f945d217f711c4dd05c48ceab8eb7140d94cf8cb094546bd",
+    "kmt_matrix": "GCC 11/11; Clang ASan/UBSan 11/11",
+    "provider_scope": "versioned envelope and simulated KFD/DRM operation boundary; full source-compatible 124 PFN ABI remains future work",
+    "runtime_asan_library_sha256": "ee1ccf8c76278ad3c8091c3e823ca16b6e09d3d813fa65637bf3ccb3bbcdc912",
+    "runtime_handshake_sha256": "1b789e4363e7c0185934ac60955f39723ad70603a76e1ee00f6585e73e655a4c",
+    "runtime_source_baseline": "b7cde4640456039f20cba91d723f3596abf8a749",
+    "runtime_source_tree_before_commit": "b526985b59f26a8eb26e8a8e0008e9e5440c5d18",
+    "runtime_static_library_sha256": "78484451b90f06192363a657ae768dc89ee95775180631fca7d5aca45531f312",
+    "typed_exports": "18 translated wrappers; no raw hsaKmt/DRM exports"
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0010/builds/runtime-handshake",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1b789e4363e7c0185934ac60955f39723ad70603a76e1ee00f6585e73e655a4c",
+      "size": 167136,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0010/builds/runtime-static.a",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "78484451b90f06192363a657ae768dc89ee95775180631fca7d5aca45531f312",
+      "size": 199938,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0010/builds/runtime-kmt-test",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "cd5c154f559cfed428d498f4261f8cf8f9ac12d450201aea0bad7c2a163f35b4",
+      "size": 194720,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0010/builds/runtime-asan.so",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ee1ccf8c76278ad3c8091c3e823ca16b6e09d3d813fa65637bf3ccb3bbcdc912",
+      "size": 1258848,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0010/builds/runtime-asan-kmt-test",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "acd991224ffb7f9f3fe63348a2cf814eb89b7c7b66f9f8edab2ffed3aadd5070",
+      "size": 2206152,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0025",
+  "includes": {},
+  "limitations": [
+    "This gate does not claim a complete source-compatible ROCr/libhsakmt shared library, KFD attach, topology discovery, HIP, OpenCL, Triton, PyTorch, or vLLM support.",
+    "Typed wrappers translate only the 18 authority operations; unsupported/source-only operations return deterministic status after local validation.",
+    "Ignored build products and command streams are external acceptance artifacts and are not tracked in the runtime child."
+  ],
+  "redactions": [],
+  "result": "Runtime typed-shim tests and authority checks passed in GCC and Clang sanitizer matrices, with current artifact identities retained.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-08T22:48:52+00:00",
+  "type": "runtime-kmt-shim-acceptance"
+}

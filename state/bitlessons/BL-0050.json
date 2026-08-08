@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/src/kmt_shim.c",
+    "projects/gem5/src/dev/amdgpu/host_gpu_kmt_state.cc"
+  ],
+  "checkpoint_id": "CP-0010",
+  "conclusion": "Canonical fixture validation is part of the current contract.",
+  "confidence": "high",
+  "decision": "Validate the fixture at wrapper and daemon boundaries until real topology exists.",
+  "evidence_ids": [
+    "EV-0024",
+    "EV-0025"
+  ],
+  "id": "BL-0050",
+  "invalidated_assumptions": [
+    "Do not call a mock topology record native KFD discovery."
+  ],
+  "observation": "The fixture is node 1, gfx950, one CU, wave64, 64KiB pages, 48-bit VA, with bounded resources.",
+  "question_or_symptom": "A handshake does not justify arbitrary topology values.",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

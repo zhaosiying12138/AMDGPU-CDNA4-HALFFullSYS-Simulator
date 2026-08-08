@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-09`
 
-**State at this commit:** `P2-KMT-ABI-01 accepted; next-P2-KMT-ABI-02`
+**State at this commit:** `P2-KMT-ABI-02 accepted; next-P3-CODEOBJ-01`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -625,11 +625,20 @@ records, model ABI, and hardware/build exclusion audit. The child provider is
 metadata-only: typed hsaKmt/DRM exports remain zero, `query_lifecycle` means
 transport-open only, and no KFD/topology or production DSO is touched.
 
-The next unique action is `P2-KMT-ABI-02`: create the next transaction and
-implement the typed libhsakmt shim plus a versioned daemon KFD/DRM operation
-envelope. The gate must prove fixed-width pointer/buffer translation,
-owner/generation and status precedence, unsupported-call atomicity, and
-no-device/no-production-DSO behavior before making a provider-attach claim.
+`CP-0010` is accepted at the typed-shim boundary. It implements the frozen
+message types 14/15 and capability bit 5, 18 typed operations, fixed-width
+owner/object generations, copied-buffer CRCs, per-provider operation
+sequences, canonical gfx950 fixture validation, daemon-owned simulated
+allocation/queue/event state, and deterministic unsupported/source-only DRM
+statuses. The retained live smoke proves the runtime-to-gem5 envelope and
+cleanup path only; it does not claim a complete 124-PFN ROCr provider, KFD
+attach, topology discovery, HIP, OpenCL, Triton, PyTorch, or vLLM execution.
+
+The next unique action is `P3-CODEOBJ-01`: create the next transaction and
+freeze a pinned gfx950 code-object and kernarg ABI fixture. That gate must
+bind ELF/MsgPack metadata, relocations, hidden arguments, alignment, LDS and
+scratch descriptors to gem5-supported ISA before any HIP/OpenCL or Triton
+claim is made.
 `SOURCE_LOCK.json` remains byte-immutable, and existing `PROJECT_LANES`
 declarations remain historically anchored and append-only.
 

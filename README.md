@@ -71,4 +71,14 @@ production GPU libraries or device nodes. The next action is
 operation envelope with fixed-width ownership and pointer translation. That
 gate must remain separate from generic ROCr/HIP/OpenCL compatibility.
 
+`CP-0010` is now accepted as the typed KMT shim boundary. It adds the frozen
+message types 14/15 and capability bit 5, 18 fixed-width operations, explicit
+owner/object generations, copied-buffer CRCs, per-provider sequence scope,
+canonical gfx950 fixture checks, and daemon-owned simulated resource state.
+The retained gem5 smoke completes the runtime-to-daemon lifecycle with
+`failures=0`, but this remains a translated envelope rather than a complete
+124-PFN ROCr/libhsakmt provider, KFD attach, HIP, OpenCL, Triton, PyTorch, or
+vLLM implementation. The next action is `P3-CODEOBJ-01`, the pinned gfx950
+code-object and kernarg ABI fixture.
+
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

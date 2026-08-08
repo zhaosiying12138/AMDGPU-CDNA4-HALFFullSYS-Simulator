@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "artifacts/evidence/CP-0010/gem5-run",
+    "state/evidence/EV-0024.json",
+    "state/evidence/EV-0025.json"
+  ],
+  "checkpoint_id": "CP-0010",
+  "conclusion": "Live claims require retained streams and hashes.",
+  "confidence": "high",
+  "decision": "Separate bounded KMT smoke from future dispatch/ROCr claims.",
+  "evidence_ids": [
+    "EV-0024",
+    "EV-0025"
+  ],
+  "id": "BL-0052",
+  "invalidated_assumptions": [
+    "A successful envelope smoke proves code-object or KFD support."
+  ],
+  "observation": "The final run retains client output, daemon log, config, stats, binary identity, and a structural audit.",
+  "question_or_symptom": "A live result without retained process evidence is not reproducible.",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

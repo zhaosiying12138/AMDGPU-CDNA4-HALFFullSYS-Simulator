@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_protocol.cc",
+    "projects/self-amdgpu-runtime/src/kmt_shim.c"
+  ],
+  "checkpoint_id": "CP-0010",
+  "conclusion": "Validation and mutation are one atomic contract.",
+  "confidence": "high",
+  "decision": "Zero outputs on failure and reject upstream fake-success behavior.",
+  "evidence_ids": [
+    "EV-0024",
+    "EV-0025"
+  ],
+  "id": "BL-0051",
+  "invalidated_assumptions": [
+    "A valid envelope does not imply a supported operation."
+  ],
+  "observation": "Decoders validate version, identity, CRC, padding, and status before mutation; source-only DRM returns NOT_SUPPORTED.",
+  "question_or_symptom": "Malformed or unsupported calls can mutate state or fake success.",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

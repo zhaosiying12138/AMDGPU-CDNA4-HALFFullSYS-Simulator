@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/src/provider_internal.h",
+    "projects/gem5/src/dev/amdgpu/host_gpu_kmt_state.cc"
+  ],
+  "checkpoint_id": "CP-0010",
+  "conclusion": "Sequence and identity state are session-scoped.",
+  "confidence": "high",
+  "decision": "Scope sequence and generations to the provider/daemon session.",
+  "evidence_ids": [
+    "EV-0024",
+    "EV-0025"
+  ],
+  "id": "BL-0049",
+  "invalidated_assumptions": [
+    "Never use a process-global counter as ownership proof."
+  ],
+  "observation": "Each provider resets its first operation to one and the daemon binds owner generations.",
+  "question_or_symptom": "A global sequence can leak state across provider sessions.",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

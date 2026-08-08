@@ -3,11 +3,11 @@
   "goal_id": "GSIM-001",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,
-  "checkpoint_id": "CP-0009",
-  "checkpoint_sha256": "e6a1ce578548ff229c25861416c6a0fa374015f2f31c2f4ab283d2acb0d77463",
-  "phase_id": "P2",
+  "checkpoint_id": "CP-0010",
+  "checkpoint_sha256": "808609cc81b2d9906b6624d1fe221d02f46074c6f96088bc43c214f33904e52a",
+  "phase_id": "P3",
   "state": "ready",
-  "next_action_id": "P2-KMT-ABI-02",
-  "next_action_summary": "Implement the typed libhsakmt shim and versioned daemon KFD/DRM operation envelope.",
+  "next_action_id": "P3-CODEOBJ-01",
+  "next_action_summary": "Freeze pinned gfx950 code-object and kernarg ABI fixtures.",
   "resume_command": "scripts/resume.sh --verify"
 }
