@@ -1,0 +1,874 @@
+{
+  "checkpoint_id": "CP-0008",
+  "claim": "The prepared self-amdgpu-runtime static CLI exposes the exact gfx950-xor-u8-v1 dispatch fixture and completes one CP8 session with an admission ACK ticket, locally canceled wait retry without resend, armed EQ0 timeout followed by GPU-updated zero, exact completion echoes and ticks, exact XOR D2H bytes and CRC, and full queue/allocation/signal cleanup.",
+  "command_argv": [
+    [
+      "cmake",
+      "--fresh",
+      "-S",
+      ".",
+      "-B",
+      "build/cp8-static",
+      "-G",
+      "Ninja",
+      "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+      "-DBUILD_SHARED_LIBS=OFF",
+      "-DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON",
+      "-DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON",
+      "-DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=ON"
+    ],
+    [
+      "cmake",
+      "--build",
+      "build/cp8-static",
+      "--parallel",
+      "2"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "build/cp8-static",
+      "--output-on-failure"
+    ],
+    [
+      "ninja",
+      "-C",
+      "build/cp8-static",
+      "-n"
+    ],
+    [
+      "cmake",
+      "--fresh",
+      "-S",
+      ".",
+      "-B",
+      "build/cp8-shared",
+      "-G",
+      "Ninja",
+      "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+      "-DBUILD_SHARED_LIBS=ON",
+      "-DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON",
+      "-DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON",
+      "-DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=ON"
+    ],
+    [
+      "cmake",
+      "--build",
+      "build/cp8-shared",
+      "--parallel",
+      "2"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "build/cp8-shared",
+      "--output-on-failure"
+    ],
+    [
+      "ninja",
+      "-C",
+      "build/cp8-shared",
+      "-n"
+    ],
+    [
+      "cmake",
+      "--fresh",
+      "-S",
+      ".",
+      "-B",
+      "build/cp8-sanitize",
+      "-G",
+      "Ninja",
+      "-DCMAKE_BUILD_TYPE=Debug",
+      "-DBUILD_SHARED_LIBS=ON",
+      "-DCMAKE_C_COMPILER=clang",
+      "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer",
+      "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined",
+      "-DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON",
+      "-DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON",
+      "-DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=OFF"
+    ],
+    [
+      "cmake",
+      "--build",
+      "build/cp8-sanitize",
+      "--parallel",
+      "2"
+    ],
+    [
+      "cmake",
+      "-E",
+      "env",
+      "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
+      "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1",
+      "ctest",
+      "--test-dir",
+      "build/cp8-sanitize",
+      "--output-on-failure"
+    ],
+    [
+      "ninja",
+      "-C",
+      "build/cp8-sanitize",
+      "-n"
+    ],
+    [
+      "sha256sum",
+      "build/cp8-static/sagr-handshake",
+      "build/cp8-static/libself_amdgpu_runtime.a",
+      "build/cp8-shared/sagr-handshake",
+      "build/cp8-shared/libself_amdgpu_runtime.so.0.6.0",
+      "build/cp8-sanitize/sagr-handshake",
+      "build/cp8-sanitize/libself_amdgpu_runtime.so.0.6.0"
+    ],
+    [
+      "ldd",
+      "build/cp8-static/sagr-handshake",
+      "build/cp8-shared/sagr-handshake",
+      "build/cp8-shared/libself_amdgpu_runtime.so.0.6.0"
+    ],
+    [
+      "nm",
+      "-D",
+      "--defined-only",
+      "build/cp8-shared/libself_amdgpu_runtime.so.0.6.0"
+    ],
+    [
+      "git",
+      "diff",
+      "HEAD",
+      "--check"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "cmake",
+        "--fresh",
+        "-S",
+        ".",
+        "-B",
+        "build/cp8-static",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+        "-DBUILD_SHARED_LIBS=OFF",
+        "-DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON",
+        "-DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON",
+        "-DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=ON"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:18:09+00:00",
+      "exit_code": 0,
+      "id": "runtime-static-configure",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-static-configure.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9fa7b2fe181a42e19abe3ec3a0ea267208e1ce421701d76b12ddb8043bd37244",
+        "size": 911,
+        "tracked": false
+      },
+      "result": "Fresh CP8 static RelWithDebInfo runtime configuration completed with dispatch tests enabled.",
+      "started_at": "2026-08-08T18:18:09+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-static-configure.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-static-configure.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "edb00cc33063bf919333181ad355675e039487d1b7ebc76e91aa26eb68c248c2",
+        "size": 529,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        "build/cp8-static",
+        "--parallel",
+        "2"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:18:29+00:00",
+      "exit_code": 0,
+      "id": "runtime-static-build",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-static-build.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7b5343cd0dc0ece296b759db3b1d2bd4444076af25bd4201cbbe6c9a58378bd4",
+        "size": 664,
+        "tracked": false
+      },
+      "result": "The static runtime and gfx950-xor-u8-v1 dispatch-capable sagr-handshake CLI built successfully.",
+      "started_at": "2026-08-08T18:18:28+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-static-build.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-static-build.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "786ba6ceda428293b184e11c7fb5008d6d1fc1b1600a78cdfaa1cebb940f333c",
+        "size": 1046,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build/cp8-static",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:19:05+00:00",
+      "exit_code": 0,
+      "id": "runtime-static-ctest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-static-ctest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ec1874c61b843ddd0a7c95ebed97ff7ebedb50892835a32a35f11d97d2f28264",
+        "size": 667,
+        "tracked": false
+      },
+      "result": "The CP8 static runtime matrix passed all 9/9 tests, including dispatch and installed-package checks.",
+      "started_at": "2026-08-08T18:19:02+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-static-ctest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-static-ctest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2bc210bfb15712dda7bd120a6be89c9f3b816fbc422a15fc295f5fc4b8b919ae",
+        "size": 1264,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ninja",
+        "-C",
+        "build/cp8-static",
+        "-n"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:21:03+00:00",
+      "exit_code": 0,
+      "id": "runtime-static-freshness",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-static-freshness.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "75f3cfafd3bf094c63967016baa48304e64131e22d6b0474af6473912b390e8a",
+        "size": 648,
+        "tracked": false
+      },
+      "result": "The final static CP8 build tree reported no pending work.",
+      "started_at": "2026-08-08T18:21:03+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-static-freshness.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-static-freshness.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d31f8c30ee04eabb6c3f4fdcdcb83d78eab8e9a753acb4babc0f6ebf8c981fa5",
+        "size": 67,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "cmake",
+        "--fresh",
+        "-S",
+        ".",
+        "-B",
+        "build/cp8-shared",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+        "-DBUILD_SHARED_LIBS=ON",
+        "-DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON",
+        "-DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON",
+        "-DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=ON"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:19:16+00:00",
+      "exit_code": 0,
+      "id": "runtime-shared-configure",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-shared-configure.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7d3d114cc87e15b63fc40f10663be113435bee2111a642a64f6a00ec3fa2e4ab",
+        "size": 910,
+        "tracked": false
+      },
+      "result": "Fresh CP8 shared RelWithDebInfo runtime configuration completed with dispatch tests enabled.",
+      "started_at": "2026-08-08T18:19:15+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-shared-configure.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-shared-configure.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "89340a2cbdf24ebf43a431cec78ff052113526730fd46bf040f0de9e4478b2cb",
+        "size": 529,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        "build/cp8-shared",
+        "--parallel",
+        "2"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:19:25+00:00",
+      "exit_code": 0,
+      "id": "runtime-shared-build",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-shared-build.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ec690492e68ade36d911e6b04609bcc8d8dd000375da1d467eddd5c6dfc4d244",
+        "size": 664,
+        "tracked": false
+      },
+      "result": "The shared runtime and dispatch-capable CLI built successfully.",
+      "started_at": "2026-08-08T18:19:24+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-shared-build.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-shared-build.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "04b33ba3cf08ef45cb3198e699bcd8525ba9b0eb1e8160a56472dfba3cc04cf5",
+        "size": 1140,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build/cp8-shared",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:19:38+00:00",
+      "exit_code": 0,
+      "id": "runtime-shared-ctest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-shared-ctest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5f86f0152249057e52dd3822894c82ad72a94df8f68fe378e64d9fc1cc2e4141",
+        "size": 667,
+        "tracked": false
+      },
+      "result": "The CP8 shared runtime matrix passed all 9/9 tests.",
+      "started_at": "2026-08-08T18:19:35+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-shared-ctest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-shared-ctest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d8945157234fad68aef4fa484a6132b5ab71c7b57f2fc115ce8235c965e0d01d",
+        "size": 1264,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ninja",
+        "-C",
+        "build/cp8-shared",
+        "-n"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:21:03+00:00",
+      "exit_code": 0,
+      "id": "runtime-shared-freshness",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-shared-freshness.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "06a5d408b46c275000b4615f2865a6d67fe40e4db22691ed94d95ae122b8321a",
+        "size": 648,
+        "tracked": false
+      },
+      "result": "The final shared CP8 build tree reported no pending work.",
+      "started_at": "2026-08-08T18:21:03+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-shared-freshness.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-shared-freshness.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8c4363278486609d07af3ba03ea10d8ec493a7189c03c6e2652e4eaa70a3bbb7",
+        "size": 67,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "cmake",
+        "--fresh",
+        "-S",
+        ".",
+        "-B",
+        "build/cp8-sanitize",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DBUILD_SHARED_LIBS=ON",
+        "-DCMAKE_C_COMPILER=clang",
+        "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined",
+        "-DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON",
+        "-DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON",
+        "-DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=OFF"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:19:59+00:00",
+      "exit_code": 0,
+      "id": "runtime-sanitize-configure",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-sanitize-configure.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2df6e196dd979ee12f5a2b0e5a1d2ba1ed50493b69d77b0b20557948fffa74ab",
+        "size": 1077,
+        "tracked": false
+      },
+      "result": "Fresh Clang AddressSanitizer/UndefinedBehaviorSanitizer CP8 configuration completed.",
+      "started_at": "2026-08-08T18:19:58+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-sanitize-configure.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-sanitize-configure.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8b830722d05b6546fcbeef02efe7f10073f6341fc3c6bc44b3cc71d89b84cfed",
+        "size": 630,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        "build/cp8-sanitize",
+        "--parallel",
+        "2"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:20:09+00:00",
+      "exit_code": 0,
+      "id": "runtime-sanitize-build",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-sanitize-build.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "845624f5046912caf64654a4057393f205b1d2e7b392c97557152df55a6f5480",
+        "size": 670,
+        "tracked": false
+      },
+      "result": "The sanitizer dispatch-capable runtime and tests built successfully.",
+      "started_at": "2026-08-08T18:20:09+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-sanitize-build.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-sanitize-build.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e63f92228204c53b37ad7672387a3bc2986201d2fe2634c4d3b335884bd852cc",
+        "size": 1140,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "cmake",
+        "-E",
+        "env",
+        "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
+        "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1",
+        "ctest",
+        "--test-dir",
+        "build/cp8-sanitize",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:20:24+00:00",
+      "exit_code": 0,
+      "id": "runtime-sanitize-ctest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-sanitize-ctest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7f9c080e9aad055e395568d807b8ef937c66a712bf27eb228236ec728efbdfe5",
+        "size": 814,
+        "tracked": false
+      },
+      "result": "The sanitizer CP8 matrix passed all 8/8 tests with no sanitizer failure.",
+      "started_at": "2026-08-08T18:20:20+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-sanitize-ctest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-sanitize-ctest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "411ec3b2d98c184f97593732455e50b17da5d8160c03062bd0b008431355d625",
+        "size": 1158,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ninja",
+        "-C",
+        "build/cp8-sanitize",
+        "-n"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:21:03+00:00",
+      "exit_code": 0,
+      "id": "runtime-sanitize-freshness",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-sanitize-freshness.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b6ddc8e3f6f7e9260008d0e24fe23a53a44c7c813f8917d43175e8e9a191a833",
+        "size": 654,
+        "tracked": false
+      },
+      "result": "The final sanitizer CP8 build tree reported no pending work.",
+      "started_at": "2026-08-08T18:21:03+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-sanitize-freshness.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-sanitize-freshness.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4ecaf7a6e8ad3c7c6fa5cbf44732d61d853a0034e5f81548cd37ec2f1bfece41",
+        "size": 69,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "build/cp8-static/sagr-handshake",
+        "build/cp8-static/libself_amdgpu_runtime.a",
+        "build/cp8-shared/sagr-handshake",
+        "build/cp8-shared/libself_amdgpu_runtime.so.0.6.0",
+        "build/cp8-sanitize/sagr-handshake",
+        "build/cp8-sanitize/libself_amdgpu_runtime.so.0.6.0"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:21:41+00:00",
+      "exit_code": 0,
+      "id": "runtime-artifact-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-artifact-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3013ec2bcd9f69b630eaddad67c1fc478ca989826e1ad8fd47864d8c7c1888e1",
+        "size": 889,
+        "tracked": false
+      },
+      "result": "The retained static CLI hash is 699612bd77801e110ae5f226c8273b12c257d0cf9f7d8110514c0d86b2dc4c57; shared and sanitizer artifact hashes were retained as well.",
+      "started_at": "2026-08-08T18:21:41+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-artifact-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-artifact-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "789487bd6c65d0fb56d102ef81293f3940c70e9106c61c0cf89e8d628c545000",
+        "size": 636,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ldd",
+        "build/cp8-static/sagr-handshake",
+        "build/cp8-shared/sagr-handshake",
+        "build/cp8-shared/libself_amdgpu_runtime.so.0.6.0"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:22:02+00:00",
+      "exit_code": 0,
+      "id": "runtime-artifact-ldd",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-artifact-ldd.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "444013205890608d83e0b51d7d0278ded6e969d4bc496bf0964cabeec0abaf2e",
+        "size": 729,
+        "tracked": false
+      },
+      "result": "The static dispatch CLI has no native HSA/HIP shared-library dependency; the shared audit resolves only the prepared local runtime.",
+      "started_at": "2026-08-08T18:22:02+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-artifact-ldd.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-artifact-ldd.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6c23db1582bfdc532ddedfb1b023fa4df32e97030c810994542cb7732832af9a",
+        "size": 748,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "nm",
+        "-D",
+        "--defined-only",
+        "build/cp8-shared/libself_amdgpu_runtime.so.0.6.0"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:21:52+00:00",
+      "exit_code": 0,
+      "id": "runtime-exported-symbols",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-exported-symbols.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e4c75af88d77e3a6fc127a4f0edc60961155bad95eee2a084050e9c96c87bff2",
+        "size": 691,
+        "tracked": false
+      },
+      "result": "The shared runtime export audit retained the CP8 dispatch API symbols.",
+      "started_at": "2026-08-08T18:21:52+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-exported-symbols.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-exported-symbols.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6a636b9518c8579c86133885e98141ec210d34399b0a1959015d17a2a0eb45ac",
+        "size": 1341,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "HEAD",
+        "--check"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:24:13+00:00",
+      "exit_code": 0,
+      "id": "runtime-diff-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "73cd09b9a45e2b0b1adf2ddc7a21ce199c4af41e1bd7e32558333d8196511046",
+        "size": 628,
+        "tracked": false
+      },
+      "result": "The runtime CP8 source diff passed the whitespace check.",
+      "started_at": "2026-08-08T18:24:13+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-08T18:24:13+00:00",
+  "environment_fingerprint": {
+    "abi": "1.4",
+    "authority_dispatch_docs_sha256": "7457ec6789a278b433ad049c5bb57583d5a6d8e1907b309960ea396a2bd218df",
+    "authority_dispatch_json_sha256": "cddaa36d0105871e2f99213818e8412a8cc08469fd850eab92cd5940498df16f",
+    "child_head": "be05cb5e2c2385704388632c1b629bb6aa9233ba",
+    "child_target_commit_status": "pending",
+    "child_transaction_phase": "prepare",
+    "child_tree": "68b873183832475abc3fa56fe53a8af418574f45",
+    "compiler": "GCC 15.2.0",
+    "dispatch_fixture": "gfx950-xor-u8-v1",
+    "dispatch_result_sha256": "d80669d3717ec97c7235271e219ee22de66dd41b3475a290ac6a9b16c048465f",
+    "dispatch_trace_sha256": "4377cde129584cd4fd93be4133993b4631b4d4db22e410edcefcf99708a553cc",
+    "input_xor_byte": "0x5a",
+    "kernel": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+    "native_gpu_dependency_audit": "no libhsa/libamdhip64 and no /dev/kfd or /dev/dri in audited process maps/opens/logs",
+    "output_crc32c": "0x796671ec",
+    "packet_crc32c": "0x8a912d83",
+    "runtime": "0.5.0",
+    "runtime_cli_sha256": "699612bd77801e110ae5f226c8273b12c257d0cf9f7d8110514c0d86b2dc4c57",
+    "runtime_cli_size": 493048,
+    "sanitizer_compiler": "Clang 21.1.8",
+    "sanitizers": "address,undefined"
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0008/sagr-handshake",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "699612bd77801e110ae5f226c8273b12c257d0cf9f7d8110514c0d86b2dc4c57",
+      "size": 493048,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/pinned-dispatch.runtime.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d80669d3717ec97c7235271e219ee22de66dd41b3475a290ac6a9b16c048465f",
+      "size": 3037,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/pinned-dispatch.runtime.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0019",
+  "includes": {},
+  "limitations": [
+    "The runtime evidence covers only the protocol-pinned CP8 fixture and its client-side contract; it does not prove a generic HSA/ROCr/HIP/OpenCL runtime or arbitrary code-object loading.",
+    "The runtime child changes are in the active CP-0008 prepare transaction; target child commit IDs are intentionally pending and are not invented here.",
+    "The retained static CLI and generated process streams are external acceptance artifacts and are not tracked source."
+  ],
+  "redactions": [],
+  "result": "Fresh static/shared/sanitizer CP8 runtime matrices passed 9/9, 9/9, and 8/8. The static CLI hash and retained successful dispatch JSON prove the pinned fixture bytes, ticket correlations, cancellation/timeout retry semantics, R+1 signal completion, exact output CRC, and cleanup.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-08T18:18:09+00:00",
+  "type": "runtime-pinned-gfx950-dispatch-acceptance"
+}

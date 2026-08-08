@@ -1,0 +1,25 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0042",
+  "checkpoint_id": "CP-0008",
+  "question_or_symptom": "Disconnecting an admitted or issued dispatch can either leak GPU-owned storage or incorrectly retry a request that may already have rung the queue.",
+  "observation": "Before a complete dispatch ACK, send timeout, cancellation, EOF, or protocol failure poisons the runtime and makes the outcome indeterminate. After a canonical ACK, wait timeout or cancellation retries the existing completion without resending. The bridge records owner disconnect phases; unissued admissions roll back, issued work quarantines packet storage until real retirement, and retired pre-wire work suppresses remaining wire records without inventing a second retirement.",
+  "evidence_ids": ["EV-0018", "EV-0019", "EV-0020"],
+  "conclusion": "Dispatch recovery requires separate pre-admission, acknowledged-wait, and issued-work lifetimes with quarantine and exactly-once retirement semantics.",
+  "decision": "Poison indeterminate pre-ACK outcomes, retry only an ACKed completion wait without allocating a new request, invalidate owner callbacks on disconnect, retain issued packet/code/kernarg storage until correlated finishPkt retirement, and suppress duplicate signal or wire completion after ownership is gone.",
+  "invalidated_assumptions": [
+    "A dispatch timeout can always be retried by sending the same request again.",
+    "Freeing client-owned allocations immediately on disconnect is safe while GPU work may still be in flight."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-dispatch.json",
+    "docs/host-transport-v1-dispatch.md",
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_dispatch_state.cc",
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "projects/self-amdgpu-runtime/tests/dispatch_test.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

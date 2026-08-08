@@ -1,0 +1,366 @@
+{
+  "schema": "amdgpu-sim.host-transport-v1.dispatch.v1",
+  "title": "GemSim host transport pinned gfx950 dispatch extension",
+  "base_protocol": "protocol/host-transport-v1.json",
+  "queue_protocol": "protocol/host-transport-v1-queue.json",
+  "memory_protocol": "protocol/host-transport-v1-memory.json",
+  "signal_protocol": "protocol/host-transport-v1-signal.json",
+  "scope": "one CP-0008-only pinned gfx950 wave64 one-CU one-workgroup AQL fixture",
+  "capability": {
+    "name": "PINNED_DISPATCH_V1",
+    "bit": 4,
+    "byte_index": 0,
+    "mask_hex": "10",
+    "negotiation": "selected if and only if both offered and required by the client; offered-only is not selected; required-not-offered is the base subset failure; QUEUE_CONTROL_V1, SIMULATED_MEMORY_V1, and SIGNAL_EVENT_V1 must also be selected before dispatch admission"
+  },
+  "transport": {
+    "header_bytes": 80,
+    "byte_order": "big-endian",
+    "message_types": {
+      "DISPATCH_REQUEST": 11,
+      "DISPATCH_ACK": 12,
+      "DISPATCH_COMPLETION": 13
+    },
+    "request_payload_bytes": 128,
+    "request_frame_bytes": 208,
+    "result_payload_bytes": 160,
+    "result_frame_bytes": 240,
+    "crc": "base protocol CRC-32C over the complete frame",
+    "ancillary_descriptors": 0,
+    "trace_record": "no fourth wire message; the fixed result payload is the wire trace summary and the full retained trace is JSONL"
+  },
+  "request_payload": {
+    "bytes": 128,
+    "fields": [
+      {"name": "dispatch_major", "offset": 0, "bytes": 2, "type": "u16", "constant": 1},
+      {"name": "dispatch_minor", "offset": 2, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "opcode", "offset": 4, "bytes": 2, "type": "u16", "values": {"SUBMIT_PINNED": 1}},
+      {"name": "flags", "offset": 6, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "queue_id", "offset": 8, "bytes": 8, "type": "u64"},
+      {"name": "queue_generation", "offset": 16, "bytes": 8, "type": "u64"},
+      {"name": "queue_sequence", "offset": 24, "bytes": 8, "type": "u64"},
+      {"name": "fixture_id", "offset": 32, "bytes": 8, "type": "u64", "constant": 1},
+      {"name": "input_allocation_id", "offset": 40, "bytes": 8, "type": "u64"},
+      {"name": "input_generation", "offset": 48, "bytes": 8, "type": "u64"},
+      {"name": "output_allocation_id", "offset": 56, "bytes": 8, "type": "u64"},
+      {"name": "output_generation", "offset": 64, "bytes": 8, "type": "u64"},
+      {"name": "signal_id", "offset": 72, "bytes": 8, "type": "u64"},
+      {"name": "signal_generation", "offset": 80, "bytes": 8, "type": "u64"},
+      {"name": "expected_signal_value", "offset": 88, "bytes": 8, "type": "i64_twos_complement_bits", "constant": 0},
+      {"name": "fixture_manifest_sha256", "offset": 96, "bytes": 32, "type": "bytes", "constant_hex": "7500741873f9d39848e57f0aa9ffc6454df7db87b93e1c046501f54db1b7543c"}
+    ]
+  },
+  "result_payload": {
+    "bytes": 160,
+    "fields": [
+      {"name": "dispatch_major", "offset": 0, "bytes": 2, "type": "u16", "constant": 1},
+      {"name": "dispatch_minor", "offset": 2, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "status", "offset": 4, "bytes": 4, "type": "u32", "source": "base protocol statuses"},
+      {"name": "opcode", "offset": 8, "bytes": 2, "type": "u16"},
+      {"name": "reserved_opcode", "offset": 10, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "reserved_status", "offset": 12, "bytes": 4, "type": "u32", "constant": 0},
+      {"name": "queue_id", "offset": 16, "bytes": 8, "type": "u64"},
+      {"name": "queue_generation", "offset": 24, "bytes": 8, "type": "u64"},
+      {"name": "queue_sequence", "offset": 32, "bytes": 8, "type": "u64"},
+      {"name": "fixture_id", "offset": 40, "bytes": 8, "type": "u64"},
+      {"name": "input_allocation_id", "offset": 48, "bytes": 8, "type": "u64"},
+      {"name": "input_generation", "offset": 56, "bytes": 8, "type": "u64"},
+      {"name": "output_allocation_id", "offset": 64, "bytes": 8, "type": "u64"},
+      {"name": "output_generation", "offset": 72, "bytes": 8, "type": "u64"},
+      {"name": "signal_id", "offset": 80, "bytes": 8, "type": "u64"},
+      {"name": "signal_generation", "offset": 88, "bytes": 8, "type": "u64"},
+      {"name": "trace_id", "offset": 96, "bytes": 8, "type": "u64"},
+      {"name": "input_gpu_va", "offset": 104, "bytes": 8, "type": "u64"},
+      {"name": "output_gpu_va", "offset": 112, "bytes": 8, "type": "u64"},
+      {"name": "packet_crc32c", "offset": 120, "bytes": 4, "type": "u32"},
+      {"name": "output_crc32c", "offset": 124, "bytes": 4, "type": "u32"},
+      {"name": "admission_tick", "offset": 128, "bytes": 8, "type": "u64"},
+      {"name": "start_tick", "offset": 136, "bytes": 8, "type": "u64"},
+      {"name": "end_tick", "offset": 144, "bytes": 8, "type": "u64"},
+      {"name": "retire_tick", "offset": 152, "bytes": 8, "type": "u64"}
+    ]
+  },
+  "fixture_authority": {
+    "fixture_id": 1,
+    "manifest_version": 1,
+    "architecture": "gfx950",
+    "gfx_ip_decimal": 950,
+    "wavefront_size": 64,
+    "active_compute_units": 1,
+    "dimensions": 1,
+    "workgroup_size": [64, 1, 1],
+    "grid_size": [64, 1, 1],
+    "workgroups": 1,
+    "waves": 1,
+    "input_offset": 0,
+    "output_offset": 0,
+    "output_bytes": 64,
+    "xor_byte": 90,
+    "signal_initial_value": 1,
+    "input_precondition": "exact golden input bytes at allocation offset zero",
+    "output_precondition": "exactly 64 zero bytes at allocation offset zero",
+    "signal_precondition": "live CP-0007 signal value is signed one and it has exactly one already-admitted, unsatisfied EQ-zero wait owned by the same client",
+    "expected_signal_value": 0,
+    "operation": "for each lane 0 through 63, output[lane] = input[lane] XOR 0x5a",
+    "code_image": {
+      "byte_order": "little-endian gfx950 instruction and descriptor bytes",
+      "descriptor_bytes": 64,
+      "machine_code_bytes": 44,
+      "bytes": 108,
+      "bytes_hex": "0000000000000000100000000000000040000000000000000000000000000000000000000000000000000000000000004000af0084000000080000000000000000000ac0000000007fc08cbf008040dc00000001700f8cbfff02022a5a000000008060dc00010200000081bf",
+      "sha256_hex": "711b101e0e78c4ac7eae865b5f34779d63f2cc9cba8e0b3025bca99fa646ad49",
+      "descriptor_sha256_hex": "570994533fd46539e1e5d00aee7167e33e30da05c6d1a2ce31bcb7d7cbe602d2",
+      "machine_code_sha256_hex": "6c37c70e8d7fa4aa164a637e0c3bf3fd87c687e93b25010d6c1af6e41dc16b13",
+      "entry_offset_bytes": 64,
+      "kernarg_bytes": 16,
+      "disassembly": [
+        "s_load_dwordx4 s[0:3], s[0:1], 0x0",
+        "s_waitcnt lgkmcnt(0)",
+        "global_load_ubyte v1, v0, s[0:1]",
+        "s_waitcnt vmcnt(0)",
+        "v_xor_b32_e32 v1, 0x5a, v1",
+        "global_store_byte v0, v1, s[2:3]",
+        "s_endpgm"
+      ]
+    },
+    "aql_template": {
+      "byte_order": "little-endian HSA packet fields",
+      "bytes": 64,
+      "bytes_hex": "02140100400001000100000040000000010000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "sha256_hex": "e8d8451e27b883a068918315c73c807d59f37f770de987e18689e201ecefb92f",
+      "header_hex": "1402",
+      "setup_hex": "0001",
+      "kernel_object": 0,
+      "kernarg_address": 0,
+      "reserved1": 0,
+      "completion_signal": 0,
+      "materialization": "daemon replaces only kernel_object and kernarg_address with nonzero internal GPU VAs; completion_signal remains the required zero special handle; all geometry, segment sizes, header, setup, and reserved bytes remain identical",
+      "materialized_sha256": "retained trace only",
+      "materialized_crc32c": "DISPATCH_ACK and DISPATCH_COMPLETION packet_crc32c"
+    },
+    "kernarg_template": {
+      "byte_order": "little-endian GPU pointers",
+      "bytes": 16,
+      "bytes_hex": "00000000000000000000000000000000",
+      "sha256_hex": "374708fff7719dd5979ec875d56cd2286f6d3cf7ec317a3b25632aab28ec37bb",
+      "materialization": "daemon writes input_gpu_va at offset zero and output_gpu_va at offset eight; no other kernarg bytes exist"
+    },
+    "golden_buffers": {
+      "input_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "input_sha256_hex": "fdeab9acf3710362bd2658cdc9a29e8f9c757fcf9811603a8c447cd1d9151108",
+      "input_crc32c_hex": "fb6d36eb",
+      "output_initial_sha256_hex": "f5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b",
+      "output_initial_crc32c_hex": "03c8eb67",
+      "output_hex": "5a5b58595e5f5c5d52535051565754554a4b48494e4f4c4d42434041464744457a7b78797e7f7c7d72737071767774756a6b68696e6f6c6d6263606166676465",
+      "output_sha256_hex": "70da449788bfa33451b353936fdf55b4a222de578c6493567c42e43b59564155",
+      "output_crc32c_hex": "796671ec",
+      "non_identity": "output bytes differ from both input bytes and the all-zero initial output"
+    },
+    "manifest": {
+      "byte_order": "big-endian scalars",
+      "domain_ascii": "AMDGPU-SIM-CP8-FIXTURE",
+      "domain_nul_terminated": true,
+      "bytes": 243,
+      "scalar_order": ["manifest_version", "gfx_ip_decimal", "wavefront_size", "active_compute_units", "dimensions", "workgroup_x", "workgroup_y", "workgroup_z", "grid_x", "grid_y", "grid_z", "input_offset", "output_offset", "output_bytes", "xor_byte"],
+      "hash_order": ["code_image_sha256", "aql_template_sha256", "kernarg_template_sha256", "golden_input_sha256", "golden_output_sha256"],
+      "bytes_hex": "414d444750552d53494d2d4350382d464958545552450000000001000003b60000004000000001000000010000004000000001000000010000004000000001000000010000000000000000000000400000005a711b101e0e78c4ac7eae865b5f34779d63f2cc9cba8e0b3025bca99fa646ad49e8d8451e27b883a068918315c73c807d59f37f770de987e18689e201ecefb92f374708fff7719dd5979ec875d56cd2286f6d3cf7ec317a3b25632aab28ec37bbfdeab9acf3710362bd2658cdc9a29e8f9c757fcf9811603a8c447cd1d915110870da449788bfa33451b353936fdf55b4a222de578c6493567c42e43b59564155",
+      "sha256_hex": "7500741873f9d39848e57f0aa9ffc6454df7db87b93e1c046501f54db1b7543c"
+    }
+  },
+  "opcode_constraints": {
+    "SUBMIT_PINNED": {
+      "request": {
+        "queue_id": "live-client-owned-nonzero",
+        "queue_generation": "exact-live-generation",
+        "queue_sequence": "nonzero-and-strictly-shared-queue-previous-plus-one",
+        "fixture_id": 1,
+        "input_allocation_id": "live-client-owned-nonzero",
+        "input_generation": "exact-live-generation",
+        "output_allocation_id": "live-client-owned-nonzero-and-distinct-from-input",
+        "output_generation": "exact-live-generation",
+        "signal_id": "live-client-owned-nonzero-with-one-armed-unsatisfied-EQ-zero-wait",
+        "signal_generation": "exact-live-generation",
+        "expected_signal_value": 0,
+        "fixture_manifest_sha256": "fixture-authority-exact",
+        "fd_count": 0
+      },
+      "success_ack": "admission only; echo all handle fields, assign one nonzero trace_id, return exact bound VAs and materialized packet CRC, set admission_tick, and keep output_crc32c plus start/end/retire ticks zero",
+      "success_completion": "only after GPUDispatcher/CU execution, output stores, packet retirement, and CP-0007 signal mirror commit; echo ACK summary, set exact golden output CRC, and provide ordered execution ticks",
+      "error_completion": "forbidden"
+    },
+    "failure_ack": "known nonzero status; version 1.0; echo request_id, decoded opcode, queue/allocation/signal identities, sequence, and fixture_id; trace_id, GPU VAs, both CRCs, and all ticks are zero; response header uses actual daemon UUID, current connection ID, and actual epoch; no descriptor and no completion follows"
+  },
+  "result_rules": {
+    "common": "one fixed 240-byte result frame with no ancillary data; exact framing, dispatch version, status, request correlation, actual daemon identity, reserved zeros, and handle echoes",
+    "ack_success": "status OK means admission, never execution; trace_id and bound VAs are nonzero; input_gpu_va and output_gpu_va equal the two CP-0006 slot VAs; packet_crc32c is the materialized 64-byte AQL CRC; output_crc32c and start/end/retire ticks are zero",
+    "ack_failure": "known nonzero status and every field from trace_id through retire_tick is zero; no state is partially published and no completion follows",
+    "completion_success": "status OK only; every echo, trace_id, VA, packet CRC, and admission tick exactly matches the ACK; output_crc32c is 0x796671ec; admission_tick < start_tick <= end_tick <= retire_tick and retire_tick > admission_tick + 1 without overflow",
+    "completion_failure": "non-OK DISPATCH_COMPLETION is noncanonical and poisons the runtime session; post-admission daemon execution failure closes the connection and is retained in the trace instead of fabricating a completion",
+    "runtime_validation": "a malformed, foreign, duplicate, out-of-order, hash-inconsistent, CRC-inconsistent, tick-inconsistent, or otherwise noncanonical ACK or completion poisons and closes the session before publishing result bytes"
+  },
+  "execution_path": {
+    "required": [
+      "bind CP-0006 sparse allocation bytes to packet-visible gem5 GPU VAs without changing their public slot VAs",
+      "materialize the pinned 64-byte AQL packet and 16-byte kernarg in daemon-owned GPU-visible storage",
+      "register and preflight the daemon-owned AQL queue before ACK, then ring the established HSA doorbell path only after the successful ACK is completely sent",
+      "HSAPacketProcessor DMA-fetches and processes the packet, GPUCommandProcessor creates the task, GPUDispatcher schedules it, and compute unit zero executes one wave64 workgroup",
+      "the compute unit performs the 64 global loads, XOR instructions, and global stores into the bound output allocation",
+      "the real finishPkt or equivalent GPU retirement path observes completion of the zero-signal AQL packet",
+      "a generation-valid listener mirrors packet retirement by storing signed zero into the referenced CP-0007 signal",
+      "only after the signal store commits may the daemon construct DISPATCH_COMPLETION"
+    ],
+    "completion_signal_boundary": "the pinned AQL completion_signal is always the HSA special handle zero; it is never a CP-0007 wire signal handle. Only the generation-valid packet-retirement listener may mirror completion into CP-0007",
+    "issue_order": "packet, kernarg, queue registration, GPU-VA bindings, and admission trace are prepared before ACK; ringHostQueue and gpuIssued transition occur exactly once only after the complete successful ACK send; disconnect before that transition rolls back the admission and queue sequence; any unexpected post-ACK issue failure closes the session and cannot fabricate a failed ACK or completion",
+    "forbidden_shortcut": "bridge-side byte arithmetic, host CPU fallback, calling submitDispatchPkt without the HSA queue/fetch path, or a timer/one-tick synthetic completion is not execution and cannot produce DISPATCH_COMPLETION"
+  },
+  "trace_contract": {
+    "schema": "amdgpu-sim.cp8-dispatch-trace.v1",
+    "wire_summary": "trace_id, both bound VAs, materialized packet CRC, output CRC, and admission/start/end/retire ticks in ACK and completion",
+    "retained_format": "newline-delimited canonical JSON objects outside Git; one event per line",
+    "required_ordered_events": ["dispatch_admitted", "aql_queue_registered", "aql_packet_published", "hsapp_packet_fetched", "gpu_command_processor_submitted", "gpu_dispatcher_started", "cu_wave_started", "cu_global_store_completed", "gpu_dispatcher_completed", "packet_retired", "cp7_signal_mirrored", "wire_completion_emitted"],
+    "common_fields": ["schema", "event", "sim_tick", "trace_id", "request_id", "fixture_id", "fixture_manifest_sha256", "code_image_sha256", "aql_template_sha256", "materialized_aql_sha256", "queue_id", "queue_generation", "queue_sequence", "input_allocation_id", "input_generation", "output_allocation_id", "output_generation", "signal_id", "signal_generation"],
+    "event_fields": {
+      "dispatch_admitted": {"admission_tick": "u64-equals-sim_tick"},
+      "aql_queue_registered": {"component": "HSAPacketProcessor", "active": true, "internal_queue_id": "nonzero-u64", "internal_queue_generation": "nonzero-u64"},
+      "aql_packet_published": {"internal_queue_id": "same-u64", "internal_queue_generation": "same-u64", "packet_va": "nonzero-u64", "materialized_aql_hex": "exact-64-byte-lowercase-hex", "materialized_kernarg_hex": "exact-16-byte-lowercase-hex", "materialized_kernarg_sha256": "lowercase-sha256", "kernel_object": "nonzero-u64", "kernarg_address": "nonzero-u64", "completion_signal": 0, "packet_crc32c": "u32", "header": 5122, "setup": 1, "grid_size": [64, 1, 1], "workgroup_size": [64, 1, 1]},
+      "hsapp_packet_fetched": {"component": "HSAPacketProcessor", "internal_queue_id": "same-u64", "internal_queue_generation": "same-u64", "packet_va": "same-u64", "read_index": "u64"},
+      "gpu_command_processor_submitted": {"component": "GPUCommandProcessor", "gpu_task_id": "nonzero-u64"},
+      "gpu_dispatcher_started": {"component": "GPUDispatcher", "gpu_task_id": "same-u64", "grid_size": [64, 1, 1], "workgroup_size": [64, 1, 1], "workgroups": 1, "waves": 1},
+      "cu_wave_started": {"component": "ComputeUnit", "gpu_task_id": "same-u64", "cu_id": 0, "workgroup_id": [0, 0, 0], "wavefront_size": 64, "lane_mask": "u64-all-ones"},
+      "cu_global_store_completed": {"component": "ComputeUnit", "gpu_task_id": "same-u64", "output_gpu_va": "ticket-u64", "store_bytes": 64},
+      "gpu_dispatcher_completed": {"component": "GPUDispatcher", "gpu_task_id": "same-u64"},
+      "packet_retired": {"internal_queue_id": "same-u64", "internal_queue_generation": "same-u64", "packet_va": "same-u64", "gpu_task_id": "same-u64", "finish_pkt_read_index": "same-as-fetch-u64", "completion_signal": 0},
+      "cp7_signal_mirrored": {"value_before": 1, "value_after": 0},
+      "wire_completion_emitted": {"packet_crc32c": "ack-u32", "output_crc32c": 2036756972, "admission_tick": "ack-u64", "start_tick": "completion-u64", "end_tick": "completion-u64", "retire_tick": "completion-u64", "signal_completion_tick": "retire-plus-one-u64", "input_gpu_va": "ticket-u64", "output_gpu_va": "ticket-u64"}
+    },
+    "disconnect_event_fields": {
+      "dispatch_owner_disconnected": {"phase": ["admitted_unissued", "issued_task_pending", "issued_task_known", "retired_pre_wire"], "internal_queue_id": "nonzero-u64", "internal_queue_generation": "u64-zero-if-and-only-if-unissued", "packet_va": "nonzero-u64", "gpu_task_id": "u64-zero-if-and-only-if-not-yet-observed", "quarantine_required": "bool-equals-issued-and-not-retired", "signal_completion_emitted": "boolean", "dispatch_completion_emitted": false},
+      "abandoned_packet_retired": {"internal_queue_id": "same-u64", "internal_queue_generation": "same-nonzero-u64", "packet_va": "same-u64", "gpu_task_id": "nonzero-u64", "completion_signal": 0, "cp7_signal_mirrored": false, "wire_completion_emitted": false, "quarantine_released": true}
+    },
+    "disconnect_ordering": "dispatch_owner_disconnected is retained before client-owned state is removed. admitted_unissued rolls back without an abandoned retirement. issued_task_pending and issued_task_known retain exactly one later abandoned_packet_retired after real finishPkt correlation and quarantine release. retired_pre_wire already has packet_retired and emits no abandoned retirement; it suppresses every not-yet-sent completion.",
+    "gpu_provenance": "records internal active/registered AQL queue IDs, packet VA, header, setup, grid and workgroup geometry, GPU task ID, CU ID zero, workgroup coordinates zero, wave64 lane mask, output store range, finishPkt read index, zero completion-signal field, and CP-0007 mirror transition",
+    "correlation": "every event carries the originating request_id and assigned trace_id; full code/template hashes equal fixture authority; materialized AQL hash and CRC refer to the same exact 64 bytes; final event fields equal DISPATCH_COMPLETION",
+    "acceptance": "missing, duplicate, reordered, foreign, or summary-inconsistent events fail CP-0008 even when output bytes happen to match"
+  },
+  "limits": {
+    "maximum_inflight_dispatches_per_session": 1,
+    "maximum_inflight_dispatches_per_queue": 1,
+    "required_compute_units": 1,
+    "required_workgroups": 1,
+    "required_waves": 1,
+    "required_wavefront_size": 64,
+    "fixed_io_bytes": 64,
+    "maximum_outbound_records": 26
+  },
+  "error_precedence": [
+    "DROP_AND_CLOSE invalid envelope, CRC, message type, fixed frame or payload length, header reserved field, uncorrelatable request, MSG_TRUNC, MSG_CTRUNC, malformed ancillary structure, or any descriptor attached to a dispatch record",
+    "MALFORMED correlatable flags, opcode, fixture_id, expected_signal_value, fixture_manifest_sha256, or other opcode-canonical-field error",
+    "UNSUPPORTED_VERSION dispatch protocol version",
+    "INSTANCE_MISMATCH daemon UUID",
+    "PROTOCOL_STATE connection ID",
+    "TOPOLOGY_MISMATCH job epoch",
+    "UNSUPPORTED_CAPABILITY PINNED_DISPATCH_V1 or any required CP-0005/CP-0006/CP-0007 capability not selected",
+    "PROTOCOL_STATE non-increasing session-wide request ID",
+    "PROTOCOL_STATE stale, foreign, destroyed, or out-of-range queue, or non-next shared queue sequence",
+    "PROTOCOL_STATE stale, foreign, freed, out-of-range, undersized, aliased, or non-packet-visible input or output allocation",
+    "PROTOCOL_STATE stale, foreign, destroyed, out-of-range, wrong-valued, or missing/wrong-wait CP-0007 signal",
+    "BUSY queue, allocation, signal, or session already participating in dispatch work",
+    "PROTOCOL_STATE input or output bytes do not match the pinned fixture precondition",
+    "RESOURCE_EXHAUSTED trace ID, internal AQL queue, packet, kernarg, code, GPU-VA binding, or scheduler resource",
+    "INTERNAL atomic materialization, queue registration validation, GPU-VA binding, or pre-ACK trace persistence failure"
+  ],
+  "semantics": {
+    "admission": "ACK OK commits the queue sequence and pins all four generation-safe resources, internal code/AQL/kernarg storage, trace ID, and GPU-VA bindings; the real doorbell is rung exactly once only after the complete ACK send; ACK does not prove packet fetch, CU issue, stores, retirement, signal update, or output correctness",
+    "queue_sequence": "the dispatch queue_sequence shares the CP-0005 queue sequence; it must be previous plus one and advances only on successful dispatch admission; rejection does not advance it",
+    "resource_pinning": "queue destruction and allocation free are BUSY while the dispatch is pending; signal destroy remains BUSY under CP-0007 wait/dispatch ownership; no slot may be reused before retirement cleanup",
+    "memory_binding": "the returned packet-visible VAs are exactly the CP-0006 functional slot VAs, not host pointers; byte mutation becomes visible to COPY_D2H only through GPU memory stores and retirement ordering",
+    "signal_completion": "admission requires one already-armed unsatisfied CP-0007 EQ-zero wait on a signed-one signal; the signal becomes signed zero only from the generation-valid real GPU retirement listener at packet retire tick R, that wait completes exactly at R+1 without overflow, and its canonical SIGNAL_COMPLETION is ordered before DISPATCH_COMPLETION",
+    "d2h_acceptance": "after canonical dispatch and signal completions, CP-0006 COPY_D2H must return the exact 64 golden output bytes and CRC 0x796671ec; output differs from both input and the initial zero buffer",
+    "request_id": "the HELLO-seeded strictly increasing tracker is shared by queue, memory, signal, and dispatch requests and never wraps; every structurally, version, identity, and capability-admitted dispatch consumes its ID even when lifecycle, BUSY, resource, or precondition validation rejects it",
+    "outbound_bound": "the CP-0007 bound of twenty-five plus one pending dispatch completion yields twenty-six; overflow or completion send failure disconnects and invokes generation-safe cleanup",
+    "no_replay": "a dispatch request or completion is never replayed across reconnect and an acknowledged pending dispatch is retried only as a local wait without another wire request"
+  },
+  "runtime_wait": {
+    "serialization": "callers serialize queue, memory, signal, and dispatch operations on one runtime instance",
+    "deadline": "the submit call forms one CLOCK_MONOTONIC absolute deadline through complete ACK admission; each later wait call forms its own absolute deadline through completion; expired deadline precedes simultaneous cancellation and both are checked before consuming a buffered completion",
+    "before_ack": "failure before a complete request send is determinate; after a complete send, timeout, cancellation, EOF, or noncanonical ACK before the terminal ACK poisons and closes the session",
+    "failed_ack": "a canonical non-OK ACK is determinate, publishes no dispatch result, sends no completion, and leaves the session reusable",
+    "after_ack": "timeout or cancellation while awaiting the acknowledged completion leaves the dispatch and any buffered completion pending and the session reusable; EOF, daemon execution failure, or protocol failure poisons",
+    "retry": "the same queue sequence, fixture, allocation handles, and signal handle retry the existing wait without allocating a request ID or sending DISPATCH_REQUEST; any different tuple is BUSY while pending",
+    "publication": "a successful submit publishes the admission ticket (request ID, trace ID, VAs, packet CRC, and admission tick) after the complete ACK validates; output CRC, execution ticks, signal completion, and caller-visible execution success publish only after the complete canonical completion validates; no timeout, cancellation, or poison path exposes partial output"
+  },
+  "disconnect": {
+    "before_gpu_issue": "cancel internal queue work and release all pins without emitting a signal update or completion",
+    "after_gpu_issue": "quarantine code, packet, kernarg, and bound allocation storage until real GPU retirement; invalidate client-visible handles immediately; emit neither CP-0007 mirror nor wire completion after owner disconnect",
+    "callback_validation": "every callback validates client file-descriptor generation, request_id, trace_id, queue/allocation/signal identities and generations, GPU task ID, and internal queue generation before mutation or emission",
+    "trace": "retain disconnect, abandonment, and eventual retirement facts for issued work; never treat them as an accepted dispatch"
+  },
+  "interleave": {
+    "allowed": "while awaiting any ACK or completion, only a canonical completion for a previously acknowledged pending queue command, signal wait, or pinned dispatch may be validated and bounded-buffered",
+    "forbidden": "a completion using the active request_id before its ACK, an unknown type, a foreign or duplicate completion, or a noncanonical trace summary poisons and closes the session",
+    "ordering": "packet retirement at tick R precedes cp7_signal_mirrored at R; the canonical CP-0007 SIGNAL_COMPLETION has tick R+1 without overflow and is ordered before wire_completion_emitted; the runtime must validate and retain both that SIGNAL_COMPLETION and DISPATCH_COMPLETION before D2H acceptance",
+    "buffer_retry": "deadline and cancellation are checked before consuming a buffered completion and leave it pending"
+  },
+  "forbidden_scope": [
+    "client-provided AQL packets, kernarg bytes, GPU pointers, code bytes, HSACO, or file descriptors",
+    "generic code-object loading, ELF or MsgPack parsing, relocation, symbol lookup, or arbitrary kernels",
+    "arbitrary geometry, multiple workgroups, multiple waves, multiple compute units, or timing and performance claims",
+    "bridge-side arithmetic, CPU fallback, direct submitDispatchPkt bypass, or timer and one-tick synthetic completion",
+    "ROCr or libhsakmt provider compatibility and every P2 claim",
+    "HIP, OpenCL, Triton, PyTorch, vLLM, collectives, tensor parallelism, or model execution"
+  ],
+  "golden": {
+    "identity": {
+      "request_id_hex": "0123456789abcdfa",
+      "daemon_instance_uuid_hex": "00112233445566778899aabbccddeeff",
+      "connection_id_hex": "1122334455667788",
+      "job_epoch_hex": "0102030405060708",
+      "queue_id_hex": "1020304050607080",
+      "queue_generation_hex": "8877665544332211",
+      "queue_sequence_hex": "0100000000000003",
+      "fixture_id": 1,
+      "input_allocation_id": 7,
+      "input_generation_hex": "1000000000000001",
+      "output_allocation_id": 8,
+      "output_generation_hex": "1000000000000002",
+      "signal_id": 9,
+      "signal_generation_hex": "2000000000000001",
+      "expected_signal_value": 0,
+      "trace_id_hex": "5452434500000001",
+      "input_gpu_va_hex": "0000100300000000",
+      "output_gpu_va_hex": "0000100380000000",
+      "internal_code_va_hex": "0000200000000000",
+      "internal_kernarg_va_hex": "0000200000001000",
+      "materialized_aql_hex": "02140100400001000100000040000000010000000100000000000000000000000000000000200000001000000020000000000000000000000000000000000000",
+      "materialized_aql_sha256_hex": "ee9dc3afa981d63756001e5dfbf3b10864a2e70a77ffde2bdd079a50b3cde353",
+      "packet_crc32c_hex": "8a912d83",
+      "materialized_kernarg_hex": "00000000031000000000008003100000",
+      "materialized_kernarg_sha256_hex": "3120a623339d6781288cd87a7db4c0318f6226c9a7870045f4b1ceb0f535f794",
+      "admission_tick_hex": "123456789abcdf00",
+      "start_tick_hex": "123456789abcdf10",
+      "end_tick_hex": "123456789abcdf40",
+      "retire_tick_hex": "123456789abcdf50"
+    },
+    "dispatch_request": {
+      "frame_bytes": 208,
+      "payload_bytes": 128,
+      "crc32c_hex": "cf679df8",
+      "frame_sha256_hex": "f4dc5de9c203275e3f1107c0891748852ca69f2facdec90d37abd3c76d01633a",
+      "frame_hex": "4753494d52504300000100000050000b00000000000000800123456789abcdfa00112233445566778899aabbccddeeff11223344556677880102030405060708cf679df80000000000000000000000000001000000010000102030405060708088776655443322110100000000000003000000000000000100000000000000071000000000000001000000000000000810000000000000020000000000000009200000000000000100000000000000007500741873f9d39848e57f0aa9ffc6454df7db87b93e1c046501f54db1b7543c"
+    },
+    "dispatch_ack": {
+      "frame_bytes": 240,
+      "payload_bytes": 160,
+      "crc32c_hex": "5c3070d8",
+      "frame_sha256_hex": "660a24c55b955ae1299681dc56209a9a043d7af638e3347919cbc3954da1fa9c",
+      "frame_hex": "4753494d52504300000100000050000c00000000000000a00123456789abcdfa00112233445566778899aabbccddeeff112233445566778801020304050607085c3070d80000000000000000000000000001000000000000000100000000000010203040506070808877665544332211010000000000000300000000000000010000000000000007100000000000000100000000000000081000000000000002000000000000000920000000000000015452434500000001000010030000000000001003800000008a912d8300000000123456789abcdf00000000000000000000000000000000000000000000000000"
+    },
+    "dispatch_completion": {
+      "frame_bytes": 240,
+      "payload_bytes": 160,
+      "crc32c_hex": "5cf2625b",
+      "frame_sha256_hex": "f82b3fe0773d4be0ade8e80062b2f3f1fc8e73ff364ca929c8f5af5e5d0eac72",
+      "frame_hex": "4753494d52504300000100000050000d00000000000000a00123456789abcdfa00112233445566778899aabbccddeeff112233445566778801020304050607085cf2625b0000000000000000000000000001000000000000000100000000000010203040506070808877665544332211010000000000000300000000000000010000000000000007100000000000000100000000000000081000000000000002000000000000000920000000000000015452434500000001000010030000000000001003800000008a912d83796671ec123456789abcdf00123456789abcdf10123456789abcdf40123456789abcdf50"
+    }
+  }
+}

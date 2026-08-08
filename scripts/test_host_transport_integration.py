@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the CP-0004 through CP-0006 host-transport integration matrix."""
+"""Run the CP-0004 through CP-0008 host-transport integration matrix."""
 
 from __future__ import annotations
 
@@ -7,11 +7,12 @@ import argparse
 import array
 import concurrent.futures
 import dataclasses
+import hashlib
 import json
 import os
+import re
 import resource
 import select
-import shutil
 import signal
 import socket
 import stat
@@ -27,13 +28,53 @@ from typing import Any, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 PROTOCOL_PATH = ROOT / "protocol/host-transport-v1.json"
+DISPATCH_PROTOCOL_PATH = ROOT / "protocol/host-transport-v1-dispatch.json"
 DEFAULT_CONFIG = (
     ROOT / "projects/gem5/configs/example/gemsim/host_bridge.py"
+)
+DEFAULT_DISPATCH_CONFIG = (
+    ROOT / "projects/gem5/configs/example/gemsim/host_dispatch.py"
 )
 WORLD_SIZES = (1, 2, 3, 4, 8)
 RUN_IDENTITY_NAMESPACE = uuid.uuid4()
 READY_TOKEN = "host-gpu-ready"
 SUCCESS_EXIT_TOKEN = "host GPU transport handshake complete"
+DISPATCH_FIXTURE = "gfx950-xor-u8-v1"
+DISPATCH_TRACE_SCHEMA = "amdgpu-sim.cp8-dispatch-trace.v1"
+# Bit 4 is CP-0008 PINNED_DISPATCH_V1; CP4's unsupported-capability probe must
+# use the next reserved bit so the runtime can form a valid open request.
+UNSUPPORTED_CAPABILITY_PROBE_BIT = 5
+FORBIDDEN_NATIVE_GPU_MARKERS = (
+    "libhsa",
+    "libamdhip64",
+    "/dev/kfd",
+    "/dev/dri",
+)
+SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+STAT_INTEGER_PATTERN = re.compile(r"(?:0|[1-9][0-9]*)")
+DISPATCH_EXIT_PATTERN = re.compile(
+    r"host-gpu-dispatch-exit cause=host GPU dispatch session complete "
+    r"code=0 tick=(0|[1-9][0-9]*) stats=([^\r\n]+)"
+)
+LOWER_HEX_64_PATTERN = re.compile(r"[0-9a-f]{128}")
+LOWER_HEX_16_PATTERN = re.compile(r"[0-9a-f]{32}")
+MAX_DISPATCH_JSON_BYTES = 1 << 20
+MAX_DISPATCH_TRACE_BYTES = 1 << 20
+MAX_DISPATCH_TRACE_RECORDS = 64
+MAX_GEM5_STATS_BYTES = 64 << 20
+TRACE_U64_RULES = frozenset({
+    "u64-equals-sim_tick",
+    "nonzero-u64",
+    "same-u64",
+    "u64",
+    "u64-all-ones",
+    "ticket-u64",
+    "same-as-fetch-u64",
+    "ack-u64",
+    "completion-u64",
+    "retire-plus-one-u64",
+})
+TRACE_U32_RULES = frozenset({"u32", "ack-u32"})
 
 
 class CheckFailure(RuntimeError):
@@ -71,6 +112,1100 @@ class RawAck:
     topology_job_uuid: str | None
     topology_rank: int | None
     topology_world_size: int | None
+
+
+@dataclasses.dataclass(frozen=True)
+class ProcessAudit:
+    maps: str
+    open_paths: tuple[str, ...]
+    log: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ProcessAuditCounts:
+    daemon_samples: int
+    runtime_samples: int
+
+
+@dataclasses.dataclass(frozen=True)
+class DispatchEvidence:
+    request_id: int
+    trace_id: int
+    fixture_id: int
+    queue_id: int
+    queue_generation: int
+    queue_sequence: int
+    input_allocation_id: int
+    input_generation: int
+    input_gpu_va: int
+    output_allocation_id: int
+    output_generation: int
+    output_gpu_va: int
+    signal_id: int
+    signal_generation: int
+    packet_crc32c: int
+    output_crc32c: int
+    admission_tick: int
+    start_tick: int
+    end_tick: int
+    retire_tick: int
+    signal_completion_tick: int
+    materialized_aql_sha256: str = ""
+
+
+DISPATCH_STAT_SEMANTICS = frozenset({
+    "dispatches_admitted",
+    "hsapp_packets_fetched",
+    "gpu_command_processor_submissions",
+    "gpu_dispatcher_starts",
+    "gpu_dispatcher_completions",
+    "workgroups_completed",
+    "waves_started",
+    "packets_retired",
+    "dispatches_completed",
+    "retired_instructions",
+    "global_store_instructions",
+    "global_store_bytes",
+    "host_fallback_count",
+})
+DISPATCH_STAT_NAMES = {
+    "dispatches_admitted": (
+        "system.host_gpu_bridge.cp8_dispatches_admitted"
+    ),
+    "hsapp_packets_fetched": (
+        "system.host_gpu_bridge.cp8_hsapp_packets_fetched"
+    ),
+    "gpu_command_processor_submissions": (
+        "system.host_gpu_bridge.cp8_gpu_command_processor_submissions"
+    ),
+    "gpu_dispatcher_starts": (
+        "system.host_gpu_bridge.cp8_gpu_dispatcher_starts"
+    ),
+    "gpu_dispatcher_completions": (
+        "system.host_gpu_bridge.cp8_gpu_dispatcher_completions"
+    ),
+    "workgroups_completed": (
+        "system.host_gpu_bridge.cp8_cu_workgroups_completed"
+    ),
+    "waves_started": "system.host_gpu_bridge.cp8_cu_waves_started",
+    "packets_retired": "system.host_gpu_bridge.cp8_packets_retired",
+    "dispatches_completed": (
+        "system.host_gpu_bridge.cp8_dispatches_completed"
+    ),
+    # The single-CU host_dispatch configuration exposes the CU group without
+    # an indexed child name.
+    "retired_instructions": "system.cpu1.CUs.numInstrExecuted",
+    "global_store_instructions": (
+        "system.host_gpu_bridge.cp8_cu_global_store_instructions"
+    ),
+    "global_store_bytes": (
+        "system.host_gpu_bridge.cp8_cu_global_store_bytes"
+    ),
+    "host_fallback_count": "system.host_gpu_bridge.host_fallback_count",
+}
+DISPATCH_RESULT_KEYS = frozenset({
+    "status",
+    "fixture",
+    "fixture_id",
+    "fixture_manifest_sha256",
+    "input_crc32c",
+    "output_sentinel_crc32c",
+    "input_hex",
+    "initial_output_hex",
+    "expected_output_hex",
+    "d2h_output_hex",
+    "ticket",
+    "first_wait",
+    "completion",
+    "signal",
+    "output_crc32c",
+    "output_match",
+    "cleanup",
+})
+DISPATCH_CLIENT_RESULT_KEYS = frozenset({
+    "status",
+    "selected_version",
+    "capability_words",
+    "daemon_uuid",
+    "job_uuid",
+    "connection_id",
+    "epoch",
+    "rank",
+    "world_size",
+    "maximum_record_bytes",
+    "request_id",
+    "peer_uid",
+    "peer_pid",
+    "dispatch",
+})
+DISPATCH_TICKET_KEYS = frozenset({
+    "request_id",
+    "queue_id",
+    "queue_generation",
+    "queue_sequence",
+    "input_allocation_id",
+    "input_generation",
+    "output_allocation_id",
+    "output_generation",
+    "signal_id",
+    "signal_generation",
+    "trace_id",
+    "input_gpu_va",
+    "output_gpu_va",
+    "packet_crc32c",
+    "admission_tick",
+})
+DISPATCH_COMPLETION_KEYS = frozenset({
+    "status",
+    "wire_status",
+    "request_id",
+    "queue_id",
+    "queue_generation",
+    "queue_sequence",
+    "fixture_id",
+    "input_allocation_id",
+    "input_generation",
+    "output_allocation_id",
+    "output_generation",
+    "signal_id",
+    "signal_generation",
+    "trace_id",
+    "input_gpu_va",
+    "output_gpu_va",
+    "packet_crc32c",
+    "output_crc32c",
+    "admission_tick",
+    "start_tick",
+    "end_tick",
+    "retire_tick",
+})
+DISPATCH_FIRST_WAIT_KEYS = frozenset({
+    "status", "status_name", "wire_status", "retried_without_send",
+})
+DISPATCH_SIGNAL_KEYS = frozenset({
+    "armed_wait_status",
+    "armed_wait_wire_status",
+    "armed_wait_status_name",
+    "observed_value",
+    "signal_completion_tick",
+    "retried_without_send",
+})
+DISPATCH_CLEANUP_KEYS = frozenset({
+    "queue_destroyed", "input_freed", "output_freed", "signal_destroyed",
+})
+
+
+def load_json_document(path: Path, expected_schema: str) -> dict[str, Any]:
+    try:
+        with path.open("r", encoding="utf-8") as stream:
+            document = json.load(stream)
+    except (OSError, json.JSONDecodeError) as error:
+        raise CheckFailure(f"could not load {path}: {error}") from error
+    require(isinstance(document, dict), f"{path} is not a JSON object")
+    require(document.get("schema") == expected_schema,
+            f"unexpected protocol schema in {path}")
+    return document
+
+
+def parse_json_integer(value: Any, source: str) -> int:
+    require(not isinstance(value, bool), f"{source} is a boolean, not an integer")
+    if isinstance(value, int):
+        result = value
+    elif isinstance(value, str):
+        require(value != "" and value.strip() == value,
+                f"{source} is not a canonical integer: {value!r}")
+        try:
+            result = int(value, 0)
+        except ValueError as error:
+            raise CheckFailure(f"{source} is not an integer: {value!r}") from error
+    else:
+        raise CheckFailure(f"{source} is not an integer: {value!r}")
+    return result
+
+
+def require_u64(value: Any, source: str, *, nonzero: bool = False) -> int:
+    result = parse_json_integer(value, source)
+    require(0 <= result <= 0xFFFFFFFFFFFFFFFF,
+            f"{source} is outside uint64: {result}")
+    if nonzero:
+        require(result != 0, f"{source} must be nonzero")
+    return result
+
+
+def require_u32(value: Any, source: str) -> int:
+    result = parse_json_integer(value, source)
+    require(0 <= result <= 0xFFFFFFFF,
+            f"{source} is outside uint32: {result}")
+    return result
+
+
+def require_json_unsigned(value: Any, source: str, bits: int) -> int:
+    require(type(value) is int, f"{source} is not a JSON unsigned integer")
+    maximum = (1 << bits) - 1
+    require(0 <= value <= maximum,
+            f"{source} is outside uint{bits}: {value}")
+    return value
+
+
+def validate_trace_event_field(
+    value: Any, rule: Any, source: str, sim_tick: int
+) -> None:
+    if not isinstance(rule, str):
+        require(type(value) is type(rule) and value == rule,
+                f"{source} differs from frozen value {rule!r}: {value!r}")
+        return
+    if rule in TRACE_U64_RULES:
+        integer = require_json_unsigned(value, source, 64)
+        if rule == "nonzero-u64":
+            require(integer != 0, f"{source} must be nonzero")
+        elif rule == "u64-all-ones":
+            require(integer == 0xFFFFFFFFFFFFFFFF,
+                    f"{source} is not the all-lanes wave64 mask")
+        elif rule == "u64-equals-sim_tick":
+            require(integer == sim_tick,
+                    f"{source} does not equal the event sim_tick")
+        return
+    if rule in TRACE_U32_RULES:
+        require_json_unsigned(value, source, 32)
+        return
+    if rule == "exact-64-byte-lowercase-hex":
+        require(isinstance(value, str) and
+                LOWER_HEX_64_PATTERN.fullmatch(value) is not None,
+                f"{source} is not exact lowercase 64-byte hex")
+        return
+    if rule == "exact-16-byte-lowercase-hex":
+        require(isinstance(value, str) and
+                LOWER_HEX_16_PATTERN.fullmatch(value) is not None,
+                f"{source} is not exact lowercase 16-byte hex")
+        return
+    if rule == "lowercase-sha256":
+        require_sha256(value, source)
+        return
+    require(type(value) is str and value == rule,
+            f"{source} differs from frozen value {rule!r}: {value!r}")
+
+
+def require_sha256(value: Any, source: str) -> str:
+    require(isinstance(value, str) and SHA256_PATTERN.fullmatch(value) is not None,
+            f"{source} is not a lowercase SHA-256 digest: {value!r}")
+    return value
+
+
+def require_exact_object(
+    value: Any, expected_keys: Iterable[str], source: str
+) -> dict[str, Any]:
+    require(isinstance(value, dict), f"{source} is not a JSON object")
+    keys = set(value)
+    expected = set(expected_keys)
+    require(keys == expected,
+            f"{source} keys differ from the frozen surface: "
+            f"missing={sorted(expected - keys)} extra={sorted(keys - expected)}")
+    return value
+
+
+def require_fixed_hex_unsigned(
+    value: Any, source: str, bits: int, *, nonzero: bool = False
+) -> int:
+    digits = bits // 4
+    require(bits in (32, 64), f"unsupported fixed hex width for {source}")
+    require(isinstance(value, str) and
+            re.fullmatch(rf"0x[0-9a-f]{{{digits}}}", value) is not None,
+            f"{source} is not canonical lowercase uint{bits} hex: {value!r}")
+    result = int(value, 16)
+    if nonzero:
+        require(result != 0, f"{source} must be nonzero")
+    return result
+
+
+def require_lower_hex_bytes(value: Any, source: str, byte_count: int) -> bytes:
+    require(isinstance(value, str) and
+            re.fullmatch(rf"[0-9a-f]{{{byte_count * 2}}}", value) is not None,
+            f"{source} is not exact lowercase {byte_count}-byte hex")
+    return bytes.fromhex(value)
+
+
+def validate_dispatch_result(
+    value: Any, authority: dict[str, Any]
+) -> DispatchEvidence:
+    dispatch = require_exact_object(value, DISPATCH_RESULT_KEYS,
+                                    "runtime dispatch result")
+    fixture = authority["fixture_authority"]
+    golden = fixture["golden_buffers"]
+    require(type(dispatch["status"]) is int and dispatch["status"] == 0,
+            "runtime dispatch status is not canonical success")
+    require(dispatch["fixture"] == DISPATCH_FIXTURE,
+            "runtime dispatch fixture name differs from the pinned CLI")
+    fixture_id = require_fixed_hex_unsigned(
+        dispatch["fixture_id"], "runtime dispatch fixture_id", 64, nonzero=True
+    )
+    require(fixture_id == fixture["fixture_id"],
+            "runtime dispatch fixture ID differs from authority")
+    require(require_sha256(
+        dispatch["fixture_manifest_sha256"],
+        "runtime dispatch fixture_manifest_sha256",
+    ) == fixture["manifest"]["sha256_hex"],
+            "runtime dispatch fixture manifest hash differs from authority")
+
+    ticket = require_exact_object(
+        dispatch["ticket"], DISPATCH_TICKET_KEYS, "runtime dispatch ticket"
+    )
+    ticket_u64 = {
+        name: require_fixed_hex_unsigned(
+            ticket[name], f"runtime dispatch ticket.{name}", 64, nonzero=True
+        )
+        for name in DISPATCH_TICKET_KEYS
+        if name != "packet_crc32c"
+    }
+    packet_crc32c = require_fixed_hex_unsigned(
+        ticket["packet_crc32c"],
+        "runtime dispatch ticket.packet_crc32c",
+        32,
+    )
+    require(packet_crc32c == int(
+        authority["golden"]["identity"]["packet_crc32c_hex"], 16
+    ), "runtime dispatch ticket packet CRC differs from fixture authority")
+    input_allocation_id = ticket_u64["input_allocation_id"]
+    output_allocation_id = ticket_u64["output_allocation_id"]
+    signal_id = ticket_u64["signal_id"]
+    require(1 <= input_allocation_id <= 1024 and
+            1 <= output_allocation_id <= 1024 and
+            input_allocation_id != output_allocation_id,
+            "runtime dispatch allocation handles are aliased or out of range")
+    require(1 <= signal_id <= 1024,
+            "runtime dispatch signal handle is out of range")
+    slot_base = 0x0000100000000000
+    slot_stride = 0x80000000
+    require(
+        ticket_u64["input_gpu_va"] ==
+        slot_base + (input_allocation_id - 1) * slot_stride and
+        ticket_u64["output_gpu_va"] ==
+        slot_base + (output_allocation_id - 1) * slot_stride,
+        "runtime dispatch packet VAs differ from their CP-0006 slots",
+    )
+
+    first_wait = require_exact_object(
+        dispatch["first_wait"], DISPATCH_FIRST_WAIT_KEYS,
+        "runtime dispatch first_wait",
+    )
+    require(type(first_wait["status"]) is int and
+            first_wait["status"] == 19 and
+            first_wait["status_name"] == "cancelled" and
+            type(first_wait["wire_status"]) is int and
+            first_wait["wire_status"] == -1 and
+            first_wait["retried_without_send"] is True,
+            "runtime dispatch first wait was not locally cancelled and retried")
+
+    completion = require_exact_object(
+        dispatch["completion"], DISPATCH_COMPLETION_KEYS,
+        "runtime dispatch completion",
+    )
+    require(type(completion["status"]) is int and completion["status"] == 0 and
+            type(completion["wire_status"]) is int and
+            completion["wire_status"] == 0,
+            "runtime dispatch completion status is not canonical success")
+    completion_u64 = {
+        name: require_fixed_hex_unsigned(
+            completion[name], f"runtime dispatch completion.{name}", 64,
+            nonzero=True,
+        )
+        for name in DISPATCH_COMPLETION_KEYS
+        if name not in {"status", "wire_status", "packet_crc32c",
+                        "output_crc32c"}
+    }
+    completion_packet_crc = require_fixed_hex_unsigned(
+        completion["packet_crc32c"],
+        "runtime dispatch completion.packet_crc32c",
+        32,
+    )
+    completion_output_crc = require_fixed_hex_unsigned(
+        completion["output_crc32c"],
+        "runtime dispatch completion.output_crc32c",
+        32,
+    )
+    ticket_echoes = (
+        "request_id",
+        "queue_id",
+        "queue_generation",
+        "queue_sequence",
+        "input_allocation_id",
+        "input_generation",
+        "output_allocation_id",
+        "output_generation",
+        "signal_id",
+        "signal_generation",
+        "trace_id",
+        "input_gpu_va",
+        "output_gpu_va",
+        "admission_tick",
+    )
+    for name in ticket_echoes:
+        require(completion_u64[name] == ticket_u64[name],
+                f"runtime dispatch completion.{name} differs from ticket")
+    require(completion_u64["fixture_id"] == fixture_id,
+            "runtime dispatch completion fixture ID differs from ticket")
+    require(completion_packet_crc == packet_crc32c,
+            "runtime dispatch completion packet CRC differs from ticket")
+
+    admission_tick = ticket_u64["admission_tick"]
+    start_tick = completion_u64["start_tick"]
+    end_tick = completion_u64["end_tick"]
+    retire_tick = completion_u64["retire_tick"]
+    require(admission_tick < start_tick <= end_tick <= retire_tick and
+            retire_tick > admission_tick + 1,
+            "runtime dispatch completion ticks are not canonical")
+    require(retire_tick != 0xFFFFFFFFFFFFFFFF,
+            "runtime dispatch retirement cannot form R+1")
+
+    signal_result = require_exact_object(
+        dispatch["signal"], DISPATCH_SIGNAL_KEYS, "runtime dispatch signal"
+    )
+    signal_completion_tick = require_fixed_hex_unsigned(
+        signal_result["signal_completion_tick"],
+        "runtime dispatch signal.signal_completion_tick",
+        64,
+        nonzero=True,
+    )
+    require(type(signal_result["armed_wait_status"]) is int and
+            signal_result["armed_wait_status"] == 11 and
+            type(signal_result["armed_wait_wire_status"]) is int and
+            signal_result["armed_wait_wire_status"] == -1 and
+            signal_result["armed_wait_status_name"] == "timed out" and
+            type(signal_result["observed_value"]) is int and
+            signal_result["observed_value"] == 0 and
+            signal_result["retried_without_send"] is True,
+            "runtime dispatch signal was not armed-one/EQ0 timeout then zero")
+    require(signal_completion_tick == retire_tick + 1,
+            "runtime dispatch signal completion tick is not exactly R+1")
+
+    expected_output_crc = int(golden["output_crc32c_hex"], 16)
+    require(completion_output_crc == expected_output_crc,
+            "runtime dispatch completion output CRC differs from authority")
+
+    # Execution and signal completion are canonical before accepting D2H bytes.
+    input_bytes = require_lower_hex_bytes(
+        dispatch["input_hex"], "runtime dispatch input_hex", 64
+    )
+    initial_output = require_lower_hex_bytes(
+        dispatch["initial_output_hex"],
+        "runtime dispatch initial_output_hex",
+        64,
+    )
+    expected_output = require_lower_hex_bytes(
+        dispatch["expected_output_hex"],
+        "runtime dispatch expected_output_hex",
+        64,
+    )
+    d2h_output = require_lower_hex_bytes(
+        dispatch["d2h_output_hex"], "runtime dispatch d2h_output_hex", 64
+    )
+    require(input_bytes.hex() == golden["input_hex"] and
+            input_bytes == bytes(range(64)),
+            "runtime dispatch input bytes differ from exact 00..3f")
+    require(initial_output == bytes(64),
+            "runtime dispatch initial output is not the exact zero sentinel")
+    xor_output = bytes(byte ^ fixture["xor_byte"] for byte in input_bytes)
+    require(expected_output == xor_output and
+            expected_output.hex() == golden["output_hex"] and
+            d2h_output == expected_output and
+            d2h_output != input_bytes and d2h_output != initial_output,
+            "runtime dispatch D2H bytes differ from the XOR fixture oracle")
+    input_crc = require_fixed_hex_unsigned(
+        dispatch["input_crc32c"], "runtime dispatch input_crc32c", 32
+    )
+    sentinel_crc = require_fixed_hex_unsigned(
+        dispatch["output_sentinel_crc32c"],
+        "runtime dispatch output_sentinel_crc32c",
+        32,
+    )
+    output_crc = require_fixed_hex_unsigned(
+        dispatch["output_crc32c"], "runtime dispatch output_crc32c", 32
+    )
+    require(input_crc == WireProtocol.crc32c(input_bytes) ==
+            int(golden["input_crc32c_hex"], 16),
+            "runtime dispatch input CRC differs from exact input bytes")
+    require(sentinel_crc == WireProtocol.crc32c(initial_output) ==
+            int(golden["output_initial_crc32c_hex"], 16),
+            "runtime dispatch sentinel CRC differs from zero bytes")
+    require(output_crc == WireProtocol.crc32c(d2h_output) ==
+            expected_output_crc == completion_output_crc,
+            "runtime dispatch D2H CRC differs from bytes or completion")
+    require(hashlib.sha256(input_bytes).hexdigest() ==
+            golden["input_sha256_hex"] and
+            hashlib.sha256(initial_output).hexdigest() ==
+            golden["output_initial_sha256_hex"] and
+            hashlib.sha256(d2h_output).hexdigest() ==
+            golden["output_sha256_hex"],
+            "runtime dispatch buffer hashes differ from authority")
+    require(dispatch["output_match"] is True,
+            "runtime dispatch did not publish exact output_match")
+    cleanup = require_exact_object(
+        dispatch["cleanup"], DISPATCH_CLEANUP_KEYS, "runtime dispatch cleanup"
+    )
+    require(all(cleanup[name] is True for name in DISPATCH_CLEANUP_KEYS),
+            "runtime dispatch resource cleanup is incomplete")
+
+    return DispatchEvidence(
+        request_id=ticket_u64["request_id"],
+        trace_id=ticket_u64["trace_id"],
+        fixture_id=fixture_id,
+        queue_id=ticket_u64["queue_id"],
+        queue_generation=ticket_u64["queue_generation"],
+        queue_sequence=ticket_u64["queue_sequence"],
+        input_allocation_id=input_allocation_id,
+        input_generation=ticket_u64["input_generation"],
+        input_gpu_va=ticket_u64["input_gpu_va"],
+        output_allocation_id=output_allocation_id,
+        output_generation=ticket_u64["output_generation"],
+        output_gpu_va=ticket_u64["output_gpu_va"],
+        signal_id=signal_id,
+        signal_generation=ticket_u64["signal_generation"],
+        packet_crc32c=packet_crc32c,
+        output_crc32c=output_crc,
+        admission_tick=admission_tick,
+        start_tick=start_tick,
+        end_tick=end_tick,
+        retire_tick=retire_tick,
+        signal_completion_tick=signal_completion_tick,
+    )
+
+
+def strict_json_object(text: str, source: str) -> dict[str, Any]:
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise CheckFailure(f"{source} repeats JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str) -> None:
+        raise CheckFailure(f"{source} contains non-finite JSON number {value}")
+
+    try:
+        value = json.loads(
+            text,
+            object_pairs_hook=unique_object,
+            parse_constant=reject_constant,
+        )
+    except json.JSONDecodeError as error:
+        raise CheckFailure(f"{source} is invalid JSON: {error}") from error
+    require(isinstance(value, dict), f"{source} is not a JSON object")
+    return value
+
+
+def load_dispatch_trace(path: Path) -> list[dict[str, Any]]:
+    try:
+        size = path.stat().st_size
+    except OSError as error:
+        raise CheckFailure(f"could not stat dispatch trace {path}: {error}") from error
+    require(size <= MAX_DISPATCH_TRACE_BYTES,
+            f"dispatch trace {path} exceeds {MAX_DISPATCH_TRACE_BYTES} bytes")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise CheckFailure(f"could not read dispatch trace {path}: {error}") from error
+    require(text.endswith("\n"),
+            f"dispatch trace {path} does not end at a JSONL record boundary")
+    lines = text.splitlines()
+    require(lines, f"dispatch trace {path} is empty")
+    require(len(lines) <= MAX_DISPATCH_TRACE_RECORDS,
+            f"dispatch trace {path} exceeds {MAX_DISPATCH_TRACE_RECORDS} records")
+    records: list[dict[str, Any]] = []
+    for index, line in enumerate(lines, start=1):
+        require(line != "", f"dispatch trace {path}:{index} is blank")
+        records.append(strict_json_object(line, f"dispatch trace {path}:{index}"))
+    return records
+
+
+def parse_gem5_stats(path: Path) -> dict[str, str]:
+    try:
+        size = path.stat().st_size
+    except OSError as error:
+        raise CheckFailure(f"could not stat gem5 stats {path}: {error}") from error
+    require(size <= MAX_GEM5_STATS_BYTES,
+            f"gem5 stats {path} exceeds {MAX_GEM5_STATS_BYTES} bytes")
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise CheckFailure(f"could not read gem5 stats {path}: {error}") from error
+    stats: dict[str, str] = {}
+    in_section = False
+    saw_section = False
+    for line_number, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped == "---------- Begin Simulation Statistics ----------":
+            require(not in_section and not saw_section,
+                    f"gem5 stats {path} contains multiple statistics sections")
+            in_section = True
+            saw_section = True
+            continue
+        if stripped == "---------- End Simulation Statistics   ----------":
+            require(in_section, f"gem5 stats {path}:{line_number} has an unmatched end")
+            in_section = False
+            continue
+        if stripped.startswith("#") or not in_section:
+            continue
+        columns = stripped.split()
+        require(len(columns) >= 2,
+                f"gem5 stats {path}:{line_number} is malformed: {line!r}")
+        name, value = columns[:2]
+        require(name not in stats,
+                f"gem5 stats {path} repeats statistic {name}")
+        stats[name] = value
+    require(saw_section and not in_section,
+            f"gem5 stats {path} has no complete statistics section")
+    return stats
+
+
+def require_stat_integer(stats: dict[str, str], name: str) -> int:
+    require(name in stats, f"gem5 stats is missing {name}")
+    value = stats[name]
+    require(STAT_INTEGER_PATTERN.fullmatch(value) is not None,
+            f"gem5 statistic {name} is not an unsigned integer: {value!r}")
+    return int(value, 10)
+
+
+def capture_process_audit(
+    pid: int, log_path: Path | None = None
+) -> ProcessAudit:
+    try:
+        maps = Path(f"/proc/{pid}/maps").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        descriptor_entries = list(Path(f"/proc/{pid}/fd").iterdir())
+    except (FileNotFoundError, ProcessLookupError) as error:
+        raise CheckFailure(f"process {pid} exited during provenance audit") from error
+    except OSError as error:
+        raise CheckFailure(f"could not audit process {pid}: {error}") from error
+    open_paths_list: list[str] = []
+    for entry in descriptor_entries:
+        try:
+            open_paths_list.append(os.readlink(entry))
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            raise CheckFailure(
+                f"could not audit process {pid} descriptor {entry.name}: {error}"
+            ) from error
+    return ProcessAudit(
+        maps=maps,
+        open_paths=tuple(sorted(open_paths_list)),
+        log=read_text(log_path) if log_path is not None else "",
+    )
+
+
+def validate_process_audit(audit: ProcessAudit) -> None:
+    sources = {
+        "process maps": audit.maps,
+        "open file descriptors": "\n".join(audit.open_paths),
+        "gem5 log": audit.log,
+    }
+    for source, contents in sources.items():
+        lowered = contents.lower()
+        for marker in FORBIDDEN_NATIVE_GPU_MARKERS:
+            require(marker not in lowered,
+                    f"{source} contains forbidden native GPU dependency {marker}")
+
+
+def validate_evidence_file(
+    path: Path, source: str, *, exact_mode: int | None = None
+) -> os.stat_result:
+    try:
+        metadata = path.lstat()
+    except OSError as error:
+        raise CheckFailure(f"could not stat {source} {path}: {error}") from error
+    require(stat.S_ISREG(metadata.st_mode),
+            f"{source} is not a regular file: {path}")
+    require(metadata.st_uid == os.geteuid(),
+            f"{source} is not owned by the current euid: {path}")
+    mode = stat.S_IMODE(metadata.st_mode)
+    if exact_mode is not None:
+        require(mode == exact_mode,
+                f"{source} mode is {mode:04o}, expected {exact_mode:04o}")
+    else:
+        require(mode & 0o022 == 0,
+                f"{source} is group/world writable: {path}")
+    require(metadata.st_size > 0, f"{source} is empty: {path}")
+    return metadata
+
+
+def validate_dispatch_exit_log(
+    log: str, stats_path: Path, earliest_tick: int
+) -> int:
+    marker_lines = [
+        line for line in log.splitlines()
+        if line.startswith("host-gpu-dispatch-exit ")
+    ]
+    require(len(marker_lines) == 1,
+            "dispatch daemon log does not contain exactly one exit marker")
+    match = DISPATCH_EXIT_PATTERN.fullmatch(marker_lines[0])
+    require(match is not None,
+            "dispatch daemon did not exit for canonical session completion")
+    assert match is not None
+    exit_tick = int(match.group(1), 10)
+    require(exit_tick >= earliest_tick,
+            "dispatch daemon exit tick precedes signal completion")
+    require(match.group(2) == str(stats_path),
+            "dispatch daemon exit marker names a foreign stats path")
+    return exit_tick
+
+
+def validate_dispatch_stats(
+    stats: dict[str, str], metric_names: dict[str, str]
+) -> dict[str, int]:
+    require(set(metric_names) == DISPATCH_STAT_SEMANTICS,
+            "dispatch statistic map does not cover the exact CP-0008 semantics")
+    require(len(set(metric_names.values())) == len(metric_names),
+            "dispatch statistic map aliases two semantic counters")
+    values = {
+        semantic: require_stat_integer(stats, name)
+        for semantic, name in metric_names.items()
+    }
+    exact_one = (
+        "dispatches_admitted",
+        "hsapp_packets_fetched",
+        "gpu_command_processor_submissions",
+        "gpu_dispatcher_starts",
+        "gpu_dispatcher_completions",
+        "workgroups_completed",
+        "waves_started",
+        "packets_retired",
+        "dispatches_completed",
+    )
+    for semantic in exact_one:
+        require(values[semantic] == 1,
+                f"dispatch statistic {semantic} is not exactly one: "
+                f"{values[semantic]}")
+    require(values["retired_instructions"] > 0,
+            "dispatch retired no GPU instructions")
+    require(values["global_store_instructions"] > 0,
+            "dispatch executed no GPU global-store instructions")
+    require(values["global_store_bytes"] == 64,
+            f"dispatch stored {values['global_store_bytes']} bytes, expected 64")
+    require(values["host_fallback_count"] == 0,
+            "dispatch used a host fallback path")
+    return values
+
+
+def validate_dispatch_trace(
+    records: list[dict[str, Any]],
+    evidence: DispatchEvidence,
+    authority: dict[str, Any],
+) -> dict[str, Any]:
+    fixture = authority["fixture_authority"]
+    trace_contract = authority["trace_contract"]
+    expected_events = trace_contract["required_ordered_events"]
+    require(len(records) == len(expected_events),
+            f"dispatch trace has {len(records)} events, expected "
+            f"{len(expected_events)}")
+    require([record.get("event") for record in records] == expected_events,
+            "dispatch trace event order is missing, duplicated, or foreign")
+
+    expected_common: dict[str, Any] = {
+        "schema": trace_contract["schema"],
+        "trace_id": evidence.trace_id,
+        "request_id": evidence.request_id,
+        "fixture_id": evidence.fixture_id,
+        "fixture_manifest_sha256": fixture["manifest"]["sha256_hex"],
+        "code_image_sha256": fixture["code_image"]["sha256_hex"],
+        "aql_template_sha256": fixture["aql_template"]["sha256_hex"],
+        "materialized_aql_sha256": evidence.materialized_aql_sha256,
+        "queue_id": evidence.queue_id,
+        "queue_generation": evidence.queue_generation,
+        "queue_sequence": evidence.queue_sequence,
+        "input_allocation_id": evidence.input_allocation_id,
+        "input_generation": evidence.input_generation,
+        "output_allocation_id": evidence.output_allocation_id,
+        "output_generation": evidence.output_generation,
+        "signal_id": evidence.signal_id,
+        "signal_generation": evidence.signal_generation,
+    }
+    common_fields = set(trace_contract["common_fields"])
+    require(common_fields == set(expected_common) | {"event", "sim_tick"},
+            "dispatch trace authority common_fields differ from the validator")
+    require(set(trace_contract["event_fields"]) == set(expected_events),
+            "dispatch trace authority event_fields differ from ordered events")
+    require(trace_contract["schema"] == DISPATCH_TRACE_SCHEMA,
+            "dispatch trace authority schema differs from CP-0008")
+    previous_tick = -1
+    indexed: dict[str, dict[str, Any]] = {}
+    for index, record in enumerate(records):
+        event = expected_events[index]
+        indexed[event] = record
+        event_fields = trace_contract["event_fields"].get(event)
+        require(isinstance(event_fields, dict),
+                f"dispatch authority lacks event_fields for {event}")
+        expected_keys = common_fields | set(event_fields)
+        require(set(record) == expected_keys,
+                f"dispatch trace event {event} keys differ from authority: "
+                f"missing={sorted(expected_keys - set(record))} "
+                f"extra={sorted(set(record) - expected_keys)}")
+        for name, expected in expected_common.items():
+            actual = record.get(name)
+            if isinstance(expected, int):
+                actual = require_u64(actual, f"trace {event}.{name}")
+            elif name.endswith("sha256"):
+                actual = require_sha256(actual, f"trace {event}.{name}")
+            require(actual == expected,
+                    f"dispatch trace {event}.{name} is inconsistent: "
+                    f"{actual!r} != {expected!r}")
+        sim_tick = require_u64(record.get("sim_tick"), f"trace {event}.sim_tick")
+        require(sim_tick >= previous_tick,
+                f"dispatch trace tick regressed at {event}")
+        previous_tick = sim_tick
+        for name, rule in event_fields.items():
+            validate_trace_event_field(
+                record[name], rule, f"trace {event}.{name}", sim_tick
+            )
+
+    require(
+        require_u64(indexed["dispatch_admitted"].get("sim_tick"),
+                    "trace dispatch_admitted.sim_tick") ==
+        require_u64(indexed["dispatch_admitted"].get("admission_tick"),
+                    "trace dispatch_admitted.admission_tick"),
+        "dispatch admission event does not self-correlate its tick",
+    )
+    require(
+        require_u64(indexed["dispatch_admitted"].get("admission_tick"),
+                    "trace dispatch_admitted.admission_tick") ==
+        evidence.admission_tick,
+        "dispatch trace admission tick differs from the ACK ticket",
+    )
+    require(
+        require_u64(indexed["gpu_dispatcher_started"].get("sim_tick"),
+                    "trace gpu_dispatcher_started.sim_tick") ==
+        evidence.start_tick,
+        "dispatch trace GPU start tick differs from completion",
+    )
+    require(
+        require_u64(indexed["cu_global_store_completed"].get("sim_tick"),
+                    "trace cu_global_store_completed.sim_tick") ==
+        evidence.end_tick,
+        "dispatch trace final-store tick differs from completion",
+    )
+    require(
+        require_u64(indexed["packet_retired"].get("sim_tick"),
+                    "trace packet_retired.sim_tick") ==
+        evidence.retire_tick,
+        "dispatch trace retire tick differs from completion",
+    )
+
+    published = indexed["aql_packet_published"]
+    packet_hex = published.get("materialized_aql_hex")
+    require(isinstance(packet_hex, str),
+            "dispatch trace does not retain materialized_aql_hex")
+    try:
+        packet = bytes.fromhex(packet_hex)
+    except ValueError as error:
+        raise CheckFailure("dispatch trace materialized AQL is not hex") from error
+    require(len(packet) == fixture["aql_template"]["bytes"],
+            f"materialized AQL is {len(packet)} bytes, expected 64")
+    template = bytes.fromhex(fixture["aql_template"]["bytes_hex"])
+    require(packet[:32] == template[:32] and packet[48:] == template[48:],
+            "materialized AQL changed a field outside its two permitted VAs")
+    packet_fields = struct.unpack("<6H5I4Q", packet)
+    kernel_object, kernarg_address, reserved, completion_signal = packet_fields[11:]
+    require(kernel_object != 0 and kernarg_address != 0,
+            "materialized AQL contains a zero code or kernarg VA")
+    require(reserved == 0 and completion_signal == 0,
+            "materialized AQL reserved/completion-signal field is nonzero")
+    actual_materialized_hash = hashlib.sha256(packet).hexdigest()
+    require(actual_materialized_hash == evidence.materialized_aql_sha256,
+            "materialized AQL bytes and retained hash disagree")
+    require(WireProtocol.crc32c(packet) == evidence.packet_crc32c,
+            "materialized AQL bytes and ACK packet CRC disagree")
+    require(require_u64(published.get("kernel_object"),
+                        "trace aql_packet_published.kernel_object") ==
+            kernel_object,
+            "retained materialized AQL kernel-object VA disagrees")
+    require(require_u64(published.get("kernarg_address"),
+                        "trace aql_packet_published.kernarg_address") ==
+            kernarg_address,
+            "retained materialized AQL kernarg VA disagrees")
+    require(require_u64(published.get("completion_signal"),
+                        "trace aql_packet_published.completion_signal") == 0,
+            "retained AQL completion signal is not the zero special handle")
+    require(require_u32(published.get("packet_crc32c"),
+                        "trace aql_packet_published.packet_crc32c") ==
+            evidence.packet_crc32c,
+            "retained materialized AQL packet CRC differs from ACK")
+    require(require_u32(published.get("header"),
+                        "trace aql_packet_published.header") == 0x1402 and
+            require_u32(published.get("setup"),
+                        "trace aql_packet_published.setup") == 1,
+            "retained AQL header/setup differs from the pinned packet")
+    require(published.get("grid_size") == fixture["grid_size"] and
+            published.get("workgroup_size") == fixture["workgroup_size"],
+            "retained AQL geometry differs from the pinned packet")
+
+    kernarg_hex = published.get("materialized_kernarg_hex")
+    require(isinstance(kernarg_hex, str),
+            "dispatch trace does not retain materialized_kernarg_hex")
+    try:
+        kernarg = bytes.fromhex(kernarg_hex)
+    except ValueError as error:
+        raise CheckFailure("dispatch trace materialized kernarg is not hex") from error
+    require(len(kernarg) == fixture["kernarg_template"]["bytes"],
+            "materialized kernarg does not have the pinned size")
+    require(int.from_bytes(kernarg[:8], "little") == evidence.input_gpu_va and
+            int.from_bytes(kernarg[8:], "little") == evidence.output_gpu_va,
+            "materialized kernarg does not bind the two ticket VAs")
+    require(require_sha256(
+        published.get("materialized_kernarg_sha256"),
+        "trace aql_packet_published.materialized_kernarg_sha256",
+    ) == hashlib.sha256(kernarg).hexdigest(),
+            "materialized kernarg bytes and retained hash disagree")
+
+    registered = indexed["aql_queue_registered"]
+    require(registered.get("component") == "HSAPacketProcessor" and
+            registered.get("active") is True,
+            "AQL queue registration is not attributed to active "
+            "HSAPacketProcessor state")
+    internal_queue_id = require_u64(
+        registered.get("internal_queue_id"),
+        "trace aql_queue_registered.internal_queue_id",
+        nonzero=True,
+    )
+    internal_queue_generation = require_u64(
+        registered.get("internal_queue_generation"),
+        "trace aql_queue_registered.internal_queue_generation",
+        nonzero=True,
+    )
+    packet_va = require_u64(published.get("packet_va"),
+                            "trace aql_packet_published.packet_va", nonzero=True)
+    for event in ("aql_packet_published", "hsapp_packet_fetched",
+                  "packet_retired"):
+        record = indexed[event]
+        require(require_u64(record.get("internal_queue_id"),
+                            f"trace {event}.internal_queue_id") ==
+                internal_queue_id,
+                f"dispatch trace {event} crossed internal AQL queues")
+        require(require_u64(record.get("internal_queue_generation"),
+                            f"trace {event}.internal_queue_generation") ==
+                internal_queue_generation,
+                f"dispatch trace {event} crossed internal queue generations")
+        require(require_u64(record.get("packet_va"),
+                            f"trace {event}.packet_va") == packet_va,
+                f"dispatch trace {event} crossed AQL packet VAs")
+
+    submitted = indexed["gpu_command_processor_submitted"]
+    require(indexed["hsapp_packet_fetched"].get("component") ==
+            "HSAPacketProcessor",
+            "packet fetch is not attributed to HSAPacketProcessor")
+    require(submitted.get("component") == "GPUCommandProcessor",
+            "GPU task submission is not attributed to GPUCommandProcessor")
+    gpu_task_id = require_u64(submitted.get("gpu_task_id"),
+                              "trace gpu_command_processor_submitted.gpu_task_id",
+                              nonzero=True)
+    for event in ("gpu_dispatcher_started", "cu_wave_started",
+                  "cu_global_store_completed", "gpu_dispatcher_completed",
+                  "packet_retired"):
+        require(require_u64(indexed[event].get("gpu_task_id"),
+                            f"trace {event}.gpu_task_id") == gpu_task_id,
+                f"dispatch trace {event} crossed GPU task IDs")
+
+    dispatcher = indexed["gpu_dispatcher_started"]
+    require(dispatcher.get("component") == "GPUDispatcher" and
+            indexed["gpu_dispatcher_completed"].get("component") ==
+            "GPUDispatcher",
+            "GPU dispatch start/completion is not attributed to GPUDispatcher")
+    require(dispatcher.get("grid_size") == fixture["grid_size"] and
+            dispatcher.get("workgroup_size") == fixture["workgroup_size"],
+            "GPUDispatcher trace geometry differs from the pinned fixture")
+    require(require_u64(dispatcher.get("workgroups"),
+                        "trace gpu_dispatcher_started.workgroups") == 1 and
+            require_u64(dispatcher.get("waves"),
+                        "trace gpu_dispatcher_started.waves") == 1,
+            "GPUDispatcher trace did not schedule one workgroup and one wave")
+
+    wave = indexed["cu_wave_started"]
+    require(wave.get("component") == "ComputeUnit" and
+            indexed["cu_global_store_completed"].get("component") ==
+            "ComputeUnit",
+            "wave/store execution is not attributed to ComputeUnit")
+    require(require_u64(wave.get("cu_id"), "trace cu_wave_started.cu_id") == 0,
+            "dispatch trace used a compute unit other than CU 0")
+    require(wave.get("workgroup_id") == [0, 0, 0],
+            "dispatch trace workgroup coordinates are not zero")
+    require(require_u64(wave.get("wavefront_size"),
+                        "trace cu_wave_started.wavefront_size") == 64,
+            "dispatch trace wavefront is not wave64")
+    require(require_u64(wave.get("lane_mask"),
+                        "trace cu_wave_started.lane_mask") ==
+            0xFFFFFFFFFFFFFFFF,
+            "dispatch trace lane mask is not all 64 lanes")
+
+    store = indexed["cu_global_store_completed"]
+    require(require_u64(store.get("output_gpu_va"),
+                        "trace cu_global_store_completed.output_gpu_va") ==
+            evidence.output_gpu_va,
+            "dispatch trace global-store base differs from the output ticket VA")
+    require(require_u64(store.get("store_bytes"),
+                        "trace cu_global_store_completed.store_bytes") == 64,
+            "dispatch trace global-store range is not exactly 64 bytes")
+
+    fetched = indexed["hsapp_packet_fetched"]
+    retired = indexed["packet_retired"]
+    read_index = require_u64(fetched.get("read_index"),
+                             "trace hsapp_packet_fetched.read_index")
+    require(require_u64(retired.get("finish_pkt_read_index"),
+                        "trace packet_retired.finish_pkt_read_index") ==
+            read_index,
+            "finishPkt retirement crossed the fetched AQL read index")
+    require(require_u64(retired.get("completion_signal"),
+                        "trace packet_retired.completion_signal") == 0,
+            "retired packet did not retain the zero completion signal")
+
+    mirrored = indexed["cp7_signal_mirrored"]
+    require(require_u64(mirrored.get("sim_tick"),
+                        "trace cp7_signal_mirrored.sim_tick") ==
+            evidence.retire_tick,
+            "CP-0007 signal mirror did not occur at packet retire tick R")
+    require(parse_json_integer(mirrored.get("value_before"),
+                               "trace cp7_signal_mirrored.value_before") == 1 and
+            parse_json_integer(mirrored.get("value_after"),
+                               "trace cp7_signal_mirrored.value_after") == 0,
+            "CP-0007 trace mirror is not the signed one-to-zero transition")
+
+    final = indexed["wire_completion_emitted"]
+    require(evidence.retire_tick != 0xFFFFFFFFFFFFFFFF and
+            evidence.signal_completion_tick == evidence.retire_tick + 1,
+            "CP-0007 signal completion tick is not exactly R+1")
+    require(require_u64(final.get("sim_tick"),
+                        "trace wire_completion_emitted.sim_tick") >=
+            evidence.signal_completion_tick,
+            "dispatch completion was emitted before CP-0007 completion R+1")
+    final_summary = {
+        "packet_crc32c": evidence.packet_crc32c,
+        "output_crc32c": evidence.output_crc32c,
+        "admission_tick": evidence.admission_tick,
+        "start_tick": evidence.start_tick,
+        "end_tick": evidence.end_tick,
+        "retire_tick": evidence.retire_tick,
+        "signal_completion_tick": evidence.signal_completion_tick,
+        "input_gpu_va": evidence.input_gpu_va,
+        "output_gpu_va": evidence.output_gpu_va,
+    }
+    for name, expected in final_summary.items():
+        maximum = require_u32 if name.endswith("crc32c") else require_u64
+        require(maximum(final.get(name), f"trace wire_completion_emitted.{name}") ==
+                expected,
+                f"wire completion trace summary disagrees on {name}")
+    require(evidence.admission_tick < evidence.start_tick <= evidence.end_tick <=
+            evidence.retire_tick and
+            evidence.retire_tick > evidence.admission_tick + 1,
+            "dispatch completion ticks are not canonical")
+    return {
+        "events": len(records),
+        "request_id": evidence.request_id,
+        "trace_id": evidence.trace_id,
+        "gpu_task_id": gpu_task_id,
+        "internal_queue_id": internal_queue_id,
+        "packet_va": packet_va,
+        "materialized_aql_sha256": actual_materialized_hash,
+    }
 
 
 class WireProtocol:
@@ -487,6 +1622,20 @@ def read_text(path: Path) -> str:
         return ""
 
 
+def write_retained_stream(path: Path, content: str) -> None:
+    """Persist an audited child stream as a private, durable artifact."""
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+            descriptor = -1
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def tail(path: Path, lines: int = 80) -> str:
     return "\n".join(read_text(path).splitlines()[-lines:])
 
@@ -503,6 +1652,16 @@ def parse_last_json(text: str, source: str) -> dict[str, Any]:
         if isinstance(value, dict):
             return value
     raise CheckFailure(f"{source} did not contain a JSON object: {text[-1000:]}")
+
+
+def parse_single_json_object(text: str, source: str) -> dict[str, Any]:
+    require(len(text) <= MAX_DISPATCH_JSON_BYTES,
+            f"{source} exceeds {MAX_DISPATCH_JSON_BYTES} bytes")
+    require(text.endswith("\n"), f"{source} is not newline terminated")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    require(len(lines) == 1,
+            f"{source} did not contain exactly one JSON record")
+    return strict_json_object(lines[0], source)
 
 
 def wait_until(predicate, timeout: float, description: str) -> None:
@@ -614,12 +1773,16 @@ class Daemon:
         maximum_record: int = 65536,
         run_timeout_ms: int | None = None,
         handshake_timeout_ms: int | None = None,
+        config: Path | None = None,
+        extra_args: Iterable[str] = (),
     ) -> None:
         self.harness = harness
         self.name = name
         self.identity = identity
         self.exit_on_handshake = exit_on_handshake
         self.maximum_record = maximum_record
+        self.config = config or harness.gem5_config
+        self.extra_args = tuple(extra_args)
         self.run_timeout_ms = run_timeout_ms or harness.run_timeout_ms
         self.handshake_timeout_ms = (
             handshake_timeout_ms or harness.handshake_timeout_ms
@@ -635,7 +1798,7 @@ class Daemon:
             str(self.harness.gem5),
             f"--listener-mode={listener_mode}",
             f"--outdir={self.out_dir}",
-            str(self.harness.gem5_config),
+            str(self.config),
             "--endpoint", str(self.endpoint),
             "--daemon-uuid", self.identity.daemon_uuid,
             "--job-uuid", self.identity.job_uuid,
@@ -646,6 +1809,7 @@ class Daemon:
             "--handshake-timeout-ms", str(self.handshake_timeout_ms),
             "--run-timeout-ms", str(self.run_timeout_ms),
             "--max-record", str(self.maximum_record),
+            *self.extra_args,
         ]
         if self.exit_on_handshake:
             argv.append("--exit-on-handshake")
@@ -730,13 +1894,16 @@ class Harness:
         self.gem5 = args.gem5
         self.runtime_cli = args.runtime_cli
         self.gem5_config = args.gem5_config
+        self.dispatch_gem5_config = args.dispatch_gem5_config
         self.work_dir = work_dir
         self.start_wait_seconds = args.start_wait_seconds
         self.process_timeout = args.process_timeout_seconds
+        self.dispatch_process_timeout = args.dispatch_process_timeout_seconds
         self.client_timeout_ms = args.client_timeout_ms
         self.startup_timeout_ms = args.server_startup_timeout_ms
         self.handshake_timeout_ms = args.server_handshake_timeout_ms
         self.run_timeout_ms = args.server_run_timeout_ms
+        self.dispatch_run_timeout_ms = args.dispatch_server_run_timeout_ms
         self.hold_ms = args.hold_ms
         self.environment = os.environ.copy()
         self.environment.update({
@@ -886,6 +2053,96 @@ class Harness:
             raise CheckFailure(f"runtime CLI timed out: {' '.join(argv)}") from error
         return ClientResult(argv, result.returncode, result.stdout, result.stderr)
 
+    def run_client_argv_audited(
+        self,
+        argv: list[str],
+        daemon: Daemon,
+        *,
+        timeout: float,
+        retained_name: str | None = None,
+    ) -> tuple[ClientResult, ProcessAuditCounts]:
+        require(timeout > 0, "audited runtime timeout must be positive")
+        require(daemon.process is not None and daemon.process.poll() is None,
+                f"daemon {daemon.name} is not live for the process audit")
+        daemon_samples = 0
+        runtime_samples = 0
+
+        def audit_daemon() -> None:
+            nonlocal daemon_samples
+            assert daemon.process is not None
+            try:
+                audit = capture_process_audit(
+                    daemon.process.pid, daemon.log_path
+                )
+            except CheckFailure:
+                if daemon.process.poll() is not None:
+                    return
+                raise
+            validate_process_audit(audit)
+            daemon_samples += 1
+
+        audit_daemon()
+        require(daemon_samples == 1,
+                f"daemon {daemon.name} exited before its live audit sample")
+        process = subprocess.Popen(
+            argv,
+            cwd=ROOT,
+            env=self.environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            close_fds=True,
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + timeout
+        try:
+            while process.poll() is None:
+                try:
+                    audit = capture_process_audit(process.pid)
+                except CheckFailure:
+                    try:
+                        process.wait(timeout=0.05)
+                    except subprocess.TimeoutExpired:
+                        raise
+                    else:
+                        break
+                validate_process_audit(audit)
+                runtime_samples += 1
+                if time.monotonic() >= deadline:
+                    raise CheckFailure(
+                        f"runtime CLI timed out under process audit: "
+                        f"{' '.join(argv)}"
+                    )
+                if daemon.process.poll() is None:
+                    audit_daemon()
+                time.sleep(0.01)
+            stdout, stderr = process.communicate(timeout=1.0)
+        except Exception:
+            terminate_process(process)
+            raise
+        if daemon.process.poll() is None:
+            audit_daemon()
+        require(runtime_samples > 0,
+                "runtime CLI exited before a live provenance audit sample")
+        validate_process_audit(ProcessAudit(
+            maps="", open_paths=(), log=read_text(daemon.log_path)
+        ))
+        validate_process_audit(ProcessAudit(
+            maps="", open_paths=(), log=stdout + "\n" + stderr
+        ))
+        if retained_name is not None:
+            write_retained_stream(
+                self.work_dir / f"{retained_name}.runtime.stdout", stdout
+            )
+            write_retained_stream(
+                self.work_dir / f"{retained_name}.runtime.stderr", stderr
+            )
+        return (
+            ClientResult(argv, process.returncode, stdout, stderr),
+            ProcessAuditCounts(daemon_samples, runtime_samples),
+        )
+
     def expect_failure(
         self,
         result: ClientResult,
@@ -945,6 +2202,48 @@ class Harness:
                 payload.get("peer_pid") == daemon.process.pid,
                 f"runtime connected to the wrong daemon process: {payload}")
         return payload
+
+    def validate_dispatch_success(
+        self,
+        result: ClientResult,
+        identity: Identity,
+        daemon: Daemon,
+        authority: dict[str, Any],
+    ) -> tuple[dict[str, Any], DispatchEvidence]:
+        require(result.returncode == 0,
+                f"dispatch runtime CLI failed: stdout={result.stdout!r} "
+                f"stderr={result.stderr!r}")
+        require(result.stderr == "",
+                f"dispatch runtime CLI emitted unexpected stderr: "
+                f"{result.stderr!r}")
+        payload = parse_single_json_object(
+            result.stdout, "dispatch runtime CLI stdout"
+        )
+        require_exact_object(
+            payload, DISPATCH_CLIENT_RESULT_KEYS,
+            "dispatch runtime CLI result",
+        )
+        ordinary = self.validate_success(
+            result,
+            identity,
+            daemon,
+            [
+                "0x000000000000001f",
+                "0x0000000000000000",
+                "0x0000000000000000",
+                "0x0000000000000000",
+            ],
+        )
+        require(ordinary == payload,
+                "strict and ordinary runtime result parsing disagreed")
+        evidence = validate_dispatch_result(payload["dispatch"], authority)
+        hello_request_id = require_fixed_hex_unsigned(
+            payload["request_id"], "dispatch runtime HELLO request_id", 64,
+            nonzero=True,
+        )
+        require(evidence.request_id > hello_request_id,
+                "dispatch request ID did not advance beyond HELLO")
+        return payload, evidence
 
     def validate_memory_success(
         self,
@@ -1073,7 +2372,10 @@ class Harness:
 
         result = self.exact_client(
             daemon,
-            extra=("--offer-cap-bit", "4", "--require-cap-bit", "4"),
+            extra=(
+                "--offer-cap-bit", str(UNSUPPORTED_CAPABILITY_PROBE_BIT),
+                "--require-cap-bit", str(UNSUPPORTED_CAPABILITY_PROBE_BIT),
+            ),
         )
         self.expect_failure(result, 5, "capability mismatch", 3)
 
@@ -1262,6 +2564,121 @@ class Harness:
             observed_value=wait["observed_value"],
             reused_generation=reuse["generation"],
             peer_pid=success["peer_pid"],
+        )
+
+    def check_pinned_dispatch(self) -> None:
+        authority = load_json_document(
+            DISPATCH_PROTOCOL_PATH,
+            "amdgpu-sim.host-transport-v1.dispatch.v1",
+        )
+        identity = make_identity(29, 1, 0)
+        trace_path = self.work_dir / "dispatch-trace.jsonl"
+        daemon = Daemon(
+            self,
+            "pinned-dispatch",
+            identity,
+            exit_on_handshake=False,
+            run_timeout_ms=self.dispatch_run_timeout_ms,
+            config=self.dispatch_gem5_config,
+            extra_args=("--dispatch-trace-path", str(trace_path)),
+        )
+        daemon.launch()
+        argv = self.client_argv(
+            daemon.endpoint,
+            identity,
+            timeout_ms=self.dispatch_run_timeout_ms,
+            extra=("--dispatch-fixture", DISPATCH_FIXTURE),
+        )
+        result, audit_counts = self.run_client_argv_audited(
+            argv,
+            daemon,
+            timeout=self.dispatch_process_timeout,
+            retained_name="pinned-dispatch",
+        )
+        payload, evidence = self.validate_dispatch_success(
+            result, identity, daemon, authority
+        )
+
+        daemon_wait = max(
+            self.dispatch_process_timeout,
+            self.dispatch_run_timeout_ms / 1000.0 + self.start_wait_seconds,
+        )
+        returncode = daemon.wait(timeout=daemon_wait)
+        daemon_log = read_text(daemon.log_path)
+        stats_path = daemon.out_dir / "stats.txt"
+        require(returncode == 0,
+                f"dispatch daemon exited rc={returncode}:\n"
+                f"{tail(daemon.log_path)}")
+        exit_tick = validate_dispatch_exit_log(
+            daemon_log, stats_path, evidence.signal_completion_tick
+        )
+        validate_process_audit(ProcessAudit(
+            maps="", open_paths=(), log=daemon_log
+        ))
+
+        require(not daemon.endpoint.exists(),
+                "dispatch daemon retained its endpoint after clean exit")
+        try:
+            lock_metadata = daemon.lock_path.lstat()
+        except OSError as error:
+            raise CheckFailure(
+                f"dispatch endpoint lock is missing: {daemon.lock_path}: "
+                f"{error}"
+            ) from error
+        require(stat.S_ISREG(lock_metadata.st_mode) and
+                lock_metadata.st_uid == os.geteuid() and
+                stat.S_IMODE(lock_metadata.st_mode) == 0o600,
+                "dispatch endpoint lock is not a same-euid 0600 regular file")
+
+        validate_evidence_file(
+            trace_path, "dispatch trace", exact_mode=0o600
+        )
+        validate_evidence_file(stats_path, "dispatch gem5 stats")
+        records = load_dispatch_trace(trace_path)
+        materialized_hash = require_sha256(
+            records[0].get("materialized_aql_sha256"),
+            "dispatch trace materialized_aql_sha256",
+        )
+        evidence = dataclasses.replace(
+            evidence, materialized_aql_sha256=materialized_hash
+        )
+        trace_summary = validate_dispatch_trace(
+            records, evidence, authority
+        )
+        stat_values = validate_dispatch_stats(
+            parse_gem5_stats(stats_path), DISPATCH_STAT_NAMES
+        )
+
+        dispatch_result = payload["dispatch"]
+        self.add_check(
+            "pinned_gfx950_dispatch",
+            fixture=dispatch_result["fixture"],
+            request_id=f"0x{evidence.request_id:016x}",
+            trace_id=f"0x{evidence.trace_id:016x}",
+            gpu_task_id=f"0x{trace_summary['gpu_task_id']:016x}",
+            packet_crc32c=f"0x{evidence.packet_crc32c:08x}",
+            output_crc32c=f"0x{evidence.output_crc32c:08x}",
+            admission_tick=evidence.admission_tick,
+            start_tick=evidence.start_tick,
+            end_tick=evidence.end_tick,
+            retire_tick=evidence.retire_tick,
+            signal_completion_tick=evidence.signal_completion_tick,
+            daemon_exit_tick=exit_tick,
+            first_wait_status=dispatch_result["first_wait"]["status_name"],
+            signal_first_wait_status=(
+                dispatch_result["signal"]["armed_wait_status_name"]
+            ),
+            dispatch_requests=stat_values["dispatches_admitted"],
+            retired_instructions=stat_values["retired_instructions"],
+            global_store_instructions=(
+                stat_values["global_store_instructions"]
+            ),
+            global_store_bytes=stat_values["global_store_bytes"],
+            daemon_audit_samples=audit_counts.daemon_samples,
+            runtime_audit_samples=audit_counts.runtime_samples,
+            dispatch_trace=str(trace_path),
+            gem5_stats=str(stats_path),
+            gem5_log=str(daemon.log_path),
         )
 
     def check_busy(self) -> None:
@@ -2059,6 +3476,7 @@ class Harness:
         self.check_queue_control()
         self.check_memory_transfer()
         self.check_signal_lifecycle()
+        self.check_pinned_dispatch()
         self.check_busy()
         for world_size in WORLD_SIZES:
             self.check_world_isolation(world_size)
@@ -2093,31 +3511,49 @@ def file_path(value: str) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the real CP-0004 through CP-0007 runtime CLI against "
+            "Run the real CP-0004 through CP-0008 runtime CLI against "
             "HostGPUBridge processes. This validates handshake, bounded "
             "queue-control events, bridge-owned simulated-memory byte "
-            "transfer, and signal/event completion, not packet submission "
-            "or GPU execution."
+            "transfer, signal/event completion, and one source-pinned "
+            "gfx950 dispatch through gem5 GPU execution."
         )
     )
     parser.add_argument("--gem5", required=True, type=executable_path)
     parser.add_argument("--runtime-cli", required=True, type=executable_path)
     parser.add_argument("--gem5-config", type=file_path,
                         default=DEFAULT_CONFIG)
+    parser.add_argument("--dispatch-gem5-config", type=file_path,
+                        default=DEFAULT_DISPATCH_CONFIG)
     parser.add_argument("--work-root", type=Path)
-    parser.add_argument("--keep-work-dir", action="store_true")
+    parser.add_argument(
+        "--keep-work-dir",
+        action="store_true",
+        help=(
+            "Compatibility flag; CP-0008 acceptance evidence now retains "
+            "every run directory"
+        ),
+    )
     parser.add_argument("--start-wait-seconds", type=float, default=15.0)
     parser.add_argument("--process-timeout-seconds", type=float, default=8.0)
+    parser.add_argument(
+        "--dispatch-process-timeout-seconds", type=float, default=90.0,
+        help="Wall-clock bound for the one real pinned-dispatch client",
+    )
     parser.add_argument("--client-timeout-ms", type=int, default=1500)
     parser.add_argument("--server-startup-timeout-ms", type=int, default=20000)
     parser.add_argument("--server-handshake-timeout-ms", type=int, default=2000)
     parser.add_argument("--server-run-timeout-ms", type=int, default=20000)
+    parser.add_argument(
+        "--dispatch-server-run-timeout-ms", type=int, default=60000,
+        help="Wall-clock service bound for the dispatch-specific gem5 config",
+    )
     parser.add_argument("--hold-ms", type=int, default=1500)
     args = parser.parse_args()
     for name in (
-        "start_wait_seconds", "process_timeout_seconds", "client_timeout_ms",
+        "start_wait_seconds", "process_timeout_seconds",
+        "dispatch_process_timeout_seconds", "client_timeout_ms",
         "server_startup_timeout_ms", "server_handshake_timeout_ms",
-        "server_run_timeout_ms", "hold_ms",
+        "server_run_timeout_ms", "dispatch_server_run_timeout_ms", "hold_ms",
     ):
         if getattr(args, name) <= 0:
             parser.error(f"--{name.replace('_', '-')} must be positive")
@@ -2125,6 +3561,12 @@ def parse_args() -> argparse.Namespace:
         args.work_root = args.work_root.expanduser().resolve()
         if not args.work_root.is_dir():
             parser.error(f"--work-root is not a directory: {args.work_root}")
+    for option, path in (
+        ("--gem5-config", args.gem5_config),
+        ("--dispatch-gem5-config", args.dispatch_gem5_config),
+    ):
+        if not path.is_file():
+            parser.error(f"{option} is not a file: {path}")
     return args
 
 
@@ -2140,7 +3582,7 @@ def main() -> int:
         return 1
 
     work_dir = Path(tempfile.mkdtemp(
-        prefix="cp7-host-",
+        prefix="cp8-host-",
         dir=str(args.work_root) if args.work_root is not None else None,
     )).resolve()
     os.chmod(work_dir, 0o700)
@@ -2165,32 +3607,35 @@ def main() -> int:
         else:
             error_message += f"; process cleanup failed: {cleanup_message}"
 
-    retain = args.keep_work_dir or status != "passed"
+    # CP-0008 trace, stats, process logs, and raw-wire evidence are acceptance
+    # provenance, so successful and failed run directories are both retained.
+    retain = True
     summary: dict[str, Any] = {
         "schema": "amdgpu-sim.host-transport.integration.v1",
         "status": status,
         "scope": (
             "CP-0004 handshake, CP-0005 bounded queue control, CP-0006 "
             "bridge-owned simulated allocation and byte transfer, and "
-            "CP-0007 signal/event completion; no packet-visible VRAM, "
-            "packet submission, or GPU execution"
+            "CP-0007 signal/event completion, plus one CP-0008 source-pinned "
+            "gfx950 AQL dispatch through gem5 GPU execution"
         ),
         "checks": harness.checks,
         "world_sizes": list(WORLD_SIZES),
         "resource_bounds": {
             "maximum_parallel_gem5_daemons": max(WORLD_SIZES),
             "maximum_clients_per_daemon_phase": 9,
-            "runtime_cli_retries": 0,
+            "runtime_cli_process_retries": 0,
+            "wire_request_retries": 0,
+            "dispatch_wait_retries_without_send": 1,
             "raw_client_retries": 0,
         },
         "duration_seconds": round(time.monotonic() - started, 3),
         "work_dir": str(work_dir),
         "work_dir_retained": retain,
+        "retained_work_dir": str(work_dir),
     }
     if error_message is not None:
         summary["error"] = error_message
-    if not retain:
-        shutil.rmtree(work_dir)
     print(json.dumps(summary, indent=2, sort_keys=True))
     if status != "passed":
         print(f"integration logs retained at {work_dir}", file=sys.stderr)

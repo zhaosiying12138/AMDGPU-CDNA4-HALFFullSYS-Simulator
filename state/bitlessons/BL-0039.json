@@ -1,0 +1,24 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0039",
+  "checkpoint_id": "CP-0008",
+  "question_or_symptom": "Matching output bytes does not prove that a dispatch reached the simulator's GPU execution path when a bridge-side transform or direct dispatcher call could produce the same result.",
+  "observation": "The accepted run retains twelve authority-ordered trace events from admission and AQL publication through HSAPacketProcessor fetch, GPUCommandProcessor submission, GPUDispatcher/CU start, 64 global stores, packet retirement, signal mirror, and wire completion. Gem5 stats show one fetched/submitted/started/completed wave, positive retired instructions and global-store bytes, and host_fallback_count zero; the daemon exits causally after the session completes.",
+  "evidence_ids": ["EV-0018", "EV-0019", "EV-0020"],
+  "conclusion": "Execution claims require path provenance and independent simulator counters in addition to functional output equality.",
+  "decision": "Require canonical trace schema, request/trace/hash correlation, HSAPP-to-CU provenance, positive retired/store statistics, zero host fallback, and causal clean exit; reject bridge arithmetic, direct command-processor shortcuts, synthetic timers, or output-only validation as dispatch evidence.",
+  "invalidated_assumptions": [
+    "A non-identity D2H buffer is evidence that a GPU instruction performed the work.",
+    "A direct internal dispatch call is equivalent to packet fetch through the configured HSA path."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-dispatch.json",
+    "docs/host-transport-v1-dispatch.md",
+    "docs/host-transport-integration.md",
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/configs/example/gemsim/host_dispatch.py"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

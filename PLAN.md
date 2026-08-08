@@ -1,9 +1,12 @@
 # amdgpu-sim implementation plan
 
-**Plan ID:** `AMDGPU-SIM-V1`  
-**Revision:** `1`  
-**Revision date:** `2026-08-08`
-**State at this commit:** `P1-SIGNAL-01-signal-event-complete; next-P1-DISPATCH-01`
+**Plan ID:** `AMDGPU-SIM-V1`
+
+**Revision:** `2`
+
+**Revision date:** `2026-08-09`
+
+**State at this commit:** `P1-DISPATCH-01 accepted; next-P2-KMT-ABI-01`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -56,6 +59,9 @@ identities. Existing upstream commits are never rewritten to add our trailers.
 | Fabric | Functional shared-memory/Unix transport first, timed xGMI/SDMA model later | No timing claims before the timed phase |
 | PyTorch | Transparent HIP-compatible path is primary; optional PrivateUse1 adapter is isolated behind the same facade | No backend-specific business logic spread through vLLM |
 | Triton | Reuse AMD lowering/compiler; add an out-of-tree `gemsim_amd` driver and launcher | Cache keys include every toolchain/runtime/simulator revision |
+| Performance | Profile the first transparent Triton vecadd before optimizing; prioritize measured 80/20 bottlenecks | No optimization claim without retained before/after profiles and unchanged correctness |
+| Host parallelism | Permit CPU-parallel threadblock simulation only with explicit dependency, barrier, atomic, and determinism gates | Host utilization never overrides simulated ordering or synchronization semantics |
+| Status tooling | Provide a simulator-aware `rocm-smi` view from the daemon registry | Report simulated instances only; never probe hardware nodes or load production SMI libraries |
 | Precision | Bitwise for copies/integers; explicit per-op/layer BF16/FP16 tolerances; exact final greedy token | No claim of all-float bitwise identity |
 | Failure | Abort the whole job epoch, checkpoint at request/layer boundaries, deterministic replay | No elastic shrink in the anchor |
 | Distribution | Root coordinator plus standard submodule gitlinks and immutable child baseline tags | We never rewrite upstream history |
@@ -276,6 +282,19 @@ packet-visible VRAM, SDMA timing, code-object loading, or GPU execution. The nex
 sub-gate binds a functional allocation to gem5 GPU VA and executes one traced
 trivial gfx950 AQL dispatch.
 
+Accepted sub-boundary: CP-0008 adds only one protocol-pinned gfx950/wave64,
+one-CU, one-workgroup AQL fixture. Its acceptance evidence must bind the
+generation-safe queue, packet-visible allocation, and completion signal to the
+real `HSAPacketProcessor -> GPUCommandProcessor -> GPUDispatcher -> CU` path,
+show retired GPU instructions and a global write, update the CP-0007 signal
+after native completion, and verify non-identity D2H bytes. A bridge-side byte
+transform, direct command-processor call, or synthetic one-tick completion is
+not dispatch evidence. CP-0008's retained 12-event trace, exact fixture/code/
+packet/kernarg hashes, causal daemon exit, and zero host fallback are accepted
+execution evidence. This gate does not add a generic code-object loader or
+claim ROCr, HIP, OpenCL, Triton, or P2 compatibility. The next sub-boundary is
+the source-exact ROCr ThunkLoader/libhsakmt ABI inventory and provider skeleton.
+
 ### P2 — ROCr/libhsakmt provider
 
 Fork the pinned ROCr core and implement `libhsakmt_gem5` against the daemon.
@@ -302,8 +321,51 @@ conformance subsets run against gem5 with production runtime/device opens absent
 
 Keep AMD TTIR/TTGIR/LLVM lowering; add an out-of-tree `gemsim_amd` backend and
 launcher linked only to the stable runtime ABI. Cache keys contain gem5/runtime/
-ISA/LLVM/Triton/device-lib revisions and capability bits. Gate the progressive
-operator manifest and differential tests for all model primitives.
+ISA/LLVM/Triton/device-lib revisions and capability bits. The first gate is
+unmodified execution of Triton's tutorial vecadd with no fallback. Broader
+operator expansion waits for the P5A profile/optimization gate and the P5B
+parallelism feasibility decision so later work benefits from early simulator
+speedups rather than repeatedly paying an already visible bottleneck.
+
+### P5A — transparent vecadd and measured operator optimization
+
+The first Triton usability checkpoint is unmodified user execution of the
+`python tutorial/01-vecadd.py` request through `gemsim_amd`. In the pinned
+Triton checkout this request maps to `python/tutorials/01-vector-add.py`; the
+upstream file is not edited. The ordinary Triton driver/launcher selection path
+must be used, with no application-specific import, source, or environment
+rewrite beyond selecting the simulator device. After that gate is accepted,
+retain a reproducible profile spanning host protocol, event queue,
+AQL/dispatch, CU pipelines, memory translation/cache, and trace emission.
+Rank bottlenecks by wall-clock contribution and optimize the smallest set that
+explains most runtime. Every optimization records the before/after profile,
+host and simulated work counts, output oracle, deterministic replay, and CPU
+fallback count. Micro-optimizations outside the dominant path are deferred.
+
+### P5B — correctness-preserving host-parallel threadblocks
+
+Investigate a separate, explicit simulator execution mode that can process
+independent threadblocks on multiple host CPU workers while preserving gem5's
+architectural result. Parallel work may be admitted only when dependency,
+memory-order, barrier, atomic, LDS, signal, event, and completion analysis proves
+the workgroups independent at that boundary. Cross-workgroup atomics, global
+ordering, unresolved aliases, or synchronization force serialization. Gates
+include race-oriented adversarial kernels, serial-versus-parallel differential
+state and trace checks, repeated deterministic runs, ThreadSanitizer where
+practical, and measured host-core scaling. The default serial path remains a
+reference and automatic fallback; saturating CPUs is not itself a success
+criterion. The parallel path must publish a bounded host scheduler/memory
+overhead budget against the serial baseline; if that budget or the proof of
+independence fails, retain the serial path.
+
+### P5C — broader Triton operator matrix
+
+After P5A and P5B are accepted (including an evidence-backed decision to retain
+serial execution where parallelism is unsafe), expand the generated operator
+manifest and differential tests through elementwise, reductions, LDS/barriers,
+atomics, MFMA/GEMM, embedding, RMSNorm, MLP, RoPE, GDN, paged attention, logits,
+and sampling. Each entry keeps its compiler/runtime/simulator identity and
+falls back only by explicit unsupported status, never host arithmetic.
 
 ### P6 — PyTorch integration
 
@@ -354,6 +416,47 @@ metrics, broader HIP/OpenCL surface, images/interop/debug features, packaging,
 upgrade compatibility matrices, fuzzing, fault injection, and reproducible
 offline bundles. No timing result is published from P8/P9 functional mode.
 
+### P11A — simulator-aware `rocm-smi`
+
+After the single-device model path and N-rank registry are usable, add a
+low-priority status tool with familiar `rocm-smi` discovery and display
+conventions backed solely by the GemSim supervisor/daemon registry. With
+multiple gem5 processes running it
+reports each simulated card's stable UUID/rank/epoch and ON state; after an
+orderly stop, crash, lease expiry, or stale epoch it reports OFF without
+inventing temperature, power, clocks, utilization, or hardware health. The
+tool must not open `/dev/kfd` or `/dev/dri`, load ROCm SMI libraries, or imply
+compatibility with physical-card management operations.
+
+### Working checkpoint forecast
+
+Checkpoint IDs are allocated only when an atomic transaction begins, so this
+table is a planning forecast rather than a fixed total. A difficult phase may
+split into additional checkpoints and no later row may skip its prerequisite.
+If every remaining row closes in exactly one distinct transaction (checkpoint
+IDs are not merged across rows), the seven accepted checkpoints plus these
+fifteen forecast gates imply a minimum of twenty-two checkpoints overall; this
+is a conditional lower bound, not a promise to compress later work into those
+IDs. A difficult row may split into additional checkpoints.
+
+| Forecast gate | Earliest phase | Result |
+| --- | --- | --- |
+| CP-0008 | P1 | One traced real CU-backed pinned dispatch |
+| P2-KMT-ABI-01 | P2 | Source-exact thunk/libhsakmt ABI inventory and provider skeleton |
+| P3-CODEOBJ-01 | P3 | Pinned gfx950 code-object and kernarg ABI fixtures |
+| P4-HIP-01 | P4 | Minimal transparent HIP/OpenCL launch surface |
+| P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
+| P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
+| P5-PARALLEL-TB-01 | P5B | Safe serial-versus-parallel threadblock experiment |
+| P5-OPS-01 | P5C | Broader model-operator manifest and differential gates |
+| P6-PYTORCH-01 | P6 | PyTorch eager/compile device foundation |
+| P7-VLLM-SINGLE-01 | P7 | Single-daemon Qwen model path |
+| P8-COLLECTIVE-01 | P8 | N-rank functional collective semantics |
+| P9-QWEN-TP2-01 | P9 | Full TP=2 prefill and greedy decode anchor |
+| P10-QWEN-TP48-01 | P10 | TP=4/8 protocol and permitted model gates |
+| P11-SMI-01 | P11A | At least two concurrent simulated gem5 cards with ON/OFF status tool |
+| P11-HARDEN-01 | P11 | Timing, breadth, packaging, and fault hardening |
+
 ## 6. Model and operator manifest
 
 The model manifest is generated, not hand-maintained: scan the official vLLM
@@ -385,6 +488,10 @@ under `state/evidence/`. Required audit classes are:
   UMD/KMD/device nodes; no `amdsmi` probing.
 - Device execution record coverage for every accepted operation and CPU
   fallback counter equal to zero.
+- Triton vecadd transparency, profile attribution, before/after bottleneck
+  evidence, and serial-versus-parallel threadblock differential checks.
+- Simulator `rocm-smi` registry/lease/epoch ON/OFF behavior with explicit
+  absence of hardware device and production management-library access.
 - N-rank collective correctness, ordering, CRC/credit, epoch abort/replay, and
   N=3 non-pair topology tests.
 
@@ -453,7 +560,7 @@ Commit trailers are mandatory:
 ```text
 Checkpoint-ID: CP-xxxx
 Goal-ID: GSIM-001
-Plan-Revision: 1
+Plan-Revision: <current-plan-revision>
 Source-Lock-SHA256: <sha256>
 Evidence-Manifest-SHA256: <sha256>
 Change-Kind: baseline|bootstrap|source|code|test|lesson|checkpoint
@@ -490,12 +597,22 @@ contracts. It makes no KFD event, GPU-visible signal memory, packet-visible VRAM
 SDMA timing, packet-submission, code-object, kernel, collective, PyTorch, or vLLM
 execution claim.
 
-The next unique action is `P1-DISPATCH-01`: create a CP-0008 two-child
-transaction for gem5 and `self-amdgpu-runtime`, then bind functional allocations
-to gem5 GPU VA and execute one traced trivial gfx950 AQL dispatch. The fixture
-must use the CP-0007 signal wait and D2H path for byte verification and trace
-evidence; it must not be generalized into a generic code-object, ROCr, HIP, or
-P2 claim.
+`CP-0008` is accepted at the P1 dispatch boundary. It preserves the CP-0002
+official Qwen and six-upstream source freeze, the CP-0003 authored runtime
+baseline, and every CP4-CP7 transport gate while proving one source-pinned
+gfx950/wave64, one-CU, one-workgroup dispatch through the real HSA packet and
+GPU execution path. The accepted evidence binds queue, allocation, signal,
+request, trace, packet, kernarg, VA, tick, statistics, and exact D2H identities;
+it explicitly makes no generic code-object, ROCr/libhsakmt, HIP, OpenCL, Triton,
+PyTorch, vLLM, multi-CU, collective, model, or performance claim.
+
+The next unique action is `P2-KMT-ABI-01`: create the next transaction and
+inventory the pinned ROCr ThunkLoader and libhsakmt ABI from source, then build
+a source-exact provider skeleton against the established GemSim boundary. The
+provider gate must audit layouts, symbols, status behavior, and unsupported
+capabilities before claiming any P2 runtime compatibility. `SOURCE_LOCK.json`
+remains byte-immutable, and existing `PROJECT_LANES` declarations remain
+historically anchored and append-only.
 `SOURCE_LOCK.json` remains byte-immutable, and existing `PROJECT_LANES`
 declarations remain historically anchored and append-only.
 

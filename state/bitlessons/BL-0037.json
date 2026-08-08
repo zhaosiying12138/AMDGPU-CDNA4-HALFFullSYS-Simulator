@@ -1,0 +1,24 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0037",
+  "checkpoint_id": "CP-0008",
+  "question_or_symptom": "A first dispatch endpoint can silently become a generic GPU API if the fixture's negotiated capability and byte authority are not kept narrow.",
+  "observation": "PINNED_DISPATCH_V1 is selected only when capability bit 4 is both offered and required, and bits 1 through 3 are selected first. The request is fixed at 208 bytes, the ACK and completion at 240 bytes, and the client supplies only generation-safe handles and the exact fixture manifest digest; it supplies no pointer, AQL packet, kernarg, HSACO, or arbitrary geometry.",
+  "evidence_ids": ["EV-0018", "EV-0019", "EV-0020"],
+  "conclusion": "A bounded execution milestone is honest only when its wire capability, fixture authority, and forbidden inputs are explicit and independently checked.",
+  "decision": "Keep dispatch capability negotiation symmetric and dependent on queue, memory, and signal capabilities; freeze the gfx950-xor-u8-v1 manifest, layouts, goldens, hashes, and failure precedence in JSON; reject every request outside that pinned fixture instead of widening the API by implication.",
+  "invalidated_assumptions": [
+    "One successful kernel-shaped request demonstrates a general dispatch surface.",
+    "A prose description is sufficient authority for packet fields, fixture bytes, and code identity."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-dispatch.json",
+    "docs/host-transport-v1-dispatch.md",
+    "tests/test_host_transport_dispatch_spec.py",
+    "projects/gem5/src/dev/amdgpu/host_gpu_protocol.cc",
+    "projects/self-amdgpu-runtime/src/transport_codec.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

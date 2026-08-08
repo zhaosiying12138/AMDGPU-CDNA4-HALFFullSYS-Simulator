@@ -1,0 +1,25 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0041",
+  "checkpoint_id": "CP-0008",
+  "question_or_symptom": "Dispatch completion and D2H acceptance can race a packet-retirement signal update unless the cross-extension ordering is explicit.",
+  "observation": "The pinned fixture starts with signed signal value one and one same-owner unsatisfied EQ-zero wait. The generation-valid retirement listener stores zero at packet-retire tick R; the CP7 SIGNAL_COMPLETION is exactly R+1 and is emitted before DISPATCH_COMPLETION. Runtime validates both completions and their request/trace/tick identities before accepting the 64-byte XOR D2H result.",
+  "evidence_ids": ["EV-0018", "EV-0019", "EV-0020"],
+  "conclusion": "A signal mirror is a causal boundary only when retirement, signal completion, dispatch completion, and data visibility have a checked total order.",
+  "decision": "Use only the generation-checked real retirement listener to mirror CP7, enforce R then R+1 then dispatch completion ordering without overflow, retain both canonical records, and permit D2H only after the signal and dispatch results are fully validated.",
+  "invalidated_assumptions": [
+    "A one-tick timer can stand in for packet retirement.",
+    "Dispatch completion may be consumed before the signal completion that proves the GPU store boundary."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-dispatch.json",
+    "docs/host-transport-v1-dispatch.md",
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_signal_state.cc",
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "projects/self-amdgpu-runtime/tests/dispatch_test.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

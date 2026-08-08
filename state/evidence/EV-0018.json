@@ -1,0 +1,508 @@
+{
+  "checkpoint_id": "CP-0008",
+  "claim": "The prepared VEGA_X86 GPU_VIPER gem5 child exposes host_dispatch.py and executes the CP8 gfx950-xor-u8-v1 AQL fixture through HSAPacketProcessor, GPUCommandProcessor, GPUDispatcher, and one real CU, with exact trace, stats, packet retirement, CP7 signal ordering, causal clean exit, and zero host fallback.",
+  "command_argv": [
+    [
+      "env",
+      "-i",
+      "HOME=/home/zhaosiying",
+      "PATH=/home/zhaosiying/amdgpu-sim/env/gem5-build/sysroot/usr/bin:/home/zhaosiying/amdgpu-sim/env/gem5-build/bin:/home/zhaosiying/miniforge3/envs/triton-dev/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "/home/zhaosiying/amdgpu-sim/env/gem5-build/bin/scons",
+      "-j4",
+      "build/VEGA_X86/gem5.opt"
+    ],
+    [
+      "./build/VEGA_X86/dev/amdgpu/host_gpu_dispatch_state.test.opt"
+    ],
+    [
+      "./build/VEGA_X86/gem5.opt",
+      "configs/example/gemsim/host_dispatch.py",
+      "--help"
+    ],
+    [
+      "sha256sum",
+      "projects/gem5/build/VEGA_X86/gem5.opt"
+    ],
+    [
+      "./build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt"
+    ],
+    [
+      "./build/VEGA_X86/dev/amdgpu/host_gpu_queue_state.test.opt"
+    ],
+    [
+      "./build/VEGA_X86/dev/amdgpu/host_gpu_memory_state.test.opt"
+    ],
+    [
+      "./build/VEGA_X86/dev/amdgpu/host_gpu_signal_state.test.opt"
+    ],
+    [
+      "./build/VEGA_X86/dev/amdgpu/host_gpu_socket_utils.test.opt"
+    ],
+    [
+      "git",
+      "diff",
+      "--check"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "env",
+        "-i",
+        "HOME=/home/zhaosiying",
+        "PATH=/home/zhaosiying/amdgpu-sim/env/gem5-build/sysroot/usr/bin:/home/zhaosiying/amdgpu-sim/env/gem5-build/bin:/home/zhaosiying/miniforge3/envs/triton-dev/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "/home/zhaosiying/amdgpu-sim/env/gem5-build/bin/scons",
+        "-j4",
+        "build/VEGA_X86/gem5.opt"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-08T18:12:37+00:00",
+      "exit_code": 0,
+      "id": "gem5-build-final3",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/gem5-build-final3.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6e9da7fccb097426bd40a3ecf9385624d6692b265261639ed5ac3db5961a5693",
+        "size": 944,
+        "tracked": false
+      },
+      "result": "Final VEGA_X86 GPU_VIPER gem5.opt linked successfully after the CP8 dispatch implementation and causal-exit config fix.",
+      "started_at": "2026-08-08T18:10:24+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/gem5-build-final3.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/gem5-build-final3.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f7405c5bc40f350d23a4ed2b1718bed8d7e56568c5645e6a35f4f9e80007b3ac",
+        "size": 97302,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "./build/VEGA_X86/dev/amdgpu/host_gpu_dispatch_state.test.opt"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-08T18:13:28+00:00",
+      "exit_code": 0,
+      "id": "gem5-dispatch-state-test-final3",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/gem5-dispatch-state-test-final3.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9c72f3ce88dbdff12854f1fb39d41effc042cecd0eb77dabd29bfb60cb68b8aa",
+        "size": 660,
+        "tracked": false
+      },
+      "result": "The focused dispatch admission, ticket, lifecycle, trace-correlation, and cleanup state suite passed 11/11.",
+      "started_at": "2026-08-08T18:13:28+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/gem5-dispatch-state-test-final3.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/gem5-dispatch-state-test-final3.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5e26a6ac73fe629ba6b96ffa6b089aa29d6ffed0cda0fd3d448525a1629d9100",
+        "size": 2197,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "./build/VEGA_X86/gem5.opt",
+        "configs/example/gemsim/host_dispatch.py",
+        "--help"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-08T18:13:28+00:00",
+      "exit_code": 0,
+      "id": "gem5-config-help-final3",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/gem5-config-help-final3.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b2cf6418efd7fa0c6a18932f78bb90f954c1bd7a8c8bb007978fd1a0b99b0023",
+        "size": 671,
+        "tracked": false
+      },
+      "result": "host_dispatch.py --help succeeded and exposed the required absolute dispatch-trace-path option and bounded service options.",
+      "started_at": "2026-08-08T18:13:28+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/gem5-config-help-final3.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/gem5-config-help-final3.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4761b6e240fa5e1280525738c017ff3b0f55ff5b6e1c7b5dfbb4909f8ab7a372",
+        "size": 29745,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "projects/gem5/build/VEGA_X86/gem5.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T18:13:29+00:00",
+      "exit_code": 0,
+      "id": "gem5-binary-sha256-final3",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/gem5-binary-sha256-final3.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a67779fc56129ebd173053ee67fb47cc2a67ae56fca624688f3e140dc1adf065",
+        "size": 629,
+        "tracked": false
+      },
+      "result": "The final gem5.opt binary hash was retained as 6cddaa84a6bf633e95b85158a67603a7d5f2f41871ba7bd9578372d652365ec7.",
+      "started_at": "2026-08-08T18:13:27+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/gem5-binary-sha256-final3.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/gem5-binary-sha256-final3.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0320aa6117a58480de098376b7ac6caa8f8d626af884c97ffac1b98355493a56",
+        "size": 104,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "./build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-08T18:13:28+00:00",
+      "exit_code": 0,
+      "id": "gem5-protocol-test-final3",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/gem5-protocol-test-final3.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c68d131875dfb4ea81ba78af97fa5aa08e5a77452a3da45c2408d0de8e2928b3",
+        "size": 642,
+        "tracked": false
+      },
+      "result": "The frozen host transport and CP8 capability/dispatch codec suite passed 35/35.",
+      "started_at": "2026-08-08T18:13:28+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/gem5-protocol-test-final3.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/gem5-protocol-test-final3.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "036ba02a508f110345e2e9544a47cef00cf3f6e56aea043837880efd544f2c1a",
+        "size": 5109,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "./build/VEGA_X86/dev/amdgpu/host_gpu_queue_state.test.opt"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-08T18:13:28+00:00",
+      "exit_code": 0,
+      "id": "gem5-queue-state-test-final3",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/gem5-queue-state-test-final3.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "84c71a59d3639e9f7571ec33c065e555c07e01eef6ef04622956d912d1ff32ce",
+        "size": 651,
+        "tracked": false
+      },
+      "result": "The queue-control regression suite passed 12/12.",
+      "started_at": "2026-08-08T18:13:28+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/gem5-queue-state-test-final3.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/gem5-queue-state-test-final3.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b6733f685e4346a51c111862ebf271d9edec5c6b6986382ce0777996f81d7571",
+        "size": 2134,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "./build/VEGA_X86/dev/amdgpu/host_gpu_memory_state.test.opt"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-08T18:13:28+00:00",
+      "exit_code": 0,
+      "id": "gem5-memory-state-test-final3",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/gem5-memory-state-test-final3.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7269dd05453cd101f2caa6bf70ad8b6b494ea50a1103257d29e8ecc9f32f9ea6",
+        "size": 654,
+        "tracked": false
+      },
+      "result": "The simulated-memory regression suite passed 8/8.",
+      "started_at": "2026-08-08T18:13:28+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/gem5-memory-state-test-final3.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/gem5-memory-state-test-final3.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5742dac03dfc3856b3d21112d33cf4a226e9b256876ee1202033f36e6b64f870",
+        "size": 1635,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "./build/VEGA_X86/dev/amdgpu/host_gpu_signal_state.test.opt"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-08T18:13:28+00:00",
+      "exit_code": 0,
+      "id": "gem5-signal-state-test-final3",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/gem5-signal-state-test-final3.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "df7d00767ac2217149281ca5d8b30bee84d5c8a0b26480bc125b4eacbfc4980f",
+        "size": 654,
+        "tracked": false
+      },
+      "result": "The signal/event regression suite passed 12/12.",
+      "started_at": "2026-08-08T18:13:28+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/gem5-signal-state-test-final3.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/gem5-signal-state-test-final3.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6f672ab235341fd3d5d0fc86c086a1cab12752d33c44067061db3b9eac681de5",
+        "size": 2286,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "./build/VEGA_X86/dev/amdgpu/host_gpu_socket_utils.test.opt"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-08T18:13:28+00:00",
+      "exit_code": 0,
+      "id": "gem5-socket-utils-test-final3",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/gem5-socket-utils-test-final3.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "721276239cd23e7a72a91c44f7e2602b154feea9aea6a513a37834519ec9afa9",
+        "size": 654,
+        "tracked": false
+      },
+      "result": "The socket/request-ID regression suite passed 23/23.",
+      "started_at": "2026-08-08T18:13:28+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/gem5-socket-utils-test-final3.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/gem5-socket-utils-test-final3.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "732fa89d784c3ff51d52b9802e9480272607094f3cc332c8e0bc6dd3e442ec92",
+        "size": 4137,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-08T17:29:54+00:00",
+      "exit_code": 0,
+      "id": "gem5-diff-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/gem5-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "13040bd448e86c160afba33fb71da2ec578ab2ee8134c010f90b2cdd447acb7a",
+        "size": 595,
+        "tracked": false
+      },
+      "result": "The gem5 CP8 source diff passed the whitespace check.",
+      "started_at": "2026-08-08T17:29:54+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/gem5-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/gem5-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-08T18:13:29+00:00",
+  "environment_fingerprint": {
+    "authority_dispatch_docs_sha256": "7457ec6789a278b433ad049c5bb57583d5a6d8e1907b309960ea396a2bd218df",
+    "authority_dispatch_json_sha256": "cddaa36d0105871e2f99213818e8412a8cc08469fd850eab92cd5940498df16f",
+    "child_head": "ae21e44a9434efb24417dfb167adacb55cb6f66f",
+    "child_target_commit_status": "pending",
+    "child_transaction_phase": "prepare",
+    "child_tree": "d40b72b15481c5e5a1d4f3d9403733c50567d426",
+    "dispatch_fixture": "gfx950-xor-u8-v1",
+    "dispatch_gem5_log_sha256": "a9e1a8a4ec6b6f1f34b13043b6cd1784d833e2ac0e5ed8842d351d3370cbc8c4",
+    "dispatch_stats_sha256": "7d5a74e9a802d59d5c68e4c1221edc0e826d1e096c632e09a751ffd2475ffda9",
+    "dispatch_trace_sha256": "4377cde129584cd4fd93be4133993b4631b4d4db22e410edcefcf99708a553cc",
+    "gem5": "25.1.0.1",
+    "gem5_binary_sha256": "6cddaa84a6bf633e95b85158a67603a7d5f2f41871ba7bd9578372d652365ec7",
+    "gem5_binary_size": 1103994776,
+    "host_dispatch_config_sha256": "11c53e42f98df54d7fcc78d6ae05174dec5018e18841341452a2f0b6688a632a",
+    "kernel": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+    "python": "3.14.6",
+    "stats_global_store_bytes": "64",
+    "stats_global_store_instructions": "1",
+    "stats_host_fallback_count": "0",
+    "stats_retired_instructions": "7",
+    "target": "VEGA_X86 GPU_VIPER"
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0008/gem5.opt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6cddaa84a6bf633e95b85158a67603a7d5f2f41871ba7bd9578372d652365ec7",
+      "size": 1103994776,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/dispatch-trace.jsonl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "4377cde129584cd4fd93be4133993b4631b4d4db22e410edcefcf99708a553cc",
+      "size": 10336,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/pinned-dispatch.m5out/stats.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7d5a74e9a802d59d5c68e4c1221edc0e826d1e096c632e09a751ffd2475ffda9",
+      "size": 1126003,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/pinned-dispatch.gem5.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a9e1a8a4ec6b6f1f34b13043b6cd1784d833e2ac0e5ed8842d351d3370cbc8c4",
+      "size": 2957,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/pinned-dispatch.m5out/config.ini",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6c241233cc19ce33d02b5db96d1d302ca1a6ec0d7e1f3eae330253ac9c436e9b",
+      "size": 128210,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/pinned-dispatch.m5out/config.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "11a22c8da98148273c32282700d92041a02a5d4491660b6de851c8b338066cae",
+      "size": 349775,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0018",
+  "includes": {},
+  "limitations": [
+    "The CP8 fixture is one source-pinned gfx950 wave64 workgroup on one CU; it is not a generic code-object, ROCr, HIP, HSA, OpenCL, multi-CU, collective, model, or performance claim.",
+    "The gem5 and source child changes are in the active CP-0008 prepare transaction; target child commit IDs are intentionally pending and are not invented here.",
+    "The retained binary, generated gem5 output, trace, stats, and process logs are external acceptance artifacts and are not tracked source."
+  ],
+  "redactions": [],
+  "result": "Final gem5 dispatch state passed 11/11; protocol, queue, memory, signal, and socket regressions passed 35/35, 12/12, 8/8, 12/12, and 23/23. The retained CP8 run emitted the 12-event dispatch trace, exact CP8 stats, and causal host GPU dispatch session complete code=0 exit.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-08T17:29:54+00:00",
+  "type": "gem5-pinned-gfx950-dispatch-acceptance"
+}

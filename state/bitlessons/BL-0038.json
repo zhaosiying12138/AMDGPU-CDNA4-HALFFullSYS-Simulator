@@ -1,0 +1,24 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0038",
+  "checkpoint_id": "CP-0008",
+  "question_or_symptom": "Treating a successful dispatch ACK as execution completion can expose output or signal state before the GPU path has issued or retired the packet.",
+  "observation": "DISPATCH_ACK/OK is an admission ticket: it pins queue, allocation, and signal generations, materializes internal packet storage, binds VAs, and reports only an admission tick, trace ID, and packet CRC. The doorbell is rung exactly once only after the complete ACK send. DISPATCH_COMPLETION/OK is constructed only after HSAPacketProcessor fetch, GPUCommandProcessor submission, GPUDispatcher/CU execution, stores, packet retirement, and the CP7 signal mirror.",
+  "evidence_ids": ["EV-0018", "EV-0019", "EV-0020"],
+  "conclusion": "Admission and execution are separate observable commit points and must have separate wire records, runtime waits, and failure semantics.",
+  "decision": "Publish the admission ticket atomically, ring the real queue only after its ACK is fully sent, retain execution state until retirement, and accept output bytes only after a canonical dispatch completion and CP7 completion have both validated.",
+  "invalidated_assumptions": [
+    "A nonzero trace ID or bound GPU VA in an ACK proves packet fetch or execution.",
+    "A client may issue D2H immediately after dispatch admission."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-dispatch.json",
+    "docs/host-transport-v1-dispatch.md",
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "projects/self-amdgpu-runtime/tests/dispatch_test.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

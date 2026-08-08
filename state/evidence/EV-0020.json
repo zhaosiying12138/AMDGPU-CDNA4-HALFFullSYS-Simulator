@@ -1,0 +1,406 @@
+{
+  "checkpoint_id": "CP-0008",
+  "claim": "The CP-0008 real-process acceptance gate preserves CP4-CP7 and proves one source-pinned gfx950-xor-u8-v1 dispatch from the runtime CLI through gem5 HSAPacketProcessor, GPUCommandProcessor, GPUDispatcher, and one CU, with exact packet/trace/request correlations, real GPU work and stores, CP7 signal completion at R+1 before dispatch completion and D2H, exact 64-byte XOR output/CRC, cleanup, causal natural exit, and native-GPU dependency exclusion.",
+  "command_argv": [
+    [
+      "python3",
+      "scripts/test_host_transport_integration.py",
+      "--gem5",
+      "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/gem5.opt",
+      "--runtime-cli",
+      "/home/zhaosiying/amdgpu-sim/projects/self-amdgpu-runtime/build/cp8-static/sagr-handshake",
+      "--work-root",
+      "artifacts/evidence/CP-0008",
+      "--keep-work-dir"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "tests.test_host_transport_dispatch_spec",
+      "-v"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "tests.test_host_transport_integration_harness",
+      "-v"
+    ],
+    [
+      "sha256sum",
+      "projects/gem5/build/VEGA_X86/gem5.opt"
+    ],
+    [
+      "sha256sum",
+      "build/cp8-static/sagr-handshake",
+      "build/cp8-static/libself_amdgpu_runtime.a",
+      "build/cp8-shared/sagr-handshake",
+      "build/cp8-shared/libself_amdgpu_runtime.so.0.6.0",
+      "build/cp8-sanitize/sagr-handshake",
+      "build/cp8-sanitize/libself_amdgpu_runtime.so.0.6.0"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "python3",
+        "scripts/test_host_transport_integration.py",
+        "--gem5",
+        "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/gem5.opt",
+        "--runtime-cli",
+        "/home/zhaosiying/amdgpu-sim/projects/self-amdgpu-runtime/build/cp8-static/sagr-handshake",
+        "--work-root",
+        "artifacts/evidence/CP-0008",
+        "--keep-work-dir"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T18:33:00+00:00",
+      "exit_code": 0,
+      "id": "host-integration-final-success",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/host-integration-final-success.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "93a0518a2f303ce74fe9c12d02523232d780f9d4a5828c70fc817da6b3e37d08",
+        "size": 923,
+        "tracked": false
+      },
+      "result": "The complete CP4-CP8 real-process gate passed with 24 checks, including exact dispatch bytes/CRC, trace/stats correlations, causal clean exit, process audits, cleanup, and CP4-CP7 preservation.",
+      "started_at": "2026-08-08T18:32:42+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/host-integration-final-success.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/host-integration-final-success.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1e00a6999a0e6bf115b07539c172ed117b3c45147ea5c7267d6f1fa102575db5",
+        "size": 7282,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "tests.test_host_transport_dispatch_spec",
+        "-v"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T17:06:38+00:00",
+      "exit_code": 0,
+      "id": "root-dispatch-spec",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/root-dispatch-spec.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a89240dd2d87a9fec567d4ec2b3126420770587656b3579e8f190d42e9c11385",
+        "size": 652,
+        "tracked": false
+      },
+      "result": "The independent CP8 protocol authority/golden specification tests passed.",
+      "started_at": "2026-08-08T17:06:38+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/root-dispatch-spec.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "46ede8f2cc4f311a49620f7ea69085e78e29d3a0a7579093116ccdf30cd0bd09",
+        "size": 1925,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/root-dispatch-spec.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "tests.test_host_transport_integration_harness",
+        "-v"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T17:06:59+00:00",
+      "exit_code": 0,
+      "id": "root-integration-harness",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/root-integration-harness.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9ffa09f75792603c1d70ef6ecaee5ecf6f283ab627dcc5d8ab202874763745a0",
+        "size": 670,
+        "tracked": false
+      },
+      "result": "The pure integration harness validators and bounded failure fixtures passed.",
+      "started_at": "2026-08-08T17:06:59+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/root-integration-harness.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a6b374660815c4ab51cc780d3f21ae8234634484bf709e583f6c8826223d4fe6",
+        "size": 4003,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/root-integration-harness.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "projects/gem5/build/VEGA_X86/gem5.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T18:13:29+00:00",
+      "exit_code": 0,
+      "id": "gem5-binary-sha256-final3",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/gem5-binary-sha256-final3.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a67779fc56129ebd173053ee67fb47cc2a67ae56fca624688f3e140dc1adf065",
+        "size": 629,
+        "tracked": false
+      },
+      "result": "The gem5 binary hash used by the successful gate is 6cddaa84a6bf633e95b85158a67603a7d5f2f41871ba7bd9578372d652365ec7.",
+      "started_at": "2026-08-08T18:13:27+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/gem5-binary-sha256-final3.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/gem5-binary-sha256-final3.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0320aa6117a58480de098376b7ac6caa8f8d626af884c97ffac1b98355493a56",
+        "size": 104,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "build/cp8-static/sagr-handshake",
+        "build/cp8-static/libself_amdgpu_runtime.a",
+        "build/cp8-shared/sagr-handshake",
+        "build/cp8-shared/libself_amdgpu_runtime.so.0.6.0",
+        "build/cp8-sanitize/sagr-handshake",
+        "build/cp8-sanitize/libself_amdgpu_runtime.so.0.6.0"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T18:21:41+00:00",
+      "exit_code": 0,
+      "id": "runtime-artifact-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0008/runtime-artifact-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3013ec2bcd9f69b630eaddad67c1fc478ca989826e1ad8fd47864d8c7c1888e1",
+        "size": 889,
+        "tracked": false
+      },
+      "result": "The static runtime CLI hash used by the successful gate is 699612bd77801e110ae5f226c8273b12c257d0cf9f7d8110514c0d86b2dc4c57.",
+      "started_at": "2026-08-08T18:21:41+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0008/runtime-artifact-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0008/runtime-artifact-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "789487bd6c65d0fb56d102ef81293f3940c70e9106c61c0cf89e8d628c545000",
+        "size": 636,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-08T18:33:00+00:00",
+  "environment_fingerprint": {
+    "admission_tick": 609000000,
+    "authority_dispatch_docs_sha256": "7457ec6789a278b433ad049c5bb57583d5a6d8e1907b309960ea396a2bd218df",
+    "authority_dispatch_json_sha256": "cddaa36d0105871e2f99213818e8412a8cc08469fd850eab92cd5940498df16f",
+    "causal_exit": "host-gpu-dispatch-exit cause=host GPU dispatch session complete code=0",
+    "child_target_commit_status": "recorded_clean",
+    "child_transaction_phase": "children_recorded",
+    "dispatch_fixture": "gfx950-xor-u8-v1",
+    "dispatch_stats_sha256": "7d5a74e9a802d59d5c68e4c1221edc0e826d1e096c632e09a751ffd2475ffda9",
+    "dispatch_trace_sha256": "4377cde129584cd4fd93be4133993b4631b4d4db22e410edcefcf99708a553cc",
+    "dispatch_wait_retries_without_send": 1,
+    "end_tick": 619473000,
+    "full_gate_capture": "artifacts/evidence/CP-0008/host-integration-final-success.json",
+    "full_gate_checks": 24,
+    "gem5_binary_sha256": "6cddaa84a6bf633e95b85158a67603a7d5f2f41871ba7bd9578372d652365ec7",
+    "gem5_binary_size": 1103994776,
+    "gem5_child_head": "479585d3566bf596369d931b1b92f7cba8bbdecd",
+    "gem5_child_tree": "3073c957dbaf4ebaff446bbb575825c762337acb",
+    "gem5_log_sha256": "a9e1a8a4ec6b6f1f34b13043b6cd1784d833e2ac0e5ed8842d351d3370cbc8c4",
+    "gpu_task_id": "0x0000000000000001",
+    "kernel": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+    "maximum_clients_per_daemon_phase": 9,
+    "maximum_parallel_gem5_daemons": 8,
+    "output_crc32c": "0x796671ec",
+    "packet_crc32c": "0x8a912d83",
+    "process_audit_forbidden": "libhsa, libamdhip64, /dev/kfd, /dev/dri absent from maps/opens/logs",
+    "python": "3.14.6",
+    "raw_client_retries": 0,
+    "raw_wire_sha256": "917f6699c66b453d580235faac47c5c7e7f2ec52468bf6ba4e5dcc54b2d61ebc",
+    "request_id": "0x7a2c47bb95d45a8c",
+    "retire_tick": 619475000,
+    "runtime_child_head": "0d31a75449a543504876178f51958bd8e7fede65",
+    "runtime_child_tree": "0214ceb3138a6a18db8ad0166e6573aba439ccad",
+    "runtime_cli_process_retries": 0,
+    "runtime_cli_sha256": "699612bd77801e110ae5f226c8273b12c257d0cf9f7d8110514c0d86b2dc4c57",
+    "runtime_cli_size": 493048,
+    "runtime_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "runtime_stdout_sha256": "d80669d3717ec97c7235271e219ee22de66dd41b3475a290ac6a9b16c048465f",
+    "signal_completion_tick": 619475001,
+    "start_tick": 613720501,
+    "stats_semantics": "admitted=fetched=submitted=starts=completions=workgroups=waves=retired=dispatches_completed=1; retired_instructions=7; global_store_instructions=1; global_store_bytes=64; host_fallback_count=0",
+    "trace_id": "0x5452434500000001",
+    "trace_schema": "amdgpu-sim.cp8-dispatch-trace.v1",
+    "transport": "Linux pathname AF_UNIX SOCK_SEQPACKET",
+    "wire_request_retries": 0,
+    "workdir": "artifacts/evidence/CP-0008/cp8-host-h69k52iu",
+    "world_sizes": "1,2,3,4,8"
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0008/gem5.opt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6cddaa84a6bf633e95b85158a67603a7d5f2f41871ba7bd9578372d652365ec7",
+      "size": 1103994776,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/sagr-handshake",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "699612bd77801e110ae5f226c8273b12c257d0cf9f7d8110514c0d86b2dc4c57",
+      "size": 493048,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/raw-wire.jsonl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "917f6699c66b453d580235faac47c5c7e7f2ec52468bf6ba4e5dcc54b2d61ebc",
+      "size": 11223,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/dispatch-trace.jsonl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "4377cde129584cd4fd93be4133993b4631b4d4db22e410edcefcf99708a553cc",
+      "size": 10336,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/pinned-dispatch.m5out/stats.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7d5a74e9a802d59d5c68e4c1221edc0e826d1e096c632e09a751ffd2475ffda9",
+      "size": 1126003,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/pinned-dispatch.gem5.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a9e1a8a4ec6b6f1f34b13043b6cd1784d833e2ac0e5ed8842d351d3370cbc8c4",
+      "size": 2957,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/pinned-dispatch.runtime.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d80669d3717ec97c7235271e219ee22de66dd41b3475a290ac6a9b16c048465f",
+      "size": 3037,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/pinned-dispatch.runtime.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/pinned-dispatch.m5out/config.ini",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6c241233cc19ce33d02b5db96d1d302ca1a6ec0d7e1f3eae330253ac9c436e9b",
+      "size": 128210,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/pinned-dispatch.m5out/config.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "11a22c8da98148273c32282700d92041a02a5d4491660b6de851c8b338066cae",
+      "size": 349775,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0008/cp8-host-h69k52iu/pinned-dispatch.m5out/citations.bib",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "bc52164d0ff6cb700ecf9122a13675f097db019b8647cb4a5e7895083c77c4c0",
+      "size": 5784,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0020",
+  "includes": {
+    "EV-0018": "b06025bfb0980c321d52ccc272eb151d716c99f17e6a66b7371c37c466ebb383",
+    "EV-0019": "205dc0b0737359ec70ef250792a547896518a0631f56e46b4adf5273a5b92f00"
+  },
+  "limitations": [
+    "CP-0008 is one bounded source-pinned gfx950 wave64, one-CU, one-workgroup fixture. It does not prove arbitrary code objects, ROCr/libhsakmt provider behavior, HIP, OpenCL, Triton, PyTorch, vLLM, multi-CU scheduling, collectives, model execution, or performance.",
+    "Process audits are repeated live snapshots plus complete retained logs for the gate children; they are not a claim about unrelated processes on the host.",
+    "The CP-0008 child target heads and trees are recorded and clean: gem5 479585d3566bf596369d931b1b92f7cba8bbdecd / 3073c957dbaf4ebaff446bbb575825c762337acb and self-amdgpu-runtime 0d31a75449a543504876178f51958bd8e7fede65 / 0214ceb3138a6a18db8ad0166e6573aba439ccad. The transaction remains in prepare with children_recorded pending root finalization and checkpoint publication.",
+    "Binaries, generated gem5 output, raw-wire, trace, stats, and process logs are retained external artifacts and are not tracked source."
+  ],
+  "redactions": [],
+  "result": "The successful host-integration-final-success capture passed 24 checks across CP4-CP8. The retained workdir cp8-host-h69k52iu binds raw-wire.jsonl, dispatch-trace.jsonl, gem5 stats, gem5/runtime logs, exact result JSON, and both final child binaries; EV-0018 and EV-0019 provide the component acceptance records.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-08T17:06:38+00:00",
+  "type": "gfx950-dispatch-integration-acceptance"
+}

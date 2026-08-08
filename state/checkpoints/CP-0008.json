@@ -1,0 +1,193 @@
+{
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "id": "CP-0008",
+  "sequence": 8,
+  "parent_checkpoint": "CP-0007",
+  "created_at": "2026-08-09T03:05:00+08:00",
+  "goal_id": "GSIM-001",
+  "phase_id": "P2",
+  "status": "accepted",
+  "root_parent_commit": "e83d8c71fc51c36c8a348c971583b240fab1e931",
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "plan_sha256": "9d2d1e90318ec5466611bc58581f35f6d48cdd59e54845ae54cb9b0e0a3bd620",
+  "goal_sha256": "cf8724e242520f7b34da88b18608749c20f5a7be15c52d1c5c2ca0b5ccb017f1",
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "id": "gem5",
+      "path": "projects/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "head": "479585d3566bf596369d931b1b92f7cba8bbdecd",
+      "tree": "3073c957dbaf4ebaff446bbb575825c762337acb",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "administrative_git_dir": "modules/gem5",
+      "clean": true
+    },
+    {
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "administrative_git_dir": "modules/rocm-systems",
+      "clean": true
+    },
+    {
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "administrative_git_dir": "modules/llvm-project",
+      "clean": true
+    },
+    {
+      "id": "triton",
+      "path": "projects/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "administrative_git_dir": "modules/triton",
+      "clean": true
+    },
+    {
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "administrative_git_dir": "modules/pytorch",
+      "clean": true
+    },
+    {
+      "id": "vllm",
+      "path": "projects/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "administrative_git_dir": "modules/vllm",
+      "clean": true
+    },
+    {
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "head": "0d31a75449a543504876178f51958bd8e7fede65",
+      "tree": "0214ceb3138a6a18db8ad0166e6573aba439ccad",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "clean": true
+    }
+  ],
+  "changes": [
+    "Added capability-gated PINNED_DISPATCH_V1 with exact 208-byte request and 240-byte admission/completion records, canonical goldens, fixture manifest/code/AQL/kernarg hashes, and strict failure precedence while preserving CP4-CP7 framing.",
+    "Extended gem5 HostGPUBridge with one pinned gfx950 wave64, one-CU, one-workgroup dispatch through HSAPacketProcessor, GPUCommandProcessor, GPUDispatcher, and a real compute unit, including generation-safe VA binding, packet/kernarg materialization, trace events, statistics, CP7 signal mirroring, and disconnect quarantine.",
+    "Advanced self-amdgpu-runtime to ABI 1.5 and release 0.6.0 with pinned-dispatch options, admission tickets, completion results, post-ACK wait retry without resend, exact completion/tick validation, atomic output publication, and full queue/memory/signal cleanup.",
+    "Added independent dispatch JSON/golden and integration validators plus a retained real-process gate proving exact XOR bytes/CRC, twelve causal trace events, positive GPU instruction/store counters, zero host fallback, native-GPU dependency exclusion, and clean daemon exit.",
+    "Recorded six CP-0008 bitlessons covering narrow fixture authority, admission/execution commits, anti-shortcut provenance, VA/materialization identity, CP7 retirement ordering, and disconnect quarantine.",
+    "Expanded the plan and goal contract with explicitly gated Triton vecadd, measured optimization, host-parallel threadblock, and simulator-aware status-tool follow-on work while preserving immutable source and project authorities."
+  ],
+  "validation": [
+    {
+      "command": "final VEGA_X86 gem5 build, pinned dispatch state suite, host-dispatch config help, protocol/queue/memory/signal/socket regressions, and source diff checks",
+      "cwd": "projects/gem5",
+      "exit_code": 0,
+      "result": "Dispatch state passed 11/11; protocol, queue, memory, signal, and socket regressions passed 35/35, 12/12, 8/8, 12/12, and 23/23; the final gem5 binary hash and dispatch trace/stats artifacts were retained.",
+      "evidence_id": "EV-0018"
+    },
+    {
+      "command": "fresh CP8 static/shared RelWithDebInfo and Clang ASan+UBSan runtime matrices, freshness, ABI export, dependency, and source diff checks",
+      "cwd": "projects/self-amdgpu-runtime",
+      "exit_code": 0,
+      "result": "Static and shared matrices passed 9/9 each, sanitizer passed 8/8, all final build trees reported no work, the pinned dispatch CLI and exported symbols passed audit, and exact dispatch result/trace artifacts were retained.",
+      "evidence_id": "EV-0019"
+    },
+    {
+      "command": "retained CP4-CP8 real-process integration, independent dispatch specification and harness tests, final binary identities, and recorded child-target durability checks",
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "The complete real-process gate passed 24 checks, including exact dispatch bytes/CRC, trace/stats correlations, CP7 R+1 ordering, cleanup, causal clean exit, process audits, and CP4-CP7 preservation; both CP8 child targets are recorded clean.",
+      "evidence_id": "EV-0020"
+    }
+  ],
+  "evidence_ids": [
+    "EV-0018",
+    "EV-0019",
+    "EV-0020"
+  ],
+  "evidence_sha256": {
+    "EV-0018": "b06025bfb0980c321d52ccc272eb151d716c99f17e6a66b7371c37c466ebb383",
+    "EV-0019": "205dc0b0737359ec70ef250792a547896518a0631f56e46b4adf5273a5b92f00",
+    "EV-0020": "b5319f6cab74893ad815b7fbd6a9642380f3f23b8c292035f3ec48e87850d5c3"
+  },
+  "evidence_manifest_id": "EV-0020",
+  "evidence_manifest_sha256": "b5319f6cab74893ad815b7fbd6a9642380f3f23b8c292035f3ec48e87850d5c3",
+  "bitlesson_ids": [
+    "BL-0037",
+    "BL-0038",
+    "BL-0039",
+    "BL-0040",
+    "BL-0041",
+    "BL-0042"
+  ],
+  "bitlesson_sha256": {
+    "BL-0037": "a2ff4f6094b3ca0891af8d82adfe9f6980c6023024f797824e65e016583ee0ee",
+    "BL-0038": "d17fa48752e936bba36c1c0774b085d9d02442261fbe4dcfd4a8fff3f14317c9",
+    "BL-0039": "0dacd5bc251dad68b1003e9b42a0e98d9fcdba2f2814dee9719989dc3fd3ffed",
+    "BL-0040": "2c9a6e81eb4106e462ff0afb4575cb8789f4b457592cc33ccfeeedca88882ba8",
+    "BL-0041": "0cd6a7b1281ec874e463c7a7f2ceea0045f7a952372a1d1ae48c52aff27f4e53",
+    "BL-0042": "56ad75161350439d6cc726d220b54e8ad7886bef8954934cda96cd90eb650b36"
+  },
+  "change_kind": "code",
+  "baseline_commit_marker": "N/A",
+  "blockers": [],
+  "limitations": [
+    "CP-0008 proves exactly one source-pinned gfx950 wave64, one-CU, one-workgroup AQL fixture through the real HSAPacketProcessor, GPUCommandProcessor, GPUDispatcher, and compute-unit path. It does not prove arbitrary packets, geometry, kernels, HSACO or ELF/MsgPack loading, relocation, generic code-object ABI, ROCr/libhsakmt provider behavior, HIP, OpenCL, Triton, PyTorch, vLLM, multi-CU or multi-workgroup scheduling, collectives, tensor parallelism, model execution, or performance timing.",
+    "The CP7 signal mirror is a generation-checked host bridge listener for the pinned packet-retirement boundary; the AQL completion_signal remains HSA special handle zero and this does not establish general GPU signal-memory semantics.",
+    "The exact XOR output and positive GPU statistics are fixture evidence only; they do not establish a general kernel compiler, instruction-set, memory-coherence, or numerical model contract.",
+    "N=1/2/3/4/8 topology, queue, memory, signal, and endpoint tests remain independent-daemon isolation evidence, not cross-rank collectives or tensor-parallel execution.",
+    "Binaries, generated gem5 output, raw-wire logs, dispatch traces, statistics, and process logs remain ignored external acceptance artifacts and are not tracked source."
+  ],
+  "next_action": {
+    "id": "P2-KMT-ABI-01",
+    "cwd": ".",
+    "argv": [
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0009",
+      "--intent",
+      "Inventory pinned ROCr/libhsakmt thunk ABI and add the GemSim provider skeleton",
+      "--participant",
+      "self-amdgpu-runtime=projects/self-amdgpu-runtime"
+    ],
+    "prerequisites": [
+      "CP-0008 is accepted and scripts/resume.sh --verify passes offline.",
+      "No transaction journal is active.",
+      "SOURCE_LOCK.json and existing PROJECT_LANES declarations remain byte-identical to their historical anchors.",
+      "The CP4 handshake, CP5 queue-control, CP6 simulated-memory, CP7 signal/event, and CP8 pinned-dispatch gates remain passing at their accepted child heads."
+    ],
+    "expected": "The next child work inventories the pinned ROCr ThunkLoader and libhsakmt symbol/layout/status ABI from source and adds a source-exact GemSim provider skeleton backed by the established transport, with explicit unsupported-capability returns and no generic ROCr/HIP/OpenCL compatibility claim before the loader audit gate.",
+    "rollback_boundary": "Keep CP-0008 visible until the CP-0009 provider-inventory child commit and evidence are complete; preserve prepared commits and the active journal on interruption, and never weaken the frozen CP4-CP8 transport/dispatch gates, source authority, or project-baseline declarations."
+  }
+}

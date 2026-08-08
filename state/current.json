@@ -2,12 +2,12 @@
   "schema": "amdgpu-sim.current.v1",
   "goal_id": "GSIM-001",
   "plan_id": "AMDGPU-SIM-V1",
-  "plan_revision": 1,
-  "checkpoint_id": "CP-0007",
-  "checkpoint_sha256": "16791b56437d7b2c17bb025c8403e0a1a18f35b543c378a1b2872c76d3f0a0d7",
-  "phase_id": "P1",
+  "plan_revision": 2,
+  "checkpoint_id": "CP-0008",
+  "checkpoint_sha256": "d19c2503fd480dc464262813c216401a055b6fcecb55f35457e657810f9b6341",
+  "phase_id": "P2",
   "state": "ready",
-  "next_action_id": "P1-DISPATCH-01",
-  "next_action_summary": "Bind functional allocations to gem5 GPU VA and execute one traced trivial gfx950 AQL dispatch using the CP7 signal wait and D2H verification path.",
+  "next_action_id": "P2-KMT-ABI-01",
+  "next_action_summary": "Inventory pinned ROCr/libhsakmt thunk ABI and add the GemSim provider skeleton.",
   "resume_command": "scripts/resume.sh --verify"
 }

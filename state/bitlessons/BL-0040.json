@@ -1,0 +1,24 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0040",
+  "checkpoint_id": "CP-0008",
+  "question_or_symptom": "Functional allocation handles, packet-visible GPU addresses, and internal code/kernarg storage can be conflated when a dispatch is admitted across the CP6 memory boundary.",
+  "observation": "The dispatch request carries only client-owned queue, input/output allocation, and CP7 signal IDs plus generations and a fixture digest. Admission pins all four live resources, preserves the public CP6 slot VAs, materializes only the code-object and kernarg addresses in daemon-owned GPU-visible storage, and leaves the AQL completion_signal as HSA special handle zero. The trace recomputes packet and kernarg hashes and binds them to the ticket.",
+  "evidence_ids": ["EV-0018", "EV-0019", "EV-0020"],
+  "conclusion": "Packet visibility is an explicit materialization and ownership contract, not an inference from a numeric allocation ID or host pointer.",
+  "decision": "Validate every handle generation and fixture hash before admission, bind the two CP6 allocations to packet-visible VAs without changing their public identities, materialize only the pinned code/kernarg fields, and retain exact packet, code, kernarg, and manifest hashes in the trace.",
+  "invalidated_assumptions": [
+    "A functional VA returned by allocation is automatically a packet-executable address.",
+    "The CP7 wire signal can be placed directly in the HSA AQL completion_signal field."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-dispatch.json",
+    "docs/host-transport-v1-dispatch.md",
+    "projects/gem5/src/dev/amdgpu/host_gpu_dispatch_fixture.hh",
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/self-amdgpu-runtime/src/transport.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

@@ -23,6 +23,15 @@ same token ID as the reference and no CPU arithmetic fallback.  The protocol
 is N-rank from the beginning so TP=4/8 can follow without a pair-specific
 rewrite.
 
+Two later goals are explicit in plan revision 2. Once the user's unmodified
+Triton `tutorial/01-vecadd.py` request (the pinned checkout's
+`python/tutorials/01-vector-add.py`) runs through GemSim, retained profiles will drive a
+small number of high-impact operator/simulator optimizations, followed by a
+separately gated experiment for CPU-parallel threadblock simulation that must
+preserve dependency and synchronization semantics. After the model path is
+usable, a low-priority simulator-aware `rocm-smi` client will report the ON/OFF
+state of multiple gem5 daemon instances without probing physical GPUs.
+
 Read [PLAN.md](PLAN.md) for the complete staged plan and [GOAL.md](GOAL.md) for
 the immutable acceptance anchor.  A blank-context handoff starts with:
 
@@ -32,15 +41,24 @@ PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、最新 checkpoint �
 bitlesson，运行 scripts/resume.sh --verify；不要重做已通过的工作。
 ```
 
-`CP-0007` is the accepted bridge-private signal/event boundary. The standalone
+`CP-0007` remains the accepted bridge-private signal/event boundary. The standalone
 runtime and gem5 preserve the CP-0004 byte-exact handshake, CP-0005 bounded
 queue control, CP-0006 sparse simulated-memory transfer, and N=1/2/3/4/8
 isolation gates while adding signed 64-bit signal create/load/store/destroy,
 generation-safe one-shot waits, event-queue completion, bounded outbound
 accounting, shared request correlation, and retry/poison semantics. The signal
 records remain host transport primitives: they do not expose GPU-visible signal
-memory or claim packet submission, code-object loading, or GPU execution. The
-next action is `P1-DISPATCH-01`: bind functional allocations to gem5 GPU VA and
-execute one traced trivial gfx950 AQL dispatch, then verify bytes with the CP7
-signal wait and D2H path. The frozen `SOURCE_LOCK.json` and registered project
-baseline remain immutable.
+memory or claim packet submission, code-object loading, or GPU execution.
+
+`CP-0008` is now the accepted pinned-dispatch boundary. It preserves every
+CP-0004 through CP-0007 gate and proves one source-pinned `gfx950-xor-u8-v1`
+wave64, one-CU, one-workgroup AQL execution through the real
+`HSAPacketProcessor -> GPUCommandProcessor -> GPUDispatcher -> CU` path, with
+exact packet/trace hashes, positive retired/store statistics, CP7 signal
+completion at retirement plus one tick, exact non-identity D2H bytes and CRC,
+causal clean exit, and zero host fallback. This is still not a generic
+code-object, ROCr/libhsakmt, HIP, OpenCL, Triton, PyTorch, vLLM, multi-CU,
+collective, or performance claim. The next action is `P2-KMT-ABI-01`: inventory
+the pinned ROCr ThunkLoader/libhsakmt ABI and prepare a source-exact provider
+skeleton. The frozen `SOURCE_LOCK.json` and registered project baseline remain
+immutable.
