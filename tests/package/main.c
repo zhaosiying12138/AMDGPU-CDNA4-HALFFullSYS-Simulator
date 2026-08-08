@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 
 #include <stddef.h>
+#include <string.h>
 
+#include <self_amdgpu_runtime/provider.h>
 #include <self_amdgpu_runtime/runtime.h>
 
 int main(void) {
@@ -15,7 +17,21 @@ int main(void) {
   sagr_dispatch_ticket_t dispatch_ticket;
   sagr_dispatch_completion_t dispatch_completion;
   sagr_memory_t memory = NULL;
+  sagr_provider_manifest_t provider_manifest;
   uint8_t byte = 0;
+  if (sagr_provider_manifest(&provider_manifest,
+                             (uint32_t)sizeof(provider_manifest)) !=
+          SAGR_STATUS_SUCCESS ||
+      provider_manifest.loader_entry_count !=
+          SAGR_PROVIDER_LOADER_ENTRY_COUNT ||
+      provider_manifest.target_loader_entry_count !=
+          SAGR_PROVIDER_TARGET_LOADER_ENTRY_COUNT ||
+      provider_manifest.direct_target_loader_entry_count !=
+          SAGR_PROVIDER_DIRECT_TARGET_LOADER_ENTRY_COUNT ||
+      strcmp(provider_manifest.authority_sha256,
+             SAGR_PROVIDER_AUTHORITY_SHA256_HEX) != 0) {
+    return 1;
+  }
   if (sagr_abi_version() != SAGR_ABI_VERSION ||
       sagr_instance_open_options_init(&options, (uint32_t)sizeof(options)) !=
           SAGR_STATUS_SUCCESS ||

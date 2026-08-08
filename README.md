@@ -20,6 +20,32 @@ raw AQL, HSACO, kernargs, GPU pointers, or file descriptors as dispatch inputs,
 provide a general kernel ABI, model SDMA timing, reconnect, or expose
 HIP/HSA/OpenCL operations.
 
+## CP-0009 provider boundary
+
+`<self_amdgpu_runtime/provider.h>` exposes the narrow GemSim provider boundary
+used while the pinned ROCr/libhsakmt ABI is being brought up. It publishes the
+source-union ThunkLoader manifest (124 entries, 113 HSA and 11 DRM), the
+Linux-effective shared/direct counts (123/122), all 17 recorded packed-layout
+records, the model interface 1.1 metadata, and the source HSAKMT status table.
+The authority identity is pinned by
+`protocol/host-transport-v1-provider.json` and its SHA-256 is available through
+`sagr_provider_authority_sha256()`.
+
+The layout records expose only the authority's recorded key offsets. Their
+`field_count` values count those recorded entries, not necessarily every
+member in the upstream C struct; omitted fields are intentionally unspecified
+and must not be inferred from this boundary.
+
+`sagr_provider_open()` wraps exactly one existing GemSim transport handshake;
+`sagr_provider_get_info()` and `sagr_provider_query_lifecycle()` expose the
+negotiated daemon identity, and `sagr_provider_close()` releases the owned
+transport. `sagr_provider_invoke()` validates symbol/index and argument
+carriers and returns `HSAKMT_STATUS_NOT_SUPPORTED` for operations outside this
+checkpoint. It does not export production symbol names, serialize raw pointers
+or descriptors, load a host GPU library, or probe a device node. This is an
+ABI inventory and provider boundary only, not a generic ROCr/HIP/OpenCL,
+code-object, Triton, PyTorch, or vLLM implementation.
+
 ## ABI surface
 
 The installed `<self_amdgpu_runtime/runtime.h>` header exposes:

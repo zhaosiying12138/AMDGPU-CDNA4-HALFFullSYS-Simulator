@@ -4,6 +4,29 @@ add_executable(self_amdgpu_runtime_api_test runtime_test.c)
 target_link_libraries(self_amdgpu_runtime_api_test PRIVATE SelfAmdgpuRuntime::runtime)
 add_test(NAME self_amdgpu_runtime.api COMMAND self_amdgpu_runtime_api_test)
 
+add_executable(self_amdgpu_runtime_provider_test provider_test.c)
+target_link_libraries(
+  self_amdgpu_runtime_provider_test
+  PRIVATE SelfAmdgpuRuntime::runtime)
+if(MSVC)
+  target_compile_options(self_amdgpu_runtime_provider_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    self_amdgpu_runtime_provider_test
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(
+  NAME self_amdgpu_runtime.provider
+  COMMAND self_amdgpu_runtime_provider_test)
+add_test(
+  NAME self_amdgpu_runtime.provider.audit
+  COMMAND
+    "${CMAKE_COMMAND}"
+    "-DSAGR_PROVIDER_SOURCE_FILE=${CMAKE_CURRENT_SOURCE_DIR}/../src/provider.c"
+    "-DSAGR_PROVIDER_HEADER_FILE=${CMAKE_CURRENT_SOURCE_DIR}/../include/self_amdgpu_runtime/provider.h"
+    "-DSAGR_PROVIDER_BINARY=$<TARGET_FILE:self_amdgpu_runtime_provider_test>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/provider_audit.cmake")
+
 add_executable(
   self_amdgpu_runtime_protocol_test
   protocol_test.c
