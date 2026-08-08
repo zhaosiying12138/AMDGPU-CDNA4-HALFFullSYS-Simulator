@@ -17,7 +17,12 @@ set(_forbidden_source_tokens
     "amdsmi")
 
 foreach(_source_file IN ITEMS "${SAGR_PROVIDER_SOURCE_FILE}"
-                              "${SAGR_PROVIDER_HEADER_FILE}")
+                              "${SAGR_PROVIDER_HEADER_FILE}"
+                              "${SAGR_KMT_SOURCE_FILE}"
+                              "${SAGR_KMT_HEADER_FILE}")
+  if(_source_file STREQUAL "")
+    continue()
+  endif()
   if(NOT EXISTS "${_source_file}")
     message(FATAL_ERROR "provider audit input does not exist: ${_source_file}")
   endif()

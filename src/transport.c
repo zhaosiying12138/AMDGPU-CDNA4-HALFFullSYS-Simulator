@@ -209,6 +209,12 @@ static sagr_status_t validate_options(
   const int dispatch_required =
       (options->required_capabilities[SAGR_CAPABILITY_DISPATCH_WORD] &
        SAGR_CAPABILITY_DISPATCH_MASK) != 0;
+  const int kmt_offered =
+      (options->offered_capabilities[SAGR_CAPABILITY_KMT_WORD] &
+       SAGR_CAPABILITY_KMT_MASK) != 0;
+  const int kmt_required =
+      (options->required_capabilities[SAGR_CAPABILITY_KMT_WORD] &
+       SAGR_CAPABILITY_KMT_MASK) != 0;
   if (options->struct_size < sizeof(*options) || options->flags != 0 ||
       options->cancel_fd < -1 || options->reserved0 != 0 ||
       !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
@@ -228,6 +234,7 @@ static sagr_status_t validate_options(
       queue_offered != queue_required || memory_offered != memory_required ||
       signal_offered != signal_required ||
       dispatch_offered != dispatch_required ||
+      kmt_offered != kmt_required ||
       (dispatch_required != 0 &&
        (queue_required == 0 || memory_required == 0 ||
         signal_required == 0))) {
@@ -967,6 +974,11 @@ static int dispatch_capability_selected(const struct sagr_instance *instance) {
   return (instance->info
               .negotiated_capabilities[SAGR_CAPABILITY_DISPATCH_WORD] &
           SAGR_CAPABILITY_DISPATCH_MASK) != 0;
+}
+
+static int kmt_capability_selected(const struct sagr_instance *instance) {
+  return (instance->info.negotiated_capabilities[SAGR_KMT_CAPABILITY_WORD] &
+          SAGR_KMT_CAPABILITY_MASK) != 0;
 }
 
 static void poison_queue_transport(struct sagr_instance *instance) {
@@ -2277,6 +2289,149 @@ static sagr_status_t receive_signal_completion(
       }
     }
   }
+}
+
+sagr_status_t sagr_transport_kmt_exchange(
+    sagr_instance_t opaque_instance, const sagr_kmt_envelope_request_t *request,
+    const sagr_kmt_call_options_t *options,
+    sagr_kmt_envelope_result_t *result, int32_t *wire_status,
+    sagr_error_info_t *error, uint32_t error_size) {
+  struct sagr_instance *instance = (struct sagr_instance *)opaque_instance;
+  sagr_kmt_call_options_t local_options;
+  monotonic_deadline_t deadline;
+  uint8_t request_frame[SAGR_WIRE_KMT_FRAME_BYTES];
+  uint8_t response_frame[SAGR_WIRE_MAX_RECORD_BYTES];
+  size_t request_size = 0;
+  size_t response_size = 0;
+  uint64_t request_id = 0;
+  int native_errno = 0;
+  int record_sent = 0;
+  int32_t decoded_wire_status = -1;
+  const char *reason = "KMT operation failed";
+  sagr_status_t status;
+
+  initialize_error(error, error_size);
+  if (instance == NULL || instance->magic != SAGR_INSTANCE_MAGIC ||
+      request == NULL || result == NULL ||
+      (error != NULL && error_size < sizeof(*error))) {
+    return fail_open(error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                     "invalid KMT exchange arguments");
+  }
+  if (options == NULL) {
+    memset(&local_options, 0, sizeof(local_options));
+    local_options.struct_size = (uint32_t)sizeof(local_options);
+    local_options.timeout_ns = SAGR_DEFAULT_OPEN_TIMEOUT_NS;
+    local_options.cancel_fd = -1;
+  } else {
+    if (options->struct_size < sizeof(*options)) {
+      return fail_open(error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                       "KMT call options are too small");
+    }
+    memcpy(&local_options, options, sizeof(local_options));
+  }
+  if (local_options.flags != 0 || local_options.cancel_fd < -1 ||
+      local_options.reserved0 != 0 ||
+      !reserved_is_zero(local_options.reserved, sizeof(local_options.reserved))) {
+    return fail_open(error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                     "invalid KMT call options");
+  }
+  if (local_options.cancel_fd >= 0) {
+    const int fd_flags = fcntl(local_options.cancel_fd, F_GETFD);
+    if (fd_flags < 0 || (fd_flags & FD_CLOEXEC) == 0) {
+      return fail_open(error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1,
+                       fd_flags < 0 ? errno : EINVAL,
+                       "KMT cancellation fd must be CLOEXEC");
+    }
+  }
+  if (make_deadline(local_options.timeout_ns,
+                    local_options.absolute_deadline_ns, &deadline) != 0) {
+    return fail_open(error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1,
+                     errno, "invalid KMT deadline");
+  }
+  if (!kmt_capability_selected(instance)) {
+    return fail_open(error, error_size, SAGR_STATUS_NOT_SUPPORTED,
+                     SAGR_WIRE_STATUS_UNSUPPORTED_CAPABILITY, 0,
+                     "KMT capability was not negotiated");
+  }
+  status = require_queue_transport(instance, error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (instance->operation_active != 0) {
+    return fail_open(error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "another transport operation is active");
+  }
+  status = sagr_protocol_allocate_request_id(&instance->next_request_id,
+                                             &request_id);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(error, error_size, status, -1, 0,
+                     "KMT request ID space exhausted");
+  }
+  status = sagr_protocol_encode_kmt_request(
+      &instance->info, request_id, request, request_frame,
+      sizeof(request_frame), &request_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(error, error_size, status, -1, 0,
+                     "could not encode KMT request");
+  }
+  instance->operation_active = 1;
+  status = send_record(instance->socket_fd, request_frame, request_size,
+                       &deadline, local_options.cancel_fd, &native_errno,
+                       &record_sent);
+  if (status != SAGR_STATUS_SUCCESS) {
+    if (record_sent != 0) {
+      poison_queue_transport(instance);
+    }
+    instance->operation_active = 0;
+    return fail_open(error, error_size, status, -1, native_errno,
+                     "KMT request send failed");
+  }
+  status = receive_record(instance->socket_fd, response_frame,
+                          sizeof(response_frame), &response_size, &deadline,
+                          local_options.cancel_fd, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    poison_queue_transport(instance);
+    instance->operation_active = 0;
+    return fail_open(error, error_size, status, -1, native_errno,
+                     "KMT result receive failed");
+  }
+  status = sagr_protocol_decode_kmt_result(
+      response_frame, response_size, &instance->info, request_id, result,
+      &decoded_wire_status, &reason);
+  if (status != SAGR_STATUS_SUCCESS ||
+      result->operation != request->operation ||
+      result->operation_sequence != request->operation_sequence ||
+      (request->operation != SAGR_KMT_OP_OPEN_KFD &&
+       (result->owner_id != request->owner_id ||
+        result->owner_generation != request->owner_generation)) ||
+      ((request->operation != SAGR_KMT_OP_OPEN_KFD &&
+        request->operation != SAGR_KMT_OP_TOPOLOGY_SNAPSHOT &&
+        request->operation != SAGR_KMT_OP_ALLOC_MEMORY &&
+        request->operation != SAGR_KMT_OP_QUEUE_CREATE &&
+        request->operation != SAGR_KMT_OP_EVENT_CREATE) &&
+       (result->object_id != request->object_id ||
+        result->object_generation != request->object_generation)) ||
+      result->auxiliary_id != request->auxiliary_id ||
+      result->auxiliary_generation != request->auxiliary_generation) {
+    poison_queue_transport(instance);
+    instance->operation_active = 0;
+    if (status == SAGR_STATUS_SUCCESS) {
+      status = SAGR_STATUS_PROTOCOL_ERROR;
+      reason = "KMT result identity mismatch";
+    }
+    return fail_open(error, error_size, status, decoded_wire_status,
+                     native_errno, reason);
+  }
+  instance->operation_active = 0;
+  if (wire_status != NULL) {
+    *wire_status = decoded_wire_status;
+  }
+  if (error != NULL && error_size >= sizeof(*error)) {
+    error->wire_status = decoded_wire_status;
+    error->status = SAGR_STATUS_SUCCESS;
+    (void)snprintf(error->message, sizeof(error->message), "%s", reason);
+  }
+  return SAGR_STATUS_SUCCESS;
 }
 
 sagr_status_t sagr_instance_open(

@@ -105,7 +105,8 @@ static int capabilities_are_valid_selection(const uint64_t *capabilities) {
                            SAGR_CAPABILITY_QUEUE_MASK |
                            SAGR_CAPABILITY_MEMORY_MASK |
                            SAGR_CAPABILITY_SIGNAL_MASK |
-                           SAGR_CAPABILITY_DISPATCH_MASK;
+                           SAGR_CAPABILITY_DISPATCH_MASK |
+                           SAGR_CAPABILITY_KMT_MASK;
   if ((capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] &
        SAGR_CAPABILITY_TOPOLOGY_MASK) == 0 ||
       (capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] & ~allowed) != 0) {
@@ -632,6 +633,12 @@ sagr_status_t sagr_protocol_decode_ack(
       ((options->required_capabilities[SAGR_CAPABILITY_DISPATCH_WORD] &
         SAGR_CAPABILITY_DISPATCH_MASK) != 0)) {
     *reason = "ACK dispatch capability was not both offered and required";
+    return SAGR_STATUS_CAPABILITY_MISMATCH;
+  }
+  if (((selected[SAGR_CAPABILITY_KMT_WORD] & SAGR_CAPABILITY_KMT_MASK) != 0) !=
+      ((options->required_capabilities[SAGR_CAPABILITY_KMT_WORD] &
+        SAGR_CAPABILITY_KMT_MASK) != 0)) {
+    *reason = "ACK KMT capability was not both offered and required";
     return SAGR_STATUS_CAPABILITY_MISMATCH;
   }
   if (!bytes_are_zero(options->expected_daemon_uuid, 16) &&
@@ -1586,6 +1593,236 @@ sagr_status_t sagr_protocol_validate_failed_dispatch_ack(
       response->start_tick != 0 || response->end_tick != 0 ||
       response->retire_tick != 0) {
     return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static int kmt_operation_valid(uint16_t operation) {
+  return operation >= (uint16_t)SAGR_KMT_OP_OPEN_KFD &&
+         operation <= (uint16_t)SAGR_KMT_OP_MODEL_DRM_CALL;
+}
+
+static int kmt_words_zero_outside(const uint32_t words[8], uint16_t operation,
+                                  int result_words) {
+  uint32_t allowed = 0;
+  uint32_t index;
+  switch (operation) {
+    case SAGR_KMT_OP_GET_VERSION: allowed = 0x0fU; break;
+    case SAGR_KMT_OP_TOPOLOGY_SNAPSHOT: allowed = 0x3fU; break;
+    case SAGR_KMT_OP_ALLOC_MEMORY: allowed = 0x7fU; break;
+    case SAGR_KMT_OP_COPY_MEMORY: allowed = result_words ? 0U : 0x1fU; break;
+    case SAGR_KMT_OP_QUEUE_CREATE: allowed = result_words ? 0x01U : 0x1fU; break;
+    case SAGR_KMT_OP_QUEUE_DOORBELL: allowed = 0x03U; break;
+    case SAGR_KMT_OP_EVENT_CREATE:
+    case SAGR_KMT_OP_EVENT_SET: allowed = result_words ? 0U : 0x03U; break;
+    case SAGR_KMT_OP_EVENT_QUERY: allowed = result_words ? 0x1fU : 0U; break;
+    case SAGR_KMT_OP_EVENT_WAIT: allowed = result_words ? 0x03U : 0x0fU; break;
+    case SAGR_KMT_OP_MODEL_DRM_CALL: allowed = result_words ? 0U : 0x03U; break;
+    case SAGR_KMT_OP_POINTER_INFO: allowed = result_words ? 0x1fU : 0U; break;
+    case SAGR_KMT_OP_OPEN_KFD:
+    case SAGR_KMT_OP_CLOSE_KFD:
+    case SAGR_KMT_OP_FREE_MEMORY:
+    case SAGR_KMT_OP_QUEUE_DESTROY:
+    case SAGR_KMT_OP_EVENT_DESTROY:
+    case SAGR_KMT_OP_EVENT_RESET: allowed = 0U; break;
+    default: return 0;
+  }
+  for (index = 0; index < 8U; ++index) {
+    if ((allowed & (UINT32_C(1) << index)) == 0 && words[index] != 0) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int kmt_reserved_request_zero(const sagr_kmt_envelope_request_t *request) {
+  return bytes_are_zero(request->reserved, sizeof(request->reserved));
+}
+
+static int kmt_reserved_result_zero(const sagr_kmt_envelope_result_t *result) {
+  return bytes_are_zero(result->reserved, sizeof(result->reserved));
+}
+
+sagr_status_t sagr_protocol_encode_kmt_request(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_kmt_envelope_request_t *request, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size) {
+  uint8_t *payload;
+  uint32_t index;
+  if (info == NULL || request == NULL || frame == NULL || frame_size == NULL ||
+      frame_capacity < SAGR_WIRE_KMT_FRAME_BYTES || request_id == 0 ||
+      request->major != SAGR_KMT_PROTOCOL_MAJOR ||
+      request->minor != SAGR_KMT_PROTOCOL_MINOR ||
+      !kmt_operation_valid(request->operation) || request->flags != 0 ||
+      request->operation_sequence == 0 ||
+      (request->operation != SAGR_KMT_OP_OPEN_KFD &&
+       (request->owner_id == 0 || request->owner_generation == 0)) ||
+      !kmt_words_zero_outside(request->argument_words, request->operation, 0) ||
+      request->buffer_bytes > SAGR_KMT_BUFFER_BYTES ||
+      (request->buffer_bytes == 0 && request->buffer_crc32c != 0) ||
+      (request->buffer_bytes != 0 && request->buffer_crc32c !=
+                                      sagr_crc32c(request->buffer,
+                                                  request->buffer_bytes)) ||
+      !bytes_are_zero(request->buffer + request->buffer_bytes,
+                      SAGR_KMT_BUFFER_BYTES - request->buffer_bytes) ||
+      !kmt_reserved_request_zero(request)) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  memset(frame, 0, SAGR_WIRE_KMT_FRAME_BYTES);
+  encode_header(frame, SAGR_WIRE_MESSAGE_KMT_REQUEST, SAGR_KMT_PAYLOAD_BYTES,
+                request_id, info->daemon_uuid, info->connection_id,
+                info->epoch);
+  payload = frame + SAGR_WIRE_HEADER_BYTES;
+  put_u16(payload, request->major);
+  put_u16(payload + 2, request->minor);
+  put_u16(payload + 4, request->operation);
+  put_u16(payload + 6, request->flags);
+  put_u64(payload + 8, request->operation_sequence);
+  put_u64(payload + 16, request->owner_id);
+  put_u64(payload + 24, request->owner_generation);
+  put_u64(payload + 32, request->object_id);
+  put_u64(payload + 40, request->object_generation);
+  put_u64(payload + 48, request->auxiliary_id);
+  put_u64(payload + 56, request->auxiliary_generation);
+  for (index = 0; index < SAGR_KMT_ARGUMENT_WORD_COUNT; ++index) {
+    put_u32(payload + 64 + (size_t)index * 4U, request->argument_words[index]);
+  }
+  put_u32(payload + 96, request->buffer_bytes);
+  put_u32(payload + 100, request->buffer_crc32c);
+  memcpy(payload + 104, request->buffer, SAGR_KMT_BUFFER_BYTES);
+  sagr_protocol_recompute_frame_crc(frame, SAGR_WIRE_KMT_FRAME_BYTES);
+  *frame_size = SAGR_WIRE_KMT_FRAME_BYTES;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_protocol_encode_kmt_result(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_kmt_envelope_result_t *result, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size) {
+  uint8_t *payload;
+  uint32_t index;
+  if (info == NULL || result == NULL || frame == NULL || frame_size == NULL ||
+      frame_capacity < SAGR_WIRE_KMT_FRAME_BYTES || request_id == 0 ||
+      result->major != SAGR_KMT_PROTOCOL_MAJOR ||
+      result->minor != SAGR_KMT_PROTOCOL_MINOR ||
+      !kmt_operation_valid(result->operation) || result->flags != 0 ||
+      result->operation_sequence == 0 ||
+      (result->operation != SAGR_KMT_OP_OPEN_KFD &&
+       (result->owner_id == 0 || result->owner_generation == 0)) ||
+      !kmt_words_zero_outside(result->result_words, result->operation, 1) ||
+      result->buffer_bytes > SAGR_KMT_BUFFER_BYTES ||
+      (result->buffer_bytes == 0 && result->buffer_crc32c != 0) ||
+      (result->buffer_bytes != 0 && result->buffer_crc32c !=
+                                      sagr_crc32c(result->buffer,
+                                                  result->buffer_bytes)) ||
+      !bytes_are_zero(result->buffer + result->buffer_bytes,
+                      SAGR_KMT_BUFFER_BYTES - result->buffer_bytes) ||
+      !kmt_reserved_result_zero(result)) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  memset(frame, 0, SAGR_WIRE_KMT_FRAME_BYTES);
+  encode_header(frame, SAGR_WIRE_MESSAGE_KMT_RESULT, SAGR_KMT_PAYLOAD_BYTES,
+                request_id, info->daemon_uuid, info->connection_id,
+                info->epoch);
+  payload = frame + SAGR_WIRE_HEADER_BYTES;
+  put_u16(payload, result->major);
+  put_u16(payload + 2, result->minor);
+  put_u16(payload + 4, result->operation);
+  put_u16(payload + 6, result->flags);
+  put_u32(payload + 8, result->status);
+  put_u32(payload + 12, (uint32_t)result->wire_status);
+  put_u64(payload + 16, result->operation_sequence);
+  put_u64(payload + 24, result->owner_id);
+  put_u64(payload + 32, result->owner_generation);
+  put_u64(payload + 40, result->object_id);
+  put_u64(payload + 48, result->object_generation);
+  put_u64(payload + 56, result->auxiliary_id);
+  put_u64(payload + 64, result->auxiliary_generation);
+  for (index = 0; index < SAGR_KMT_ARGUMENT_WORD_COUNT; ++index) {
+    put_u32(payload + 72 + (size_t)index * 4U, result->result_words[index]);
+  }
+  put_u32(payload + 104, result->buffer_bytes);
+  put_u32(payload + 108, result->buffer_crc32c);
+  memcpy(payload + 112, result->buffer, SAGR_KMT_BUFFER_BYTES);
+  sagr_protocol_recompute_frame_crc(frame, SAGR_WIRE_KMT_FRAME_BYTES);
+  *frame_size = SAGR_WIRE_KMT_FRAME_BYTES;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_protocol_decode_kmt_result(
+    const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
+    uint64_t expected_request_id, sagr_kmt_envelope_result_t *result,
+    int32_t *wire_status, const char **reason) {
+  const uint8_t *payload;
+  uint32_t index;
+  uint32_t buffer_bytes;
+  if (wire_status != NULL) {
+    *wire_status = -1;
+  }
+  if (reason != NULL) {
+    *reason = "malformed KMT result";
+  }
+  if (frame == NULL || info == NULL || result == NULL ||
+      frame_size != SAGR_WIRE_KMT_FRAME_BYTES || expected_request_id == 0 ||
+      memcmp(frame, k_magic, sizeof(k_magic)) != 0 ||
+      get_u16(frame + 8) != 1 || get_u16(frame + 10) != 0 ||
+      get_u16(frame + 12) != SAGR_WIRE_HEADER_BYTES ||
+      get_u16(frame + 14) != SAGR_WIRE_MESSAGE_KMT_RESULT ||
+      get_u32(frame + 20) != SAGR_KMT_PAYLOAD_BYTES ||
+      get_u32(frame + 16) != 0 || get_u32(frame + 68) != 0 ||
+      !bytes_are_zero(frame + 72, 8) ||
+      get_u64(frame + 24) != expected_request_id ||
+      get_u64(frame + 48) != info->connection_id ||
+      get_u64(frame + 56) != info->epoch ||
+      memcmp(frame + 32, info->daemon_uuid, SAGR_UUID_SIZE) != 0 ||
+      get_u32(frame + 64) != frame_crc32c(frame, frame_size)) {
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  payload = frame + SAGR_WIRE_HEADER_BYTES;
+  memset(result, 0, sizeof(*result));
+  result->major = get_u16(payload);
+  result->minor = get_u16(payload + 2);
+  result->operation = get_u16(payload + 4);
+  result->flags = get_u16(payload + 6);
+  result->status = get_u32(payload + 8);
+  result->wire_status = (int32_t)get_u32(payload + 12);
+  result->operation_sequence = get_u64(payload + 16);
+  result->owner_id = get_u64(payload + 24);
+  result->owner_generation = get_u64(payload + 32);
+  result->object_id = get_u64(payload + 40);
+  result->object_generation = get_u64(payload + 48);
+  result->auxiliary_id = get_u64(payload + 56);
+  result->auxiliary_generation = get_u64(payload + 64);
+  for (index = 0; index < SAGR_KMT_ARGUMENT_WORD_COUNT; ++index) {
+    result->result_words[index] = get_u32(payload + 72 + (size_t)index * 4U);
+  }
+  result->buffer_bytes = get_u32(payload + 104);
+  result->buffer_crc32c = get_u32(payload + 108);
+  memcpy(result->buffer, payload + 112, SAGR_KMT_BUFFER_BYTES);
+  buffer_bytes = result->buffer_bytes;
+  if (result->major != SAGR_KMT_PROTOCOL_MAJOR ||
+      result->minor != SAGR_KMT_PROTOCOL_MINOR ||
+      !kmt_operation_valid(result->operation) || result->flags != 0 ||
+      result->operation_sequence == 0 ||
+      (result->operation != SAGR_KMT_OP_OPEN_KFD &&
+       (result->owner_id == 0 || result->owner_generation == 0)) ||
+      !kmt_words_zero_outside(result->result_words, result->operation, 1) ||
+      buffer_bytes > SAGR_KMT_BUFFER_BYTES ||
+      (buffer_bytes == 0 && result->buffer_crc32c != 0) ||
+      (buffer_bytes != 0 && result->buffer_crc32c !=
+                                  sagr_crc32c(result->buffer, buffer_bytes)) ||
+      !bytes_are_zero(result->buffer + buffer_bytes,
+                      SAGR_KMT_BUFFER_BYTES - buffer_bytes) ||
+      !kmt_reserved_result_zero(result)) {
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (wire_status != NULL) {
+    *wire_status = result->wire_status;
+  }
+  if (reason != NULL) {
+    *reason = result->status == SAGR_KMT_STATUS_SUCCESS
+                  ? "KMT operation succeeded"
+                  : "KMT operation rejected";
   }
   return SAGR_STATUS_SUCCESS;
 }

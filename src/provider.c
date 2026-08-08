@@ -2,9 +2,12 @@
 
 #include <self_amdgpu_runtime/provider.h>
 
+#include "provider_internal.h"
+
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 
 enum { SAGR_PROVIDER_MAGIC = 0x50525631 };
@@ -35,12 +38,34 @@ typedef struct provider_model_command_record {
   uint32_t size_bytes;
 } provider_model_command_record_t;
 
-struct sagr_provider {
-  uint32_t magic;
-  uint32_t reserved0;
-  sagr_instance_t instance;
-  sagr_instance_info_t transport_info;
-};
+static int valid_provider(const sagr_provider_t *provider);
+
+sagr_instance_t sagr_provider_transport_instance(sagr_provider_t *provider) {
+  return valid_provider(provider) ? provider->instance : NULL;
+}
+
+const sagr_instance_info_t *sagr_provider_transport_info(
+    const sagr_provider_t *provider) {
+  return valid_provider(provider) ? &provider->transport_info : NULL;
+}
+
+int sagr_provider_is_valid(const sagr_provider_t *provider) {
+  return valid_provider(provider);
+}
+
+uint64_t sagr_provider_next_kmt_sequence(sagr_provider_t *provider) {
+  uint64_t sequence;
+  if (!valid_provider(provider)) {
+    return 0;
+  }
+  sequence = atomic_fetch_add_explicit(&provider->kmt_operation_sequence,
+                                       UINT64_C(1), memory_order_relaxed);
+  if (sequence == 0) {
+    sequence = atomic_fetch_add_explicit(&provider->kmt_operation_sequence,
+                                         UINT64_C(1), memory_order_relaxed);
+  }
+  return sequence;
+}
 
 static const provider_symbol_record_t k_symbols[] = {
     {"hsaKmtOpenKFD", SAGR_PROVIDER_SYMBOL_HSA,
@@ -825,6 +850,7 @@ sagr_status_t sagr_provider_open(
   }
   provider->magic = SAGR_PROVIDER_MAGIC;
   provider->instance = instance;
+  atomic_init(&provider->kmt_operation_sequence, UINT64_C(1));
   status = sagr_instance_get_info(instance, &provider->transport_info,
                                   (uint32_t)sizeof(provider->transport_info));
   if (status != SAGR_STATUS_SUCCESS) {

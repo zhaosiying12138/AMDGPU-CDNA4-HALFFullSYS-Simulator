@@ -7,6 +7,7 @@
 
 #include <self_amdgpu_runtime/export.h>
 #include <self_amdgpu_runtime/runtime.h>
+#include <self_amdgpu_runtime/kmt_shim.h>
 
 #ifdef __cplusplus
 extern "C" {

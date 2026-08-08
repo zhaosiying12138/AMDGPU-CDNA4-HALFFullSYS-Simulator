@@ -28,7 +28,8 @@ add_library(
   src/runtime.c
   src/transport.c
   src/transport_codec.c
-  src/provider.c)
+  src/provider.c
+  src/kmt_shim.c)
 add_library(SelfAmdgpuRuntime::runtime ALIAS self_amdgpu_runtime)
 
 set_target_properties(

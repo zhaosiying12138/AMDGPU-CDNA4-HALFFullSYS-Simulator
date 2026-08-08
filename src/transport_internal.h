@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include <self_amdgpu_runtime/runtime.h>
+#include <self_amdgpu_runtime/kmt_shim.h>
 
 enum {
   SAGR_WIRE_HEADER_BYTES = 80,
@@ -32,7 +33,9 @@ enum {
   SAGR_WIRE_DISPATCH_REQUEST_FRAME_BYTES =
       SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_DISPATCH_REQUEST_PAYLOAD_BYTES,
   SAGR_WIRE_DISPATCH_RESULT_FRAME_BYTES =
-      SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_DISPATCH_RESULT_PAYLOAD_BYTES
+      SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_DISPATCH_RESULT_PAYLOAD_BYTES,
+  SAGR_WIRE_KMT_FRAME_BYTES =
+      SAGR_WIRE_HEADER_BYTES + SAGR_KMT_PAYLOAD_BYTES
 };
 
 enum {
@@ -83,6 +86,12 @@ enum {
   SAGR_WIRE_MESSAGE_DISPATCH_ACK = 12,
   SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION = 13,
   SAGR_WIRE_DISPATCH_OPCODE_SUBMIT_PINNED = 1
+};
+
+enum {
+  SAGR_WIRE_MESSAGE_KMT_REQUEST = SAGR_KMT_MESSAGE_REQUEST,
+  SAGR_WIRE_MESSAGE_KMT_RESULT = SAGR_KMT_MESSAGE_RESULT,
+  SAGR_WIRE_MESSAGE_KMT_ACK = SAGR_KMT_MESSAGE_ACK
 };
 
 typedef struct sagr_wire_queue_request {
@@ -346,6 +355,29 @@ sagr_status_t sagr_protocol_validate_failed_dispatch_ack(
     const sagr_wire_dispatch_request_t *request,
     const sagr_wire_dispatch_response_t *response);
 
+sagr_status_t sagr_protocol_encode_kmt_request(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_kmt_envelope_request_t *request, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size);
+
+sagr_status_t sagr_protocol_encode_kmt_result(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_kmt_envelope_result_t *result, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size);
+
+sagr_status_t sagr_protocol_decode_kmt_result(
+    const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
+    uint64_t expected_request_id, sagr_kmt_envelope_result_t *result,
+    int32_t *wire_status, const char **reason);
+
 sagr_status_t sagr_protocol_map_wire_status(uint32_t status);
+
+/* The provider shim uses this transport-private exchange.  The caller has
+ * already validated typed ownership and copied-buffer bounds. */
+sagr_status_t sagr_transport_kmt_exchange(
+    sagr_instance_t instance, const sagr_kmt_envelope_request_t *request,
+    const sagr_kmt_call_options_t *options,
+    sagr_kmt_envelope_result_t *result, int32_t *wire_status,
+    sagr_error_info_t *error, uint32_t error_size);
 
 #endif
