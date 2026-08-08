@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   self_amdgpu_runtime
-  VERSION 0.3.0
+  VERSION 0.4.0
   DESCRIPTION "Host-side C runtime foundation for the self-amdgpu gem5 transport"
   LANGUAGES C)
 

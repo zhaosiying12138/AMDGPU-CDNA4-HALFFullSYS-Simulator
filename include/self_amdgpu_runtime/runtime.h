@@ -47,6 +47,8 @@ enum {
 #define SAGR_CAPABILITY_TOPOLOGY_MASK UINT64_C(1)
 #define SAGR_CAPABILITY_QUEUE_WORD UINT32_C(0)
 #define SAGR_CAPABILITY_QUEUE_MASK UINT64_C(2)
+#define SAGR_CAPABILITY_MEMORY_WORD UINT32_C(0)
+#define SAGR_CAPABILITY_MEMORY_MASK UINT64_C(4)
 
 #define SAGR_QUEUE_PROTOCOL_MAJOR UINT16_C(1)
 #define SAGR_QUEUE_PROTOCOL_MINOR UINT16_C(0)
@@ -56,8 +58,18 @@ enum {
 #define SAGR_QUEUE_COMMAND_CONTROL_TEST UINT64_C(1)
 #define SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST UINT64_C(2)
 
+#define SAGR_MEMORY_PROTOCOL_MAJOR UINT16_C(1)
+#define SAGR_MEMORY_PROTOCOL_MINOR UINT16_C(0)
+#define SAGR_MEMORY_MAX_LIVE_ALLOCATIONS UINT32_C(1024)
+#define SAGR_MEMORY_MAX_SINGLE_ALLOCATION_BYTES UINT64_C(2147483648)
+#define SAGR_MEMORY_MAX_TOTAL_LIVE_BYTES UINT64_C(4294967296)
+#define SAGR_MEMORY_MAX_TRANSFER_BYTES UINT64_C(16777216)
+#define SAGR_MEMORY_ALIGNMENT_4K UINT64_C(4096)
+#define SAGR_MEMORY_ALIGNMENT_64K UINT64_C(65536)
+
 typedef struct sagr_instance *sagr_instance_t;
 typedef struct sagr_queue *sagr_queue_t;
+typedef struct sagr_memory *sagr_memory_t;
 
 /*
  * All public structures contain fixed-width fields only. Callers initialize
@@ -169,6 +181,38 @@ typedef struct sagr_queue_completion {
   uint8_t reserved[16];
 } sagr_queue_completion_t;
 
+typedef struct sagr_memory_allocate_options {
+  uint32_t struct_size;
+  uint32_t flags;
+  uint64_t size_bytes;
+  uint64_t alignment_bytes;
+  uint8_t reserved[16];
+} sagr_memory_allocate_options_t;
+
+typedef struct sagr_memory_operation_options {
+  uint32_t struct_size;
+  uint32_t flags;
+  uint64_t timeout_ns;
+  uint64_t absolute_deadline_ns;
+  int32_t cancel_fd;
+  uint32_t reserved0;
+  uint8_t reserved[16];
+} sagr_memory_operation_options_t;
+
+typedef struct sagr_memory_info {
+  uint32_t struct_size;
+  uint32_t flags;
+  uint64_t allocation_id;
+  uint64_t generation;
+  uint64_t simulated_va;
+  uint64_t size_bytes;
+  uint64_t alignment_bytes;
+  uint64_t connection_id;
+  uint64_t epoch;
+  uint8_t daemon_uuid[SAGR_UUID_SIZE];
+  uint8_t reserved[16];
+} sagr_memory_info_t;
+
 SAGR_API uint32_t sagr_abi_version(void);
 SAGR_API const char *sagr_version_string(void);
 SAGR_API const char *sagr_status_string(sagr_status_t status);
@@ -181,6 +225,10 @@ SAGR_API sagr_status_t sagr_queue_operation_options_init(
     sagr_queue_operation_options_t *options, uint32_t options_size);
 SAGR_API sagr_status_t sagr_queue_create_options_init(
     sagr_queue_create_options_t *options, uint32_t options_size);
+SAGR_API sagr_status_t sagr_memory_allocate_options_init(
+    sagr_memory_allocate_options_t *options, uint32_t options_size);
+SAGR_API sagr_status_t sagr_memory_operation_options_init(
+    sagr_memory_operation_options_t *options, uint32_t options_size);
 
 /*
  * Open performs exactly one AF_UNIX SOCK_SEQPACKET handshake attempt. When no
@@ -232,6 +280,40 @@ SAGR_API sagr_status_t sagr_queue_wait(
 SAGR_API sagr_status_t sagr_queue_destroy(
     sagr_queue_t *queue,
     const sagr_queue_operation_options_t *operation_options,
+    sagr_error_info_t *out_error, uint32_t error_size);
+
+/*
+ * Memory operations are synchronous and caller-serialized with queue APIs on
+ * the owning instance. Host pointers are copied through sealed memfd staging
+ * and never appear on the wire. A complete send followed by failure before a
+ * canonical terminal ACK poisons the transport. Allocation handles have
+ * unique ownership; copied aliases must not be used after free or close.
+ * COPY_D2H does not modify the caller buffer until final carrier validation,
+ * private reread, CRC verification, and its post-ACK deadline/cancel check
+ * succeed. Observable carrier mismatches poison; local scratch allocation or
+ * reread failure and post-ACK timeout/cancellation leave the known session
+ * reusable.
+ */
+SAGR_API sagr_status_t sagr_memory_allocate(
+    sagr_instance_t instance, const sagr_memory_allocate_options_t *options,
+    const sagr_memory_operation_options_t *operation_options,
+    sagr_memory_t *out_memory, sagr_memory_info_t *out_info,
+    uint32_t info_size, sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_memory_get_info(
+    sagr_memory_t memory, sagr_memory_info_t *info, uint32_t info_size);
+SAGR_API sagr_status_t sagr_memory_copy_from_host(
+    sagr_memory_t memory, uint64_t offset, const void *source,
+    uint64_t byte_count,
+    const sagr_memory_operation_options_t *operation_options,
+    sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_memory_copy_to_host(
+    sagr_memory_t memory, uint64_t offset, void *destination,
+    uint64_t byte_count,
+    const sagr_memory_operation_options_t *operation_options,
+    sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_memory_free(
+    sagr_memory_t *memory,
+    const sagr_memory_operation_options_t *operation_options,
     sagr_error_info_t *out_error, uint32_t error_size);
 
 #ifdef __cplusplus

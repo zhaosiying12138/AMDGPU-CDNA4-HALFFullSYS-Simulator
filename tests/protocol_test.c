@@ -59,6 +59,70 @@ static const char k_golden_queue_error_completion[] =
     "102030405060708088776655443322110100000000000002"
     "00000000000000020000000000000001123456789abcdef1";
 
+static const char k_golden_memory_alloc_request[] =
+    "4753494d5250430000010000005000060000000000000040"
+    "0123456789abcdf100112233445566778899aabbccddeeff"
+    "1122334455667788010203040506070891fdb84e00000000"
+    "000000000000000000010000000100000000000000000000"
+    "000000000000000000000000000000000000000000010000"
+    "000000000001000000000000000000000000000000000000";
+
+static const char k_golden_memory_alloc_ack[] =
+    "4753494d5250430000010000005000070000000000000040"
+    "0123456789abcdf100112233445566778899aabbccddeeff"
+    "11223344556677880102030405060708c6f7e53000000000"
+    "000000000000000000010000000000000001000000000000"
+    "000000000000000788776655443322110000100300000000"
+    "00000000000100000000000000010000123456789abcdef2";
+
+static const char k_golden_memory_h2d_request[] =
+    "4753494d5250430000010000005000060000000000000040"
+    "0123456789abcdf200112233445566778899aabbccddeeff"
+    "112233445566778801020304050607085d4ceda600000000"
+    "000000000000000000010000000300000000000000000007"
+    "887766554433221100000000000010000000000000000010"
+    "0000000048dfe98200000000000000000000000000000000";
+
+static const char k_golden_memory_h2d_ack[] =
+    "4753494d5250430000010000005000070000000000000040"
+    "0123456789abcdf200112233445566778899aabbccddeeff"
+    "112233445566778801020304050607087f6468ee00000000"
+    "000000000000000000010000000000000003000000000000"
+    "000000000000000788776655443322110000000000001000"
+    "00000000000000100000000048dfe982123456789abcdef3";
+
+static const char k_golden_memory_d2h_request[] =
+    "4753494d5250430000010000005000060000000000000040"
+    "0123456789abcdf300112233445566778899aabbccddeeff"
+    "112233445566778801020304050607089cc6b0a700000000"
+    "000000000000000000010000000400000000000000000007"
+    "887766554433221100000000000010000000000000000010"
+    "000000000000000000000000000000000000000000000000";
+
+static const char k_golden_memory_d2h_ack[] =
+    "4753494d5250430000010000005000070000000000000040"
+    "0123456789abcdf300112233445566778899aabbccddeeff"
+    "112233445566778801020304050607089465fa5e00000000"
+    "000000000000000000010000000000000004000000000000"
+    "000000000000000788776655443322110000000000001000"
+    "00000000000000100000000048dfe982123456789abcdef4";
+
+static const char k_golden_memory_free_request[] =
+    "4753494d5250430000010000005000060000000000000040"
+    "0123456789abcdf400112233445566778899aabbccddeeff"
+    "11223344556677880102030405060708a966c7a900000000"
+    "000000000000000000010000000200000000000000000007"
+    "887766554433221100000000000000000000000000000000"
+    "000000000000000000000000000000000000000000000000";
+
+static const char k_golden_memory_free_ack[] =
+    "4753494d5250430000010000005000070000000000000040"
+    "0123456789abcdf400112233445566778899aabbccddeeff"
+    "11223344556677880102030405060708e6b8578e00000000"
+    "000000000000000000010000000000000002000000000000"
+    "000000000000000788776655443322110000000000000000"
+    "00000000000000000000000000000000123456789abcdef5";
+
 static const uint8_t k_daemon_uuid[16] = {
     0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
     0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};
@@ -700,6 +764,311 @@ static int test_failed_queue_ack_shape(void) {
   return 0;
 }
 
+static int expect_memory_case(
+    const char *name, const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_wire_memory_request_t *request,
+    const sagr_wire_memory_response_t *response, const char *request_golden,
+    const char *ack_golden) {
+  uint8_t frame[SAGR_WIRE_MEMORY_FRAME_BYTES];
+  size_t frame_size = 0;
+  sagr_wire_memory_response_t decoded;
+  int32_t wire_status = -1;
+  const char *reason = NULL;
+  if (sagr_protocol_encode_memory_request(
+          info, request_id, request, frame, sizeof(frame), &frame_size) !=
+          SAGR_STATUS_SUCCESS ||
+      expect_equal(name, frame, frame_size, request_golden) != 0) {
+    fprintf(stderr, "%s memory request golden encode failed\n", name);
+    return 1;
+  }
+  if (sagr_protocol_encode_memory_response(
+          info, request_id, response, frame, sizeof(frame), &frame_size) !=
+          SAGR_STATUS_SUCCESS ||
+      expect_equal(name, frame, frame_size, ack_golden) != 0 ||
+      sagr_protocol_decode_memory_response(
+          frame, frame_size, info, request_id, &decoded, &wire_status,
+          &reason) != SAGR_STATUS_SUCCESS ||
+      wire_status != SAGR_WIRE_STATUS_OK ||
+      decoded.request_id != request_id || decoded.opcode != response->opcode ||
+      decoded.allocation_id != response->allocation_id ||
+      decoded.generation != response->generation ||
+      decoded.value0 != response->value0 || decoded.value1 != response->value1 ||
+      decoded.value2 != response->value2 ||
+      decoded.sim_tick != response->sim_tick) {
+    fprintf(stderr, "%s memory ACK golden encode/decode failed: %s\n", name,
+            reason == NULL ? "no reason" : reason);
+    return 1;
+  }
+  return 0;
+}
+
+static int test_memory_golden_frames(void) {
+  sagr_instance_info_t info;
+  sagr_wire_memory_request_t request;
+  sagr_wire_memory_response_t response;
+
+  initialize_queue_info(&info);
+  info.negotiated_capabilities[0] =
+      SAGR_CAPABILITY_TOPOLOGY_MASK | SAGR_CAPABILITY_MEMORY_MASK;
+  memset(&request, 0, sizeof(request));
+  request.major = SAGR_MEMORY_PROTOCOL_MAJOR;
+  request.minor = SAGR_MEMORY_PROTOCOL_MINOR;
+  request.opcode = SAGR_WIRE_MEMORY_OPCODE_ALLOC;
+  request.byte_count = UINT64_C(65536);
+  request.argument = SAGR_MEMORY_ALIGNMENT_64K;
+  memset(&response, 0, sizeof(response));
+  response.major = SAGR_MEMORY_PROTOCOL_MAJOR;
+  response.minor = SAGR_MEMORY_PROTOCOL_MINOR;
+  response.status = SAGR_WIRE_STATUS_OK;
+  response.opcode = request.opcode;
+  response.allocation_id = UINT64_C(7);
+  response.generation = UINT64_C(0x8877665544332211);
+  response.value0 = UINT64_C(0x0000100300000000);
+  response.value1 = request.byte_count;
+  response.value2 = request.argument;
+  response.sim_tick = UINT64_C(0x123456789abcdef2);
+  if (expect_memory_case(
+          "MEMORY_ALLOC", &info, UINT64_C(0x0123456789abcdf1), &request,
+          &response, k_golden_memory_alloc_request,
+          k_golden_memory_alloc_ack) != 0) {
+    return 1;
+  }
+
+  request.opcode = SAGR_WIRE_MEMORY_OPCODE_COPY_H2D;
+  request.allocation_id = response.allocation_id;
+  request.generation = response.generation;
+  request.offset = UINT64_C(4096);
+  request.byte_count = UINT64_C(16);
+  request.argument = UINT64_C(0x48dfe982);
+  response.opcode = request.opcode;
+  response.value0 = request.offset;
+  response.value1 = request.byte_count;
+  response.value2 = request.argument;
+  response.sim_tick = UINT64_C(0x123456789abcdef3);
+  if (expect_memory_case(
+          "MEMORY_H2D", &info, UINT64_C(0x0123456789abcdf2), &request,
+          &response, k_golden_memory_h2d_request,
+          k_golden_memory_h2d_ack) != 0) {
+    return 1;
+  }
+
+  request.opcode = SAGR_WIRE_MEMORY_OPCODE_COPY_D2H;
+  request.argument = 0;
+  response.opcode = request.opcode;
+  response.sim_tick = UINT64_C(0x123456789abcdef4);
+  if (expect_memory_case(
+          "MEMORY_D2H", &info, UINT64_C(0x0123456789abcdf3), &request,
+          &response, k_golden_memory_d2h_request,
+          k_golden_memory_d2h_ack) != 0) {
+    return 1;
+  }
+
+  request.opcode = SAGR_WIRE_MEMORY_OPCODE_FREE;
+  request.offset = 0;
+  request.byte_count = 0;
+  response.opcode = request.opcode;
+  response.value0 = 0;
+  response.value1 = 0;
+  response.value2 = 0;
+  response.sim_tick = UINT64_C(0x123456789abcdef5);
+  if (expect_memory_case(
+          "MEMORY_FREE", &info, UINT64_C(0x0123456789abcdf4), &request,
+          &response, k_golden_memory_free_request,
+          k_golden_memory_free_ack) != 0) {
+    return 1;
+  }
+  return 0;
+}
+
+static int test_memory_request_structural_limits(void) {
+  sagr_instance_info_t info;
+  sagr_wire_memory_request_t request;
+  uint8_t frame[SAGR_WIRE_MEMORY_FRAME_BYTES];
+  size_t frame_size = 0;
+  initialize_queue_info(&info);
+  memset(&request, 0, sizeof(request));
+  request.major = SAGR_MEMORY_PROTOCOL_MAJOR;
+  request.minor = SAGR_MEMORY_PROTOCOL_MINOR;
+  request.opcode = SAGR_WIRE_MEMORY_OPCODE_ALLOC;
+  request.byte_count = SAGR_MEMORY_MAX_SINGLE_ALLOCATION_BYTES + UINT64_C(1);
+  request.argument = SAGR_MEMORY_ALIGNMENT_4K;
+  if (sagr_protocol_encode_memory_request(
+          &info, UINT64_C(1), &request, frame, sizeof(frame), &frame_size) !=
+      SAGR_STATUS_SUCCESS) {
+    fprintf(stderr, "resource-exhausting ALLOC was rejected structurally\n");
+    return 1;
+  }
+  request.opcode = SAGR_WIRE_MEMORY_OPCODE_COPY_D2H;
+  request.allocation_id = UINT64_C(1);
+  request.generation = UINT64_C(1);
+  request.offset = UINT64_C(4);
+  request.byte_count = SAGR_MEMORY_MAX_TRANSFER_BYTES + UINT64_C(1);
+  request.argument = 0;
+  if (sagr_protocol_encode_memory_request(
+          &info, UINT64_C(2), &request, frame, sizeof(frame), &frame_size) !=
+      SAGR_STATUS_SUCCESS) {
+    fprintf(stderr, "resource-exhausting COPY was rejected structurally\n");
+    return 1;
+  }
+  request.offset = UINT64_MAX;
+  request.byte_count = UINT64_C(1);
+  if (sagr_protocol_encode_memory_request(
+          &info, UINT64_C(3), &request, frame, sizeof(frame), &frame_size) !=
+      SAGR_STATUS_INVALID_ARGUMENT) {
+    fprintf(stderr, "overflowing COPY range was encoded\n");
+    return 1;
+  }
+  return 0;
+}
+
+static int expect_memory_decode_status(const uint8_t *frame,
+                                       size_t frame_size,
+                                       const sagr_instance_info_t *info,
+                                       uint64_t request_id,
+                                       sagr_status_t expected) {
+  sagr_wire_memory_response_t decoded;
+  int32_t wire_status = -1;
+  const char *reason = NULL;
+  const sagr_status_t actual = sagr_protocol_decode_memory_response(
+      frame, frame_size, info, request_id, &decoded, &wire_status, &reason);
+  if (actual != expected) {
+    fprintf(stderr, "memory mutation status=%d expected=%d: %s\n", actual,
+            expected, reason == NULL ? "no reason" : reason);
+    return 1;
+  }
+  return 0;
+}
+
+static int test_memory_response_mutations(void) {
+  sagr_instance_info_t info;
+  uint8_t golden[SAGR_WIRE_MEMORY_FRAME_BYTES];
+  uint8_t mutated[SAGR_WIRE_MEMORY_FRAME_BYTES];
+  size_t golden_size = 0;
+  const uint64_t request_id = UINT64_C(0x0123456789abcdf1);
+  initialize_queue_info(&info);
+  if (decode_hex(k_golden_memory_alloc_ack, golden, sizeof(golden),
+                 &golden_size) != 0) {
+    return 1;
+  }
+
+#define EXPECT_MEMORY_MUTATION(MUTATION, EXPECTED)                             \
+  do {                                                                          \
+    memcpy(mutated, golden, golden_size);                                       \
+    MUTATION;                                                                   \
+    sagr_protocol_recompute_frame_crc(mutated, golden_size);                    \
+    if (expect_memory_decode_status(mutated, golden_size, &info, request_id,    \
+                                    EXPECTED) != 0) {                           \
+      return 1;                                                                 \
+    }                                                                           \
+  } while (0)
+
+  EXPECT_MEMORY_MUTATION(store_u16(mutated + 14,
+                                   SAGR_WIRE_MESSAGE_MEMORY_REQUEST),
+                         SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_MEMORY_MUTATION(store_u64(mutated + 24, request_id + UINT64_C(1)),
+                         SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_MEMORY_MUTATION(mutated[32] ^= 1, SAGR_STATUS_INSTANCE_MISMATCH);
+  EXPECT_MEMORY_MUTATION(store_u64(mutated + 48, info.connection_id + 1),
+                         SAGR_STATUS_TOPOLOGY_MISMATCH);
+  EXPECT_MEMORY_MUTATION(store_u64(mutated + 56, info.epoch + 1),
+                         SAGR_STATUS_TOPOLOGY_MISMATCH);
+  EXPECT_MEMORY_MUTATION(store_u16(mutated + SAGR_WIRE_HEADER_BYTES, 2),
+                         SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_MEMORY_MUTATION(store_u32(mutated + SAGR_WIRE_HEADER_BYTES + 4,
+                                   UINT32_MAX),
+                         SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_MEMORY_MUTATION(store_u16(mutated + SAGR_WIRE_HEADER_BYTES + 8, 99),
+                         SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_MEMORY_MUTATION(store_u16(mutated + SAGR_WIRE_HEADER_BYTES + 10, 1),
+                         SAGR_STATUS_PROTOCOL_ERROR);
+  EXPECT_MEMORY_MUTATION(store_u32(mutated + SAGR_WIRE_HEADER_BYTES + 12, 1),
+                         SAGR_STATUS_PROTOCOL_ERROR);
+#undef EXPECT_MEMORY_MUTATION
+
+  memcpy(mutated, golden, golden_size);
+  mutated[golden_size - 1U] ^= 1;
+  if (expect_memory_decode_status(mutated, golden_size, &info, request_id,
+                                  SAGR_STATUS_CHECKSUM_ERROR) != 0 ||
+      expect_memory_decode_status(golden, golden_size - 1U, &info, request_id,
+                                  SAGR_STATUS_PROTOCOL_ERROR) != 0) {
+    return 1;
+  }
+  return 0;
+}
+
+static int test_memory_capability_must_be_required(void) {
+  sagr_wire_ack_fields_t fields;
+  sagr_instance_open_options_t options;
+  sagr_wire_ack_result_t result;
+  uint8_t frame[SAGR_WIRE_ACK_FRAME_BYTES];
+  size_t frame_size = 0;
+  int32_t wire_status = -1;
+  const char *reason = NULL;
+  initialize_success_ack(&fields);
+  fields.selected_capabilities[0] |= SAGR_CAPABILITY_MEMORY_MASK;
+  initialize_golden_options(&options);
+  options.offered_capabilities[0] |= SAGR_CAPABILITY_MEMORY_MASK;
+  if (sagr_protocol_encode_ack(&fields, frame, sizeof(frame), &frame_size) !=
+          SAGR_STATUS_SUCCESS ||
+      sagr_protocol_decode_ack(frame, frame_size, &options, fields.request_id,
+                               k_client_nonce, &result, &wire_status,
+                               &reason) != SAGR_STATUS_CAPABILITY_MISMATCH) {
+    fprintf(stderr, "offered-only memory capability ACK was accepted\n");
+    return 1;
+  }
+  options.required_capabilities[0] |= SAGR_CAPABILITY_MEMORY_MASK;
+  if (sagr_protocol_decode_ack(frame, frame_size, &options, fields.request_id,
+                               k_client_nonce, &result, &wire_status,
+                               &reason) != SAGR_STATUS_SUCCESS ||
+      (result.selected_capabilities[0] & SAGR_CAPABILITY_MEMORY_MASK) == 0) {
+    fprintf(stderr, "required memory capability ACK was rejected: %s\n",
+            reason == NULL ? "no reason" : reason);
+    return 1;
+  }
+  return 0;
+}
+
+static int test_failed_memory_ack_shape(void) {
+  sagr_wire_memory_request_t request;
+  sagr_wire_memory_response_t response;
+  memset(&request, 0, sizeof(request));
+  request.opcode = SAGR_WIRE_MEMORY_OPCODE_COPY_H2D;
+  request.allocation_id = UINT64_C(7);
+  request.generation = UINT64_C(0x8877665544332211);
+  memset(&response, 0, sizeof(response));
+  response.status = SAGR_WIRE_STATUS_PROTOCOL_STATE;
+  response.opcode = request.opcode;
+  response.allocation_id = request.allocation_id;
+  response.generation = request.generation;
+  if (sagr_protocol_validate_failed_memory_ack(&request, &response) !=
+      SAGR_STATUS_SUCCESS) {
+    fprintf(stderr, "canonical failed memory ACK was rejected\n");
+    return 1;
+  }
+
+#define EXPECT_FAILED_MEMORY_ACK_REJECTED(MUTATION)                            \
+  do {                                                                          \
+    sagr_wire_memory_response_t changed = response;                             \
+    MUTATION;                                                                   \
+    if (sagr_protocol_validate_failed_memory_ack(&request, &changed) !=         \
+        SAGR_STATUS_PROTOCOL_ERROR) {                                           \
+      fprintf(stderr, "noncanonical failed memory ACK was accepted\n");     \
+      return 1;                                                                 \
+    }                                                                           \
+  } while (0)
+  EXPECT_FAILED_MEMORY_ACK_REJECTED(
+      changed.opcode = SAGR_WIRE_MEMORY_OPCODE_FREE);
+  EXPECT_FAILED_MEMORY_ACK_REJECTED(changed.allocation_id ^= UINT64_C(1));
+  EXPECT_FAILED_MEMORY_ACK_REJECTED(changed.generation ^= UINT64_C(1));
+  EXPECT_FAILED_MEMORY_ACK_REJECTED(changed.value0 = UINT64_C(1));
+  EXPECT_FAILED_MEMORY_ACK_REJECTED(changed.value1 = UINT64_C(1));
+  EXPECT_FAILED_MEMORY_ACK_REJECTED(changed.value2 = UINT64_C(1));
+  EXPECT_FAILED_MEMORY_ACK_REJECTED(changed.sim_tick = UINT64_C(1));
+  EXPECT_FAILED_MEMORY_ACK_REJECTED(changed.status = SAGR_WIRE_STATUS_OK);
+#undef EXPECT_FAILED_MEMORY_ACK_REJECTED
+  return 0;
+}
+
 static int test_request_id_exhaustion(void) {
   uint64_t next_request_id = UINT64_MAX - UINT64_C(1);
   uint64_t request_id = 0;
@@ -737,6 +1106,11 @@ int main(void) {
   failures += test_queue_response_mutations();
   failures += test_queue_capability_must_be_required();
   failures += test_failed_queue_ack_shape();
+  failures += test_memory_golden_frames();
+  failures += test_memory_request_structural_limits();
+  failures += test_memory_response_mutations();
+  failures += test_memory_capability_must_be_required();
+  failures += test_failed_memory_ack_shape();
   failures += test_request_id_exhaustion();
   return failures == 0 ? 0 : 1;
 }

@@ -92,6 +92,46 @@ static int expect_queue_option_defaults(void) {
   return 0;
 }
 
+static int expect_memory_option_defaults(void) {
+  sagr_memory_allocate_options_t allocate_options;
+  sagr_memory_operation_options_t operation_options;
+  if (sagr_memory_allocate_options_init(
+          &allocate_options, (uint32_t)sizeof(allocate_options)) !=
+          SAGR_STATUS_SUCCESS ||
+      allocate_options.struct_size != (uint32_t)sizeof(allocate_options) ||
+      allocate_options.flags != 0 || allocate_options.size_bytes != 0 ||
+      allocate_options.alignment_bytes != SAGR_MEMORY_ALIGNMENT_4K ||
+      sagr_memory_operation_options_init(
+          &operation_options, (uint32_t)sizeof(operation_options)) !=
+          SAGR_STATUS_SUCCESS ||
+      operation_options.struct_size != (uint32_t)sizeof(operation_options) ||
+      operation_options.flags != 0 ||
+      operation_options.timeout_ns != SAGR_DEFAULT_OPEN_TIMEOUT_NS ||
+      operation_options.absolute_deadline_ns != 0 ||
+      operation_options.cancel_fd != -1 || operation_options.reserved0 != 0) {
+    fprintf(stderr, "unexpected memory option defaults\n");
+    return 1;
+  }
+  if (sagr_memory_allocate_options_init(
+          NULL, (uint32_t)sizeof(allocate_options)) !=
+          SAGR_STATUS_INVALID_ARGUMENT ||
+      sagr_memory_allocate_options_init(
+          &allocate_options, (uint32_t)sizeof(allocate_options) - 1U) !=
+          SAGR_STATUS_BUFFER_TOO_SMALL ||
+      allocate_options.struct_size != (uint32_t)sizeof(allocate_options) ||
+      sagr_memory_operation_options_init(
+          NULL, (uint32_t)sizeof(operation_options)) !=
+          SAGR_STATUS_INVALID_ARGUMENT ||
+      sagr_memory_operation_options_init(
+          &operation_options, (uint32_t)sizeof(operation_options) - 1U) !=
+          SAGR_STATUS_BUFFER_TOO_SMALL ||
+      operation_options.struct_size != (uint32_t)sizeof(operation_options)) {
+    fprintf(stderr, "unexpected memory option validation\n");
+    return 1;
+  }
+  return 0;
+}
+
 int main(void) {
   int failures = 0;
   const uint32_t abi_version = sagr_abi_version();
@@ -110,14 +150,22 @@ int main(void) {
                  "public queue info ABI size changed");
   _Static_assert(sizeof(sagr_queue_completion_t) == 80,
                  "public queue completion ABI size changed");
+  _Static_assert(sizeof(sagr_memory_allocate_options_t) == 40,
+                 "public memory allocate options ABI size changed");
+  _Static_assert(sizeof(sagr_memory_operation_options_t) == 48,
+                 "public memory operation options ABI size changed");
+  _Static_assert(sizeof(sagr_memory_info_t) == 96,
+                 "public memory info ABI size changed");
 
   if (abi_version != SAGR_ABI_VERSION ||
-      strcmp(SAGR_VERSION_STRING, "0.3.0") != 0 ||
+      strcmp(SAGR_VERSION_STRING, "0.4.0") != 0 ||
       SAGR_ABI_VERSION_DECODE_MAJOR(abi_version) != SAGR_ABI_VERSION_MAJOR ||
       SAGR_ABI_VERSION_DECODE_MINOR(abi_version) != SAGR_ABI_VERSION_MINOR ||
-      SAGR_ABI_VERSION_MAJOR != 1 || SAGR_ABI_VERSION_MINOR != 2 ||
+      SAGR_ABI_VERSION_MAJOR != 1 || SAGR_ABI_VERSION_MINOR != 3 ||
       SAGR_CAPABILITY_QUEUE_MASK != UINT64_C(2) ||
-      SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST != UINT64_C(2)) {
+      SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST != UINT64_C(2) ||
+      SAGR_CAPABILITY_MEMORY_MASK != UINT64_C(4) ||
+      SAGR_MEMORY_MAX_TRANSFER_BYTES != UINT64_C(16777216)) {
     fprintf(stderr, "unexpected ABI version: 0x%08x\n", abi_version);
     ++failures;
   }
@@ -166,6 +214,7 @@ int main(void) {
   failures += expect_string(sagr_status_string(INT32_C(12345)), "unknown status");
   failures += expect_options_defaults();
   failures += expect_queue_option_defaults();
+  failures += expect_memory_option_defaults();
 
   return failures == 0 ? 0 : 1;
 }

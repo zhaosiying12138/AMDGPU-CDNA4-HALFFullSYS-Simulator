@@ -20,7 +20,10 @@ enum {
   SAGR_WIRE_CAPABILITY_BYTES = 32,
   SAGR_WIRE_QUEUE_PAYLOAD_BYTES = 64,
   SAGR_WIRE_QUEUE_FRAME_BYTES =
-      SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_QUEUE_PAYLOAD_BYTES
+      SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_QUEUE_PAYLOAD_BYTES,
+  SAGR_WIRE_MEMORY_PAYLOAD_BYTES = 64,
+  SAGR_WIRE_MEMORY_FRAME_BYTES =
+      SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_MEMORY_PAYLOAD_BYTES
 };
 
 enum {
@@ -44,6 +47,15 @@ enum {
   SAGR_WIRE_QUEUE_OPCODE_CREATE = 1,
   SAGR_WIRE_QUEUE_OPCODE_DESTROY = 2,
   SAGR_WIRE_QUEUE_OPCODE_DOORBELL = 3
+};
+
+enum {
+  SAGR_WIRE_MESSAGE_MEMORY_REQUEST = 6,
+  SAGR_WIRE_MESSAGE_MEMORY_ACK = 7,
+  SAGR_WIRE_MEMORY_OPCODE_ALLOC = 1,
+  SAGR_WIRE_MEMORY_OPCODE_FREE = 2,
+  SAGR_WIRE_MEMORY_OPCODE_COPY_H2D = 3,
+  SAGR_WIRE_MEMORY_OPCODE_COPY_D2H = 4
 };
 
 typedef struct sagr_wire_queue_request {
@@ -72,6 +84,32 @@ typedef struct sagr_wire_queue_response {
   uint64_t request_id;
   uint16_t message_type;
 } sagr_wire_queue_response_t;
+
+typedef struct sagr_wire_memory_request {
+  uint16_t major;
+  uint16_t minor;
+  uint16_t opcode;
+  uint16_t flags;
+  uint64_t allocation_id;
+  uint64_t generation;
+  uint64_t offset;
+  uint64_t byte_count;
+  uint64_t argument;
+} sagr_wire_memory_request_t;
+
+typedef struct sagr_wire_memory_response {
+  uint16_t major;
+  uint16_t minor;
+  uint32_t status;
+  uint16_t opcode;
+  uint64_t allocation_id;
+  uint64_t generation;
+  uint64_t value0;
+  uint64_t value1;
+  uint64_t value2;
+  uint64_t sim_tick;
+  uint64_t request_id;
+} sagr_wire_memory_response_t;
 
 typedef struct sagr_wire_ack_fields {
   uint16_t selected_major;
@@ -145,6 +183,25 @@ sagr_status_t sagr_protocol_allocate_request_id(uint64_t *next_request_id,
 sagr_status_t sagr_protocol_validate_failed_queue_ack(
     const sagr_wire_queue_request_t *request,
     const sagr_wire_queue_response_t *response);
+
+sagr_status_t sagr_protocol_encode_memory_request(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_wire_memory_request_t *request, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size);
+
+sagr_status_t sagr_protocol_encode_memory_response(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_wire_memory_response_t *response, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size);
+
+sagr_status_t sagr_protocol_decode_memory_response(
+    const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
+    uint64_t expected_request_id, sagr_wire_memory_response_t *result,
+    int32_t *wire_status, const char **reason);
+
+sagr_status_t sagr_protocol_validate_failed_memory_ack(
+    const sagr_wire_memory_request_t *request,
+    const sagr_wire_memory_response_t *response);
 
 sagr_status_t sagr_protocol_map_wire_status(uint32_t status);
 

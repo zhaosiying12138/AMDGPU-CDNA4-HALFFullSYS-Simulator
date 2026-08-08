@@ -21,7 +21,9 @@ static void usage(FILE *stream, const char *program) {
           "[--expected-epoch N] [--min-version MAJOR.MINOR] "
           "[--max-version MAJOR.MINOR] [--offer-cap-bit N] "
           "[--require-cap-bit N] [--timeout-ms N|infinite] [--hold-ms N] "
-          "[--queue-depth N --doorbells N --command-kind 0|1|2]\n",
+          "[--queue-depth N --doorbells N --command-kind 0|1|2] "
+          "[--memory-bytes N [--memory-alignment 4096|65536] "
+          "[--memory-reuse]]\n",
           program);
 }
 
@@ -41,6 +43,28 @@ typedef struct queue_cli_result {
   int32_t completion_wire_status;
   uint64_t completion_error_code;
 } queue_cli_result_t;
+
+typedef struct memory_cli_options {
+  uint32_t enabled;
+  uint32_t reuse;
+  uint64_t bytes;
+  uint64_t alignment;
+} memory_cli_options_t;
+
+typedef struct memory_cli_result {
+  sagr_memory_info_t info;
+  uint32_t initial_zero;
+  uint32_t match;
+  uint32_t freed;
+  uint32_t reused;
+  uint32_t reuse_zero;
+  uint32_t pattern_crc;
+  uint32_t returned_crc;
+  uint64_t reuse_allocation_id;
+  uint64_t reuse_generation;
+  uint64_t reuse_simulated_va;
+  uint32_t reuse_freed;
+} memory_cli_result_t;
 
 static int hex_value(char character) {
   if (character >= '0' && character <= '9') {
@@ -228,7 +252,8 @@ static void print_uuid(const uint8_t uuid[16]) {
 static int parse_arguments(int argc, char **argv, const char **endpoint,
                            sagr_instance_open_options_t *options,
                            uint64_t *hold_ms,
-                           queue_cli_options_t *queue_options) {
+                           queue_cli_options_t *queue_options,
+                           memory_cli_options_t *memory_options) {
   int index;
   int have_job = 0;
   int have_rank = 0;
@@ -236,11 +261,18 @@ static int parse_arguments(int argc, char **argv, const char **endpoint,
   int have_queue_depth = 0;
   int have_doorbells = 0;
   int have_command_kind = 0;
+  int have_memory_bytes = 0;
+  int have_memory_alignment = 0;
+  memory_options->alignment = SAGR_MEMORY_ALIGNMENT_4K;
   for (index = 1; index < argc; ++index) {
     const char *argument = argv[index];
     if (strcmp(argument, "--help") == 0) {
       usage(stdout, argv[0]);
       exit(0);
+    }
+    if (strcmp(argument, "--memory-reuse") == 0) {
+      memory_options->reuse = 1;
+      continue;
     }
     if (index + 1 >= argc) {
       return -1;
@@ -334,6 +366,20 @@ static int parse_arguments(int argc, char **argv, const char **endpoint,
         return -1;
       }
       have_command_kind = 1;
+    } else if (strcmp(argument, "--memory-bytes") == 0) {
+      if (parse_u64(argv[++index], &memory_options->bytes) != 0 ||
+          memory_options->bytes == 0 ||
+          memory_options->bytes > SAGR_MEMORY_MAX_TRANSFER_BYTES) {
+        return -1;
+      }
+      have_memory_bytes = 1;
+    } else if (strcmp(argument, "--memory-alignment") == 0) {
+      if (parse_u64(argv[++index], &memory_options->alignment) != 0 ||
+          (memory_options->alignment != SAGR_MEMORY_ALIGNMENT_4K &&
+           memory_options->alignment != SAGR_MEMORY_ALIGNMENT_64K)) {
+        return -1;
+      }
+      have_memory_alignment = 1;
     } else {
       return -1;
     }
@@ -357,6 +403,19 @@ static int parse_arguments(int argc, char **argv, const char **endpoint,
     options->required_capabilities[SAGR_CAPABILITY_QUEUE_WORD] |=
         SAGR_CAPABILITY_QUEUE_MASK;
   }
+  if (have_memory_alignment != 0 && have_memory_bytes == 0) {
+    return -1;
+  }
+  if (memory_options->reuse != 0 && have_memory_bytes == 0) {
+    return -1;
+  }
+  if (have_memory_bytes != 0) {
+    memory_options->enabled = 1;
+    options->offered_capabilities[SAGR_CAPABILITY_MEMORY_WORD] |=
+        SAGR_CAPABILITY_MEMORY_MASK;
+    options->required_capabilities[SAGR_CAPABILITY_MEMORY_WORD] |=
+        SAGR_CAPABILITY_MEMORY_MASK;
+  }
   return 0;
 }
 
@@ -368,6 +427,198 @@ static void set_local_error(sagr_error_info_t *error, sagr_status_t status,
   error->wire_status = -1;
   error->native_errno = native_errno;
   (void)snprintf(error->message, sizeof(error->message), "%s", message);
+}
+
+static uint32_t cli_crc32c(const uint8_t *data, size_t size) {
+  uint32_t crc = UINT32_MAX;
+  size_t index;
+  for (index = 0; index < size; ++index) {
+    uint32_t bit;
+    crc ^= data[index];
+    for (bit = 0; bit < 8; ++bit) {
+      const uint32_t mask = UINT32_C(0) - (crc & UINT32_C(1));
+      crc = (crc >> 1) ^ (UINT32_C(0x82f63b78) & mask);
+    }
+  }
+  return ~crc;
+}
+
+static int memory_bytes_are_zero(const uint8_t *bytes, size_t size) {
+  uint8_t combined = 0;
+  size_t index;
+  for (index = 0; index < size; ++index) {
+    combined = (uint8_t)(combined | bytes[index]);
+  }
+  return combined == 0;
+}
+
+static void fill_memory_pattern(uint8_t *bytes, size_t size) {
+  size_t index;
+  for (index = 0; index < size; ++index) {
+    const uint64_t position = (uint64_t)index;
+    bytes[index] = (uint8_t)((position * UINT64_C(131) +
+                              (position >> 8) + UINT64_C(17)) &
+                             UINT64_C(0xff));
+  }
+}
+
+static sagr_status_t run_memory_roundtrip(
+    sagr_instance_t instance, const sagr_instance_open_options_t *open_options,
+    const memory_cli_options_t *memory_options, memory_cli_result_t *result,
+    sagr_error_info_t *error, const char **phase) {
+  sagr_memory_allocate_options_t allocate_options;
+  sagr_memory_operation_options_t operation_options;
+  sagr_memory_info_t reuse_info;
+  sagr_memory_t memory = NULL;
+  sagr_memory_t reuse_memory = NULL;
+  uint8_t *pattern = NULL;
+  uint8_t *returned = NULL;
+  const size_t byte_count = (size_t)memory_options->bytes;
+  sagr_status_t status;
+
+  memset(result, 0, sizeof(*result));
+  memset(&reuse_info, 0, sizeof(reuse_info));
+  status = sagr_memory_allocate_options_init(
+      &allocate_options, (uint32_t)sizeof(allocate_options));
+  if (status == SAGR_STATUS_SUCCESS) {
+    status = sagr_memory_operation_options_init(
+        &operation_options, (uint32_t)sizeof(operation_options));
+  }
+  if (status != SAGR_STATUS_SUCCESS) {
+    set_local_error(error, status, 0, "could not initialize memory options");
+    *phase = "memory_options";
+    return status;
+  }
+  allocate_options.size_bytes = memory_options->bytes;
+  allocate_options.alignment_bytes = memory_options->alignment;
+  operation_options.timeout_ns = open_options->open_timeout_ns;
+  pattern = (uint8_t *)malloc(byte_count);
+  returned = (uint8_t *)malloc(byte_count);
+  if (pattern == NULL || returned == NULL) {
+    set_local_error(error, SAGR_STATUS_OUT_OF_RESOURCES, errno,
+                    "could not allocate memory roundtrip buffers");
+    *phase = "memory_host_allocate";
+    status = SAGR_STATUS_OUT_OF_RESOURCES;
+    goto done;
+  }
+
+  *phase = "memory_allocate";
+  status = sagr_memory_allocate(
+      instance, &allocate_options, &operation_options, &memory, &result->info,
+      (uint32_t)sizeof(result->info), error, (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    goto done;
+  }
+
+  memset(returned, 0xa5, byte_count);
+  *phase = "memory_initial_d2h";
+  status = sagr_memory_copy_to_host(memory, 0, returned,
+                                    memory_options->bytes, &operation_options,
+                                    error, (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    goto done;
+  }
+  result->initial_zero =
+      (uint32_t)memory_bytes_are_zero(returned, byte_count);
+  if (result->initial_zero == 0) {
+    status = SAGR_STATUS_CHECKSUM_ERROR;
+    set_local_error(error, status, 0,
+                    "new simulated allocation was not zero initialized");
+    *phase = "memory_initial_zero";
+    goto done;
+  }
+
+  fill_memory_pattern(pattern, byte_count);
+  result->pattern_crc = cli_crc32c(pattern, byte_count);
+  *phase = "memory_h2d";
+  status = sagr_memory_copy_from_host(
+      memory, 0, pattern, memory_options->bytes, &operation_options, error,
+      (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    goto done;
+  }
+
+  memset(returned, 0xa5, byte_count);
+  *phase = "memory_d2h";
+  status = sagr_memory_copy_to_host(memory, 0, returned,
+                                    memory_options->bytes, &operation_options,
+                                    error, (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    goto done;
+  }
+  result->returned_crc = cli_crc32c(returned, byte_count);
+  result->match =
+      (uint32_t)(memcmp(pattern, returned, byte_count) == 0 &&
+                 result->pattern_crc == result->returned_crc);
+  if (result->match == 0) {
+    status = SAGR_STATUS_CHECKSUM_ERROR;
+    set_local_error(error, status, 0,
+                    "simulated memory roundtrip bytes did not match");
+    *phase = "memory_compare";
+    goto done;
+  }
+
+  *phase = "memory_free";
+  status = sagr_memory_free(&memory, &operation_options, error,
+                            (uint32_t)sizeof(*error));
+  if (status != SAGR_STATUS_SUCCESS) {
+    goto done;
+  }
+  result->freed = 1;
+
+  if (memory_options->reuse != 0) {
+    *phase = "memory_reuse_allocate";
+    status = sagr_memory_allocate(
+        instance, &allocate_options, &operation_options, &reuse_memory,
+        &reuse_info, (uint32_t)sizeof(reuse_info), error,
+        (uint32_t)sizeof(*error));
+    if (status != SAGR_STATUS_SUCCESS) {
+      goto done;
+    }
+    result->reused = 1;
+    result->reuse_allocation_id = reuse_info.allocation_id;
+    result->reuse_generation = reuse_info.generation;
+    result->reuse_simulated_va = reuse_info.simulated_va;
+    if (reuse_info.allocation_id != result->info.allocation_id ||
+        reuse_info.simulated_va != result->info.simulated_va ||
+        reuse_info.generation == 0 ||
+        reuse_info.generation == result->info.generation) {
+      status = SAGR_STATUS_PROTOCOL_ERROR;
+      set_local_error(error, status, 0,
+                      "reallocated memory did not reuse the slot canonically");
+      *phase = "memory_reuse_identity";
+      goto done;
+    }
+    memset(returned, 0xa5, byte_count);
+    *phase = "memory_reuse_d2h";
+    status = sagr_memory_copy_to_host(
+        reuse_memory, 0, returned, memory_options->bytes, &operation_options,
+        error, (uint32_t)sizeof(*error));
+    if (status != SAGR_STATUS_SUCCESS) {
+      goto done;
+    }
+    result->reuse_zero =
+        (uint32_t)memory_bytes_are_zero(returned, byte_count);
+    if (result->reuse_zero == 0) {
+      status = SAGR_STATUS_CHECKSUM_ERROR;
+      set_local_error(error, status, 0,
+                      "reused simulated allocation was not zero initialized");
+      *phase = "memory_reuse_zero";
+      goto done;
+    }
+    *phase = "memory_reuse_free";
+    status = sagr_memory_free(&reuse_memory, &operation_options, error,
+                              (uint32_t)sizeof(*error));
+    if (status != SAGR_STATUS_SUCCESS) {
+      goto done;
+    }
+    result->reuse_freed = 1;
+  }
+
+done:
+  free(returned);
+  free(pattern);
+  return status;
 }
 
 static sagr_status_t run_queue_control(
@@ -472,16 +723,20 @@ int main(int argc, char **argv) {
   sagr_status_t status;
   queue_cli_options_t queue_options;
   queue_cli_result_t queue_result;
+  memory_cli_options_t memory_options;
+  memory_cli_result_t memory_result;
   const char *failure_phase = "handshake";
   uint32_t index;
   uint64_t hold_ms = 0;
 
   memset(&queue_options, 0, sizeof(queue_options));
   memset(&queue_result, 0, sizeof(queue_result));
+  memset(&memory_options, 0, sizeof(memory_options));
+  memset(&memory_result, 0, sizeof(memory_result));
   status = sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (status != SAGR_STATUS_SUCCESS ||
       parse_arguments(argc, argv, &endpoint, &options, &hold_ms,
-                      &queue_options) != 0) {
+                      &queue_options, &memory_options) != 0) {
     usage(stderr, argv[0]);
     return 2;
   }
@@ -500,6 +755,16 @@ int main(int argc, char **argv) {
   if (queue_options.enabled != 0) {
     status = run_queue_control(instance, &options, &queue_options,
                                &queue_result, &error, &failure_phase);
+    if (status != SAGR_STATUS_SUCCESS) {
+      (void)sagr_instance_close(&instance);
+      print_failure_json(failure_phase, status, &error);
+      free(queue_result.sequences);
+      return 1;
+    }
+  }
+  if (memory_options.enabled != 0) {
+    status = run_memory_roundtrip(instance, &options, &memory_options,
+                                  &memory_result, &error, &failure_phase);
     if (status != SAGR_STATUS_SUCCESS) {
       (void)sagr_instance_close(&instance);
       print_failure_json(failure_phase, status, &error);
@@ -545,6 +810,35 @@ int main(int argc, char **argv) {
              queue_result.sequences[index]);
     }
     fputs("]}", stdout);
+  }
+  if (memory_options.enabled != 0) {
+    printf(",\"memory\":{\"status\":0,\"allocation_id\":\"0x%016" PRIx64
+           "\",\"generation\":\"0x%016" PRIx64
+           "\",\"simulated_va\":\"0x%016" PRIx64
+           "\",\"size_bytes\":%" PRIu64
+           ",\"alignment_bytes\":%" PRIu64
+           ",\"initial_zero\":%s,\"pattern_crc32c\":\"0x%08" PRIx32
+           "\",\"returned_crc32c\":\"0x%08" PRIx32
+           "\",\"match\":%s,\"freed\":%s",
+           memory_result.info.allocation_id, memory_result.info.generation,
+           memory_result.info.simulated_va, memory_result.info.size_bytes,
+           memory_result.info.alignment_bytes,
+           memory_result.initial_zero != 0 ? "true" : "false",
+           memory_result.pattern_crc, memory_result.returned_crc,
+           memory_result.match != 0 ? "true" : "false",
+           memory_result.freed != 0 ? "true" : "false");
+    if (memory_options.reuse != 0) {
+      printf(",\"reuse\":{\"allocation_id\":\"0x%016" PRIx64
+             "\",\"generation\":\"0x%016" PRIx64
+             "\",\"simulated_va\":\"0x%016" PRIx64
+             "\",\"initial_zero\":%s,\"freed\":%s}",
+             memory_result.reuse_allocation_id,
+             memory_result.reuse_generation,
+             memory_result.reuse_simulated_va,
+             memory_result.reuse_zero != 0 ? "true" : "false",
+             memory_result.reuse_freed != 0 ? "true" : "false");
+    }
+    fputc('}', stdout);
   }
   fputs("}\n", stdout);
   if (fflush(stdout) != 0 || hold_connection(hold_ms) != 0) {

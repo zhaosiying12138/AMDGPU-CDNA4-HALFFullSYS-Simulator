@@ -11,8 +11,10 @@ Linux `AF_UNIX` `SOCK_SEQPACKET`, including peer credentials, identity and
 capability negotiation, CRC32C framing, cancellation, and one absolute
 monotonic deadline. Queue-control protocol 1.0 adds bounded queue lifecycle,
 control-only doorbell notification, and asynchronous completion matching.
-It does **not** submit GPU packets or kernels, allocate GPU memory, pass
-descriptors or host pointers, reconnect, or expose HIP/HSA/OpenCL operations.
+Simulated-memory protocol 1.0 adds bridge-owned allocation and real byte
+transfer through sealed `memfd` staging passed with `SCM_RIGHTS`.
+It does **not** submit GPU packets or kernels, expose packet-visible VRAM,
+model SDMA timing, reconnect, or expose HIP/HSA/OpenCL operations.
 
 ## ABI surface
 
@@ -26,9 +28,11 @@ The installed `<self_amdgpu_runtime/runtime.h>` header exposes:
   `sagr_error_info_t` structures containing fixed-width fields only; and
 - `sagr_instance_open()`, `sagr_instance_get_info()`, and
   `sagr_instance_close()` for an independently owned transport instance; and
-- size-tagged queue options/results plus create, ring, wait, and destroy APIs.
+- size-tagged queue options/results plus create, ring, wait, and destroy APIs;
+  and
+- size-tagged memory options/info plus allocate, query, H2D, D2H, and free APIs.
 
-The transport API is ABI version `1.2`; the project release is `0.3.0`.
+The transport API is ABI version `1.3`; the project release is `0.4.0`.
 Status values 0 through 3 retain their original meanings. Transport statuses
 are appended, and native `errno` values are diagnostic rather than primary.
 
@@ -53,6 +57,29 @@ metadata only. A wait timeout or cancellation is retryable. An indeterminate
 ACK or a noncanonical frame poisons the queue transport, after which the caller
 closes the instance. Queue handles have unique ownership; copied aliases must
 not be used after destroy or instance close.
+
+Simulated memory requires capability bit 2 to be both offered and required.
+The v1 reference limits are 1024 live allocation slots, 2 GiB per allocation,
+4 GiB of total live requested bytes, and 16 MiB per transfer. Allocation is
+bridge-owned and sparse on the daemon side; a new or reused allocation reads
+as zero. Its returned simulated VA is functional transport metadata, not an
+address accepted by AMDGPU packet execution.
+
+Memory operations are synchronous and share the instance request-ID sequence
+with queue control. H2D sends one exact-size, mode-0600 memfd with
+`F_SEAL_SHRINK|F_SEAL_GROW|F_SEAL_WRITE|F_SEAL_SEAL`; D2H sends one mode-0600
+`O_RDWR` memfd initially sealed against shrink/grow. A successful daemon D2H
+adds the write and seal seals and returns the immutable content CRC32C. The
+runtime validates exact size, mode including special bits, access, seals, and
+CRC into private scratch before changing the caller buffer.
+
+A failure after a complete request send but before a canonical ACK poisons the
+shared transport. A canonical non-OK ACK is determinate and retryable. After a
+successful D2H ACK, observable carrier or CRC mismatches poison, while local
+scratch allocation or `pread` failure and deadline/cancellation leave the
+caller buffer untouched and the known session reusable. Allocation handles
+have unique ownership; copied aliases must not be used after free or instance
+close.
 
 ## Build and test
 
@@ -106,6 +133,23 @@ sagr-handshake \
   --timeout-ms 5000
 ```
 
+For the simulated-memory gate, `--memory-bytes N` automatically offers and
+requires capability bit 2. The tool allocates, verifies the initial zero
+contents, performs a deterministic H2D/D2H byte and CRC roundtrip, and frees
+the allocation. `--memory-alignment` selects 4096 or 65536. Adding
+`--memory-reuse` proves that the same slot and VA receive a changed nonzero
+generation, are zero initialized again, and are freed. The stable success JSON
+contains the `memory` object and nests the optional `reuse` object within it.
+
+```sh
+sagr-handshake \
+  --endpoint /absolute/path/to/gemsim.sock \
+  --memory-bytes 1048576 \
+  --memory-alignment 65536 \
+  --memory-reuse \
+  --timeout-ms 5000
+```
+
 Protocol rejection harnesses can override the offered version range with
 `--min-version MAJOR.MINOR` and `--max-version MAJOR.MINOR`, and may repeat
 `--offer-cap-bit N` or `--require-cap-bit N` for bits 0 through 255. A required
@@ -136,7 +180,7 @@ cmake --install build --prefix "$PWD/install"
 Consumers can use the exported package without depending on this source tree:
 
 ```cmake
-find_package(SelfAmdgpuRuntime 0.3 CONFIG REQUIRED)
+find_package(SelfAmdgpuRuntime 0.4 CONFIG REQUIRED)
 target_link_libraries(my_target PRIVATE SelfAmdgpuRuntime::runtime)
 ```
 

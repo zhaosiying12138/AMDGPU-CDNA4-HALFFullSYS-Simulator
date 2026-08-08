@@ -24,13 +24,15 @@ static int test_complete_parse(void) {
   };
   sagr_instance_open_options_t options;
   queue_cli_options_t queue_options;
+  memory_cli_options_t memory_options;
   const char *endpoint = NULL;
   uint64_t hold_ms = 0;
   memset(&queue_options, 0, sizeof(queue_options));
+  memset(&memory_options, 0, sizeof(memory_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (parse_arguments((int)(sizeof(arguments) / sizeof(arguments[0])),
                       arguments, &endpoint, &options, &hold_ms,
-                      &queue_options) != 0 ||
+                      &queue_options, &memory_options) != 0 ||
       endpoint == NULL || strcmp(endpoint, "/tmp/gemsim.sock") != 0 ||
       options.minimum_version_major != 0 ||
       options.minimum_version_minor != 9 ||
@@ -41,7 +43,8 @@ static int test_complete_parse(void) {
       options.required_capabilities[3] != (UINT64_C(1) << 63) ||
       options.offered_capabilities[0] != SAGR_CAPABILITY_TOPOLOGY_MASK ||
       options.required_capabilities[0] != SAGR_CAPABILITY_TOPOLOGY_MASK ||
-      queue_options.enabled != 0) {
+      queue_options.enabled != 0 || memory_options.enabled != 0 ||
+      memory_options.alignment != SAGR_MEMORY_ALIGNMENT_4K) {
     fprintf(stderr, "complete CLI option parse failed\n");
     return 1;
   }
@@ -51,12 +54,14 @@ static int test_complete_parse(void) {
 static int expect_invalid(char **arguments, size_t argument_count) {
   sagr_instance_open_options_t options;
   queue_cli_options_t queue_options;
+  memory_cli_options_t memory_options;
   const char *endpoint = NULL;
   uint64_t hold_ms = 0;
   memset(&queue_options, 0, sizeof(queue_options));
+  memset(&memory_options, 0, sizeof(memory_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   return parse_arguments((int)argument_count, arguments, &endpoint, &options,
-                         &hold_ms, &queue_options) == -1
+                         &hold_ms, &queue_options, &memory_options) == -1
              ? 0
              : 1;
 }
@@ -86,13 +91,15 @@ static int test_queue_parse(void) {
       (char *)"1", (char *)"--command-kind", (char *)"3"};
   sagr_instance_open_options_t options;
   queue_cli_options_t queue_options;
+  memory_cli_options_t memory_options;
   const char *endpoint = NULL;
   uint64_t hold_ms = 0;
   memset(&queue_options, 0, sizeof(queue_options));
+  memset(&memory_options, 0, sizeof(memory_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (parse_arguments((int)(sizeof(arguments) / sizeof(arguments[0])),
                       arguments, &endpoint, &options, &hold_ms,
-                      &queue_options) != 0 ||
+                      &queue_options, &memory_options) != 0 ||
       queue_options.enabled != 1 || queue_options.depth != 8 ||
       queue_options.doorbells != 3 ||
       queue_options.command_kind != SAGR_QUEUE_COMMAND_CONTROL_TEST ||
@@ -109,12 +116,90 @@ static int test_queue_parse(void) {
   endpoint = NULL;
   hold_ms = 0;
   memset(&queue_options, 0, sizeof(queue_options));
+  memset(&memory_options, 0, sizeof(memory_options));
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   if (parse_arguments((int)(sizeof(arguments) / sizeof(arguments[0])),
                       arguments, &endpoint, &options, &hold_ms,
-                      &queue_options) != 0 ||
+                      &queue_options, &memory_options) != 0 ||
       queue_options.command_kind != SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST) {
     fprintf(stderr, "CONTROL_ERROR_TEST CLI option parse failed\n");
+    return 1;
+  }
+  return 0;
+}
+
+static int test_memory_parse(void) {
+  char *arguments[] = {
+      (char *)"sagr-handshake", (char *)"--endpoint",
+      (char *)"/tmp/gemsim.sock", (char *)"--memory-bytes",
+      (char *)"65536", (char *)"--memory-alignment", (char *)"65536",
+      (char *)"--memory-reuse"};
+  char *default_alignment[] = {
+      (char *)"tool", (char *)"--endpoint", (char *)"/x",
+      (char *)"--memory-bytes", (char *)"1"};
+  char *alignment_without_memory[] = {
+      (char *)"tool", (char *)"--endpoint", (char *)"/x",
+      (char *)"--memory-alignment", (char *)"4096"};
+  char *reuse_without_memory[] = {
+      (char *)"tool", (char *)"--endpoint", (char *)"/x",
+      (char *)"--memory-reuse"};
+  char *zero_bytes[] = {
+      (char *)"tool", (char *)"--endpoint", (char *)"/x",
+      (char *)"--memory-bytes", (char *)"0"};
+  char *oversize[] = {
+      (char *)"tool", (char *)"--endpoint", (char *)"/x",
+      (char *)"--memory-bytes", (char *)"16777217"};
+  char *bad_alignment[] = {
+      (char *)"tool", (char *)"--endpoint", (char *)"/x",
+      (char *)"--memory-bytes", (char *)"1",
+      (char *)"--memory-alignment", (char *)"8192"};
+  sagr_instance_open_options_t options;
+  queue_cli_options_t queue_options;
+  memory_cli_options_t memory_options;
+  const char *endpoint = NULL;
+  uint64_t hold_ms = 0;
+
+  memset(&queue_options, 0, sizeof(queue_options));
+  memset(&memory_options, 0, sizeof(memory_options));
+  (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
+  if (parse_arguments((int)(sizeof(arguments) / sizeof(arguments[0])),
+                      arguments, &endpoint, &options, &hold_ms,
+                      &queue_options, &memory_options) != 0 ||
+      memory_options.enabled != 1 || memory_options.reuse != 1 ||
+      memory_options.bytes != UINT64_C(65536) ||
+      memory_options.alignment != SAGR_MEMORY_ALIGNMENT_64K ||
+      (options.offered_capabilities[SAGR_CAPABILITY_MEMORY_WORD] &
+       SAGR_CAPABILITY_MEMORY_MASK) == 0 ||
+      (options.required_capabilities[SAGR_CAPABILITY_MEMORY_WORD] &
+       SAGR_CAPABILITY_MEMORY_MASK) == 0) {
+    fprintf(stderr, "memory CLI option parse failed\n");
+    return 1;
+  }
+
+  endpoint = NULL;
+  hold_ms = 0;
+  memset(&queue_options, 0, sizeof(queue_options));
+  memset(&memory_options, 0, sizeof(memory_options));
+  (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
+  if (parse_arguments(
+          (int)(sizeof(default_alignment) / sizeof(default_alignment[0])),
+          default_alignment, &endpoint, &options, &hold_ms, &queue_options,
+          &memory_options) != 0 ||
+      memory_options.enabled != 1 || memory_options.reuse != 0 ||
+      memory_options.bytes != UINT64_C(1) ||
+      memory_options.alignment != SAGR_MEMORY_ALIGNMENT_4K ||
+      expect_invalid(alignment_without_memory,
+                     sizeof(alignment_without_memory) /
+                         sizeof(alignment_without_memory[0])) != 0 ||
+      expect_invalid(reuse_without_memory,
+                     sizeof(reuse_without_memory) /
+                         sizeof(reuse_without_memory[0])) != 0 ||
+      expect_invalid(zero_bytes,
+                     sizeof(zero_bytes) / sizeof(zero_bytes[0])) != 0 ||
+      expect_invalid(oversize, sizeof(oversize) / sizeof(oversize[0])) != 0 ||
+      expect_invalid(bad_alignment,
+                     sizeof(bad_alignment) / sizeof(bad_alignment[0])) != 0) {
+    fprintf(stderr, "memory CLI default or rejection parse failed\n");
     return 1;
   }
   return 0;
@@ -186,6 +271,7 @@ int main(void) {
   failures += test_complete_parse();
   failures += test_invalid_parse();
   failures += test_queue_parse();
+  failures += test_memory_parse();
   failures += test_monotonic_hold();
   return failures == 0 ? 0 : 1;
 }

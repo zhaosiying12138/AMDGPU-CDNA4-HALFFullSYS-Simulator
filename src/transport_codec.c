@@ -96,7 +96,8 @@ static int capabilities_are_zero(const uint64_t *capabilities) {
 static int capabilities_are_valid_selection(const uint64_t *capabilities) {
   uint32_t index;
   const uint64_t allowed = SAGR_CAPABILITY_TOPOLOGY_MASK |
-                           SAGR_CAPABILITY_QUEUE_MASK;
+                           SAGR_CAPABILITY_QUEUE_MASK |
+                           SAGR_CAPABILITY_MEMORY_MASK;
   if ((capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] &
        SAGR_CAPABILITY_TOPOLOGY_MASK) == 0 ||
       (capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] & ~allowed) != 0) {
@@ -586,6 +587,13 @@ sagr_status_t sagr_protocol_decode_ack(
     *reason = "ACK queue capability was not both offered and required";
     return SAGR_STATUS_CAPABILITY_MISMATCH;
   }
+  if (((selected[SAGR_CAPABILITY_MEMORY_WORD] &
+        SAGR_CAPABILITY_MEMORY_MASK) != 0) !=
+      ((options->required_capabilities[SAGR_CAPABILITY_MEMORY_WORD] &
+        SAGR_CAPABILITY_MEMORY_MASK) != 0)) {
+    *reason = "ACK memory capability was not both offered and required";
+    return SAGR_STATUS_CAPABILITY_MISMATCH;
+  }
   if (!bytes_are_zero(options->expected_daemon_uuid, 16) &&
       memcmp(options->expected_daemon_uuid, header.daemon_uuid, 16) != 0) {
     *reason = "ACK daemon instance mismatch";
@@ -843,5 +851,220 @@ sagr_status_t sagr_protocol_decode_queue_response(
     return sagr_protocol_map_wire_status(wire);
   }
   *reason = "queue operation succeeded";
+  return SAGR_STATUS_SUCCESS;
+}
+
+static int memory_opcode_is_valid(uint16_t opcode) {
+  return opcode == SAGR_WIRE_MEMORY_OPCODE_ALLOC ||
+         opcode == SAGR_WIRE_MEMORY_OPCODE_FREE ||
+         opcode == SAGR_WIRE_MEMORY_OPCODE_COPY_H2D ||
+         opcode == SAGR_WIRE_MEMORY_OPCODE_COPY_D2H;
+}
+
+sagr_status_t sagr_protocol_encode_memory_request(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_wire_memory_request_t *request, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size) {
+  const size_t encoded_size = SAGR_WIRE_MEMORY_FRAME_BYTES;
+  uint8_t *payload;
+  if (info == NULL || request == NULL || frame == NULL || frame_size == NULL ||
+      frame_capacity < encoded_size || request_id == 0 ||
+      bytes_are_zero(info->daemon_uuid, 16) || info->connection_id == 0 ||
+      info->epoch == 0 || request->major != SAGR_MEMORY_PROTOCOL_MAJOR ||
+      request->minor != SAGR_MEMORY_PROTOCOL_MINOR || request->flags != 0 ||
+      !memory_opcode_is_valid(request->opcode)) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (request->opcode == SAGR_WIRE_MEMORY_OPCODE_ALLOC &&
+      (request->allocation_id != 0 || request->generation != 0 ||
+       request->offset != 0 || request->byte_count == 0 ||
+       (request->argument != SAGR_MEMORY_ALIGNMENT_4K &&
+        request->argument != SAGR_MEMORY_ALIGNMENT_64K))) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (request->opcode == SAGR_WIRE_MEMORY_OPCODE_FREE &&
+      (request->allocation_id == 0 || request->generation == 0 ||
+       request->offset != 0 || request->byte_count != 0 ||
+       request->argument != 0)) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if ((request->opcode == SAGR_WIRE_MEMORY_OPCODE_COPY_H2D ||
+       request->opcode == SAGR_WIRE_MEMORY_OPCODE_COPY_D2H) &&
+      (request->allocation_id == 0 || request->generation == 0 ||
+       request->byte_count == 0 ||
+       request->offset > UINT64_MAX - request->byte_count ||
+       (request->opcode == SAGR_WIRE_MEMORY_OPCODE_COPY_H2D
+            ? request->argument > UINT32_MAX
+            : request->argument != 0))) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+
+  memset(frame, 0, encoded_size);
+  encode_header(frame, SAGR_WIRE_MESSAGE_MEMORY_REQUEST,
+                SAGR_WIRE_MEMORY_PAYLOAD_BYTES, request_id, info->daemon_uuid,
+                info->connection_id, info->epoch);
+  payload = frame + SAGR_WIRE_HEADER_BYTES;
+  put_u16(payload, request->major);
+  put_u16(payload + 2, request->minor);
+  put_u16(payload + 4, request->opcode);
+  put_u16(payload + 6, request->flags);
+  put_u64(payload + 8, request->allocation_id);
+  put_u64(payload + 16, request->generation);
+  put_u64(payload + 24, request->offset);
+  put_u64(payload + 32, request->byte_count);
+  put_u64(payload + 40, request->argument);
+  sagr_protocol_recompute_frame_crc(frame, encoded_size);
+  *frame_size = encoded_size;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_protocol_encode_memory_response(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_wire_memory_response_t *response, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size) {
+  const size_t encoded_size = SAGR_WIRE_MEMORY_FRAME_BYTES;
+  uint8_t *payload;
+  if (info == NULL || response == NULL || frame == NULL || frame_size == NULL ||
+      frame_capacity < encoded_size || request_id == 0 ||
+      bytes_are_zero(info->daemon_uuid, 16) || info->connection_id == 0 ||
+      info->epoch == 0 || response->major != SAGR_MEMORY_PROTOCOL_MAJOR ||
+      response->minor != SAGR_MEMORY_PROTOCOL_MINOR ||
+      response->status > SAGR_WIRE_STATUS_INTERNAL ||
+      !memory_opcode_is_valid(response->opcode)) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  memset(frame, 0, encoded_size);
+  encode_header(frame, SAGR_WIRE_MESSAGE_MEMORY_ACK,
+                SAGR_WIRE_MEMORY_PAYLOAD_BYTES, request_id, info->daemon_uuid,
+                info->connection_id, info->epoch);
+  payload = frame + SAGR_WIRE_HEADER_BYTES;
+  put_u16(payload, response->major);
+  put_u16(payload + 2, response->minor);
+  put_u32(payload + 4, response->status);
+  put_u16(payload + 8, response->opcode);
+  put_u64(payload + 16, response->allocation_id);
+  put_u64(payload + 24, response->generation);
+  put_u64(payload + 32, response->value0);
+  put_u64(payload + 40, response->value1);
+  put_u64(payload + 48, response->value2);
+  put_u64(payload + 56, response->sim_tick);
+  sagr_protocol_recompute_frame_crc(frame, encoded_size);
+  *frame_size = encoded_size;
+  return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t decode_memory_response_header(
+    const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
+    uint64_t expected_request_id, const uint8_t **payload,
+    const char **reason) {
+  if (frame == NULL || info == NULL || payload == NULL || reason == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (frame_size != SAGR_WIRE_MEMORY_FRAME_BYTES) {
+    *reason = "invalid memory ACK record size";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (memcmp(frame, k_magic, sizeof(k_magic)) != 0 || get_u16(frame + 8) != 1 ||
+      get_u16(frame + 10) != 0 ||
+      get_u16(frame + 12) != SAGR_WIRE_HEADER_BYTES ||
+      get_u16(frame + 14) != SAGR_WIRE_MESSAGE_MEMORY_ACK ||
+      get_u32(frame + 16) != 0 ||
+      get_u32(frame + 20) != SAGR_WIRE_MEMORY_PAYLOAD_BYTES) {
+    *reason = "invalid memory ACK framing";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (get_u64(frame + 24) == 0 ||
+      get_u64(frame + 24) != expected_request_id ||
+      get_u32(frame + 68) != 0 || get_u64(frame + 72) != 0) {
+    *reason = "invalid memory ACK request or reserved field";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (frame_crc32c(frame, frame_size) != get_u32(frame + 64)) {
+    *reason = "memory ACK CRC32C mismatch";
+    return SAGR_STATUS_CHECKSUM_ERROR;
+  }
+  if (bytes_are_zero(info->daemon_uuid, 16) || info->connection_id == 0 ||
+      info->epoch == 0) {
+    *reason = "invalid local memory session identity";
+    return SAGR_STATUS_INVALID_HANDLE;
+  }
+  if (memcmp(frame + 32, info->daemon_uuid, 16) != 0) {
+    *reason = "memory ACK daemon identity mismatch";
+    return SAGR_STATUS_INSTANCE_MISMATCH;
+  }
+  if (get_u64(frame + 48) != info->connection_id ||
+      get_u64(frame + 56) != info->epoch) {
+    *reason = "memory ACK session identity mismatch";
+    return SAGR_STATUS_TOPOLOGY_MISMATCH;
+  }
+  *payload = frame + SAGR_WIRE_HEADER_BYTES;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_protocol_decode_memory_response(
+    const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
+    uint64_t expected_request_id, sagr_wire_memory_response_t *result,
+    int32_t *wire_status, const char **reason) {
+  const uint8_t *payload = NULL;
+  uint32_t wire;
+  sagr_status_t status;
+  if (result == NULL || wire_status == NULL || reason == NULL ||
+      expected_request_id == 0) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  memset(result, 0, sizeof(*result));
+  *wire_status = -1;
+  *reason = "invalid memory ACK";
+  status = decode_memory_response_header(frame, frame_size, info,
+                                         expected_request_id, &payload, reason);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (get_u16(payload) != SAGR_MEMORY_PROTOCOL_MAJOR ||
+      get_u16(payload + 2) != SAGR_MEMORY_PROTOCOL_MINOR ||
+      !memory_opcode_is_valid(get_u16(payload + 8)) ||
+      get_u16(payload + 10) != 0 || get_u32(payload + 12) != 0) {
+    *reason = "invalid memory ACK fixed fields";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  wire = get_u32(payload + 4);
+  if (wire > SAGR_WIRE_STATUS_INTERNAL) {
+    *reason = "unknown memory ACK status";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  *wire_status = (int32_t)wire;
+  result->major = get_u16(payload);
+  result->minor = get_u16(payload + 2);
+  result->status = wire;
+  result->opcode = get_u16(payload + 8);
+  result->allocation_id = get_u64(payload + 16);
+  result->generation = get_u64(payload + 24);
+  result->value0 = get_u64(payload + 32);
+  result->value1 = get_u64(payload + 40);
+  result->value2 = get_u64(payload + 48);
+  result->sim_tick = get_u64(payload + 56);
+  result->request_id = get_u64(frame + 24);
+  if (wire != SAGR_WIRE_STATUS_OK) {
+    *reason = "daemon rejected memory operation";
+    return sagr_protocol_map_wire_status(wire);
+  }
+  *reason = "memory operation succeeded";
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_protocol_validate_failed_memory_ack(
+    const sagr_wire_memory_request_t *request,
+    const sagr_wire_memory_response_t *response) {
+  if (request == NULL || response == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (response->status == SAGR_WIRE_STATUS_OK ||
+      response->opcode != request->opcode ||
+      response->allocation_id != request->allocation_id ||
+      response->generation != request->generation || response->value0 != 0 ||
+      response->value1 != 0 || response->value2 != 0 ||
+      response->sim_tick != 0) {
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
   return SAGR_STATUS_SUCCESS;
 }

@@ -6,12 +6,12 @@
 #include <stdint.h>
 
 #define SAGR_VERSION_MAJOR 0u
-#define SAGR_VERSION_MINOR 3u
+#define SAGR_VERSION_MINOR 4u
 #define SAGR_VERSION_PATCH 0u
-#define SAGR_VERSION_STRING "0.3.0"
+#define SAGR_VERSION_STRING "0.4.0"
 
 #define SAGR_ABI_VERSION_MAJOR 1u
-#define SAGR_ABI_VERSION_MINOR 2u
+#define SAGR_ABI_VERSION_MINOR 3u
 
 #define SAGR_ABI_VERSION_ENCODE(major, minor) \
   ((((uint32_t)(major)) << 16u) | ((uint32_t)(minor)))
