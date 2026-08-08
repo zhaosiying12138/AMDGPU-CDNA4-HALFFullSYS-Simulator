@@ -3,11 +3,11 @@
   "goal_id": "GSIM-001",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,
-  "checkpoint_id": "CP-0008",
-  "checkpoint_sha256": "d19c2503fd480dc464262813c216401a055b6fcecb55f35457e657810f9b6341",
+  "checkpoint_id": "CP-0009",
+  "checkpoint_sha256": "e6a1ce578548ff229c25861416c6a0fa374015f2f31c2f4ab283d2acb0d77463",
   "phase_id": "P2",
   "state": "ready",
-  "next_action_id": "P2-KMT-ABI-01",
-  "next_action_summary": "Inventory pinned ROCr/libhsakmt thunk ABI and add the GemSim provider skeleton.",
+  "next_action_id": "P2-KMT-ABI-02",
+  "next_action_summary": "Implement the typed libhsakmt shim and versioned daemon KFD/DRM operation envelope.",
   "resume_command": "scripts/resume.sh --verify"
 }

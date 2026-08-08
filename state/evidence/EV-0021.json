@@ -1,0 +1,711 @@
+{
+  "checkpoint_id": "CP-0009",
+  "claim": "The CP-0009 self-amdgpu-runtime child exposes the source-pinned GemSim provider metadata/transport boundary and passes the current static/shared package matrices plus a Clang AddressSanitizer+UndefinedBehaviorSanitizer matrix. The provider audit finds no host GPU library/device-node dependency, the shared ABI exports exactly the 16 sagr_provider_* metadata/transport functions, and unsupported provider calls remain deterministic. This is not a typed ROCr/libhsakmt implementation.",
+  "command_argv": [
+    [
+      "cmake",
+      "--build",
+      "build/cp9-provider-final2-asan",
+      "--parallel",
+      "2"
+    ],
+    [
+      "cmake",
+      "--build",
+      "build/cp9-provider-final2-shared",
+      "--parallel",
+      "2"
+    ],
+    [
+      "cmake",
+      "--build",
+      "build/cp9-provider-final2-static",
+      "--parallel",
+      "2"
+    ],
+    [
+      "sha256sum",
+      "projects/self-amdgpu-runtime/build/cp9-provider-final2-static/sagr-handshake",
+      "projects/self-amdgpu-runtime/build/cp9-provider-final2-static/libself_amdgpu_runtime.a",
+      "projects/self-amdgpu-runtime/build/cp9-provider-final2-static/tests/self_amdgpu_runtime_provider_test",
+      "projects/self-amdgpu-runtime/build/cp9-provider-final2-shared/sagr-handshake",
+      "projects/self-amdgpu-runtime/build/cp9-provider-final2-shared/libself_amdgpu_runtime.so.0.6.0",
+      "projects/self-amdgpu-runtime/build/cp9-provider-final2-shared/tests/self_amdgpu_runtime_provider_test",
+      "projects/self-amdgpu-runtime/build/cp9-provider-final2-asan/sagr-handshake",
+      "projects/self-amdgpu-runtime/build/cp9-provider-final2-asan/libself_amdgpu_runtime.so.0.6.0",
+      "projects/self-amdgpu-runtime/build/cp9-provider-final2-asan/tests/self_amdgpu_runtime_provider_test"
+    ],
+    [
+      "cmake",
+      "-E",
+      "env",
+      "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
+      "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1",
+      "ctest",
+      "--test-dir",
+      "build/cp9-provider-final2-asan",
+      "--output-on-failure"
+    ],
+    [
+      "ldd",
+      "projects/self-amdgpu-runtime/build/cp9-provider-final2-asan/tests/self_amdgpu_runtime_provider_test"
+    ],
+    [
+      "git",
+      "diff",
+      "HEAD",
+      "--check"
+    ],
+    [
+      "nm",
+      "-D",
+      "--defined-only",
+      "projects/self-amdgpu-runtime/build/cp9-provider-final2-shared/libself_amdgpu_runtime.so.0.6.0"
+    ],
+    [
+      "bash",
+      "-c",
+      "ninja -C build/cp9-provider-final2-static -n && ninja -C build/cp9-provider-final2-shared -n && ninja -C build/cp9-provider-final2-asan -n"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "build/cp9-provider-final2-shared",
+      "--output-on-failure"
+    ],
+    [
+      "ldd",
+      "projects/self-amdgpu-runtime/build/cp9-provider-final2-shared/tests/self_amdgpu_runtime_provider_test"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "build/cp9-provider-final2-static",
+      "--output-on-failure"
+    ],
+    [
+      "ldd",
+      "projects/self-amdgpu-runtime/build/cp9-provider-final2-static/tests/self_amdgpu_runtime_provider_test"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        "build/cp9-provider-final2-asan",
+        "--parallel",
+        "2"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T20:50:10+00:00",
+      "exit_code": 0,
+      "id": "runtime-final2-asan-build-final",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/runtime-final2-asan-build-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "84fed466a6eb7aeed8b7205f2746912799c0ee99ab30f7e338da10107c1e349a",
+        "size": 698,
+        "tracked": false
+      },
+      "result": "The hash-guarded final Clang sanitizer build tree reports no pending work after the child build.",
+      "started_at": "2026-08-08T20:50:10+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/runtime-final2-asan-build-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/runtime-final2-asan-build-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8c35b1682f73592d30612d7b0fabdb384fcfff35cb5a076cb48b85b1368aa794",
+        "size": 22,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        "build/cp9-provider-final2-shared",
+        "--parallel",
+        "2"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T20:50:10+00:00",
+      "exit_code": 0,
+      "id": "runtime-final2-shared-build-final",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/runtime-final2-shared-build-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7d531bb915c5932968bd9374593c7273b32cd8e668dff31f7cfcc39b544aec48",
+        "size": 704,
+        "tracked": false
+      },
+      "result": "The hash-guarded final shared build tree reports no pending work after the child build.",
+      "started_at": "2026-08-08T20:50:10+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/runtime-final2-shared-build-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/runtime-final2-shared-build-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8c35b1682f73592d30612d7b0fabdb384fcfff35cb5a076cb48b85b1368aa794",
+        "size": 22,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        "build/cp9-provider-final2-static",
+        "--parallel",
+        "2"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T20:50:10+00:00",
+      "exit_code": 0,
+      "id": "runtime-final2-static-build-final",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/runtime-final2-static-build-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e50f35533cd3ff3fecc69cc44d7cdbd4e11b3cb675670b587772261d19c82738",
+        "size": 704,
+        "tracked": false
+      },
+      "result": "The hash-guarded final static build tree reports no pending work after the child build.",
+      "started_at": "2026-08-08T20:50:10+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/runtime-final2-static-build-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/runtime-final2-static-build-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8c35b1682f73592d30612d7b0fabdb384fcfff35cb5a076cb48b85b1368aa794",
+        "size": 22,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "projects/self-amdgpu-runtime/build/cp9-provider-final2-static/sagr-handshake",
+        "projects/self-amdgpu-runtime/build/cp9-provider-final2-static/libself_amdgpu_runtime.a",
+        "projects/self-amdgpu-runtime/build/cp9-provider-final2-static/tests/self_amdgpu_runtime_provider_test",
+        "projects/self-amdgpu-runtime/build/cp9-provider-final2-shared/sagr-handshake",
+        "projects/self-amdgpu-runtime/build/cp9-provider-final2-shared/libself_amdgpu_runtime.so.0.6.0",
+        "projects/self-amdgpu-runtime/build/cp9-provider-final2-shared/tests/self_amdgpu_runtime_provider_test",
+        "projects/self-amdgpu-runtime/build/cp9-provider-final2-asan/sagr-handshake",
+        "projects/self-amdgpu-runtime/build/cp9-provider-final2-asan/libself_amdgpu_runtime.so.0.6.0",
+        "projects/self-amdgpu-runtime/build/cp9-provider-final2-asan/tests/self_amdgpu_runtime_provider_test"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T20:50:40+00:00",
+      "exit_code": 0,
+      "id": "runtime-final3-artifact-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-artifact-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3c40ddbb764573b1e5e667fac376cb30d986e6e64a61505735d3680a4fa0239",
+        "size": 1464,
+        "tracked": false
+      },
+      "result": "Current static, shared, and sanitizer CLI/library/provider-test artifact identities were captured after the final source/hash guard build.",
+      "started_at": "2026-08-08T20:50:40+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-artifact-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-artifact-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a081d8ea2d61d0196da96c6a249d256daf3d266b890e349884e0ef9930388f7a",
+        "size": 1400,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "cmake",
+        "-E",
+        "env",
+        "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
+        "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1",
+        "ctest",
+        "--test-dir",
+        "build/cp9-provider-final2-asan",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T20:50:44+00:00",
+      "exit_code": 0,
+      "id": "runtime-final3-asan-ctest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-asan-ctest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "80300060f18842dc6f73c617ea09964cf06bdea918e0277e2eaff9a1d4abcddd",
+        "size": 832,
+        "tracked": false
+      },
+      "result": "The current Clang AddressSanitizer+UndefinedBehaviorSanitizer matrix passed all 10/10 non-package tests.",
+      "started_at": "2026-08-08T20:50:40+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-asan-ctest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-asan-ctest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1da787fec94a7b17e14f8aeb3ddfc790112d37f37b06c79beaafdf692ec2a18d",
+        "size": 1511,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ldd",
+        "projects/self-amdgpu-runtime/build/cp9-provider-final2-asan/tests/self_amdgpu_runtime_provider_test"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T20:50:40+00:00",
+      "exit_code": 0,
+      "id": "runtime-final3-asan-ldd",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-asan-ldd.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f97afc37d9b891f029ab5502a0b4fa99a84f6cf08456c420c31f9c71f5e80a77",
+        "size": 681,
+        "tracked": false
+      },
+      "result": "The sanitizer provider test has no production GPU DSO dependency.",
+      "started_at": "2026-08-08T20:50:40+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-asan-ldd.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-asan-ldd.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a03f1d3e77bd449788acd1b6279e512a5fc50402575fc2ee04396b28f253172d",
+        "size": 559,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "HEAD",
+        "--check"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T20:50:40+00:00",
+      "exit_code": 0,
+      "id": "runtime-final3-diff-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4a71288e97faf66134e7cfe7d0c0c2e109e86c02dd915b8af3318b4f24e03297",
+        "size": 642,
+        "tracked": false
+      },
+      "result": "The runtime child worktree has no whitespace errors in its HEAD diff.",
+      "started_at": "2026-08-08T20:50:40+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "nm",
+        "-D",
+        "--defined-only",
+        "projects/self-amdgpu-runtime/build/cp9-provider-final2-shared/libself_amdgpu_runtime.so.0.6.0"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T20:50:40+00:00",
+      "exit_code": 0,
+      "id": "runtime-final3-exported-symbols",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-exported-symbols.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c51bfc04192618041239a194840e4057f9e9dcc182bca4172370e3e64660a7fe",
+        "size": 723,
+        "tracked": false
+      },
+      "result": "The shared library exports exactly the 16 sagr_provider_* CP9 metadata/transport functions and no raw production HSAKMT/DRM symbols.",
+      "started_at": "2026-08-08T20:50:40+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-exported-symbols.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-exported-symbols.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0e522c521ad604d2833cf781e9d7514a57239cd21fb85ad7074d0af371d5d208",
+        "size": 2068,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "ninja -C build/cp9-provider-final2-static -n && ninja -C build/cp9-provider-final2-shared -n && ninja -C build/cp9-provider-final2-asan -n"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T20:50:40+00:00",
+      "exit_code": 0,
+      "id": "runtime-final3-freshness",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-freshness.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e30571d0bd8ddf9768da7765c39b34ab757e3b76cb252004e730ec31a081f8d9",
+        "size": 760,
+        "tracked": false
+      },
+      "result": "All three final2 build trees report no work to do after the retained current binaries were built.",
+      "started_at": "2026-08-08T20:50:40+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-freshness.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-freshness.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "21cbb04e947972713452546e3689412d596e6d84c70f4a3783e4d2798c1f7982",
+        "size": 247,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build/cp9-provider-final2-shared",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T20:50:44+00:00",
+      "exit_code": 0,
+      "id": "runtime-final3-shared-ctest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-shared-ctest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "fc82b5e35532e35daee489cc49adc3a4a000713f9ebea8b474ad6639b7d778e3",
+        "size": 697,
+        "tracked": false
+      },
+      "result": "The current shared matrix passed all 11/11 tests, including provider, no-device audit, regressions, dispatch, CLI, and installed-package consumer.",
+      "started_at": "2026-08-08T20:50:40+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-shared-ctest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-shared-ctest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "77b53c5094ce898221085dd8e27edcf5f4d398ca4c12db40f52179342dc81791",
+        "size": 1635,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ldd",
+        "projects/self-amdgpu-runtime/build/cp9-provider-final2-shared/tests/self_amdgpu_runtime_provider_test"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T20:50:40+00:00",
+      "exit_code": 0,
+      "id": "runtime-final3-shared-ldd",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-shared-ldd.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "17e0c0ae96a0dae5e9f57b912161c02fe1703cea6f0472543e8dc4f7355609fa",
+        "size": 687,
+        "tracked": false
+      },
+      "result": "The shared-build provider test links only the project runtime, libc, loader, and vdso; no production GPU DSO is present.",
+      "started_at": "2026-08-08T20:50:40+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-shared-ldd.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-shared-ldd.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "37b5f0d9248fabb87d2f3fdfe492da8141f773781d6cdb5ff00c26dbd3e19b43",
+        "size": 330,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build/cp9-provider-final2-static",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-08T20:50:44+00:00",
+      "exit_code": 0,
+      "id": "runtime-final3-static-ctest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-static-ctest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9264f866e1f48280c44ee05b44d45125a70e8de2537d0b652277937b231aec13",
+        "size": 697,
+        "tracked": false
+      },
+      "result": "The current static matrix passed all 11/11 tests, including provider, no-device audit, regressions, dispatch, CLI, and installed-package consumer.",
+      "started_at": "2026-08-08T20:50:40+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-static-ctest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-static-ctest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9cc88faef2fb843a1fe5b5c00f84a9a1c0b8f4126715d549982d294736f27dac",
+        "size": 1635,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ldd",
+        "projects/self-amdgpu-runtime/build/cp9-provider-final2-static/tests/self_amdgpu_runtime_provider_test"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T20:50:40+00:00",
+      "exit_code": 0,
+      "id": "runtime-final3-static-ldd",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-static-ldd.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5a24f0296b8d01493083ba6129956ed8a0f4a4dbf6de0c98ddf7c5b9eb3b8670",
+        "size": 687,
+        "tracked": false
+      },
+      "result": "The static-build provider test has no production GPU DSO dependency.",
+      "started_at": "2026-08-08T20:50:40+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-static-ldd.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/runtime-final3-static-ldd.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d5d7bc30752b2ad842bc1afaf77e16429f83303b19ca7bcc00a3cf31f94c398a",
+        "size": 159,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": "projects/self-amdgpu-runtime",
+  "ended_at": "2026-08-08T20:50:44+00:00",
+  "environment_fingerprint": {
+    "asan_ubsan_ctest": "10/10",
+    "authority_sha256": "12c66e523a2f91750379255c6021c34d457432a3b818062b69f8077595a124bc",
+    "compiler_matrix": "GCC 15.2.0 RelWithDebInfo; Clang 21.1.8 ASan+UBSan Debug",
+    "dependency_audit": "provider.audit and ldd checks passed; no production GPU DSO",
+    "provider_header_sha256": "0fa94181ec8b5387289638479b42135b3c6d59d4e55853b2f98bc6cc891eef26",
+    "provider_source_sha256": "ccd566e4bab545da5a094f6a6895d14d719a58798265a50be6e57e268db8180e",
+    "provider_test_source_sha256": "bda82f1a1e0de586cb4be10dd88b9e5c1750ae0bda7e812e9d939922cd59e341",
+    "shared_ctest": "11/11",
+    "shared_provider_exports": "16 sagr_provider_*; zero raw hsaKmt/DRM/amdgpu exports",
+    "source_commit": "92115a2941982a384de161be3f78cf9bff547027",
+    "source_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+    "static_ctest": "11/11"
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0009/runtime-builds/static-sagr-handshake",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "095591500dbf395bc90b9d572d5798aed048abddc778546cc5b94f447bcc8878",
+      "size": 493064,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0009/runtime-builds/static-libself_amdgpu_runtime.a",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "814df1333843cb7911576c3e62a52b867cbc33b7c511b4e8396d839acccf7701",
+      "size": 843670,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0009/runtime-builds/static-provider-test",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5820c22adcb1a5d3fa37bd3781194e663f3a65a3f2a921d70cf4fb3ba49f72d2",
+      "size": 487024,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0009/runtime-builds/shared-sagr-handshake",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e8e03958ee624f0c67722dbf713c57d15841b07927ede9c0b405c9daa3367b38",
+      "size": 103184,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0009/runtime-builds/shared-libself_amdgpu_runtime.so.0.6.0",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a5de72dfcbeb0fe3ffa11663e887c87d02579945f055df2c47b9f85cf6e4d2b9",
+      "size": 458384,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0009/runtime-builds/shared-provider-test",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "03ba03faa17fe81e02f38f961c29f4b9288a72b7d908241284f9b485deddad9f",
+      "size": 49736,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0009/runtime-builds/asan-sagr-handshake",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ba5c3cbb69d1cfbd12df19d8cb3cfca35179dee4fdee2582a48f7a8e2b75f9ca",
+      "size": 2019048,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0009/runtime-builds/asan-libself_amdgpu_runtime.so.0.6.0",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "18751690fcf9a8cf4f0174d08e17ab28721f75d971a5f4c1ba3fefb95807cc0a",
+      "size": 1289984,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0009/runtime-builds/asan-provider-test",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "0dafa94b1dd6b08701caa9fd6424147eda0f03627966504210fc64d89990cb00",
+      "size": 1822968,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0021",
+  "includes": {},
+  "limitations": [
+    "CP-0009 is a metadata-only provider skeleton: it exports zero typed hsaKmt or DRM entry points and does not claim a complete ROCr/libhsakmt, HIP, OpenCL, Triton, PyTorch, vLLM, code-object, KFD, or DRM implementation.",
+    "The recorded layout field maps are authority key offsets only and are intentionally partial; omitted upstream fields are unspecified.",
+    "The transport-open lifecycle query reports a valid GemSim provider handle after handshake only; it is not evidence that hsaKmtOpenKFD or KFD topology was opened.",
+    "Ignored build products and command streams are external acceptance artifacts; source and manifests are the acceptance authority."
+  ],
+  "redactions": [],
+  "result": "Hash-guarded final2 build trees are up to date; current final3 static/shared tests passed 11/11 each and Clang ASan+UBSan tests passed 10/10. The final artifact hash, export, no-device/DSO audit, freshness, build, and diff checks all passed.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-08T20:50:10+00:00",
+  "type": "runtime-provider-skeleton-acceptance"
+}

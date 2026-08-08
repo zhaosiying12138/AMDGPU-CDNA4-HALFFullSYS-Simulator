@@ -1,0 +1,23 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0047",
+  "checkpoint_id": "CP-0009",
+  "question_or_symptom": "A transport-open provider handle can be mistaken for an opened KFD channel or discovered GPU topology.",
+  "observation": "sagr_provider_query_lifecycle reports only a valid handle after the established host transport handshake. It performs no hsaKmtOpenKFD, topology, DRM, or device-node operation; KERNEL_IO_CHANNEL_NOT_OPENED is reserved for a future full-provider KFD policy.",
+  "evidence_ids": ["EV-0021", "EV-0022"],
+  "conclusion": "Transport session state and KFD lifecycle state need distinct APIs and status contracts.",
+  "decision": "Keep the current query explicitly transport-open and defer KFD/topology success statuses until a typed daemon operation envelope and no-device audit exist.",
+  "invalidated_assumptions": [
+    "A successful provider_open implies hsaKmtOpenKFD success.",
+    "KERNEL_IO_CHANNEL_NOT_OPENED is the result of the current transport lifecycle query."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-provider.json",
+    "docs/host-transport-v1-provider.md",
+    "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/provider.h",
+    "projects/self-amdgpu-runtime/src/provider.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

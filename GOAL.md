@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0008-pinned-dispatch-accepted; next-P2-KMT-ABI-01`
+**Current state:** `CP-0009-provider-skeleton-accepted; next-P2-KMT-ABI-02`
 
 **Current phase:** `P2`
 
@@ -77,12 +77,13 @@ advance a phase without a new checkpoint and root coordinator commit.
 继续执行 amdgpu-sim 计划。当前目录是 /home/zhaosiying/amdgpu-sim。
 先读取 PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、其引用的
 最新 checkpoint/bitlesson/evidence，运行 scripts/resume.sh --verify。
-CP-0008 已 accepted；从唯一 next_action `P2-KMT-ABI-01` 继续，不要再次
-begin CP-0008，也不要重做 bootstrap、source freeze、authored runtime
+CP-0009 已 accepted；从唯一 next_action `P2-KMT-ABI-02` 继续，不要再次
+begin CP-0009，也不要重做 bootstrap、source freeze、authored runtime
 baseline 或已通过的 CP4-CP8 handshake/queue-control/memory/signal/dispatch
 gates，也不要修改已冻结的 SOURCE_LOCK.json 或已登记的 PROJECT_LANES
-baseline。先针对 pinned ROCr/ThunkLoader/libhsakmt source inventory 建立
-source-exact ABI map 和 provider skeleton；不要把 CP8 的 single fixture
+baseline。CP-0009 只冻结 source-exact ROCr/ThunkLoader/libhsakmt ABI
+inventory 和 metadata-only provider skeleton；下一步才实现 typed
+libhsakmt shim 与版本化 daemon KFD/DRM operation envelope。不要把它们
 推广为通用 ROCr、HIP、OpenCL、Triton、PyTorch 或 vLLM 能力。
 在 Triton 用户命令 `tutorial/01-vecadd.py`（当前 pinned checkout 中对应未修改的
 `python/tutorials/01-vector-add.py`）首次透明通过后，先完成可复现的 gem5

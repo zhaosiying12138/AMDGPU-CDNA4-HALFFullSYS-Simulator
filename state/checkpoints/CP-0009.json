@@ -1,0 +1,181 @@
+{
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "id": "CP-0009",
+  "sequence": 9,
+  "parent_checkpoint": "CP-0008",
+  "created_at": "2026-08-09T05:10:00+08:00",
+  "goal_id": "GSIM-001",
+  "phase_id": "P2",
+  "status": "accepted",
+  "root_parent_commit": "07955784b904b030332c5846240f54721269e4d1",
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "plan_sha256": "f012944650a83399bad8816201d35c90fefc25aeeef2841209ca6fb1b276844e",
+  "goal_sha256": "1ead2af9f4f9da960993e805e0561665e95f92cd0cf81a0d4c327f04cf4b640d",
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "id": "gem5",
+      "path": "projects/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "head": "479585d3566bf596369d931b1b92f7cba8bbdecd",
+      "tree": "3073c957dbaf4ebaff446bbb575825c762337acb",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "administrative_git_dir": "modules/gem5",
+      "clean": true
+    },
+    {
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "administrative_git_dir": "modules/rocm-systems",
+      "clean": true
+    },
+    {
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "administrative_git_dir": "modules/llvm-project",
+      "clean": true
+    },
+    {
+      "id": "triton",
+      "path": "projects/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "administrative_git_dir": "modules/triton",
+      "clean": true
+    },
+    {
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "administrative_git_dir": "modules/pytorch",
+      "clean": true
+    },
+    {
+      "id": "vllm",
+      "path": "projects/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "administrative_git_dir": "modules/vllm",
+      "clean": true
+    },
+    {
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "head": "b7cde4640456039f20cba91d723f3596abf8a749",
+      "tree": "b526985b59f26a8eb26e8a8e0008e9e5440c5d18",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "clean": true
+    }
+  ],
+  "changes": [
+    "Added the pinned ROCr ThunkLoader and libhsakmt source-exact authority with platform-conditional loader counts, status observations, ABI layouts, model interface metadata, and hardware/build exclusion records.",
+    "Added a metadata-only self-amdgpu-runtime provider boundary backed by the accepted transport handshake, deterministic unsupported-call behavior, size-tagged metadata queries, and no production GPU library or device-node dependency.",
+    "Added static/shared package and Clang ASan+UBSan provider tests, hash-length identity guards, exported-symbol and dependency audits, and retained CP9 evidence manifests.",
+    "Recorded five CP-0009 bitlessons separating source-union from effective loader counts, metadata from typed ABI, no-device dependency boundaries, partial layout maps, and transport-open from KFD lifecycle."
+  ],
+  "validation": [
+    {
+      "command": "source authority JSON/docs/spec checks",
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "The provider authority JSON parsed, its independent specification test passed 9/9, authored files were whitespace-clean, and final SHA identities were retained.",
+      "evidence_id": "EV-0022"
+    },
+    {
+      "command": "fresh runtime provider static/shared/package and Clang ASan+UBSan matrices",
+      "cwd": "projects/self-amdgpu-runtime",
+      "exit_code": 0,
+      "result": "Static and shared CTest passed 11/11 each; Clang ASan+UBSan passed 10/10; provider audit, nm, ldd, freshness, and hash-guard checks passed.",
+      "evidence_id": "EV-0021"
+    },
+    {
+      "command": "umbrella child, transaction, evidence, root metadata, and fsck checks",
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "The runtime child target and tree were recorded clean, EV21/EV22 hashes were bound, and the CP9 root metadata/bitlesson identities passed the retained umbrella checks.",
+      "evidence_id": "EV-0023"
+    }
+  ],
+  "evidence_ids": ["EV-0021", "EV-0022", "EV-0023"],
+  "evidence_sha256": {
+    "EV-0021": "7ce45fabacf8358de66bda23a9cef56bad5136c407e2a417229789abdf86a9f8",
+    "EV-0022": "95d172c252d154367d0bab8d72bf7721cb40fc26ba97af6bea56bd33423a0f2b",
+    "EV-0023": "254da2c3bf7751ef48d6251c9382292a2114a6edad9587e6d1f52324d4966ec8"
+  },
+  "evidence_manifest_id": "EV-0023",
+  "evidence_manifest_sha256": "254da2c3bf7751ef48d6251c9382292a2114a6edad9587e6d1f52324d4966ec8",
+  "bitlesson_ids": ["BL-0043", "BL-0044", "BL-0045", "BL-0046", "BL-0047"],
+  "bitlesson_sha256": {
+    "BL-0043": "c10fc2f9affc168445bcbcb17d88be6d233e87a0b30ad5f77602332ac43371df",
+    "BL-0044": "cf73d849eab9326bee330a06befcde76cf1a13fcbe86e71d403dc289d53fd6c3",
+    "BL-0045": "fa038aaf0b0802c7d0aee6e535c8b693a341ec48a31e859c849c55705a49ed73",
+    "BL-0046": "91f3a6cc3f9d161a72906367a89b28f7cc7cda8689dc41d53ec9c3276430a5b9",
+    "BL-0047": "2866822ef9ac22ac902c0b1647bdb41a48d5b49d4692c93e7a895f688f555369"
+  },
+  "change_kind": "code",
+  "baseline_commit_marker": "N/A",
+  "blockers": [],
+  "limitations": [
+    "CP-0009 is a source-exact ABI inventory and metadata-only provider skeleton. It does not prove typed ROCr/libhsakmt entry points, KFD attach, topology discovery, HIP, OpenCL, Triton, PyTorch, vLLM, code-object loading, or model execution.",
+    "The provider query_lifecycle state is transport-open only; KERNEL_IO_CHANNEL_NOT_OPENED remains a future full-provider KFD-channel policy.",
+    "The 17 layout field maps contain selected key offsets only and are not exhaustive struct serialization contracts.",
+    "Build products and retained command streams are ignored external acceptance artifacts, not tracked source."
+  ],
+  "next_action": {
+    "id": "P2-KMT-ABI-02",
+    "cwd": ".",
+    "argv": [
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0010",
+      "--intent",
+      "Implement the typed libhsakmt shim and versioned daemon KFD/DRM operation envelope",
+      "--participant",
+      "gem5=projects/gem5",
+      "--participant",
+      "self-amdgpu-runtime=projects/self-amdgpu-runtime"
+    ],
+    "prerequisites": [
+      "CP-0009 is accepted and scripts/resume.sh --verify passes offline.",
+      "No transaction journal is active.",
+      "SOURCE_LOCK.json and existing PROJECT_LANES declarations remain byte-identical to their historical anchors.",
+      "The CP4 handshake, CP5 queue-control, CP6 simulated-memory, CP7 signal/event, and CP8 pinned-dispatch gates remain passing at their accepted child heads.",
+      "The CP-0009 metadata-only provider boundary and its no-device/DSO audit remain intact."
+    ],
+    "expected": "A typed source-compatible libhsakmt shim and versioned daemon KFD/DRM operation envelope translate fixed-width IDs, copied buffers, ownership generations, and status outcomes without raw pointers, file descriptors, production device opens, or upstream v1.0 fake-success behavior.",
+    "rollback_boundary": "Keep CP-0009 visible until the CP-0010 typed-shim child and evidence are complete; preserve the accepted metadata provider, CP4-CP8 transport/dispatch gates, source authority, and project baselines on interruption."
+  }
+}

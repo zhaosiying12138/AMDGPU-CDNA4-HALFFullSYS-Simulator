@@ -1,0 +1,23 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0044",
+  "checkpoint_id": "CP-0009",
+  "question_or_symptom": "Publishing a source symbol catalog can be mistaken for implementing the ROCr/libhsakmt ABI.",
+  "observation": "The CP-0009 provider exposes manifest, symbol/layout/model metadata, the existing transport handshake, and a generic validated invoke boundary. Shared nm shows 16 sagr_provider_* exports and zero typed hsaKmt/DRM exports; valid unsupported calls return NOT_SUPPORTED without mutating result bytes.",
+  "evidence_ids": ["EV-0021", "EV-0022"],
+  "conclusion": "An inventory and a typed provider are different gates; the former cannot support a generic ROCr or HIP claim.",
+  "decision": "Keep CP-0009 metadata-only and require a later typed shim plus daemon operation envelope before claiming provider attach or upper-runtime compatibility.",
+  "invalidated_assumptions": [
+    "A complete name list is equivalent to callable C entry points.",
+    "A generic byte-carrier invoke can safely stand in for pointer-bearing ABI functions."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-provider.json",
+    "docs/host-transport-v1-provider.md",
+    "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/provider.h",
+    "projects/self-amdgpu-runtime/src/provider.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

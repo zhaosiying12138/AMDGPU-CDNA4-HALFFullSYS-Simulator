@@ -1,0 +1,22 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0045",
+  "checkpoint_id": "CP-0009",
+  "question_or_symptom": "A model callback or handshake can appear device-free while upstream libhsakmt still links or probes production GPU paths.",
+  "observation": "The pinned libhsakmt source and CMake retain direct KFD, DRM, AMDGPU, sysfs, and device-node paths, while the CP-0009 provider audit reports no production GPU DSO dependency and no forbidden device-node access.",
+  "evidence_ids": ["EV-0021", "EV-0022"],
+  "conclusion": "No-device behavior is a dependency and syscall boundary, not just a runtime callback choice.",
+  "decision": "Keep upstream hardware paths as an exclusion audit and require a project-owned shim/daemon translation with readelf, ldd, source-token, and negative device checks before enabling any KFD/DRM operation.",
+  "invalidated_assumptions": [
+    "Routing one model DRM callback removes every production hardware dependency.",
+    "A successful transport handshake proves that KFD or DRM was not touched."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-provider.json",
+    "docs/host-transport-v1-provider.md",
+    "projects/self-amdgpu-runtime/tests/provider_audit.cmake"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

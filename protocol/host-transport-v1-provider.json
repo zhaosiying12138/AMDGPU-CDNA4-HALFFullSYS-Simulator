@@ -1,0 +1,733 @@
+{
+  "schema": "amdgpu-sim.host-transport-v1.provider.v1",
+  "title": "GemSim source-exact ROCr ThunkLoader and libhsakmt provider authority",
+  "checkpoint": "CP-0009",
+  "scope": "P2 source inventory and provider boundary only; this document does not claim a generic ROCr, HIP, OpenCL, Triton, PyTorch, vLLM, or code-object implementation",
+  "source_authority": {
+    "repository": "rocm-systems",
+    "official_ref": "develop",
+    "commit": "92115a2941982a384de161be3f78cf9bff547027",
+    "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+    "rocr_runtime_tree": "e68c0afe1ce52ab5ec3582bcbde95a5681d44f98",
+    "rocr_runtime_core_tree": "bd8d06a20f7a41a3001659fd4ae7f565c251171f",
+    "rocr_runtime_core_subtree_tree": "3c01bd8a2d12f5de12da83741fa27482daeec1d8",
+    "libhsakmt_tree": "3a70cc0c6401ff26f18273c80f2015cc5df81936",
+    "header_tree": "2c9ed471c9a10e1848f84ebcf6bff18e0c6cd6be",
+    "files": [
+      {
+        "id": "thunk_loader_header",
+        "path": "projects/rocr-runtime/runtime/hsa-runtime/core/inc/thunk_loader.h",
+        "blob": "3072ad3980bf02ec542869f475dfc297b2591b23",
+        "sha256": "83f65a011aa999f79780c2d71b045ee8073d2bdc1812d86670aca4dbefcba2a2",
+        "lines": "43-596",
+        "role": "PFN typedefs, DRM typedefs, loader state, and function-pointer table"
+      },
+      {
+        "id": "thunk_loader_implementation",
+        "path": "projects/rocr-runtime/runtime/hsa-runtime/core/runtime/thunk_loader.cpp",
+        "blob": "833dd25c94ac63f20169989d7dbbc0bf5c1093ce",
+        "sha256": "1d92bcb64e526725c8fdfffb59af7b5b207da726366de4b8b77d2352b6f006f8",
+        "lines": "57-698",
+        "role": "whoami selection, shared-library resolution, direct binding, DTIF lifecycle, and DXG ABI check"
+      },
+      {
+        "id": "hsakmt_header",
+        "path": "projects/rocr-runtime/libhsakmt/include/hsakmt/hsakmt.h",
+        "blob": "0f9e6d74e20758aa0326b930421d4dbfd6708e6a",
+        "sha256": "ab9543b00ca560bcd8f6fba39b6fcb6341842908ce440c444e5f170f2f401ede",
+        "lines": "39-1493",
+        "role": "public C function declarations and device-path documentation"
+      },
+      {
+        "id": "hsakmt_types",
+        "path": "projects/rocr-runtime/libhsakmt/include/hsakmt/hsakmttypes.h",
+        "blob": "788e7cf799a70e4dc1a198f185f8910737d57422",
+        "sha256": "14b3817760f81ca9e958fec8475167e0c6b25b1687346dede53dfa3cad7df61e",
+        "lines": "43-1596",
+        "role": "status enum, ABI types, and pack(4) structures"
+      },
+      {
+        "id": "hsakmt_model_interface",
+        "path": "projects/rocr-runtime/libhsakmt/include/hsakmt/hsakmtmodeliface.h",
+        "blob": "fd468dbf07b7d8a55fbbf209184e948050996a05",
+        "sha256": "2495716e141174f1d073bc06cb8298f85eb674d1ad2f754503ae4490fe13997a",
+        "lines": "23-134",
+        "role": "software-model function table, DRM command enum, and 15 DRM argument structs"
+      },
+      {
+        "id": "hsakmt_model_implementation",
+        "path": "projects/rocr-runtime/libhsakmt/src/hsakmtmodel.c",
+        "blob": "ed4da1084c0744d1113e58ea20cbd37d9d5bfb30",
+        "sha256": "e49d921544af96f3260954b69bfc8652180240a7f91bd79c9061108105e63de6",
+        "lines": "145-530",
+        "role": "HSA_MODEL_LIB env/dlopen/version negotiation, ioctl/DRM model callbacks, and v1.0 fallback behavior"
+      },
+      {
+        "id": "hsakmt_model_header",
+        "path": "projects/rocr-runtime/libhsakmt/include/hsakmt/hsakmtmodel.h",
+        "blob": "466abb7f21dae2f68ba52f8d1d2de120abdc92e9",
+        "sha256": "662b276495320f1e3d64a1ac6f05e674ac2c5832394a4092f1cc8b46e5936fca",
+        "lines": "26-84",
+        "role": "model-mode declarations and DRM wrapper API boundary"
+      },
+      {
+        "id": "kfd_ioctl_header",
+        "path": "projects/rocr-runtime/libhsakmt/include/hsakmt/linux/kfd_ioctl.h",
+        "blob": "81237c7689c2f86bb88eca17fa609278766d78b1",
+        "sha256": "ec5b2ef82d657d26515d7b9ce6472526a8521436ca6509ff8bfca9140454d5a1",
+        "lines": "1-1857",
+        "role": "upstream KFD ioctl numbers and argument ABI delegated by model_kfd_ioctl"
+      },
+      {
+        "id": "libhsakmt_topology_attach",
+        "path": "projects/rocr-runtime/libhsakmt/src/topology.c",
+        "blob": "6e4eedc512ad14227cbe4a6a9e288e240fb98340",
+        "sha256": "04de124aac580871b03808c7837192ce88656858ae93a3b32926e754afea2b4a",
+        "lines": "2283-2349",
+        "role": "topology snapshot -> model_init -> FMM aperture/doorbell attach chain"
+      },
+      {
+        "id": "libhsakmt_cmake",
+        "path": "projects/rocr-runtime/libhsakmt/CMakeLists.txt",
+        "blob": "024a360c8f7eccffa292c3b7190ec6645d36714e",
+        "sha256": "ccad1e92e152472062504cf22fc3e8a7dd7b75ca51f9ff913884bd8e4525a5e1",
+        "lines": "171-189,275-307",
+        "role": "native source list and production libdrm/libdrm_amdgpu/dl/pthread linkage"
+      },
+      {
+        "id": "rocr_runtime_cmake",
+        "path": "projects/rocr-runtime/CMakeLists.txt",
+        "blob": "2993948dd814a089789a483a828c163ed69c08cb",
+        "sha256": "4ed537d1bbc2fac9be451da2fcaadb4c80f07f97e5acf00ad03a0072ce9c0802",
+        "lines": "124-162,243-254",
+        "role": "parent target topology and runtime/libhsakmt dependency selection"
+      },
+      {
+        "id": "hsa_runtime_cmake",
+        "path": "projects/rocr-runtime/runtime/hsa-runtime/CMakeLists.txt",
+        "blob": "15fa56e64569979a45a0d5428aae1f512bdbada2",
+        "sha256": "4bb388fa17f3da4765f1bbc871ce2968efa1de3961d3bff1bfb2ae0aba7daa32",
+        "lines": "117-148,250-287",
+        "role": "ROCr target source/link configuration and thunk loader inclusion"
+      },
+      {
+        "id": "libhsakmt_version_script",
+        "path": "projects/rocr-runtime/libhsakmt/src/libhsakmt.ver",
+        "blob": "9723538034f349a246f34a76b552f9b430eb12ad",
+        "sha256": "9e0037a2a7e8daf3451823288f5aa15efd1fda3f1a0b8f246f484612bdc6f49b",
+        "lines": "1-120",
+        "role": "Linux shared-object global export surface"
+      },
+      {
+        "id": "libhsakmt_openclose",
+        "path": "projects/rocr-runtime/libhsakmt/src/openclose.c",
+        "blob": "35957dbded7e8e11f36295cb31cea2417a463437",
+        "sha256": "61f1fe09a1e6d9139a807dd0744459650c74a0e8335cd27cf39852ec92cec808",
+        "lines": "53-370",
+        "role": "KFD open/close path and kernel-channel status behavior"
+      },
+      {
+        "id": "libhsakmt_memory_hardware_path",
+        "path": "projects/rocr-runtime/libhsakmt/src/memory.c",
+        "blob": "28a4d110dbcc9c5cf78ec347533e66480caa32a7",
+        "sha256": "8ae278fa61fc29e820af49bc925e13c06d1ab9a1abbc6d40d4ef185c2b8e3dcf",
+        "lines": "953-1320",
+        "role": "upstream memory/import/export and DRM ioctl hardware path"
+      },
+      {
+        "id": "libhsakmt_fmm_hardware_path",
+        "path": "projects/rocr-runtime/libhsakmt/src/fmm.c",
+        "blob": "1595e3f8b9d50afd50f7a98e71bf958ad9b1ca6f",
+        "sha256": "0dbe10f0c508c379cf7c331d6ce412472bd33f18b7219c23a04e8e2d8ab74fbf",
+        "lines": "2381-2439, 2768-2788, 2987-3235, 4785-4787",
+        "role": "upstream amdgpu device setup and DRM sync-object hardware path"
+      },
+      {
+        "id": "libhsakmt_debug_hardware_path",
+        "path": "projects/rocr-runtime/libhsakmt/src/debug.c",
+        "blob": "7dacc8118af5321ef45ce83c1ebcd79369ec03a9",
+        "sha256": "1ae6e5efdddd41914b4e2a07bb0c594a871f6aa1a865f7e8acdac38f43f9571f",
+        "lines": "748-760",
+        "role": "upstream DRM render-node and PCI-revision discovery path"
+      },
+      {
+        "id": "kfd_driver_mapping",
+        "path": "projects/rocr-runtime/runtime/hsa-runtime/core/driver/kfd/amd_kfd_driver.cpp",
+        "blob": "fb4f99cc1d8f8fcd028957832767afff95a52dfb",
+        "sha256": "006d75fdbb00fe12ef36a2f101212b36c93355389d7945076c693ff605e8ced8",
+        "lines": "120-226, 738-834, 892-1018",
+        "role": "observed ROCr mapping of selected KMT statuses"
+      }
+    ]
+  },
+  "target_abi": {
+    "platform": "linux-x86_64",
+    "pointer_bytes": 8,
+    "enum_bytes": 4,
+    "integer_byte_order": "little-endian",
+    "hsakmttypes_pack": 4,
+    "layout_probe": {
+      "compiler": "gcc",
+      "command": "gcc -std=c11 -Iprojects/rocm-systems/projects/rocr-runtime/libhsakmt/include -include hsakmt/hsakmt.h",
+      "rule": "The recorded size/offset values are frozen for this target ABI; a different pointer width, enum ABI, compiler ABI, or packing mode requires a new authority revision."
+    }
+  },
+  "loader": {
+    "class": "rocr::core::ThunkLoader",
+    "state": ["thunk_handle", "library_name", "is_win_dxg_", "is_wsl_dxg_", "is_dtif_", "is_loaded_"],
+    "selection_order": [
+      "if enable_dtif is true, set is_dtif and select libdtif.so (dtif64a.dll on Windows)",
+      "on Linux only, if enable_dxg_detection is true, probe /dev/dxg with open(O_RDWR); success selects librocdxg.so and sets is_wsl_dxg",
+      "otherwise whoami returns an empty library name and the loader uses direct linked symbols"
+    ],
+    "shared_library_load_order": [
+      "LoadLib(library_name)",
+      "if that fails, GetAdjacentLibraryPath(library_name)",
+      "if both fail, report DlError and leave the shared handle unavailable"
+    ],
+    "shared_library_resolution": {
+      "entry_count": 124,
+      "source_union_entry_count": 124,
+      "mandatory_entry_count": 119,
+      "optional_entry_count": 5,
+      "order": [
+        "hsaKmtOpenKFD", "hsaKmtCloseKFD", "hsaKmtGetVersion", "hsaKmtAcquireSystemProperties", "hsaKmtReleaseSystemProperties", "hsaKmtGetNodeProperties", "hsaKmtGetNodeMemoryProperties", "hsaKmtGetNodeCacheProperties", "hsaKmtGetNodeIoLinkProperties", "hsaKmtCreateEvent", "hsaKmtDestroyEvent", "hsaKmtSetEvent", "hsaKmtResetEvent", "hsaKmtQueryEventState", "hsaKmtWaitOnEvent", "hsaKmtWaitOnMultipleEvents", "hsaKmtCreateQueue", "hsaKmtCreateQueueExt", "hsaKmtCreateQueueV2", "hsaKmtUpdateQueue", "hsaKmtDestroyQueue", "hsaKmtSetQueueCUMask", "hsaKmtSetMemoryPolicy", "hsaKmtAllocMemory", "hsaKmtAllocMemoryAlign", "hsaKmtFreeMemory", "hsaKmtAvailableMemory", "hsaKmtRegisterMemory", "hsaKmtRegisterMemoryToNodes", "hsaKmtRegisterMemoryWithFlags", "hsaKmtRegisterGraphicsHandleToNodes", "hsaKmtRegisterGraphicsHandleToNodesExt", "hsaKmtShareMemory", "hsaKmtRegisterSharedHandle", "hsaKmtRegisterSharedHandleToNodes", "hsaKmtProcessVMRead", "hsaKmtProcessVMWrite", "hsaKmtDeregisterMemory", "hsaKmtMapMemoryToGPU", "hsaKmtMapMemoryToGPUNodes", "hsaKmtUnmapMemoryToGPU", "hsaKmtDbgRegister", "hsaKmtDbgUnregister", "hsaKmtDbgWavefrontControl", "hsaKmtDbgAddressWatch", "hsaKmtDbgEnable", "hsaKmtDbgDisable", "hsaKmtDbgGetDeviceData", "hsaKmtDbgGetQueueData", "hsaKmtGetClockCounters", "hsaKmtPmcGetCounterProperties", "hsaKmtPmcRegisterTrace", "hsaKmtPmcUnregisterTrace", "hsaKmtPmcAcquireTraceAccess", "hsaKmtPmcReleaseTraceAccess", "hsaKmtPmcStartTrace", "hsaKmtPmcQueryTrace", "hsaKmtPmcStopTrace", "hsaKmtMapGraphicHandle", "hsaKmtUnmapGraphicHandle", "hsaKmtSetTrapHandler", "hsaKmtSetSigbusDelay", "hsaKmtGetTileConfig", "hsaKmtQueryPointerInfo", "hsaKmtSetMemoryUserData", "hsaKmtGetQueueInfo", "hsaKmtGetKernelQueueId", "hsaKmtAllocQueueGWS", "hsaKmtRuntimeEnable", "hsaKmtRuntimeDisable", "hsaKmtCheckRuntimeDebugSupport", "hsaKmtGetRuntimeCapabilities", "hsaKmtGetCoreRuntimeInfo", "hsaKmtGetCoreDeviceInfo", "hsaKmtDebugTrapIoctl", "hsaKmtSPMAcquire", "hsaKmtSPMRelease", "hsaKmtSPMSetDestBuffer", "hsaKmtSVMSetAttr", "hsaKmtSVMGetAttr", "hsaKmtSetXNACKMode", "hsaKmtGetXNACKMode", "hsaKmtOpenSMI", "hsaKmtExportDMABufHandle", "hsaKmtWaitOnEvent_Ext", "hsaKmtWaitOnMultipleEvents_Ext", "hsaKmtReplaceAsanHeaderPage", "hsaKmtReturnAsanHeaderPage", "hsaKmtGetAMDGPUDeviceHandle", "hsaKmtPcSamplingQueryCapabilities", "hsaKmtPcSamplingCreate", "hsaKmtPcSamplingDestroy", "hsaKmtPcSamplingStart", "hsaKmtPcSamplingStop", "hsaKmtPcSamplingSupport", "hsaKmtModelEnabled", "hsaKmtQueueRingDoorbell", "amdgpu_device_initialize", "hsaKmtAisReadWriteFile", "hsaKmtGetMemoryHandle", "hsaKmtHandleImport", "hsaKmtImportExternalSemaphore", "hsaKmtDestroyExternalSemaphore", "hsaKmtQueueSignalExternalSemaphore", "hsaKmtQueueWaitExternalSemaphore", "hsaKmtHandleExport", "hsaKmtMemoryVaMap", "hsaKmtMemoryVaUnmap", "hsaKmtMemHandleFree", "hsaKmtMemHandleFreePreserveMetadata", "hsaKmtMemoryGetCpuAddr", "hsaKmtGetAmdGPUDeviceFd", "hsaKmtMemoryCpuMap", "hsaKmtGetNodeWallclockFrequency", "amdgpu_device_deinitialize", "amdgpu_query_gpu_info", "amdgpu_bo_cpu_map", "amdgpu_bo_free", "amdgpu_bo_export", "amdgpu_bo_import", "amdgpu_bo_va_op", "amdgpu_bo_query_info", "amdgpu_bo_set_metadata", "drmCommandWriteRead"
+      ],
+      "mandatory_symbols": [
+        "hsaKmtOpenKFD",
+        "hsaKmtCloseKFD",
+        "hsaKmtGetVersion",
+        "hsaKmtAcquireSystemProperties",
+        "hsaKmtReleaseSystemProperties",
+        "hsaKmtGetNodeProperties",
+        "hsaKmtGetNodeMemoryProperties",
+        "hsaKmtGetNodeCacheProperties",
+        "hsaKmtGetNodeIoLinkProperties",
+        "hsaKmtCreateEvent",
+        "hsaKmtDestroyEvent",
+        "hsaKmtSetEvent",
+        "hsaKmtResetEvent",
+        "hsaKmtQueryEventState",
+        "hsaKmtWaitOnEvent",
+        "hsaKmtWaitOnMultipleEvents",
+        "hsaKmtCreateQueue",
+        "hsaKmtCreateQueueExt",
+        "hsaKmtCreateQueueV2",
+        "hsaKmtUpdateQueue",
+        "hsaKmtDestroyQueue",
+        "hsaKmtSetQueueCUMask",
+        "hsaKmtSetMemoryPolicy",
+        "hsaKmtAllocMemory",
+        "hsaKmtAllocMemoryAlign",
+        "hsaKmtFreeMemory",
+        "hsaKmtAvailableMemory",
+        "hsaKmtRegisterMemory",
+        "hsaKmtRegisterMemoryToNodes",
+        "hsaKmtRegisterMemoryWithFlags",
+        "hsaKmtRegisterGraphicsHandleToNodes",
+        "hsaKmtRegisterGraphicsHandleToNodesExt",
+        "hsaKmtShareMemory",
+        "hsaKmtRegisterSharedHandle",
+        "hsaKmtRegisterSharedHandleToNodes",
+        "hsaKmtProcessVMRead",
+        "hsaKmtProcessVMWrite",
+        "hsaKmtDeregisterMemory",
+        "hsaKmtMapMemoryToGPU",
+        "hsaKmtMapMemoryToGPUNodes",
+        "hsaKmtUnmapMemoryToGPU",
+        "hsaKmtDbgRegister",
+        "hsaKmtDbgUnregister",
+        "hsaKmtDbgWavefrontControl",
+        "hsaKmtDbgAddressWatch",
+        "hsaKmtDbgEnable",
+        "hsaKmtDbgDisable",
+        "hsaKmtDbgGetDeviceData",
+        "hsaKmtDbgGetQueueData",
+        "hsaKmtGetClockCounters",
+        "hsaKmtPmcGetCounterProperties",
+        "hsaKmtPmcRegisterTrace",
+        "hsaKmtPmcUnregisterTrace",
+        "hsaKmtPmcAcquireTraceAccess",
+        "hsaKmtPmcReleaseTraceAccess",
+        "hsaKmtPmcStartTrace",
+        "hsaKmtPmcQueryTrace",
+        "hsaKmtPmcStopTrace",
+        "hsaKmtMapGraphicHandle",
+        "hsaKmtUnmapGraphicHandle",
+        "hsaKmtSetTrapHandler",
+        "hsaKmtGetTileConfig",
+        "hsaKmtQueryPointerInfo",
+        "hsaKmtSetMemoryUserData",
+        "hsaKmtGetQueueInfo",
+        "hsaKmtGetKernelQueueId",
+        "hsaKmtAllocQueueGWS",
+        "hsaKmtRuntimeEnable",
+        "hsaKmtRuntimeDisable",
+        "hsaKmtCheckRuntimeDebugSupport",
+        "hsaKmtGetRuntimeCapabilities",
+        "hsaKmtGetCoreRuntimeInfo",
+        "hsaKmtGetCoreDeviceInfo",
+        "hsaKmtDebugTrapIoctl",
+        "hsaKmtSPMAcquire",
+        "hsaKmtSPMRelease",
+        "hsaKmtSPMSetDestBuffer",
+        "hsaKmtSVMSetAttr",
+        "hsaKmtSVMGetAttr",
+        "hsaKmtSetXNACKMode",
+        "hsaKmtGetXNACKMode",
+        "hsaKmtOpenSMI",
+        "hsaKmtExportDMABufHandle",
+        "hsaKmtWaitOnEvent_Ext",
+        "hsaKmtWaitOnMultipleEvents_Ext",
+        "hsaKmtReplaceAsanHeaderPage",
+        "hsaKmtReturnAsanHeaderPage",
+        "hsaKmtGetAMDGPUDeviceHandle",
+        "hsaKmtPcSamplingQueryCapabilities",
+        "hsaKmtPcSamplingCreate",
+        "hsaKmtPcSamplingDestroy",
+        "hsaKmtPcSamplingStart",
+        "hsaKmtPcSamplingStop",
+        "hsaKmtPcSamplingSupport",
+        "hsaKmtModelEnabled",
+        "hsaKmtQueueRingDoorbell",
+        "amdgpu_device_initialize",
+        "hsaKmtAisReadWriteFile",
+        "hsaKmtGetMemoryHandle",
+        "hsaKmtHandleImport",
+        "hsaKmtHandleExport",
+        "hsaKmtMemoryVaMap",
+        "hsaKmtMemoryVaUnmap",
+        "hsaKmtMemHandleFree",
+        "hsaKmtMemHandleFreePreserveMetadata",
+        "hsaKmtMemoryGetCpuAddr",
+        "hsaKmtGetAmdGPUDeviceFd",
+        "hsaKmtMemoryCpuMap",
+        "hsaKmtGetNodeWallclockFrequency",
+        "amdgpu_device_deinitialize",
+        "amdgpu_query_gpu_info",
+        "amdgpu_bo_cpu_map",
+        "amdgpu_bo_free",
+        "amdgpu_bo_export",
+        "amdgpu_bo_import",
+        "amdgpu_bo_va_op",
+        "amdgpu_bo_query_info",
+        "amdgpu_bo_set_metadata",
+        "drmCommandWriteRead"
+      ],
+      "optional_symbols": [
+        "hsaKmtSetSigbusDelay", "hsaKmtImportExternalSemaphore", "hsaKmtDestroyExternalSemaphore", "hsaKmtQueueSignalExternalSemaphore", "hsaKmtQueueWaitExternalSemaphore"
+      ],
+      "conditional_symbols": {
+        "hsaKmtGetMemoryHandle": {
+          "guard": "defined(_WIN32)",
+          "source_union": true,
+          "linux_shared_effective": false,
+          "linux_direct_effective": false,
+          "locations": ["thunk_loader.h typedef and PFN field", "thunk_loader.cpp shared resolution", "thunk_loader.cpp direct binding"]
+        },
+        "hsaKmtQueueRingDoorbell": {
+          "guard": "defined(_WIN32) only in direct binding",
+          "source_union": true,
+          "linux_shared_effective": true,
+          "linux_direct_effective": false,
+          "locations": ["thunk_loader.h typedef and PFN field", "thunk_loader.cpp shared resolution", "thunk_loader.cpp direct binding"]
+        }
+      },
+      "effective_by_platform": {
+        "linux_x86_64": {"entry_count": 123, "hsa_symbol_count": 112, "drm_symbol_count": 11, "mandatory_entry_count": 118, "optional_entry_count": 5},
+        "windows": {"entry_count": 124, "hsa_symbol_count": 113, "drm_symbol_count": 11, "mandatory_entry_count": 119, "optional_entry_count": 5}
+      },
+      "optional_rule": "A missing optional export leaves its PFN null and KfdDriver guards calls; any missing mandatory export jumps to LOAD_ERROR and does not provide a usable shared API table. On Linux the _WIN32-only hsaKmtGetMemoryHandle entry is absent, while hsaKmtQueueRingDoorbell remains an unguarded shared lookup."
+    },
+    "direct_binding": {
+      "entry_count": 124,
+      "source_union_entry_count": 124,
+      "rule": "When no shared library is selected, PFNs are assigned to the linked symbols in the exact direct_order below; hsaKmtQueueRingDoorbell and hsaKmtGetMemoryHandle are assigned only under _WIN32, and drmCommandWriteRead is assigned only under __linux__. The direct table differs from shared resolution because the source places amdgpu_device_initialize at the end of the HSA assignments and swaps the two guarded queue/model assignments.",
+      "hsa_symbol_count": 113,
+      "drm_symbol_count": 11,
+      "effective_by_platform": {
+        "linux_x86_64": {"entry_count": 122, "hsa_symbol_count": 111, "drm_symbol_count": 11, "mandatory_entry_count": 117, "optional_entry_count": 5},
+        "windows": {"entry_count": 124, "hsa_symbol_count": 113, "drm_symbol_count": 11, "mandatory_entry_count": 119, "optional_entry_count": 5}
+      },
+      "direct_order": [
+        "hsaKmtOpenKFD",
+        "hsaKmtCloseKFD",
+        "hsaKmtGetVersion",
+        "hsaKmtAcquireSystemProperties",
+        "hsaKmtReleaseSystemProperties",
+        "hsaKmtGetNodeProperties",
+        "hsaKmtGetNodeMemoryProperties",
+        "hsaKmtGetNodeCacheProperties",
+        "hsaKmtGetNodeIoLinkProperties",
+        "hsaKmtCreateEvent",
+        "hsaKmtDestroyEvent",
+        "hsaKmtSetEvent",
+        "hsaKmtResetEvent",
+        "hsaKmtQueryEventState",
+        "hsaKmtWaitOnEvent",
+        "hsaKmtWaitOnMultipleEvents",
+        "hsaKmtCreateQueue",
+        "hsaKmtCreateQueueExt",
+        "hsaKmtCreateQueueV2",
+        "hsaKmtUpdateQueue",
+        "hsaKmtDestroyQueue",
+        "hsaKmtSetQueueCUMask",
+        "hsaKmtSetMemoryPolicy",
+        "hsaKmtAllocMemory",
+        "hsaKmtAllocMemoryAlign",
+        "hsaKmtFreeMemory",
+        "hsaKmtAvailableMemory",
+        "hsaKmtRegisterMemory",
+        "hsaKmtRegisterMemoryToNodes",
+        "hsaKmtRegisterMemoryWithFlags",
+        "hsaKmtRegisterGraphicsHandleToNodes",
+        "hsaKmtRegisterGraphicsHandleToNodesExt",
+        "hsaKmtShareMemory",
+        "hsaKmtRegisterSharedHandle",
+        "hsaKmtRegisterSharedHandleToNodes",
+        "hsaKmtProcessVMRead",
+        "hsaKmtProcessVMWrite",
+        "hsaKmtDeregisterMemory",
+        "hsaKmtMapMemoryToGPU",
+        "hsaKmtMapMemoryToGPUNodes",
+        "hsaKmtUnmapMemoryToGPU",
+        "hsaKmtDbgRegister",
+        "hsaKmtDbgUnregister",
+        "hsaKmtDbgWavefrontControl",
+        "hsaKmtDbgAddressWatch",
+        "hsaKmtDbgEnable",
+        "hsaKmtDbgDisable",
+        "hsaKmtDbgGetDeviceData",
+        "hsaKmtDbgGetQueueData",
+        "hsaKmtGetClockCounters",
+        "hsaKmtPmcGetCounterProperties",
+        "hsaKmtPmcRegisterTrace",
+        "hsaKmtPmcUnregisterTrace",
+        "hsaKmtPmcAcquireTraceAccess",
+        "hsaKmtPmcReleaseTraceAccess",
+        "hsaKmtPmcStartTrace",
+        "hsaKmtPmcQueryTrace",
+        "hsaKmtPmcStopTrace",
+        "hsaKmtMapGraphicHandle",
+        "hsaKmtUnmapGraphicHandle",
+        "hsaKmtSetTrapHandler",
+        "hsaKmtSetSigbusDelay",
+        "hsaKmtGetTileConfig",
+        "hsaKmtQueryPointerInfo",
+        "hsaKmtSetMemoryUserData",
+        "hsaKmtGetQueueInfo",
+        "hsaKmtGetKernelQueueId",
+        "hsaKmtAllocQueueGWS",
+        "hsaKmtRuntimeEnable",
+        "hsaKmtRuntimeDisable",
+        "hsaKmtCheckRuntimeDebugSupport",
+        "hsaKmtGetRuntimeCapabilities",
+        "hsaKmtGetCoreRuntimeInfo",
+        "hsaKmtGetCoreDeviceInfo",
+        "hsaKmtDebugTrapIoctl",
+        "hsaKmtSPMAcquire",
+        "hsaKmtSPMRelease",
+        "hsaKmtSPMSetDestBuffer",
+        "hsaKmtSVMSetAttr",
+        "hsaKmtSVMGetAttr",
+        "hsaKmtSetXNACKMode",
+        "hsaKmtGetXNACKMode",
+        "hsaKmtOpenSMI",
+        "hsaKmtExportDMABufHandle",
+        "hsaKmtWaitOnEvent_Ext",
+        "hsaKmtWaitOnMultipleEvents_Ext",
+        "hsaKmtReplaceAsanHeaderPage",
+        "hsaKmtReturnAsanHeaderPage",
+        "hsaKmtGetAMDGPUDeviceHandle",
+        "hsaKmtPcSamplingQueryCapabilities",
+        "hsaKmtPcSamplingCreate",
+        "hsaKmtPcSamplingDestroy",
+        "hsaKmtPcSamplingStart",
+        "hsaKmtPcSamplingStop",
+        "hsaKmtPcSamplingSupport",
+        "hsaKmtQueueRingDoorbell",
+        "hsaKmtModelEnabled",
+        "hsaKmtAisReadWriteFile",
+        "hsaKmtGetMemoryHandle",
+        "hsaKmtHandleImport",
+        "hsaKmtImportExternalSemaphore",
+        "hsaKmtDestroyExternalSemaphore",
+        "hsaKmtQueueSignalExternalSemaphore",
+        "hsaKmtQueueWaitExternalSemaphore",
+        "hsaKmtHandleExport",
+        "hsaKmtMemoryVaMap",
+        "hsaKmtMemoryVaUnmap",
+        "hsaKmtMemHandleFree",
+        "hsaKmtMemHandleFreePreserveMetadata",
+        "hsaKmtMemoryGetCpuAddr",
+        "hsaKmtGetAmdGPUDeviceFd",
+        "hsaKmtMemoryCpuMap",
+        "hsaKmtGetNodeWallclockFrequency",
+        "amdgpu_device_initialize",
+        "amdgpu_device_deinitialize",
+        "amdgpu_query_gpu_info",
+        "amdgpu_bo_cpu_map",
+        "amdgpu_bo_free",
+        "amdgpu_bo_export",
+        "amdgpu_bo_import",
+        "amdgpu_bo_va_op",
+        "amdgpu_bo_query_info",
+        "amdgpu_bo_set_metadata",
+        "drmCommandWriteRead"
+      ]
+    },
+    "post_load": [
+      "DTIF only: resolve DtifCreate and call it with HSA; resolve DtifDestroy on teardown",
+      "DXG only: resolve DxgAbiCheck if present; absent export is treated as compatible; otherwise pass HsaStructureSizes sizes and require SUCCESS",
+      "GemSim must not enter either hardware shared-library branch and must not call any hardware probe"
+    ]
+  },
+  "symbol_inventory": {
+    "hsa_thunk_typedef_count": 113,
+    "linux_hsa_thunk_typedef_count": 112,
+    "linux_direct_hsa_assignment_count": 111,
+    "drm_thunk_typedef_count": 11,
+    "hsa_thunk_typedef_order": [
+      "hsaKmtOpenKFD", "hsaKmtCloseKFD", "hsaKmtGetVersion", "hsaKmtAcquireSystemProperties", "hsaKmtReleaseSystemProperties", "hsaKmtGetNodeProperties", "hsaKmtGetNodeMemoryProperties", "hsaKmtGetNodeCacheProperties", "hsaKmtGetNodeIoLinkProperties", "hsaKmtCreateEvent", "hsaKmtDestroyEvent", "hsaKmtSetEvent", "hsaKmtResetEvent", "hsaKmtQueryEventState", "hsaKmtWaitOnEvent", "hsaKmtWaitOnMultipleEvents", "hsaKmtCreateQueue", "hsaKmtCreateQueueExt", "hsaKmtCreateQueueV2", "hsaKmtUpdateQueue", "hsaKmtDestroyQueue", "hsaKmtSetQueueCUMask", "hsaKmtSetMemoryPolicy", "hsaKmtAllocMemory", "hsaKmtAllocMemoryAlign", "hsaKmtFreeMemory", "hsaKmtAvailableMemory", "hsaKmtRegisterMemory", "hsaKmtRegisterMemoryToNodes", "hsaKmtRegisterMemoryWithFlags", "hsaKmtRegisterGraphicsHandleToNodes", "hsaKmtRegisterGraphicsHandleToNodesExt", "hsaKmtShareMemory", "hsaKmtRegisterSharedHandle", "hsaKmtRegisterSharedHandleToNodes", "hsaKmtProcessVMRead", "hsaKmtProcessVMWrite", "hsaKmtDeregisterMemory", "hsaKmtMapMemoryToGPU", "hsaKmtMapMemoryToGPUNodes", "hsaKmtUnmapMemoryToGPU", "hsaKmtDbgRegister", "hsaKmtDbgUnregister", "hsaKmtDbgWavefrontControl", "hsaKmtDbgAddressWatch", "hsaKmtDbgEnable", "hsaKmtDbgDisable", "hsaKmtDbgGetDeviceData", "hsaKmtDbgGetQueueData", "hsaKmtGetClockCounters", "hsaKmtPmcGetCounterProperties", "hsaKmtPmcRegisterTrace", "hsaKmtPmcUnregisterTrace", "hsaKmtPmcAcquireTraceAccess", "hsaKmtPmcReleaseTraceAccess", "hsaKmtPmcStartTrace", "hsaKmtPmcQueryTrace", "hsaKmtPmcStopTrace", "hsaKmtMapGraphicHandle", "hsaKmtUnmapGraphicHandle", "hsaKmtSetTrapHandler", "hsaKmtSetSigbusDelay", "hsaKmtGetTileConfig", "hsaKmtQueryPointerInfo", "hsaKmtSetMemoryUserData", "hsaKmtGetQueueInfo", "hsaKmtGetKernelQueueId", "hsaKmtAllocQueueGWS", "hsaKmtRuntimeEnable", "hsaKmtRuntimeDisable", "hsaKmtCheckRuntimeDebugSupport", "hsaKmtGetRuntimeCapabilities", "hsaKmtGetCoreRuntimeInfo", "hsaKmtGetCoreDeviceInfo", "hsaKmtDebugTrapIoctl", "hsaKmtSPMAcquire", "hsaKmtSPMRelease", "hsaKmtSPMSetDestBuffer", "hsaKmtSVMSetAttr", "hsaKmtSVMGetAttr", "hsaKmtSetXNACKMode", "hsaKmtGetXNACKMode", "hsaKmtOpenSMI", "hsaKmtExportDMABufHandle", "hsaKmtWaitOnEvent_Ext", "hsaKmtWaitOnMultipleEvents_Ext", "hsaKmtReplaceAsanHeaderPage", "hsaKmtReturnAsanHeaderPage", "hsaKmtGetAMDGPUDeviceHandle", "hsaKmtPcSamplingQueryCapabilities", "hsaKmtPcSamplingCreate", "hsaKmtPcSamplingDestroy", "hsaKmtPcSamplingStart", "hsaKmtPcSamplingStop", "hsaKmtPcSamplingSupport", "hsaKmtModelEnabled", "hsaKmtQueueRingDoorbell", "hsaKmtAisReadWriteFile", "hsaKmtGetMemoryHandle", "hsaKmtHandleImport", "hsaKmtImportExternalSemaphore", "hsaKmtDestroyExternalSemaphore", "hsaKmtQueueSignalExternalSemaphore", "hsaKmtQueueWaitExternalSemaphore", "hsaKmtHandleExport", "hsaKmtMemoryVaMap", "hsaKmtMemoryVaUnmap", "hsaKmtMemHandleFree", "hsaKmtMemHandleFreePreserveMetadata", "hsaKmtMemoryGetCpuAddr", "hsaKmtMemoryCpuMap", "hsaKmtGetNodeWallclockFrequency", "hsaKmtGetAmdGPUDeviceFd"
+    ],
+    "libhsakmt_version_script_export_count": 108,
+    "libhsakmt_version_script_exports": [
+      "hsaKmtOpenKFD", "hsaKmtCloseKFD", "hsaKmtGetVersion", "hsaKmtAcquireSystemProperties", "hsaKmtReleaseSystemProperties", "hsaKmtGetNodeProperties", "hsaKmtGetNodeWallclockFrequency", "hsaKmtGetNodeMemoryProperties", "hsaKmtGetNodeCacheProperties", "hsaKmtGetNodeIoLinkProperties", "hsaKmtCreateEvent", "hsaKmtDestroyEvent", "hsaKmtSetEvent", "hsaKmtResetEvent", "hsaKmtQueryEventState", "hsaKmtWaitOnEvent", "hsaKmtWaitOnMultipleEvents", "hsaKmtCreateQueue", "hsaKmtUpdateQueue", "hsaKmtDestroyQueue", "hsaKmtSetQueueCUMask", "hsaKmtSetMemoryPolicy", "hsaKmtAllocMemory", "hsaKmtAllocMemoryAlign", "hsaKmtFreeMemory", "hsaKmtAvailableMemory", "hsaKmtRegisterMemory", "hsaKmtRegisterMemoryToNodes", "hsaKmtImportExternalSemaphore", "hsaKmtDestroyExternalSemaphore", "hsaKmtQueueSignalExternalSemaphore", "hsaKmtQueueWaitExternalSemaphore", "hsaKmtRegisterMemoryWithFlags", "hsaKmtRegisterGraphicsHandleToNodes", "hsaKmtShareMemory", "hsaKmtRegisterSharedHandle", "hsaKmtRegisterSharedHandleToNodes", "hsaKmtProcessVMRead", "hsaKmtProcessVMWrite", "hsaKmtDeregisterMemory", "hsaKmtMapMemoryToGPU", "hsaKmtMapMemoryToGPUNodes", "hsaKmtUnmapMemoryToGPU", "hsaKmtDbgRegister", "hsaKmtDbgUnregister", "hsaKmtDbgWavefrontControl", "hsaKmtDbgAddressWatch", "hsaKmtDbgEnable", "hsaKmtDbgDisable", "hsaKmtDbgGetDeviceData", "hsaKmtDbgGetQueueData", "hsaKmtGetClockCounters", "hsaKmtPmcGetCounterProperties", "hsaKmtPmcRegisterTrace", "hsaKmtPmcUnregisterTrace", "hsaKmtPmcAcquireTraceAccess", "hsaKmtPmcReleaseTraceAccess", "hsaKmtPmcStartTrace", "hsaKmtPmcQueryTrace", "hsaKmtPmcStopTrace", "hsaKmtMapGraphicHandle", "hsaKmtUnmapGraphicHandle", "hsaKmtSetTrapHandler", "hsaKmtGetTileConfig", "hsaKmtQueryPointerInfo", "hsaKmtSetMemoryUserData", "hsaKmtGetQueueInfo", "hsaKmtAllocQueueGWS", "hsaKmtGetKernelQueueId", "hsaKmtRuntimeEnable", "hsaKmtRuntimeDisable", "hsaKmtCheckRuntimeDebugSupport", "hsaKmtGetRuntimeCapabilities", "hsaKmtDebugTrapIoctl", "hsaKmtGetCoreRuntimeInfo", "hsaKmtGetCoreDeviceInfo", "hsaKmtSPMAcquire", "hsaKmtSPMRelease", "hsaKmtSPMSetDestBuffer", "hsaKmtSVMSetAttr", "hsaKmtSVMGetAttr", "hsaKmtSetXNACKMode", "hsaKmtGetXNACKMode", "hsaKmtOpenSMI", "hsaKmtExportDMABufHandle", "hsaKmtWaitOnEvent_Ext", "hsaKmtWaitOnMultipleEvents_Ext", "hsaKmtReplaceAsanHeaderPage", "hsaKmtReturnAsanHeaderPage", "hsaKmtGetAMDGPUDeviceHandle", "hsaKmtPcSamplingQueryCapabilities", "hsaKmtPcSamplingCreate", "hsaKmtPcSamplingDestroy", "hsaKmtPcSamplingStart", "hsaKmtPcSamplingStop", "hsaKmtPcSamplingSupport", "hsaKmtAisReadWriteFile", "hsaKmtGetMemoryHandle", "hsaKmtHandleImport", "hsaKmtHandleExport", "hsaKmtMemoryVaMap", "hsaKmtMemoryVaUnmap", "hsaKmtMemHandleFree", "hsaKmtMemHandleFreePreserveMetadata", "hsaKmtMemoryGetCpuAddr", "hsaKmtMemoryCpuMap", "hsaKmtSetSigbusDelay", "hsaKmtGetAmdGPUDeviceFd"
+    ],
+    "version_script_difference": {
+      "typedefs_not_exported_by_libhsakmt_ver": ["hsaKmtCreateQueueExt", "hsaKmtCreateQueueV2", "hsaKmtModelEnabled", "hsaKmtQueueRingDoorbell", "hsaKmtRegisterGraphicsHandleToNodesExt"],
+      "exported_not_typed": []
+    },
+    "drm_resolution_count": 11,
+    "drm_resolution_order": ["amdgpu_device_initialize", "amdgpu_device_deinitialize", "amdgpu_query_gpu_info", "amdgpu_bo_cpu_map", "amdgpu_bo_free", "amdgpu_bo_export", "amdgpu_bo_import", "amdgpu_bo_va_op", "amdgpu_bo_query_info", "amdgpu_bo_set_metadata", "drmCommandWriteRead"],
+    "layers": [
+      {
+        "id": "lifecycle_topology",
+        "meaning": "open/close, interface version, topology snapshot and discoverable properties",
+        "symbols": ["hsaKmtOpenKFD", "hsaKmtCloseKFD", "hsaKmtGetVersion", "hsaKmtAcquireSystemProperties", "hsaKmtReleaseSystemProperties", "hsaKmtGetNodeProperties", "hsaKmtGetNodeMemoryProperties", "hsaKmtGetNodeCacheProperties", "hsaKmtGetNodeIoLinkProperties", "hsaKmtGetNodeWallclockFrequency"]
+      },
+      {
+        "id": "event_sync",
+        "meaning": "OS event ABI used by queue and runtime waits",
+        "symbols": ["hsaKmtCreateEvent", "hsaKmtDestroyEvent", "hsaKmtSetEvent", "hsaKmtResetEvent", "hsaKmtQueryEventState", "hsaKmtWaitOnEvent", "hsaKmtWaitOnMultipleEvents", "hsaKmtWaitOnEvent_Ext", "hsaKmtWaitOnMultipleEvents_Ext"]
+      },
+      {
+        "id": "queue_dispatch",
+        "meaning": "queue creation, update, CU mask, information, doorbell and GWS",
+        "symbols": ["hsaKmtCreateQueue", "hsaKmtCreateQueueExt", "hsaKmtCreateQueueV2", "hsaKmtUpdateQueue", "hsaKmtDestroyQueue", "hsaKmtSetQueueCUMask", "hsaKmtGetQueueInfo", "hsaKmtGetKernelQueueId", "hsaKmtAllocQueueGWS", "hsaKmtQueueRingDoorbell"]
+      },
+      {
+        "id": "memory_virtual",
+        "meaning": "allocation, registration, mapping, pointer query and CPU/GPU virtual-address operations",
+        "symbols": ["hsaKmtSetMemoryPolicy", "hsaKmtAllocMemory", "hsaKmtAllocMemoryAlign", "hsaKmtFreeMemory", "hsaKmtAvailableMemory", "hsaKmtRegisterMemory", "hsaKmtRegisterMemoryToNodes", "hsaKmtRegisterMemoryWithFlags", "hsaKmtRegisterGraphicsHandleToNodes", "hsaKmtRegisterGraphicsHandleToNodesExt", "hsaKmtShareMemory", "hsaKmtRegisterSharedHandle", "hsaKmtRegisterSharedHandleToNodes", "hsaKmtProcessVMRead", "hsaKmtProcessVMWrite", "hsaKmtDeregisterMemory", "hsaKmtMapMemoryToGPU", "hsaKmtMapMemoryToGPUNodes", "hsaKmtUnmapMemoryToGPU", "hsaKmtMapGraphicHandle", "hsaKmtUnmapGraphicHandle", "hsaKmtQueryPointerInfo", "hsaKmtSetMemoryUserData", "hsaKmtGetAMDGPUDeviceHandle", "hsaKmtGetMemoryHandle", "hsaKmtHandleImport", "hsaKmtHandleExport", "hsaKmtMemoryVaMap", "hsaKmtMemoryVaUnmap", "hsaKmtMemHandleFree", "hsaKmtMemHandleFreePreserveMetadata", "hsaKmtMemoryGetCpuAddr", "hsaKmtMemoryCpuMap", "hsaKmtGetAmdGPUDeviceFd"]
+      },
+      {
+        "id": "debug_and_observability",
+        "meaning": "debug traps, counters, SPM, SVM, XNACK, SMI, ASAN, sampling and model hooks",
+        "symbols": ["hsaKmtDbgRegister", "hsaKmtDbgUnregister", "hsaKmtDbgWavefrontControl", "hsaKmtDbgAddressWatch", "hsaKmtDbgEnable", "hsaKmtDbgDisable", "hsaKmtDbgGetDeviceData", "hsaKmtDbgGetQueueData", "hsaKmtGetClockCounters", "hsaKmtPmcGetCounterProperties", "hsaKmtPmcRegisterTrace", "hsaKmtPmcUnregisterTrace", "hsaKmtPmcAcquireTraceAccess", "hsaKmtPmcReleaseTraceAccess", "hsaKmtPmcStartTrace", "hsaKmtPmcQueryTrace", "hsaKmtPmcStopTrace", "hsaKmtSetTrapHandler", "hsaKmtSetSigbusDelay", "hsaKmtGetTileConfig", "hsaKmtRuntimeEnable", "hsaKmtRuntimeDisable", "hsaKmtCheckRuntimeDebugSupport", "hsaKmtGetRuntimeCapabilities", "hsaKmtGetCoreRuntimeInfo", "hsaKmtGetCoreDeviceInfo", "hsaKmtDebugTrapIoctl", "hsaKmtSPMAcquire", "hsaKmtSPMRelease", "hsaKmtSPMSetDestBuffer", "hsaKmtSVMSetAttr", "hsaKmtSVMGetAttr", "hsaKmtSetXNACKMode", "hsaKmtGetXNACKMode", "hsaKmtOpenSMI", "hsaKmtExportDMABufHandle", "hsaKmtReplaceAsanHeaderPage", "hsaKmtReturnAsanHeaderPage", "hsaKmtPcSamplingQueryCapabilities", "hsaKmtPcSamplingCreate", "hsaKmtPcSamplingDestroy", "hsaKmtPcSamplingStart", "hsaKmtPcSamplingStop", "hsaKmtPcSamplingSupport", "hsaKmtModelEnabled", "hsaKmtAisReadWriteFile"]
+      },
+      {
+        "id": "external_semaphore",
+        "meaning": "optional external semaphore thunks; absence is explicitly supported by ThunkLoader",
+        "symbols": ["hsaKmtImportExternalSemaphore", "hsaKmtDestroyExternalSemaphore", "hsaKmtQueueSignalExternalSemaphore", "hsaKmtQueueWaitExternalSemaphore"]
+      },
+      {
+        "id": "drm_hardware_surface",
+        "meaning": "DRM/amdgpu symbols resolved only for the hardware shared/direct path and forbidden in GemSim",
+        "symbols": ["amdgpu_device_initialize", "amdgpu_device_deinitialize", "amdgpu_query_gpu_info", "amdgpu_bo_cpu_map", "amdgpu_bo_free", "amdgpu_bo_export", "amdgpu_bo_import", "amdgpu_bo_va_op", "amdgpu_bo_query_info", "amdgpu_bo_set_metadata", "drmCommandWriteRead"]
+      }
+    ]
+  },
+  "abi_layouts": [
+    {"type": "HsaVersionInfo", "sizeof": 8, "fields": {"KernelInterfaceMajorVersion": 0, "KernelInterfaceMinorVersion": 4}},
+    {"type": "HsaSystemProperties", "sizeof": 16, "fields": {"NumNodes": 0, "PlatformOem": 4, "PlatformId": 8, "PlatformRev": 12}},
+    {"type": "HsaNodeProperties", "sizeof": 396, "fields": {"NumCPUCores": 0, "Capability": 32, "WaveFrontSize": 52, "LocalMemSize": 92, "MarketingName": 112, "AMDName": 240, "DebugProperties": 308, "UniqueID": 340, "WallClockKHz": 384, "FabricHandleSupported": 392}},
+    {"type": "HsaMemoryProperties", "sizeof": 32, "fields": {"HeapType": 0, "SizeInBytes": 4, "Flags": 12, "Width": 16, "MemoryClockMax": 20, "VirtualBaseAddress": 24}},
+    {"type": "HsaCacheProperties", "sizeof": 1056, "fields": {"ProcessorIdLow": 0, "CacheLevel": 4, "CacheType": 28, "SiblingMap": 32}},
+    {"type": "HsaIoLinkProperties", "sizeof": 52, "fields": {"IoLinkType": 0, "NodeFrom": 12, "MinimumLatency": 24, "Flags": 48}},
+    {"type": "HsaMemFlags", "sizeof": 4, "fields": {"Value": 0}},
+    {"type": "HsaGraphicsResourceInfo", "sizeof": 40, "fields": {"MemoryAddress": 0, "SizeInBytes": 8, "Metadata": 16, "MetadataSizeInBytes": 24, "NodeId": 28, "SizeHintInBytes": 32}},
+    {"type": "HsaQueueInfo", "sizeof": 76, "fields": {"QueueDetailError": 0, "QueueTypeExtended": 4, "NumCUAssigned": 8, "CUMaskInfo": 12, "UserContextSaveArea": 20, "SaveAreaSizeInBytes": 28, "ControlStackTop": 36, "SaveAreaHeader": 52, "SaveAreaAllocSize": 68}},
+    {"type": "HsaQueueResource", "sizeof": 40, "fields": {"QueueId": 0, "Queue_DoorBell": 8, "Queue_write_ptr": 16, "Queue_read_ptr": 24, "ErrorReason": 32}},
+    {"type": "HsaEventDescriptor", "sizeof": 24, "fields": {"EventType": 0, "NodeId": 4, "SyncVar": 8}},
+    {"type": "HsaEvent", "sizeof": 48, "fields": {"EventId": 0, "EventData": 4}},
+    {"type": "HsaPointerInfo", "sizeof": 68, "fields": {"Type": 0, "Node": 4, "MemFlags": 8, "CPUAddress": 12, "GPUAddress": 20, "SizeInBytes": 28, "NRegisteredNodes": 36, "NMappedNodes": 40, "RegisteredNodes": 44, "MappedNodes": 52, "UserData": 60}},
+    {"type": "HsaMemoryRange", "sizeof": 16, "fields": {"MemoryAddress": 0, "SizeInBytes": 8}},
+    {"type": "HsaHandleImportDesc", "sizeof": 40, "fields": {"device_handle": 0, "type": 8, "dmabuf_fd": 12, "mem": 28, "metadata": 36}},
+    {"type": "HsaHandleImportResult", "sizeof": 24, "fields": {"buf_handle": 0, "dmabuf_fd": 8, "alloc_size": 12, "metadata": 20}},
+    {"type": "HsaStructureSizes", "sizeof": 16, "fields": {"StructureSizes": 0, "SizeOfHsaNodeProperties": 2, "SizeOfHsaExternalHandleDesc": 4, "Reserved": 6}}
+  ],
+  "abi_layouts_scope": {
+    "field_scope": "key_offsets_partial",
+    "meaning": "Each fields map records the authority's selected key offsets only; it is not an exhaustive declaration of every upstream struct field. sizeof remains authoritative for the recorded target ABI."
+  },
+  "model_abi": {
+    "source_header": "projects/rocr-runtime/libhsakmt/include/hsakmt/hsakmtmodeliface.h:23-134",
+    "interface_version": {"major": 1, "minor": 1},
+    "packing": "compiler-default",
+    "function_table": {
+      "type": "struct hsakmt_model_functions",
+      "sizeof": 32,
+      "fields": {"version_major": 0, "version_minor": 4, "create_memfd": 8, "handle_ioctl": 16, "handle_drm_call": 24}
+    },
+    "drm_command_count": 15,
+    "drm_commands": [
+      {"name": "HSAKMT_DRM_BO_VA_OP", "value": 0, "arg_type": "struct hsakmt_drm_bo_va_op_args", "sizeof": 48, "fields": {"bo": 0, "offset": 8, "size": 16, "addr": 24, "flags": 32, "ops": 40}},
+      {"name": "HSAKMT_DRM_BO_FREE", "value": 1, "arg_type": "struct hsakmt_drm_bo_free_args", "sizeof": 8, "fields": {"bo": 0}},
+      {"name": "HSAKMT_DRM_BO_IMPORT", "value": 2, "arg_type": "struct hsakmt_drm_bo_import_args", "sizeof": 16, "fields": {"fd": 0, "type": 4, "result_out": 8}},
+      {"name": "HSAKMT_DRM_BO_EXPORT", "value": 3, "arg_type": "struct hsakmt_drm_bo_export_args", "sizeof": 24, "fields": {"bo": 0, "type": 8, "handle_out": 16}},
+      {"name": "HSAKMT_DRM_BO_CPU_MAP", "value": 4, "arg_type": "struct hsakmt_drm_bo_cpu_map_args", "sizeof": 16, "fields": {"bo": 0, "cpu_ptr_out": 8}},
+      {"name": "HSAKMT_DRM_BO_QUERY_INFO", "value": 5, "arg_type": "struct hsakmt_drm_bo_query_info_args", "sizeof": 16, "fields": {"bo": 0, "info_out": 8}},
+      {"name": "HSAKMT_DRM_BO_SET_METADATA", "value": 6, "arg_type": "struct hsakmt_drm_bo_set_metadata_args", "sizeof": 16, "fields": {"bo": 0, "metadata": 8}},
+      {"name": "HSAKMT_DRM_COMMAND_WRITE_READ", "value": 7, "arg_type": "struct hsakmt_drm_cmd_write_read_args", "sizeof": 32, "fields": {"fd": 0, "cmd": 8, "data": 16, "size": 24}},
+      {"name": "HSAKMT_DRM_OPEN_RENDER", "value": 8, "arg_type": "struct hsakmt_drm_open_render_args", "sizeof": 16, "fields": {"minor": 0, "fd_out": 8}},
+      {"name": "HSAKMT_DRM_CLOSE", "value": 9, "arg_type": "struct hsakmt_drm_close_args", "sizeof": 4, "fields": {"fd": 0}},
+      {"name": "HSAKMT_DRM_DEVICE_INITIALIZE", "value": 10, "arg_type": "struct hsakmt_drm_device_initialize_args", "sizeof": 32, "fields": {"fd": 0, "major_out": 8, "minor_out": 16, "dev_out": 24}},
+      {"name": "HSAKMT_DRM_DEVICE_DEINITIALIZE", "value": 11, "arg_type": "struct hsakmt_drm_device_deinitialize_args", "sizeof": 8, "fields": {"dev": 0}},
+      {"name": "HSAKMT_DRM_DEVICE_GET_FD", "value": 12, "arg_type": "struct hsakmt_drm_device_get_fd_args", "sizeof": 16, "fields": {"dev": 0, "fd_out": 8}},
+      {"name": "HSAKMT_DRM_GET_MARKETING_NAME", "value": 13, "arg_type": "struct hsakmt_drm_get_marketing_name_args", "sizeof": 16, "fields": {"dev": 0, "name_out": 8}},
+      {"name": "HSAKMT_DRM_QUERY_GPU_INFO", "value": 14, "arg_type": "struct hsakmt_drm_query_gpu_info_args", "sizeof": 16, "fields": {"dev": 0, "info_out": 8}}
+    ],
+    "provider_rule": "Expose model ABI metadata and preserve command/status shape, but route no production DRM call; an unimplemented model command returns HSAKMT_STATUS_NOT_SUPPORTED after argument validation."
+  },
+  "upstream_hardware_call_audit": [
+    {
+      "file_id": "libhsakmt_memory_hardware_path",
+      "source_refs": ["memory.c:953-1077", "memory.c:1109-1210", "memory.c:1224-1320"],
+      "direct_or_wrapper_calls": ["amdgpu_device_get_fd", "amdgpu_bo_export", "amdgpu_bo_import", "amdgpu_bo_query_info", "amdgpu_bo_set_metadata", "amdgpu_bo_free", "amdgpu_bo_cpu_map", "drmCommandWriteRead", "drmIoctl"],
+      "gem_sim_rule": "Do not link or call these production APIs; implement the corresponding provider operation through the daemon transport or return NOT_SUPPORTED."
+    },
+    {
+      "file_id": "libhsakmt_fmm_hardware_path",
+      "source_refs": ["fmm.c:2381-2439", "fmm.c:2768-2788", "fmm.c:2987-3235", "fmm.c:4785-4787"],
+      "direct_or_wrapper_calls": ["hsakmt_amdgpu_device_initialize", "hsakmt_fn_amdgpu_device_initialize2", "hsakmt_amdgpu_device_get_fd", "hsakmt_amdgpu_device_deinitialize", "drmSyncobjCreate", "drmSyncobjDestroy", "hsakmt_drm_open_render"],
+      "gem_sim_rule": "The provider must not create host render-node/device handles or invoke libdrm sync-object calls."
+    },
+    {
+      "file_id": "libhsakmt_debug_hardware_path",
+      "source_refs": ["debug.c:748-760"],
+      "direct_or_wrapper_calls": ["drmOpenRender", "drmGetDevice2", "drmFreeDevice", "drmClose"],
+      "gem_sim_rule": "Debug/device discovery is unsupported in the provider until a daemon-owned equivalent is specified; never probe a host DRM node."
+    }
+  ],
+  "hardware_call_boundary": {
+    "model_dispatch": {
+      "source": "hsakmtmodel.c:257-530",
+      "model_mode": "model_kfd_ioctl delegates KFD requests to handle_ioctl; v1.1 model mode routes the 15 DRM commands to handle_drm_call under a mutex",
+      "non_model_mode": "the same wrappers call production amdgpu/libdrm functions",
+      "v1_0_fallback": "older model minor versions use source-defined no-op/synthetic-handle compatibility paths; this is upstream behavior and is not a GemSim success policy"
+    },
+    "topology_attach_chain": [
+      "topology.c:2283-2305 acquires a snapshot",
+      "topology.c:2311-2318 calls model_init then FMM apertures and process doorbells",
+      "fmm.c:2377-2444 opens render nodes and initializes an amdgpu device"
+    ],
+    "provider_requirements": [
+      "Do not link hsakmtmodel.c, production libhsakmt, libdrm, or libdrm_amdgpu into the daemon/provider",
+      "Implement only daemon-owned model/KFD/DRM semantics and return NOT_SUPPORTED for absent operations",
+      "Keep HSA_MODEL_LIB/dlopen and host render-node probing out of the GemSim path"
+    ]
+  },
+  "build_boundary": {
+    "source_file_ids": ["libhsakmt_cmake", "rocr_runtime_cmake", "hsa_runtime_cmake"],
+    "libhsakmt": {
+      "source_list": "libhsakmt/CMakeLists.txt:171-189 includes debug.c, fmm.c, hsakmtmodel.c, memory.c, openclose.c, topology.c",
+      "production_link": "libhsakmt/CMakeLists.txt:275-286 requires libdrm and libdrm_amdgpu and links pthread, rt, NUMA, libc, and dl"
+    },
+    "rocr_runtime": {
+      "target_graph": "rocr-runtime/CMakeLists.txt:128-162 builds hsakmt and hsa-runtime64 and selects hsakmt/hsakmt-staticdrm dependencies"
+    },
+    "hsa_runtime": {
+      "source_and_target": "runtime/hsa-runtime/CMakeLists.txt:117-148 creates the core target; :250-264 includes core/runtime/thunk_loader.cpp",
+      "unix_drm_dependency": "runtime/hsa-runtime/CMakeLists.txt:127-133 uses pkg-config libdrm on UNIX"
+    },
+    "provider_link_rule": "The GemSim provider must have no DT_NEEDED or static object dependency on production libhsakmt, libdrm, libdrm_amdgpu, amdsmi, or host KFD/DRM libraries."
+  },
+  "query_lifecycle": {
+    "scope": "transport-open",
+    "meaning": "Reports only that a provider handle owns a completed host-transport handshake and remains open.",
+    "success_requires": "valid provider handle after transport handshake",
+    "does_not_call": ["hsaKmtOpenKFD", "hsaKmtAcquireSystemProperties", "hsaKmtGetNodeProperties"],
+    "does_not_mean": ["KFD channel open", "KFD topology acquired", "GPU node discovered"],
+    "hardware_effect": "none; the query performs no device-node, KFD, DRM, or topology operation",
+    "status_boundary": "KERNEL_IO_CHANNEL_NOT_OPENED is a future full-provider KFD-channel policy status, not a result of this transport-open query"
+  },
+  "statuses": {
+    "source_enum_header": "projects/rocr-runtime/libhsakmt/include/hsakmt/hsakmttypes.h:95-133",
+    "values": {
+      "HSAKMT_STATUS_SUCCESS": 0,
+      "HSAKMT_STATUS_ERROR": 1,
+      "HSAKMT_STATUS_DRIVER_MISMATCH": 2,
+      "HSAKMT_STATUS_INVALID_PARAMETER": 3,
+      "HSAKMT_STATUS_INVALID_HANDLE": 4,
+      "HSAKMT_STATUS_INVALID_NODE_UNIT": 5,
+      "HSAKMT_STATUS_NO_MEMORY": 6,
+      "HSAKMT_STATUS_BUFFER_TOO_SMALL": 7,
+      "HSAKMT_STATUS_NOT_IMPLEMENTED": 10,
+      "HSAKMT_STATUS_NOT_SUPPORTED": 11,
+      "HSAKMT_STATUS_UNAVAILABLE": 12,
+      "HSAKMT_STATUS_OUT_OF_RESOURCES": 13,
+      "HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED": 20,
+      "HSAKMT_STATUS_KERNEL_COMMUNICATION_ERROR": 21,
+      "HSAKMT_STATUS_KERNEL_ALREADY_OPENED": 22,
+      "HSAKMT_STATUS_HSAMMU_UNAVAILABLE": 23,
+      "HSAKMT_STATUS_WAIT_FAILURE": 30,
+      "HSAKMT_STATUS_WAIT_TIMEOUT": 31,
+      "HSAKMT_STATUS_MEMORY_ALREADY_REGISTERED": 35,
+      "HSAKMT_STATUS_MEMORY_NOT_REGISTERED": 36,
+      "HSAKMT_STATUS_MEMORY_ALIGNMENT": 37
+    },
+    "observed_rocr_mapping": [
+      {"scope": "KfdDriver::Open/Close and most generic wrappers", "source": "amd_kfd_driver.cpp:173-179", "non_success": "HSA_STATUS_ERROR"},
+      {"scope": "KfdDriver::AllocateMemory", "source": "amd_kfd_driver.cpp:229-414", "statuses": ["HSAKMT_STATUS_NO_MEMORY (retry after Trim)", "any final non-success", "pin/ASAN failure"], "mapped": "HSA_STATUS_ERROR_OUT_OF_RESOURCES"},
+      {"scope": "KfdDriver::AllocateScratchMemory", "source": "amd_kfd_driver.cpp:882-893", "statuses": ["any non-success or null output"], "mapped": "HSA_STATUS_ERROR_OUT_OF_RESOURCES"},
+      {"scope": "KfdDriver external semaphore import", "source": "amd_kfd_driver.cpp:768-779", "mapping": {"HSAKMT_STATUS_INVALID_PARAMETER": "HSA_STATUS_ERROR_INVALID_ARGUMENT", "HSAKMT_STATUS_NOT_SUPPORTED": "HSA_STATUS_ERROR_NOT_SUPPORTED", "HSAKMT_STATUS_INVALID_NODE_UNIT": "HSA_STATUS_ERROR_INVALID_AGENT", "other_non_success": "HSA_STATUS_ERROR"}},
+      {"scope": "KfdDriver external semaphore queue signal/wait", "source": "amd_kfd_driver.cpp:799-810", "mapping": {"HSAKMT_STATUS_INVALID_HANDLE": "HSA_STATUS_ERROR_INVALID_ARGUMENT", "HSAKMT_STATUS_NOT_SUPPORTED": "HSA_STATUS_ERROR_NOT_SUPPORTED", "HSAKMT_STATUS_INVALID_NODE_UNIT": "HSA_STATUS_ERROR_INVALID_AGENT", "other_non_success": "HSA_STATUS_ERROR"}}
+    ],
+    "provider_policy": {
+      "source_of_policy": "CP-0009 GemSim design; preserves source distinctions and never manufactures success-shaped output",
+      "success": "HSAKMT_STATUS_SUCCESS only after the corresponding daemon operation has committed",
+      "bad_argument_or_foreign_handle": "HSAKMT_STATUS_INVALID_PARAMETER or HSAKMT_STATUS_INVALID_HANDLE as applicable",
+      "unsupported_capability": "HSAKMT_STATUS_NOT_SUPPORTED",
+      "unimplemented_optional_operation": "HSAKMT_STATUS_NOT_IMPLEMENTED only when the API is intentionally present but no implementation is promised",
+      "resource_exhaustion": "HSAKMT_STATUS_NO_MEMORY or HSAKMT_STATUS_OUT_OF_RESOURCES according to whether allocation or an already-sized resource is exhausted",
+      "daemon_transport_failure": "HSAKMT_STATUS_KERNEL_COMMUNICATION_ERROR",
+      "provider_not_open": "Future full-provider KFD-channel policy only: HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED; CP-0009 transport-open/lifecycle query does not use this status",
+      "wait_deadline": "HSAKMT_STATUS_WAIT_TIMEOUT",
+      "never": ["return SUCCESS for an unsupported operation", "silently fall back to host arithmetic", "collapse INVALID_HANDLE into SUCCESS"]
+    }
+  },
+  "unsupported_semantics": {
+    "export_contract": "CP-0009 currently publishes source-exact public symbol names and C signatures as metadata only; the current metadata skeleton does not export the 124 typed hsaKmt/DRM entry points. A future full provider must export the complete typed surface and return deterministic HSAKMT_STATUS_NOT_SUPPORTED (or the explicitly documented NOT_IMPLEMENTED policy) for unsupported functions after required argument/ownership validation.",
+    "current_cp9_metadata_skeleton": {
+      "kind": "metadata-only",
+      "typed_hsakmt_drm_exports": 0,
+      "source_union_typed_entries": 124,
+      "implemented_full_provider": false,
+      "provided_surfaces": ["manifest", "symbol metadata", "layout metadata", "model ABI metadata", "generic unsupported invoke"]
+    },
+    "future_full_provider_contract": {
+      "required_typed_exports": 124,
+      "gate": "provider_gate",
+      "not_satisfied_by": ["source inventory alone", "metadata queries alone", "generic invoke returning NOT_SUPPORTED"]
+    },
+    "hardware_bypass": "The provider is a daemon-backed implementation and must not link to, dlopen, dlsym, or call production AMDGPU KMD/UMD libraries.",
+    "forbidden_device_nodes": ["/dev/kfd", "/dev/dri", "/dev/dxg", "/dev/udmabuf"],
+    "forbidden_probes": ["open/access/stat/readlink on forbidden device nodes", "amdgpu_device_initialize against a host fd", "drmGetVersion/drmIoctl hardware discovery", "amdsmi or ROCm SMI library loading"],
+    "invalid_input_precedence": "Validate null pointers, sizes, alignment, enum ranges, ownership, and generation before reporting unsupported where the API contract makes the distinction observable.",
+    "no_fake_state": "An unsupported or failed operation must not mutate queue, allocation, event, signal, or output state and must not emit a success completion.",
+    "transport_boundary": "The provider uses the accepted host transport handshake/queue/memory/signal/dispatch contracts; it never exposes a raw pointer, file descriptor, production GPU VA, or KFD handle over the wire.",
+    "scope_exclusions": ["generic HSACO/ELF loading", "multi-CU scheduling", "HIP/OpenCL registration", "Triton/PyTorch/vLLM integration", "performance claims"]
+  },
+  "provider_gate": {
+    "required_before_provider_claim": [
+      "Compile the layout probe for the target ABI and compare every recorded sizeof/offsetof",
+      "Audit every ThunkLoader typedef, shared resolution entry, direct binding, and version-script export",
+      "Audit direct and wrapper calls in upstream libhsakmt memory.c, fmm.c, and debug.c and prove none enter the GemSim dependency graph",
+      "Export the complete required ABI surface even when a function returns NOT_SUPPORTED",
+      "Run lifecycle/topology, allocation/pointer, queue, event/signal, generation/ownership, OOM, double-free, concurrency, DSO, and no-device-node tests",
+      "Prove with syscall and dependency audits that /dev/kfd, /dev/dri, /dev/dxg, /dev/udmabuf, production libhsakmt, libdrm, and amdsmi are absent from the GemSim path"
+    ],
+    "not_proven_by_this_authority": ["provider implementation", "HIP/OpenCL launch", "Triton vecadd", "kernel code-object loading", "model execution"]
+  }
+}

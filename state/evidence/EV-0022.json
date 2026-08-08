@@ -1,0 +1,226 @@
+{
+  "checkpoint_id": "CP-0009",
+  "claim": "The CP-0009 root authority pins the ROCr ThunkLoader/libhsakmt source commit/tree, source files, conditional Linux shared/direct symbol counts, status and layout records, model interface ABI, hardware/build exclusion boundary, and the metadata-only provider contract. Its independent mechanical tests pass 9/9; the JSON parses and the authored files are whitespace-clean.",
+  "command_argv": [
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "-v",
+      "tests/test_host_transport_provider_spec.py"
+    ],
+    [
+      "python3",
+      "-m",
+      "json.tool",
+      "protocol/host-transport-v1-provider.json"
+    ],
+    [
+      "git",
+      "diff",
+      "--check",
+      "--",
+      "docs/host-transport-v1-provider.md",
+      "protocol/host-transport-v1-provider.json",
+      "tests/test_host_transport_provider_spec.py"
+    ],
+    [
+      "sha256sum",
+      "protocol/host-transport-v1-provider.json",
+      "docs/host-transport-v1-provider.md",
+      "tests/test_host_transport_provider_spec.py"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "-v",
+        "tests/test_host_transport_provider_spec.py"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T20:36:41+00:00",
+      "exit_code": 0,
+      "id": "root-provider-spec",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/root-provider-spec.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d31e914c3057d15531999f331c56efcb92d1c027648867c495d5bd0aa870e759",
+        "size": 655,
+        "tracked": false
+      },
+      "result": "The independent CP9 provider authority tests passed 9/9.",
+      "started_at": "2026-08-08T20:36:41+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/root-provider-spec.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "efb036351663bc6c57e1dacecd8d298b6dddc2ce6b618c1914bc796b88d2edce",
+        "size": 1744,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/root-provider-spec.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "json.tool",
+        "protocol/host-transport-v1-provider.json"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T20:36:41+00:00",
+      "exit_code": 0,
+      "id": "root-provider-json-tool",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/root-provider-json-tool.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8b914e4bf6874979a685010330abcf2019ca24d0f4e654cca9b74af06f762f5d",
+        "size": 655,
+        "tracked": false
+      },
+      "result": "The source-exact provider authority JSON parsed successfully.",
+      "started_at": "2026-08-08T20:36:41+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/root-provider-json-tool.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/root-provider-json-tool.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "011c2eb6795d4248c0bb10a85a6819c952f082ef404d33647c2d7fbe9c3a52e1",
+        "size": 71818,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check",
+        "--",
+        "docs/host-transport-v1-provider.md",
+        "protocol/host-transport-v1-provider.json",
+        "tests/test_host_transport_provider_spec.py"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T20:36:41+00:00",
+      "exit_code": 0,
+      "id": "root-provider-diff-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/root-provider-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2200d920049886af196daea0722042887303614462977e51c841f6ef73e310d5",
+        "size": 751,
+        "tracked": false
+      },
+      "result": "The provider authority JSON, documentation, and spec test pass git diff --check.",
+      "started_at": "2026-08-08T20:36:41+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/root-provider-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/root-provider-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "protocol/host-transport-v1-provider.json",
+        "docs/host-transport-v1-provider.md",
+        "tests/test_host_transport_provider_spec.py"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-08T20:36:41+00:00",
+      "exit_code": 0,
+      "id": "root-provider-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0009/root-provider-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "94daa58dc9367be3736452ff8757cdc7f8fa7af023572ed16fe43a59f191e852",
+        "size": 714,
+        "tracked": false
+      },
+      "result": "The final authority JSON, documentation, and spec-test SHA-256 identities were retained.",
+      "started_at": "2026-08-08T20:36:41+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0009/root-provider-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0009/root-provider-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0ba2ec4fed3f545a552aa5b39476bf66558a2da2aef2b495bb3dfdcdfc478ca0",
+        "size": 317,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-08T20:36:41+00:00",
+  "environment_fingerprint": {
+    "authority_docs_sha256": "bcfecd8f2b6150af5d5b1712aa977c12af8aad814e03a25d52db1481849eb391",
+    "authority_json_sha256": "12c66e523a2f91750379255c6021c34d457432a3b818062b69f8077595a124bc",
+    "authority_spec_test_sha256": "662c547bb5fa4b543b90ef5b97c793c8b91c5772545e50ca07bb45c8108a8164",
+    "cp9_typed_exports": "0; future full provider contract remains gated",
+    "linux_direct_effective": "122 (HSA 111, DRM 11; mandatory 117, optional 5)",
+    "linux_shared_effective": "123 (HSA 112, DRM 11; mandatory 118, optional 5)",
+    "model_abi": "1.1, function table 32 bytes, 15 DRM commands",
+    "recorded_layouts": "17 key-offset-partial records",
+    "source_commit": "92115a2941982a384de161be3f78cf9bff547027",
+    "source_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+    "source_union_symbols": "124 (HSA 113, DRM 11)"
+  },
+  "exit_code": 0,
+  "external_artifacts": [],
+  "id": "EV-0022",
+  "includes": {},
+  "limitations": [
+    "The authority is a source and contract inventory, not proof that production ROCr/libhsakmt can run unchanged on a host without KFD/DRM.",
+    "CP9 current provider exports metadata/transport APIs only; no typed hsaKmt or DRM symbols are exported in this gate.",
+    "Layout field maps are key offsets recorded by the authority and are intentionally partial, not exhaustive C struct definitions.",
+    "The query_lifecycle contract covers transport-open only and does not imply hsaKmtOpenKFD, topology, or kernel-driver evidence."
+  ],
+  "redactions": [],
+  "result": "Final authority SHA identities and 9/9 mechanical checks are retained; the ABI/source boundary is ready for the next typed-shim gate.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-08T20:36:41+00:00",
+  "type": "rocr-libhsakmt-authority-acceptance"
+}

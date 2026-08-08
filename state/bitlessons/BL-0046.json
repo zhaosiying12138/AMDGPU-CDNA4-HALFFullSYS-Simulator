@@ -1,0 +1,23 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0046",
+  "checkpoint_id": "CP-0009",
+  "question_or_symptom": "A few sizeof/offsetof probes can be read as a complete declaration of every upstream ABI field.",
+  "observation": "The authority freezes 17 target layout sizes and selected key offsets, but explicitly marks each field map as key-offset-partial. The provider API preserves omitted fields as unspecified and tests only the recorded entries.",
+  "evidence_ids": ["EV-0021", "EV-0022"],
+  "conclusion": "Layout size authority and field-map completeness are separate claims and must not be conflated.",
+  "decision": "Use the recorded sizes/offsets only for identity and compatibility probes; require a new complete-field probe before exposing a typed structure to a daemon adapter.",
+  "invalidated_assumptions": [
+    "An incomplete field map is safe to use for arbitrary struct serialization.",
+    "Matching sizeof alone proves pointer-bearing field semantics."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-provider.json",
+    "docs/host-transport-v1-provider.md",
+    "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/provider.h",
+    "projects/self-amdgpu-runtime/tests/provider_test.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

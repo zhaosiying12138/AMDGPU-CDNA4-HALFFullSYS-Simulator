@@ -1,0 +1,23 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0043",
+  "checkpoint_id": "CP-0009",
+  "question_or_symptom": "A single loader-entry count can hide platform guards and make a Linux provider bind the wrong PFN surface.",
+  "observation": "The pinned source union has 124 entries. Linux shared resolution has 123 active entries (112 HSA and 11 DRM), while direct binding has 122 (111 HSA and 11 DRM) because hsaKmtGetMemoryHandle is Windows-only in both paths and hsaKmtQueueRingDoorbell is additionally guarded in direct binding.",
+  "evidence_ids": ["EV-0021", "EV-0022"],
+  "conclusion": "Source-union inventory and target-effective loader tables are separate ABI facts and must be reported with their preprocessor conditions.",
+  "decision": "Freeze source order and conditional guards together; expose union, shared-effective, and direct-effective counts instead of silently deleting platform-specific entries.",
+  "invalidated_assumptions": [
+    "The source PFN count is automatically the active Linux direct-binding count.",
+    "A missing platform entry can be ignored without changing loader validation."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-provider.json",
+    "docs/host-transport-v1-provider.md",
+    "tests/test_host_transport_provider_spec.py",
+    "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/provider.h"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

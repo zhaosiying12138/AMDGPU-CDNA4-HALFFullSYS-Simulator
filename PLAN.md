@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-09`
 
-**State at this commit:** `P1-DISPATCH-01 accepted; next-P2-KMT-ABI-01`
+**State at this commit:** `P2-KMT-ABI-01 accepted; next-P2-KMT-ABI-02`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -302,6 +302,18 @@ Audit every loaded symbol and ABI structure against the exact source revision.
 Gate: lifecycle, memory, queue, signal/event, pointer-info, and error-path
 conformance tests pass under a loader audit with no `/dev/kfd`/`/dev/dri`.
 
+CP-0009 closes only the source-inventory portion of this phase. It freezes the
+124-entry ThunkLoader/libhsakmt source union, Linux shared/direct conditional
+counts (123/122), 17 key-offset-partial layout records, status observations,
+and the 1.1 model interface. Its provider implementation is metadata-only plus
+the established transport-open handshake and deterministic NOT_SUPPORTED
+boundary; it exports zero typed hsaKmt/DRM functions and makes no KFD or
+topology claim. `P2-KMT-ABI-02` is the next gate: implement a typed,
+source-compatible libhsakmt shim and a versioned daemon KFD/DRM operation
+envelope with fixed-width IDs, copied buffers, ownership/generation checks,
+and an explicit no-device/no-production-DSO audit. Do not cast wire integers
+back to host pointers or inherit upstream v1.0 fake-success behavior.
+
 ### P3 — code-object and kernel ABI gate
 
 Use the pinned ROCm LLVM/Clang/device-libs to produce gfx950 HSACO. Reuse ROCr
@@ -434,15 +446,16 @@ Checkpoint IDs are allocated only when an atomic transaction begins, so this
 table is a planning forecast rather than a fixed total. A difficult phase may
 split into additional checkpoints and no later row may skip its prerequisite.
 If every remaining row closes in exactly one distinct transaction (checkpoint
-IDs are not merged across rows), the seven accepted checkpoints plus these
-fifteen forecast gates imply a minimum of twenty-two checkpoints overall; this
-is a conditional lower bound, not a promise to compress later work into those
-IDs. A difficult row may split into additional checkpoints.
+IDs are not merged across rows), the nine accepted checkpoints plus these
+fourteen forecast gates imply a minimum of twenty-three checkpoints overall;
+this is a conditional lower bound, not a promise to compress later work into
+those IDs. A difficult row may split into additional checkpoints.
 
 | Forecast gate | Earliest phase | Result |
 | --- | --- | --- |
 | CP-0008 | P1 | One traced real CU-backed pinned dispatch |
 | P2-KMT-ABI-01 | P2 | Source-exact thunk/libhsakmt ABI inventory and provider skeleton |
+| P2-KMT-ABI-02 | P2 | Typed libhsakmt shim and versioned daemon KFD/DRM operation envelope |
 | P3-CODEOBJ-01 | P3 | Pinned gfx950 code-object and kernarg ABI fixtures |
 | P4-HIP-01 | P4 | Minimal transparent HIP/OpenCL launch surface |
 | P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
@@ -606,13 +619,17 @@ request, trace, packet, kernarg, VA, tick, statistics, and exact D2H identities;
 it explicitly makes no generic code-object, ROCr/libhsakmt, HIP, OpenCL, Triton,
 PyTorch, vLLM, multi-CU, collective, model, or performance claim.
 
-The next unique action is `P2-KMT-ABI-01`: create the next transaction and
-inventory the pinned ROCr ThunkLoader and libhsakmt ABI from source, then build
-a source-exact provider skeleton against the established GemSim boundary. The
-provider gate must audit layouts, symbols, status behavior, and unsupported
-capabilities before claiming any P2 runtime compatibility. `SOURCE_LOCK.json`
-remains byte-immutable, and existing `PROJECT_LANES` declarations remain
-historically anchored and append-only.
+`CP-0009` is accepted at the P2 ABI-inventory boundary. It binds the pinned
+ROCr/libhsakmt source files, loader order and platform guards, status/layout
+records, model ABI, and hardware/build exclusion audit. The child provider is
+metadata-only: typed hsaKmt/DRM exports remain zero, `query_lifecycle` means
+transport-open only, and no KFD/topology or production DSO is touched.
+
+The next unique action is `P2-KMT-ABI-02`: create the next transaction and
+implement the typed libhsakmt shim plus a versioned daemon KFD/DRM operation
+envelope. The gate must prove fixed-width pointer/buffer translation,
+owner/generation and status precedence, unsupported-call atomicity, and
+no-device/no-production-DSO behavior before making a provider-attach claim.
 `SOURCE_LOCK.json` remains byte-immutable, and existing `PROJECT_LANES`
 declarations remain historically anchored and append-only.
 

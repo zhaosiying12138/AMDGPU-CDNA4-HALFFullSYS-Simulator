@@ -58,7 +58,17 @@ exact packet/trace hashes, positive retired/store statistics, CP7 signal
 completion at retirement plus one tick, exact non-identity D2H bytes and CRC,
 causal clean exit, and zero host fallback. This is still not a generic
 code-object, ROCr/libhsakmt, HIP, OpenCL, Triton, PyTorch, vLLM, multi-CU,
-collective, or performance claim. The next action is `P2-KMT-ABI-01`: inventory
-the pinned ROCr ThunkLoader/libhsakmt ABI and prepare a source-exact provider
-skeleton. The frozen `SOURCE_LOCK.json` and registered project baseline remain
-immutable.
+collective, or performance claim.
+
+`CP-0009` is now accepted as the source-exact ROCr/libhsakmt ABI boundary. It
+records the pinned ThunkLoader source, 124-entry source-union order, Linux
+shared/direct effective counts, 17 key-offset-partial layouts, status mapping,
+and model ABI 1.1. The runtime child exposes metadata, the existing transport
+handshake, and deterministic unsupported-call behavior only: it exports zero
+typed hsaKmt/DRM entry points, does not open KFD/topology, and does not load
+production GPU libraries or device nodes. The next action is
+`P2-KMT-ABI-02`: build the typed libhsakmt shim and a versioned daemon KFD/DRM
+operation envelope with fixed-width ownership and pointer translation. That
+gate must remain separate from generic ROCr/HIP/OpenCL compatibility.
+
+The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.
