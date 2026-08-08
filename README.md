@@ -32,13 +32,15 @@ PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、最新 checkpoint �
 bitlesson，运行 scripts/resume.sh --verify；不要重做已通过的工作。
 ```
 
-`CP-0006` is the accepted functional simulated-memory boundary. The standalone
+`CP-0007` is the accepted bridge-private signal/event boundary. The standalone
 runtime and gem5 preserve the CP-0004 byte-exact handshake, CP-0005 bounded
-queue control, and N=1/2/3/4/8 isolation gates while adding sparse
-allocation/free, deterministic functional VA, sealed-memfd H2D/D2H transfer,
-caller-buffer atomicity, and generation-safe slot reuse. This storage is still
-bridge-private: the stack does not yet submit AQL packets, load code objects, or
-execute GPU work. The next action is `P1-SIGNAL-01`: implement and test a
-bounded generation-safe signal/event lifecycle and gem5 event-queue completion
-delivery. The frozen `SOURCE_LOCK.json` and registered project baseline remain
-immutable.
+queue control, CP-0006 sparse simulated-memory transfer, and N=1/2/3/4/8
+isolation gates while adding signed 64-bit signal create/load/store/destroy,
+generation-safe one-shot waits, event-queue completion, bounded outbound
+accounting, shared request correlation, and retry/poison semantics. The signal
+records remain host transport primitives: they do not expose GPU-visible signal
+memory or claim packet submission, code-object loading, or GPU execution. The
+next action is `P1-DISPATCH-01`: bind functional allocations to gem5 GPU VA and
+execute one traced trivial gfx950 AQL dispatch, then verify bytes with the CP7
+signal wait and D2H path. The frozen `SOURCE_LOCK.json` and registered project
+baseline remain immutable.

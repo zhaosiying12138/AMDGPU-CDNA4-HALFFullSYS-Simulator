@@ -999,6 +999,62 @@ class Harness:
             require(reuse is None, f"unexpected memory reuse result: {memory}")
         return memory
 
+    def validate_signal_success(
+        self,
+        payload: dict[str, Any],
+        *,
+        expected_initial: int,
+        expected_stored: int,
+    ) -> dict[str, Any]:
+        signal_result = payload.get("signal")
+        require(isinstance(signal_result, dict),
+                f"signal result is missing: {payload}")
+        require(signal_result.get("status") == 0,
+                f"signal status is wrong: {signal_result}")
+        signal_id = int(signal_result.get("signal_id", "0"), 0)
+        generation = int(signal_result.get("generation", "0"), 0)
+        require(1 <= signal_id <= 1024,
+                f"signal ID is out of range: {signal_result}")
+        require(generation != 0,
+                f"signal generation is zero: {signal_result}")
+        require(signal_result.get("initial_value") == expected_initial and
+                signal_result.get("load_before") == expected_initial,
+                f"signal initial load is wrong: {signal_result}")
+        require(signal_result.get("stored_value") == expected_stored and
+                signal_result.get("load_after") == expected_stored,
+                f"signal stored load is wrong: {signal_result}")
+        require(signal_result.get("destroyed") is True,
+                f"signal was not destroyed: {signal_result}")
+
+        wait = signal_result.get("wait")
+        require(isinstance(wait, dict),
+                f"signal wait result is missing: {signal_result}")
+        require(wait.get("condition") == "gte" and wait.get("compare") == 0,
+                f"signal wait predicate is wrong: {wait}")
+        require(wait.get("first_status") == 11 and
+                wait.get("first_status_name") == "timed out",
+                f"signal wait did not first time out: {wait}")
+        require(wait.get("completion_status") == 0 and
+                wait.get("observed_value") == expected_stored,
+                f"signal completion is not canonical: {wait}")
+        require(int(wait.get("sequence", "0"), 0) != 0,
+                f"signal wait sequence is zero: {wait}")
+        require(wait.get("retried_without_send") is True,
+                f"signal wait retry sent a second request: {wait}")
+
+        reuse = signal_result.get("reuse")
+        require(isinstance(reuse, dict),
+                f"signal reuse result is missing: {signal_result}")
+        require(int(reuse.get("signal_id", "0"), 0) == signal_id,
+                f"signal slot was not deterministically reused: {reuse}")
+        reuse_generation = int(reuse.get("generation", "0"), 0)
+        require(reuse_generation > generation,
+                f"signal reuse generation did not advance: {reuse}")
+        require(reuse.get("initial_value") == expected_initial and
+                reuse.get("destroyed") is True,
+                f"reused signal lifecycle is incomplete: {reuse}")
+        return signal_result
+
     def exact_client(self, daemon: Daemon, **kwargs: Any) -> ClientResult:
         return self.run_client_argv(
             self.client_argv(daemon.endpoint, daemon.identity, **kwargs)
@@ -1017,7 +1073,7 @@ class Harness:
 
         result = self.exact_client(
             daemon,
-            extra=("--offer-cap-bit", "3", "--require-cap-bit", "3"),
+            extra=("--offer-cap-bit", "4", "--require-cap-bit", "4"),
         )
         self.expect_failure(result, 5, "capability mismatch", 3)
 
@@ -1159,6 +1215,52 @@ class Harness:
             generation=memory["generation"],
             simulated_va=memory["simulated_va"],
             crc32c=memory["returned_crc32c"],
+            peer_pid=success["peer_pid"],
+        )
+
+    def check_signal_lifecycle(self) -> None:
+        expected_capabilities = [
+            "0x0000000000000009", "0x0000000000000000",
+            "0x0000000000000000", "0x0000000000000000",
+        ]
+        initial_value = -7
+        stored_value = 42
+        identity = make_identity(23, 1, 0)
+        daemon = Daemon(
+            self, "signal-lifecycle", identity,
+            exit_on_handshake=False, run_timeout_ms=12000,
+        )
+        daemon.launch()
+        result = self.exact_client(
+            daemon,
+            extra=(
+                "--signal-initial", str(initial_value),
+                "--signal-wait-condition", "gte",
+                "--signal-wait-compare", "0",
+                "--signal-wait-timeout-ms", "50",
+                "--signal-store", str(stored_value),
+                "--signal-reuse",
+            ),
+        )
+        success = self.validate_success(
+            result, identity, daemon, expected_capabilities
+        )
+        signal_result = self.validate_signal_success(
+            success,
+            expected_initial=initial_value,
+            expected_stored=stored_value,
+        )
+        daemon.stop()
+        wait = signal_result["wait"]
+        reuse = signal_result["reuse"]
+        self.add_check(
+            "signal_event_lifecycle",
+            signal_id=signal_result["signal_id"],
+            generation=signal_result["generation"],
+            wait_sequence=wait["sequence"],
+            first_wait_status=wait["first_status_name"],
+            observed_value=wait["observed_value"],
+            reused_generation=reuse["generation"],
             peer_pid=success["peer_pid"],
         )
 
@@ -1956,6 +2058,7 @@ class Harness:
         self.check_reject_then_success()
         self.check_queue_control()
         self.check_memory_transfer()
+        self.check_signal_lifecycle()
         self.check_busy()
         for world_size in WORLD_SIZES:
             self.check_world_isolation(world_size)
@@ -1990,10 +2093,11 @@ def file_path(value: str) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the real CP-0004 through CP-0006 runtime CLI against "
+            "Run the real CP-0004 through CP-0007 runtime CLI against "
             "HostGPUBridge processes. This validates handshake, bounded "
-            "queue-control events, and bridge-owned simulated-memory byte "
-            "transfer, not packet submission or GPU execution."
+            "queue-control events, bridge-owned simulated-memory byte "
+            "transfer, and signal/event completion, not packet submission "
+            "or GPU execution."
         )
     )
     parser.add_argument("--gem5", required=True, type=executable_path)
@@ -2036,7 +2140,7 @@ def main() -> int:
         return 1
 
     work_dir = Path(tempfile.mkdtemp(
-        prefix="cp6-host-",
+        prefix="cp7-host-",
         dir=str(args.work_root) if args.work_root is not None else None,
     )).resolve()
     os.chmod(work_dir, 0o700)
@@ -2066,9 +2170,10 @@ def main() -> int:
         "schema": "amdgpu-sim.host-transport.integration.v1",
         "status": status,
         "scope": (
-            "CP-0004 handshake, CP-0005 bounded queue control, and CP-0006 "
-            "bridge-owned simulated allocation and byte transfer; no "
-            "packet-visible VRAM, packet submission, or GPU execution"
+            "CP-0004 handshake, CP-0005 bounded queue control, CP-0006 "
+            "bridge-owned simulated allocation and byte transfer, and "
+            "CP-0007 signal/event completion; no packet-visible VRAM, "
+            "packet submission, or GPU execution"
         ),
         "checks": harness.checks,
         "world_sizes": list(WORLD_SIZES),

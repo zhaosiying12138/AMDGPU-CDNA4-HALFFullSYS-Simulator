@@ -1,0 +1,24 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0031",
+  "checkpoint_id": "CP-0007",
+  "question_or_symptom": "Adding a signal/event extension can accidentally make capability negotiation, framing, and descriptor policy depend on whichever child implementation was updated first.",
+  "observation": "SIGNAL_EVENT_V1 is capability bit 3 and is selected only when offered and required together, independently of queue and memory bits. Its three record types use the unchanged 80-byte envelope plus one fixed 64-byte payload, have independently recomputed 144-byte goldens, and never carry ancillary descriptors.",
+  "evidence_ids": ["EV-0015", "EV-0016", "EV-0017"],
+  "conclusion": "A protocol extension is a separate negotiated contract only when its capability symmetry, exact bytes, and resource-carrier rules are explicit and tested by an independent authority.",
+  "decision": "Keep signal capability selection independent, preserve the frozen envelope, publish request/result layouts and goldens in the signal schema, reject every descriptor on signal records, and require root, gem5, and runtime tests to derive their expectations from that contract.",
+  "invalidated_assumptions": [
+    "A newly offered capability may be accepted without a matching client requirement.",
+    "Cross-process success is sufficient evidence that signal bytes and ancillary policy are canonical."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-signal.json",
+    "docs/host-transport-v1-signal.md",
+    "tests/test_host_transport_signal_spec.py",
+    "projects/gem5/src/dev/amdgpu/host_gpu_protocol.cc",
+    "projects/self-amdgpu-runtime/src/transport_codec.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

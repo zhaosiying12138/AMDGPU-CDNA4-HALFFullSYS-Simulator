@@ -1,0 +1,24 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0035",
+  "checkpoint_id": "CP-0007",
+  "question_or_symptom": "A shared session can receive a valid earlier completion while another queue, memory, or signal request is awaiting its ACK, but broad buffering can hide a completion for the active request or a foreign signal.",
+  "observation": "HELLO seeds one strictly increasing request-ID tracker shared by queue, memory, and signal records. Only canonical completions for previously ACKed pending work may interleave; an active request completion, duplicate, foreign identity, unknown record, or noncanonical result is a protocol failure. Unknown correlatable signal opcodes return a deterministic MALFORMED ACK that echoes the raw opcode.",
+  "evidence_ids": ["EV-0015", "EV-0016", "EV-0017"],
+  "conclusion": "Interleaving is safe only with one correlation namespace and an allowlist tied to acknowledged work, not a generic completion buffer.",
+  "decision": "Consume request IDs after structural/version/identity/capability admission even for deterministic lifecycle failures, validate every completion against its acknowledged owner and request record, buffer only canonical allowed completions, and preserve deterministic raw-opcode failure echoes.",
+  "invalidated_assumptions": [
+    "Queue, memory, and signal request counters can advance independently on one connection.",
+    "Any well-formed completion is harmless to buffer while a synchronous ACK is pending."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-signal.json",
+    "projects/gem5/src/dev/amdgpu/host_gpu_protocol.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "projects/self-amdgpu-runtime/src/transport_codec.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

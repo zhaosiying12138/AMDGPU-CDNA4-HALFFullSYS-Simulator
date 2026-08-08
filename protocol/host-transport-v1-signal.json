@@ -1,0 +1,223 @@
+{
+  "schema": "amdgpu-sim.host-transport-v1.signal.v1",
+  "title": "GemSim host transport signal and event extension",
+  "base_protocol": "protocol/host-transport-v1.json",
+  "queue_protocol": "protocol/host-transport-v1-queue.json",
+  "memory_protocol": "protocol/host-transport-v1-memory.json",
+  "scope": "bounded bridge-owned signal lifecycle and wait completion events only",
+  "capability": {
+    "name": "SIGNAL_EVENT_V1",
+    "bit": 3,
+    "byte_index": 0,
+    "mask_hex": "08",
+    "negotiation": "selected if and only if both offered and required by the client; offered-only is not selected; required-not-offered is the base subset failure; independent of QUEUE_CONTROL_V1 and SIMULATED_MEMORY_V1"
+  },
+  "transport": {
+    "header_bytes": 80,
+    "byte_order": "big-endian",
+    "message_types": {
+      "SIGNAL_REQUEST": 8,
+      "SIGNAL_ACK": 9,
+      "SIGNAL_COMPLETION": 10
+    },
+    "payload_bytes": 64,
+    "frame_bytes": 144,
+    "crc": "base protocol CRC-32C over the complete frame",
+    "ancillary_descriptors": 0
+  },
+  "request_payload": {
+    "bytes": 64,
+    "fields": [
+      {"name": "signal_major", "offset": 0, "bytes": 2, "type": "u16", "constant": 1},
+      {"name": "signal_minor", "offset": 2, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "opcode", "offset": 4, "bytes": 2, "type": "u16", "values": {"CREATE": 1, "DESTROY": 2, "LOAD": 3, "STORE": 4, "WAIT": 5}},
+      {"name": "flags", "offset": 6, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "signal_id", "offset": 8, "bytes": 8, "type": "u64"},
+      {"name": "generation", "offset": 16, "bytes": 8, "type": "u64"},
+      {"name": "sequence", "offset": 24, "bytes": 8, "type": "u64"},
+      {"name": "value", "offset": 32, "bytes": 8, "type": "i64_twos_complement_bits"},
+      {"name": "condition", "offset": 40, "bytes": 8, "type": "u64", "values": {"EQ": 0, "NE": 1, "LT": 2, "GTE": 3}},
+      {"name": "reserved0", "offset": 48, "bytes": 8, "type": "u64", "constant": 0},
+      {"name": "reserved1", "offset": 56, "bytes": 8, "type": "u64", "constant": 0}
+    ]
+  },
+  "result_payload": {
+    "bytes": 64,
+    "fields": [
+      {"name": "signal_major", "offset": 0, "bytes": 2, "type": "u16", "constant": 1},
+      {"name": "signal_minor", "offset": 2, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "status", "offset": 4, "bytes": 4, "type": "u32", "source": "base protocol statuses"},
+      {"name": "opcode", "offset": 8, "bytes": 2, "type": "u16"},
+      {"name": "reserved_opcode", "offset": 10, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "reserved_status", "offset": 12, "bytes": 4, "type": "u32", "constant": 0},
+      {"name": "signal_id", "offset": 16, "bytes": 8, "type": "u64"},
+      {"name": "generation", "offset": 24, "bytes": 8, "type": "u64"},
+      {"name": "sequence", "offset": 32, "bytes": 8, "type": "u64"},
+      {"name": "value", "offset": 40, "bytes": 8, "type": "i64_twos_complement_bits"},
+      {"name": "ready", "offset": 48, "bytes": 8, "type": "u64", "values": {"ARMED": 0, "READY": 1}},
+      {"name": "sim_tick", "offset": 56, "bytes": 8, "type": "u64"}
+    ]
+  },
+  "limits": {
+    "maximum_live_signals": 1024,
+    "minimum_signal_id": 1,
+    "maximum_signal_id": 1024,
+    "maximum_pending_waits": 8,
+    "maximum_pending_waits_per_signal": 1,
+    "completion_latency_ticks": 1,
+    "maximum_outbound_records": 25
+  },
+  "condition_rules": {
+    "value_domain": "signed 64-bit two's-complement",
+    "wire_domain": "the exact u64 bit pattern of the signed value",
+    "EQ": "observed == compare_value",
+    "NE": "observed != compare_value",
+    "LT": "observed < compare_value using signed int64 ordering",
+    "GTE": "observed >= compare_value using signed int64 ordering",
+    "arithmetic": "no arithmetic or overflow is involved in condition evaluation"
+  },
+  "opcode_constraints": {
+    "CREATE": {
+      "request": {"signal_id": 0, "generation": 0, "sequence": 0, "value": "arbitrary-i64-bits", "condition": 0},
+      "success_ack": {"signal_id": "integer-1-through-1024", "generation": "new-nonzero", "sequence": 0, "value": "initial-value-echo", "ready": 0, "sim_tick": "opaque-admission-tick"},
+      "completion": "forbidden"
+    },
+    "DESTROY": {
+      "request": {"signal_id": "nonzero", "generation": "nonzero", "sequence": 0, "value": 0, "condition": 0},
+      "success_ack": {"signal_id": "request-echo", "generation": "request-echo", "sequence": 0, "value": 0, "ready": 0, "sim_tick": "opaque-admission-tick"},
+      "completion": "forbidden"
+    },
+    "LOAD": {
+      "request": {"signal_id": "nonzero", "generation": "nonzero", "sequence": 0, "value": 0, "condition": 0},
+      "success_ack": {"signal_id": "request-echo", "generation": "request-echo", "sequence": 0, "value": "current-signed-value-bits", "ready": 0, "sim_tick": "opaque-admission-tick"},
+      "completion": "forbidden"
+    },
+    "STORE": {
+      "request": {"signal_id": "nonzero", "generation": "nonzero", "sequence": 0, "value": "arbitrary-i64-bits", "condition": 0},
+      "success_ack": {"signal_id": "request-echo", "generation": "request-echo", "sequence": 0, "value": "stored-value-echo", "ready": 0, "sim_tick": "opaque-admission-tick-or-trigger-tick"},
+      "completion": "only a previously armed WAIT may complete; STORE itself has no completion"
+    },
+    "WAIT": {
+      "request": {"signal_id": "nonzero", "generation": "nonzero", "sequence": "nonzero-and-strictly-previous-plus-one", "value": "signed-compare-value-bits", "condition": "integer-0-through-3"},
+      "success_ack": {"signal_id": "request-echo", "generation": "request-echo", "sequence": "request-echo", "value": "admission-snapshot", "ready": "one-if-snapshot-satisfies-condition-else-zero", "sim_tick": "admission-tick-T-strictly-below-UINT64_MAX"},
+      "success_completion": {"status": "OK", "opcode": "WAIT", "signal_id": "request-echo", "generation": "request-echo", "sequence": "request-echo", "value": "captured-satisfying-snapshot", "ready": 0, "sim_tick": "satisfaction-observation-tick-plus-one", "request_id": "WAIT-request-echo"}
+    },
+    "failure_ack": "known nonzero status; protocol version 1.0; echo request_id, opcode, signal_id, generation, and sequence from the structurally decoded request; value, ready, and sim_tick are zero; response header uses actual daemon UUID, current connection ID, and actual epoch; no descriptor; no completion follows"
+  },
+  "ack_rules": {
+    "common": "exactly one 144-byte SIGNAL_ACK with no ancillary data; framing and signal version 1.0, known status, request_id echo, actual daemon UUID, current connection ID, actual epoch, and all reserved fields are exact",
+    "CREATE_success": "status OK; assigned slot is in 1 through 1024; generation is nonzero and new; sequence zero; value exactly echoes the initial signed bit pattern; ready zero; sim_tick is an opaque admission tick",
+    "DESTROY_success": "status OK; identity echoes; sequence, value, and ready are zero; sim_tick is an opaque admission tick",
+    "LOAD_success": "status OK; identity echoes; sequence and ready are zero; value is the event-queue-ordered current signed bit pattern; sim_tick is an opaque admission tick",
+    "STORE_success": "status OK; identity echoes; sequence and ready are zero; value exactly echoes the committed signed bit pattern; sim_tick is the store admission tick and follows sim_tick_rules.store_ack",
+    "WAIT_success": "status OK; identity and sequence echo; value is the admission snapshot; ready is exactly zero or one and equals the signed predicate result; sim_tick is admission tick T and follows sim_tick_rules.wait_ack",
+    "failure": "status is a known nonzero base status; opcode, signal_id, generation, and sequence echo; value, ready, and sim_tick are zero",
+    "runtime_validation": "any ACK shape, identity, request correlation, reserved-field, value, ready, descriptor, or status mismatch after send poisons and closes the session; sim_tick is validated only by sim_tick_rules and the locally known completion correlation"
+  },
+  "sim_tick_rules": {
+    "opaque_lifecycle_ack": "Successful CREATE, LOAD, and DESTROY ACK sim_tick is the daemon admission tick and is opaque to the runtime; it may be any u64 value, including UINT64_MAX, and the client does not compare it with a locally predicted tick.",
+    "store_ack": "A successful STORE ACK sim_tick is the daemon admission tick. If that STORE is the first store to satisfy an armed WAIT, its tick S MUST be below UINT64_MAX so S+1 is representable and the runtime records S for completion validation; if it satisfies no armed WAIT, its tick is opaque and may be any u64 value, including UINT64_MAX.",
+    "wait_ack": "A successful WAIT ACK sim_tick is admission tick T and MUST be below UINT64_MAX because the accepted wait owes a completion at T+1. The runtime enforces this bound; it does not predict T.",
+    "immediate_completion": "For a WAIT ACK with ready=1, completion sim_tick MUST equal the locally received WAIT ACK tick T plus one, and the completion value MUST equal the ACK snapshot.",
+    "armed_completion": "For a WAIT ACK with ready=0, completion sim_tick MUST equal the locally received satisfying STORE ACK tick S plus one, and MUST be strictly greater than the locally received WAIT ACK tick T. The runtime compares only these known ticks.",
+    "failure_ack": "Every failed ACK has sim_tick zero."
+  },
+  "completion_rules": {
+    "message": "SIGNAL_COMPLETION exists only for a successfully acknowledged WAIT",
+    "identity": "request_id, signal_id, generation, and sequence exactly echo the originating WAIT",
+    "result": "status OK, opcode WAIT, ready zero, and value satisfies the stored signed predicate",
+    "immediate": "if WAIT_ACK ready is one, completion value equals the ACK snapshot and completion sim_tick equals ACK sim_tick plus one",
+    "armed": "if WAIT_ACK ready is zero, the first later STORE whose committed value satisfies the predicate captures that value and completion sim_tick equals that STORE admission tick plus one; completion sim_tick is strictly greater than WAIT_ACK sim_tick",
+    "exactly_once": "once ready, a wait is never re-evaluated; later stores cannot change its captured completion value; the wait remains counted and keeps DESTROY busy after its completion is queued until that complete frame is successfully sent",
+    "failure_completion": "forbidden; any non-OK or otherwise noncanonical SIGNAL_COMPLETION poisons the runtime session"
+  },
+  "error_precedence": [
+    "DROP_AND_CLOSE invalid envelope, CRC, message type, frame or payload length, header reserved field, uncorrelatable request, MSG_TRUNC, MSG_CTRUNC, malformed ancillary structure, or any descriptor attached to a signal record",
+    "MALFORMED correlatable flags, payload reserved field, opcode, opcode-canonical-field, or WAIT condition error",
+    "UNSUPPORTED_VERSION signal protocol version",
+    "INSTANCE_MISMATCH daemon UUID",
+    "PROTOCOL_STATE connection ID",
+    "TOPOLOGY_MISMATCH job epoch",
+    "UNSUPPORTED_CAPABILITY SIGNAL_EVENT_V1 not selected",
+    "PROTOCOL_STATE non-increasing session-wide request ID",
+    "PROTOCOL_STATE stale, foreign, destroyed, out-of-range signal, or non-next WAIT sequence",
+    "BUSY destroy with pending wait or conflicting wait on the same signal",
+    "RESOURCE_EXHAUSTED signal slot, generation, or session pending-wait ceiling",
+    "INTERNAL completion-tick overflow or event scheduling failure"
+  ],
+  "semantics": {
+    "event_handle": "there is no separate event handle in version 1; SIGNAL_COMPLETION is the event primitive",
+    "signal_identity": "lowest-free slot IDs 1 through 1024 may be reused only with a new daemon-lifetime monotonic nonzero generation; generation never wraps",
+    "ownership": "signal identity is scoped to the owning client file descriptor generation and negotiated connection",
+    "event_queue": "PollEvent only schedules service; all decode, lifecycle, load, store, wait admission, predicate evaluation, ACK construction, and completion construction occur on the gem5 event queue",
+    "ordering": "record service gives CREATE, DESTROY, LOAD, STORE, and WAIT a single deterministic order; STORE commits before its ACK is constructed and before newly satisfied waits are queued",
+    "wait_admission": "WAIT at UINT64_MAX is INTERNAL and changes neither the per-signal sequence nor waiter state; otherwise an immediately satisfied wait captures its admission value and becomes due one tick later, while an unsatisfied wait becomes armed",
+    "store_overflow": "at UINT64_MAX a STORE that would first satisfy an armed wait is INTERNAL and leaves both signal value and waiter unchanged; a STORE that satisfies no waiter may commit at UINT64_MAX",
+    "wait_resources": "at most one armed, scheduled, or outbound-but-not-yet-sent wait exists per signal and at most eight exist in the session; a wait releases its resource only after the complete completion frame is sent; rejected waits do not advance the per-signal sequence",
+    "destroy": "DESTROY is BUSY while a wait or its callback is pending",
+    "callback_validation": "before emission, a callback validates owner file descriptor generation, signal slot and generation, wait sequence, and originating request_id",
+    "disconnect": "disconnect, completion send failure, or outbound overflow cancels every wait and callback and releases all signals owned by the client file descriptor generation",
+    "request_id": "the HELLO-seeded session-wide strictly increasing tracker is shared by queue, memory, and signal requests and never wraps; every structurally, version, identity, and capability-admitted request consumes its ID even when lifecycle, BUSY, resource, or tick validation rejects it",
+    "outbound_bound": "eight queued-but-unsent prior queue completions, eight newly admitted queue completions, eight signal waits or completions, and one synchronous ACK fit the fixed maximum of twenty-five outbound records; queue completion construction releases its inflight command before socket send, so both queue cohorts are counted",
+    "runtime_handle_ownership": "the opaque signal handle is unique ownership; copied aliases must not be passed after successful destroy or instance close"
+  },
+  "runtime_wait": {
+    "serialization": "callers serialize queue, memory, and signal operations on one instance",
+    "deadline": "one CLOCK_MONOTONIC absolute deadline is formed once after synchronous validation; expired deadline precedes simultaneous cancellation and both are checked before consuming a buffered completion",
+    "before_ack": "failure before a complete record send is determinate; after a complete send, timeout, cancellation, EOF, or noncanonical ACK before the canonical terminal ACK poisons and closes the session",
+    "after_ack": "timeout or cancellation while awaiting a successfully acknowledged WAIT completion leaves the wait and any buffered completion pending and keeps the session reusable; EOF or protocol failure poisons",
+    "retry": "the same signal, condition, and compare value retries the existing wait without allocating a request ID or sending another WAIT; a different predicate and DESTROY return BUSY while the wait is pending; LOAD and STORE remain allowed",
+    "publication": "wait result output is published only after the complete SIGNAL_COMPLETION validates; timeout, cancellation, and protocol failure expose no partial result"
+  },
+  "interleave": {
+    "allowed": "while awaiting any queue, memory, or signal ACK or any queue or signal completion, only a canonical completion for a previously acknowledged pending queue command or signal wait may be validated and bounded-buffered",
+    "forbidden": "a completion using the active request_id before its ACK, an unknown record type, a foreign or duplicate completion, or any noncanonical completion poisons and closes the session",
+    "buffer_retry": "deadline and cancellation are checked before a buffered completion is consumed; timeout or cancellation leaves it pending"
+  },
+  "forbidden_scope": [
+    "separate KFD event handles",
+    "signal arithmetic or compare-and-swap operations",
+    "GPU-visible signal memory",
+    "queue or packet completion linkage",
+    "GPU packet submission",
+    "code objects",
+    "kernel execution",
+    "collectives"
+  ],
+  "golden": {
+    "identity": {
+      "daemon_instance_uuid_hex": "00112233445566778899aabbccddeeff",
+      "connection_id_hex": "1122334455667788",
+      "job_epoch_hex": "0102030405060708",
+      "signal_id_hex": "0000000000000007",
+      "generation_hex": "8877665544332211",
+      "sequence_hex": "0100000000000002",
+      "initial_value": -7,
+      "wait_compare_value": 0,
+      "wait_condition": "GTE",
+      "stored_value": 42,
+      "create_request_id_hex": "0123456789abcdf5",
+      "load_request_id_hex": "0123456789abcdf6",
+      "wait_request_id_hex": "0123456789abcdf7",
+      "store_request_id_hex": "0123456789abcdf8",
+      "destroy_request_id_hex": "0123456789abcdf9",
+      "create_tick_hex": "123456789abcdef5",
+      "load_tick_hex": "123456789abcdef6",
+      "wait_tick_hex": "123456789abcdef7",
+      "store_tick_hex": "123456789abcdef8",
+      "completion_tick_hex": "123456789abcdef9",
+      "destroy_tick_hex": "123456789abcdefa"
+    },
+    "create_request": {"frame_bytes": 144, "crc32c_hex": "b095ba99", "frame_hex": "4753494d52504300000100000050000800000000000000400123456789abcdf500112233445566778899aabbccddeeff11223344556677880102030405060708b095ba990000000000000000000000000001000000010000000000000000000000000000000000000000000000000000fffffffffffffff9000000000000000000000000000000000000000000000000"},
+    "create_ack": {"frame_bytes": 144, "crc32c_hex": "dda8e6fc", "frame_hex": "4753494d52504300000100000050000900000000000000400123456789abcdf500112233445566778899aabbccddeeff11223344556677880102030405060708dda8e6fc00000000000000000000000000010000000000000001000000000000000000000000000788776655443322110000000000000000fffffffffffffff90000000000000000123456789abcdef5"},
+    "load_request": {"frame_bytes": 144, "crc32c_hex": "601dbdee", "frame_hex": "4753494d52504300000100000050000800000000000000400123456789abcdf600112233445566778899aabbccddeeff11223344556677880102030405060708601dbdee00000000000000000000000000010000000300000000000000000007887766554433221100000000000000000000000000000000000000000000000000000000000000000000000000000000"},
+    "load_ack": {"frame_bytes": 144, "crc32c_hex": "2fa9d5b6", "frame_hex": "4753494d52504300000100000050000900000000000000400123456789abcdf600112233445566778899aabbccddeeff112233445566778801020304050607082fa9d5b600000000000000000000000000010000000000000003000000000000000000000000000788776655443322110000000000000000fffffffffffffff90000000000000000123456789abcdef6"},
+    "wait_request": {"frame_bytes": 144, "crc32c_hex": "60ce276f", "frame_hex": "4753494d52504300000100000050000800000000000000400123456789abcdf700112233445566778899aabbccddeeff1122334455667788010203040506070860ce276f00000000000000000000000000010000000500000000000000000007887766554433221101000000000000020000000000000000000000000000000300000000000000000000000000000000"},
+    "wait_ack": {"frame_bytes": 144, "crc32c_hex": "593564c3", "frame_hex": "4753494d52504300000100000050000900000000000000400123456789abcdf700112233445566778899aabbccddeeff11223344556677880102030405060708593564c300000000000000000000000000010000000000000005000000000000000000000000000788776655443322110100000000000002fffffffffffffff90000000000000000123456789abcdef7"},
+    "store_request": {"frame_bytes": 144, "crc32c_hex": "302bee23", "frame_hex": "4753494d52504300000100000050000800000000000000400123456789abcdf800112233445566778899aabbccddeeff11223344556677880102030405060708302bee230000000000000000000000000001000000040000000000000000000788776655443322110000000000000000000000000000002a000000000000000000000000000000000000000000000000"},
+    "store_ack": {"frame_bytes": 144, "crc32c_hex": "c6b5892c", "frame_hex": "4753494d52504300000100000050000900000000000000400123456789abcdf800112233445566778899aabbccddeeff11223344556677880102030405060708c6b5892c00000000000000000000000000010000000000000004000000000000000000000000000788776655443322110000000000000000000000000000002a0000000000000000123456789abcdef8"},
+    "wait_completion": {"frame_bytes": 144, "crc32c_hex": "5b153679", "frame_hex": "4753494d52504300000100000050000a00000000000000400123456789abcdf700112233445566778899aabbccddeeff112233445566778801020304050607085b15367900000000000000000000000000010000000000000005000000000000000000000000000788776655443322110100000000000002000000000000002a0000000000000000123456789abcdef9"},
+    "destroy_request": {"frame_bytes": 144, "crc32c_hex": "45803080", "frame_hex": "4753494d52504300000100000050000800000000000000400123456789abcdf900112233445566778899aabbccddeeff112233445566778801020304050607084580308000000000000000000000000000010000000200000000000000000007887766554433221100000000000000000000000000000000000000000000000000000000000000000000000000000000"},
+    "destroy_ack": {"frame_bytes": 144, "crc32c_hex": "544d9c83", "frame_hex": "4753494d52504300000100000050000900000000000000400123456789abcdf900112233445566778899aabbccddeeff11223344556677880102030405060708544d9c830000000000000000000000000001000000000000000200000000000000000000000000078877665544332211000000000000000000000000000000000000000000000000123456789abcdefa"}
+  }
+}

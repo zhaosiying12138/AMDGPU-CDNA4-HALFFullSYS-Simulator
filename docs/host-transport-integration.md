@@ -1,8 +1,9 @@
-# CP-0004 Through CP-0006 Host Transport Integration
+# CP-0004 Through CP-0007 Host Transport Integration
 
 `scripts/test_host_transport_integration.py` is the real cross-process gate for
 the frozen host transport 1.0 handshake, its bounded queue-control extension,
-and the bridge-owned simulated-memory data path.
+the bridge-owned simulated-memory data path, and the generation-safe signal
+event path.
 It starts the supplied gem5 binary with the `HostGPUBridge` SimObject and invokes
 the supplied `sagr-handshake` runtime CLI against its pathname `SOCK_SEQPACKET`
 endpoints.
@@ -50,6 +51,11 @@ The script emits one machine-readable JSON summary. A successful run covers:
   initial zero-fill, performs real sealed-memfd H2D and D2H transfer, compares
   bytes and CRC, frees the allocation, reuses its slot with a new generation,
   verifies zero-fill again, and frees the reused allocation;
+- a signal-capable session that creates a signal at -7, loads it, admits a
+  signed `GTE 0` wait, observes a bounded local timeout, stores 42, retries the
+  identical wait without sending another request, validates the correlated
+  gem5 event-queue completion, loads 42, destroys the signal, and reuses the
+  same slot with a new generation before destroying it again;
 - one established runtime holding the daemon while a second runtime receives
   `BUSY`;
 - independent daemon endpoints and exact identities for world sizes 1, 2, 3,
@@ -87,5 +93,13 @@ python3 -m unittest discover -s tests -p 'test_host_transport_*.py' -v
 
 This gate proves framing, negotiation, identity, endpoint lifecycle, deadline
 behavior, the bounded control-queue/event path, and functional bytes stored by
-the gem5 bridge. It does not prove packet-visible GPU VRAM, SDMA timing, packet
-submission, code object execution, collectives, or any GPU computation.
+the gem5 bridge, plus the bounded signal/event lifecycle. It does not prove
+packet-visible GPU VRAM, SDMA timing, packet submission, code object execution,
+collectives, or any GPU computation.
+
+CP-0007 is the accepted signal/event boundary. The next integration boundary is
+`P1-DISPATCH-01`: a pinned trivial gfx950 fixture will bind a functional
+allocation to gem5 GPU VA, submit one traced AQL dispatch, wait through the CP7
+signal path, and verify bytes through D2H. That follow-on gate is intentionally
+bounded and does not claim generic code-object loading, ROCr/HIP compatibility,
+or model execution.

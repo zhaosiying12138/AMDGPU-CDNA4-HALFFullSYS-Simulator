@@ -3,7 +3,7 @@
 **Plan ID:** `AMDGPU-SIM-V1`  
 **Revision:** `1`  
 **Revision date:** `2026-08-08`
-**State at this commit:** `P1-MEM-01-simulated-memory-complete; next-P1-SIGNAL-01`
+**State at this commit:** `P1-SIGNAL-01-signal-event-complete; next-P1-DISPATCH-01`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -260,6 +260,22 @@ submission, code-object loading, or GPU execution. The next sub-gate adds a
 bounded signal and event lifecycle without advancing the phase-level trivial
 kernel claim.
 
+Accepted sub-boundary: CP-0007 adds capability bit 3 and a bounded bridge-private
+signal/event service without changing the frozen envelope, queue frames, or
+simulated-memory carriers. Signal values are signed 64-bit bit patterns with
+generation-safe 1024-slot ownership, deterministic event-queue ordering,
+one-shot waits, exact one-tick completion relationships, and atomic overflow
+rejection. The runtime shares one monotonic request-ID namespace across queue,
+memory, and signal records; it buffers only canonical completions for prior ACKed
+work, retries an already ACKed wait without resending, poisons on indeterminate
+pre-ACK outcomes, and publishes validated signal state atomically. The real
+process gate covers timeout, retry, store-triggered completion, load/destroy,
+slot reuse, and preserved handshake/queue/memory/isolation behavior. This remains
+host transport state: it is not a KFD event handle, GPU-visible signal memory,
+packet-visible VRAM, SDMA timing, code-object loading, or GPU execution. The next
+sub-gate binds a functional allocation to gem5 GPU VA and executes one traced
+trivial gfx950 AQL dispatch.
+
 ### P2 — ROCr/libhsakmt provider
 
 Fork the pinned ROCr core and implement `libhsakmt_gem5` against the daemon.
@@ -462,20 +478,24 @@ licenses into a false aggregate claim.
 
 ## 10. Current handoff boundary
 
-`CP-0006` retains the CP-0002 official Qwen and six-upstream source freeze plus
+`CP-0007` retains the CP-0002 official Qwen and six-upstream source freeze plus
 the CP-0003 authored runtime baseline. It advances only gem5 and
-`self-amdgpu-runtime` from the CP-0005 queue boundary to the shared functional
-memory extension. The accepted gate preserves byte-exact handshake, endpoint,
-deadline, failure, queue, completion, and N=1/2/3/4/8 isolation behavior and
-adds bounded sparse allocation/free, deterministic functional VA, sealed-memfd
-H2D/D2H transfer, caller-buffer atomicity, and generation-safe slot reuse. It
-makes no packet-visible VRAM, SDMA timing, packet-submission, code-object,
-kernel, collective, PyTorch, or vLLM execution claim.
+`self-amdgpu-runtime` from the CP-0006 simulated-memory boundary to the shared
+bounded signal/event extension. The accepted gate preserves byte-exact
+handshake, endpoint, deadline, failure, queue, memory, completion, and
+N=1/2/3/4/8 isolation behavior and adds signed signal lifecycle, generation-safe
+one-shot waits, event-queue completion, exact tick validation, bounded outbound
+accounting, shared request correlation, and runtime retry/poison/atomicity
+contracts. It makes no KFD event, GPU-visible signal memory, packet-visible VRAM,
+SDMA timing, packet-submission, code-object, kernel, collective, PyTorch, or vLLM
+execution claim.
 
-The next unique action is `P1-SIGNAL-01`: create a CP-0007 two-child
-transaction for gem5 and `self-amdgpu-runtime`, then implement and validate a
-bounded generation-safe signal/event lifecycle, value query/update,
-deadline/cancellation-aware waits, and gem5 event-queue completion delivery.
+The next unique action is `P1-DISPATCH-01`: create a CP-0008 two-child
+transaction for gem5 and `self-amdgpu-runtime`, then bind functional allocations
+to gem5 GPU VA and execute one traced trivial gfx950 AQL dispatch. The fixture
+must use the CP-0007 signal wait and D2H path for byte verification and trace
+evidence; it must not be generalized into a generic code-object, ROCr, HIP, or
+P2 claim.
 `SOURCE_LOCK.json` remains byte-immutable, and existing `PROJECT_LANES`
 declarations remain historically anchored and append-only.
 

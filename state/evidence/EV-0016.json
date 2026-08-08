@@ -1,0 +1,975 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0016",
+  "checkpoint_id": "CP-0007",
+  "type": "runtime-signal-event-acceptance",
+  "claim": "The self-amdgpu-runtime ABI 1.4 release 0.5.0 exposes unique-owner signal handles and create/load/store/wait/destroy APIs for SIGNAL_EVENT_V1, with signed predicates, retryable post-ACK waits, deadline and cancellation precedence, atomic result publication, shared queue/memory/signal request IDs, canonical completion interleave, and indeterminate-ACK poison semantics while preserving the accepted queue and simulated-memory contracts.",
+  "command_argv": [
+    [
+      "cmake",
+      "-S",
+      ".",
+      "-B",
+      "build/cp7-static",
+      "-G",
+      "Ninja",
+      "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+      "-DBUILD_SHARED_LIBS=OFF",
+      "-DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON",
+      "-DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON",
+      "-DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=ON"
+    ],
+    [
+      "cmake",
+      "--build",
+      "build/cp7-static",
+      "--parallel",
+      "2"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "build/cp7-static",
+      "--output-on-failure"
+    ],
+    [
+      "ninja",
+      "-C",
+      "build/cp7-static",
+      "-n"
+    ],
+    [
+      "cmake",
+      "-S",
+      ".",
+      "-B",
+      "build/cp7-shared",
+      "-G",
+      "Ninja",
+      "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+      "-DBUILD_SHARED_LIBS=ON",
+      "-DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON",
+      "-DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON",
+      "-DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=ON"
+    ],
+    [
+      "cmake",
+      "--build",
+      "build/cp7-shared",
+      "--parallel",
+      "2"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "build/cp7-shared",
+      "--output-on-failure"
+    ],
+    [
+      "ninja",
+      "-C",
+      "build/cp7-shared",
+      "-n"
+    ],
+    [
+      "cmake",
+      "-S",
+      ".",
+      "-B",
+      "build/cp7-sanitize",
+      "-G",
+      "Ninja",
+      "-DCMAKE_BUILD_TYPE=Debug",
+      "-DBUILD_SHARED_LIBS=ON",
+      "-DCMAKE_C_COMPILER=clang",
+      "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer",
+      "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined",
+      "-DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON",
+      "-DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON",
+      "-DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=OFF"
+    ],
+    [
+      "cmake",
+      "--build",
+      "build/cp7-sanitize",
+      "--parallel",
+      "2"
+    ],
+    [
+      "cmake",
+      "-E",
+      "env",
+      "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
+      "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1",
+      "ctest",
+      "--test-dir",
+      "build/cp7-sanitize",
+      "--output-on-failure"
+    ],
+    [
+      "ninja",
+      "-C",
+      "build/cp7-sanitize",
+      "-n"
+    ],
+    [
+      "sha256sum",
+      "build/cp7-static/sagr-handshake",
+      "build/cp7-static/libself_amdgpu_runtime.a",
+      "build/cp7-shared/sagr-handshake",
+      "build/cp7-shared/libself_amdgpu_runtime.so.0.5.0",
+      "build/cp7-sanitize/sagr-handshake",
+      "build/cp7-sanitize/libself_amdgpu_runtime.so.0.5.0"
+    ],
+    [
+      "ldd",
+      "build/cp7-static/sagr-handshake",
+      "build/cp7-shared/sagr-handshake",
+      "build/cp7-shared/libself_amdgpu_runtime.so.0.5.0"
+    ],
+    [
+      "nm",
+      "-D",
+      "--defined-only",
+      "build/cp7-shared/libself_amdgpu_runtime.so.0.5.0"
+    ],
+    [
+      "python3",
+      "scripts/check_staged.py",
+      "--repo",
+      "projects/self-amdgpu-runtime"
+    ],
+    [
+      "git",
+      "write-tree"
+    ],
+    [
+      "git",
+      "diff",
+      "--cached",
+      "--check"
+    ],
+    [
+      "git",
+      "diff",
+      "--cached",
+      "--name-only"
+    ]
+  ],
+  "cwd": ".",
+  "started_at": "2026-08-08T06:06:32+00:00",
+  "ended_at": "2026-08-08T06:07:45+00:00",
+  "exit_code": 0,
+  "result": "Fresh RelWithDebInfo static and shared matrices each passed 8/8 tests, the Clang AddressSanitizer and UndefinedBehaviorSanitizer matrix passed 7/7, all final build trees reported no work, the shared library export audit found 28 public symbols including the signal API, and staged tree 68b873183832475abc3fa56fe53a8af418574f45 passed policy and whitespace checks.",
+  "command_results": [
+    {
+      "id": "runtime-static-configure",
+      "argv": [
+        "cmake",
+        "-S",
+        ".",
+        "-B",
+        "build/cp7-static",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+        "-DBUILD_SHARED_LIBS=OFF",
+        "-DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON",
+        "-DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON",
+        "-DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=ON"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:06:32+00:00",
+      "ended_at": "2026-08-08T06:06:33+00:00",
+      "exit_code": 0,
+      "result": "A fresh RelWithDebInfo static runtime build configured with installed-package testing enabled.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-static-configure.json",
+        "size": 896,
+        "sha256": "97e9d153c1395b2250680e3ffef1d1754626b6d9a710a268d5a57cf925a7188b",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-static-configure.stdout",
+        "size": 529,
+        "sha256": "8cb90de4a2c85ba07595298cdac409d6c587d7994e71459810ea44e64bea773d",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-static-configure.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-static-build",
+      "argv": [
+        "cmake",
+        "--build",
+        "build/cp7-static",
+        "--parallel",
+        "2"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:06:46+00:00",
+      "ended_at": "2026-08-08T06:06:48+00:00",
+      "exit_code": 0,
+      "result": "The static ABI 1.4 runtime, signal-capable CLI, and all enabled test targets built successfully.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-static-build.json",
+        "size": 664,
+        "sha256": "bf63c6c0dca73e7e336c0a6dcc6ec81ecb7e4090da670d67e0ad429bd41c3272",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-static-build.stdout",
+        "size": 2081,
+        "sha256": "2914d3ed4bbb3713c732e4aca513ae2f69d21e72e66c1ad66faeec766f1fea35",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-static-build.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-static-ctest",
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build/cp7-static",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:07:11+00:00",
+      "ended_at": "2026-08-08T06:07:15+00:00",
+      "exit_code": 0,
+      "result": "The static matrix passed all 8 API, protocol, transport, queue, memory, signal, CLI, and installed-package tests.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-static-ctest.json",
+        "size": 667,
+        "sha256": "dcc899446bb2931a02ec9a92396d802997abd2ba60bd3a76a6d44c610d969b33",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-static-ctest.stdout",
+        "size": 1153,
+        "sha256": "e76ff53d3145dacb162ce2a4c59354b93460dee8a9278d4cc3f737d3301ec23d",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-static-ctest.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-static-freshness",
+      "argv": [
+        "ninja",
+        "-C",
+        "build/cp7-static",
+        "-n"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:07:45+00:00",
+      "ended_at": "2026-08-08T06:07:45+00:00",
+      "exit_code": 0,
+      "result": "The final static build-tree freshness check reported no work to do.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-static-freshness.json",
+        "size": 648,
+        "sha256": "d51e82bd7d06fd40f7d28b0281a561ab279bfd4366b8e1c77a5f75d940ae0414",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-static-freshness.stdout",
+        "size": 67,
+        "sha256": "6a19c69f513e3865b2a06e6771f1c13c730fa5bbaca8152120ee8b3cc097b4a4",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-static-freshness.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-shared-configure",
+      "argv": [
+        "cmake",
+        "-S",
+        ".",
+        "-B",
+        "build/cp7-shared",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+        "-DBUILD_SHARED_LIBS=ON",
+        "-DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON",
+        "-DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON",
+        "-DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=ON"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:06:32+00:00",
+      "ended_at": "2026-08-08T06:06:33+00:00",
+      "exit_code": 0,
+      "result": "A fresh RelWithDebInfo shared runtime build configured with installed-package testing enabled.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-shared-configure.json",
+        "size": 895,
+        "sha256": "73d95fead3d7e3c74d1dd0e1653484e715144883823ccb891ff2b4a1f1f4dbbb",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-shared-configure.stdout",
+        "size": 529,
+        "sha256": "1fe75b5ddc4867aa127d621f993ffde9b18cf5f8bbf8c60ab31ca9d3a182c718",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-shared-configure.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-shared-build",
+      "argv": [
+        "cmake",
+        "--build",
+        "build/cp7-shared",
+        "--parallel",
+        "2"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:06:46+00:00",
+      "ended_at": "2026-08-08T06:06:48+00:00",
+      "exit_code": 0,
+      "result": "The shared ABI 1.4 runtime, signal-capable CLI, and all enabled test targets built successfully.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-shared-build.json",
+        "size": 664,
+        "sha256": "07f025666118cbff6f85c211350a73e435826a17424cef255543e48c46aa5f60",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-shared-build.stdout",
+        "size": 2175,
+        "sha256": "f06e6119d3f65b472b9142046b3fab0f48bda42d93fb5769b9e0028215bf406d",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-shared-build.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-shared-ctest",
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build/cp7-shared",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:07:11+00:00",
+      "ended_at": "2026-08-08T06:07:15+00:00",
+      "exit_code": 0,
+      "result": "The shared matrix passed all 8 API, protocol, transport, queue, memory, signal, CLI, and installed-package tests.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-shared-ctest.json",
+        "size": 667,
+        "sha256": "2b7113763191f1f22f3b1b18520e29874d2cc576d69bc561e2381c67fa41e525",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-shared-ctest.stdout",
+        "size": 1153,
+        "sha256": "898d79e29b11a3d2ef7ddb8cdadd609d6a9c46cd896ebbe82bec7c2a6540daec",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-shared-ctest.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-shared-freshness",
+      "argv": [
+        "ninja",
+        "-C",
+        "build/cp7-shared",
+        "-n"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:07:45+00:00",
+      "ended_at": "2026-08-08T06:07:45+00:00",
+      "exit_code": 0,
+      "result": "The final shared build-tree freshness check reported no work to do.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-shared-freshness.json",
+        "size": 648,
+        "sha256": "2212ad18666a9361d2410aa37be7a4f63e87e255cfac50e14cb513b1f8b94b0e",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-shared-freshness.stdout",
+        "size": 67,
+        "sha256": "131b559945a294c55452109a99bcd8bb7f1b579d524b5face4044584bc3b6e5b",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-shared-freshness.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-sanitize-configure",
+      "argv": [
+        "cmake",
+        "-S",
+        ".",
+        "-B",
+        "build/cp7-sanitize",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DBUILD_SHARED_LIBS=ON",
+        "-DCMAKE_C_COMPILER=clang",
+        "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined",
+        "-DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON",
+        "-DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON",
+        "-DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=OFF"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:06:32+00:00",
+      "ended_at": "2026-08-08T06:06:33+00:00",
+      "exit_code": 0,
+      "result": "A fresh Clang Debug shared runtime build configured with AddressSanitizer and UndefinedBehaviorSanitizer.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-sanitize-configure.json",
+        "size": 1062,
+        "sha256": "cf61bbc762afcb3810d6c2baa2f4916f0d4c6c6afa5521a1b0dbe7dde862dec2",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-sanitize-configure.stdout",
+        "size": 630,
+        "sha256": "71706ae0a65bd01e96d71861090249f853cf6a16ca19df77c605e285439259d3",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-sanitize-configure.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-sanitize-build",
+      "argv": [
+        "cmake",
+        "--build",
+        "build/cp7-sanitize",
+        "--parallel",
+        "2"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:06:46+00:00",
+      "ended_at": "2026-08-08T06:06:47+00:00",
+      "exit_code": 0,
+      "result": "The sanitizer-instrumented ABI 1.4 runtime, signal-capable CLI, and seven enabled test targets built successfully.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-sanitize-build.json",
+        "size": 670,
+        "sha256": "265805d20320c187ea112f0adb0b11d7f954ba40240e63a6818e1fe44e277550",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-sanitize-build.stdout",
+        "size": 2175,
+        "sha256": "22d39af1f13ef03c733b044423571aea400a73a5f4678095d409e66eaec74f1c",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-sanitize-build.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-sanitize-ctest",
+      "argv": [
+        "cmake",
+        "-E",
+        "env",
+        "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
+        "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1",
+        "ctest",
+        "--test-dir",
+        "build/cp7-sanitize",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:07:11+00:00",
+      "ended_at": "2026-08-08T06:07:15+00:00",
+      "exit_code": 0,
+      "result": "The Clang AddressSanitizer and UndefinedBehaviorSanitizer matrix passed all 7 enabled tests with leak detection.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-sanitize-ctest.json",
+        "size": 814,
+        "sha256": "97caa4eb7656a0737cae4e7ad2e94f30343bdf5bad41b8a4e130038157694f76",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-sanitize-ctest.stdout",
+        "size": 1047,
+        "sha256": "02e637b2bb3250d78f8c44072f5680d9668c9f24dc4df43fadecf75f9f9d1430",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-sanitize-ctest.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-sanitize-freshness",
+      "argv": [
+        "ninja",
+        "-C",
+        "build/cp7-sanitize",
+        "-n"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:07:45+00:00",
+      "ended_at": "2026-08-08T06:07:45+00:00",
+      "exit_code": 0,
+      "result": "The final sanitizer build-tree freshness check reported no work to do.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-sanitize-freshness.json",
+        "size": 654,
+        "sha256": "b51154586a33c15258a00a70012da4b230490b4d6c29c0fba52db4030221a9b6",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-sanitize-freshness.stdout",
+        "size": 69,
+        "sha256": "fd59575b12ec650b496f633e8f50b2ec877a2739aabe6a7ff7121e1975e224ec",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-sanitize-freshness.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-artifact-sha256",
+      "argv": [
+        "sha256sum",
+        "build/cp7-static/sagr-handshake",
+        "build/cp7-static/libself_amdgpu_runtime.a",
+        "build/cp7-shared/sagr-handshake",
+        "build/cp7-shared/libself_amdgpu_runtime.so.0.5.0",
+        "build/cp7-sanitize/sagr-handshake",
+        "build/cp7-sanitize/libself_amdgpu_runtime.so.0.5.0"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:07:45+00:00",
+      "ended_at": "2026-08-08T06:07:45+00:00",
+      "exit_code": 0,
+      "result": "SHA-256 identities were retained for the static, shared, and sanitizer CLIs and libraries.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-artifact-sha256.json",
+        "size": 889,
+        "sha256": "e8e570ec58bdcaaf2a21ace43b45e4f2838314d5713cf9c3c80bb6364589626a",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-artifact-sha256.stdout",
+        "size": 636,
+        "sha256": "8afad96ccf0dd8f8e376b2bc5c85838d022cabd9b6343f53fb09e8e2b576d0e4",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-artifact-sha256.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-artifact-ldd",
+      "argv": [
+        "ldd",
+        "build/cp7-static/sagr-handshake",
+        "build/cp7-shared/sagr-handshake",
+        "build/cp7-shared/libself_amdgpu_runtime.so.0.5.0"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:07:45+00:00",
+      "ended_at": "2026-08-08T06:07:45+00:00",
+      "exit_code": 0,
+      "result": "The static CLI uses only the system C runtime, and the shared CLI resolves the locally built ABI 1.4 DSO.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-artifact-ldd.json",
+        "size": 729,
+        "sha256": "b97a4775f46444328a4278e9a96830c900110a23f43e8020bd8674909408f715",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-artifact-ldd.stdout",
+        "size": 748,
+        "sha256": "2a73d7b32617c2013d26c4f86dd6c19f17d67d72671377cfed801b3d83facc2f",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-artifact-ldd.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-exported-symbols",
+      "argv": [
+        "nm",
+        "-D",
+        "--defined-only",
+        "build/cp7-shared/libself_amdgpu_runtime.so.0.5.0"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:07:45+00:00",
+      "ended_at": "2026-08-08T06:07:45+00:00",
+      "exit_code": 0,
+      "result": "The shared library exports 28 public instance, queue, memory, signal, version, ABI, and status symbols.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-exported-symbols.json",
+        "size": 691,
+        "sha256": "ead489dec9e3c27942bfc0233850b851ba3ce9f03dd06b631760519012b5f3af",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-exported-symbols.stdout",
+        "size": 1184,
+        "sha256": "c65a328324154765afe690211f5e521467f0e9307b4486348ecd38d725813db4",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-exported-symbols.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-staged-policy",
+      "argv": [
+        "python3",
+        "scripts/check_staged.py",
+        "--repo",
+        "projects/self-amdgpu-runtime"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-08T06:07:45+00:00",
+      "ended_at": "2026-08-08T06:07:45+00:00",
+      "exit_code": 0,
+      "result": "The complete runtime candidate index passed generated-artifact, model, environment, size, and probable-secret policy.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-staged-policy.json",
+        "size": 653,
+        "sha256": "57de70e56622f42be4ec417bd4dd6b54b7688e235633851d1e49732af2a653a8",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-staged-policy.stdout",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-staged-policy.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-staged-tree",
+      "argv": [
+        "git",
+        "write-tree"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:07:45+00:00",
+      "ended_at": "2026-08-08T06:07:45+00:00",
+      "exit_code": 0,
+      "result": "The retained write-tree output binds the exact runtime CP-0007 candidate tree 68b873183832475abc3fa56fe53a8af418574f45.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-staged-tree.json",
+        "size": 610,
+        "sha256": "ffcadbbb1f54b4d3a7d60b5abdce8b5a02277d637445219ea095e5c648c57e61",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-staged-tree.stdout",
+        "size": 41,
+        "sha256": "add17ef6e47aa99750e4c4a6533aba1cea2bf01c9f7468319fd3889dcefab2b3",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-staged-tree.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-diff-check",
+      "argv": [
+        "git",
+        "diff",
+        "--cached",
+        "--check"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:07:45+00:00",
+      "ended_at": "2026-08-08T06:07:45+00:00",
+      "exit_code": 0,
+      "result": "The complete staged runtime candidate patch has no whitespace errors.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-diff-check.json",
+        "size": 632,
+        "sha256": "67dd9e50043abd1412de74c6fba7e286618620e41ea23065a73993c085fdea07",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-diff-check.stdout",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-diff-check.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    },
+    {
+      "id": "runtime-staged-paths",
+      "argv": [
+        "git",
+        "diff",
+        "--cached",
+        "--name-only"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-08T06:07:45+00:00",
+      "ended_at": "2026-08-08T06:07:45+00:00",
+      "exit_code": 0,
+      "result": "The retained path list binds the exact 15-file runtime CP-0007 candidate scope.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0007/runtime-staged-paths.json",
+        "size": 642,
+        "sha256": "b32c494e35607671c11b73082eb4f4bb7b70c482a78448c57daa9f87fc032491",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0007/runtime-staged-paths.stdout",
+        "size": 331,
+        "sha256": "b52baf370e5828a8517f3b9e64fea80aae127039d20ae3c8bb31daf28726f603",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0007/runtime-staged-paths.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tracked": false,
+        "required_at_acceptance": true,
+        "required_for_resume": false
+      }
+    }
+  ],
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0007/sagr-handshake",
+      "size": 400800,
+      "sha256": "4b96f388238db1e9f959fedcc67b44ad3475418a737706a250b809e4a118aafa",
+      "tracked": false,
+      "required_at_acceptance": true,
+      "required_for_resume": false
+    }
+  ],
+  "includes": {},
+  "environment_fingerprint": {
+    "kernel": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+    "runtime": "0.5.0",
+    "abi": "1.4",
+    "cmake": "3.31.10",
+    "generator": "Ninja",
+    "release_compiler": "GCC 15.2.0",
+    "sanitizer_compiler": "Clang 21.1.8",
+    "sanitizers": "address,undefined",
+    "exported_symbol_count": "28",
+    "runtime_cli_sha256": "4b96f388238db1e9f959fedcc67b44ad3475418a737706a250b809e4a118aafa",
+    "timezone": "Asia/Shanghai"
+  },
+  "limitations": [
+    "This evidence proves the public C ABI and client side of the bounded bridge-private signal/event protocol; it does not prove KFD event handles, GPU-visible signal memory, packet submission, code-object loading, kernel execution, collectives, PyTorch, vLLM, HIP, HSA, or OpenCL execution.",
+    "Signal, queue, memory, and instance handles have unique C ownership. Copied aliases after destroy, free, or instance close are outside the API contract.",
+    "After a complete signal request send, timeout, cancellation, EOF, or a noncanonical response before the canonical ACK poisons the session; a canonical non-OK ACK is determinate and reusable, while timeout or cancellation after a successful WAIT ACK preserves the pending wait for an identical retry.",
+    "The sanitizer matrix explicitly disables the installed-package consumer; both non-sanitized release matrices keep package validation enabled.",
+    "Build trees and the retained static signal-capable CLI remain ignored external artifacts and are not committed."
+  ],
+  "redactions": []
+}

@@ -1,0 +1,24 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0033",
+  "checkpoint_id": "CP-0007",
+  "question_or_symptom": "Signed wait predicates and one-tick event completion can become nondeterministic at two's-complement or simulation-tick boundaries.",
+  "observation": "Signal values are exact signed int64 bit patterns, conditions use signed EQ/NE/LT/GTE comparisons without arithmetic, and gem5 evaluates waits on one event queue. WAIT at UINT64_MAX and a satisfying STORE at UINT64_MAX are rejected atomically; immediate completions occur at T+1 and armed completions at S+1.",
+  "evidence_ids": ["EV-0015", "EV-0016", "EV-0017"],
+  "conclusion": "Exactly-once wait behavior needs explicit signed comparison and representable tick relationships, not an implicit host-clock or unsigned arithmetic convention.",
+  "decision": "Capture the admission snapshot and tick before deciding immediate versus armed state, require representable owed completions, leave value, sequence, and waiter state unchanged on overflow rejection, and validate the received tick relationships rather than predicting daemon ticks locally.",
+  "invalidated_assumptions": [
+    "Unsigned comparisons are interchangeable with HSA-style signed signal conditions.",
+    "A tick increment may wrap while still representing a valid completion."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-signal.json",
+    "docs/host-transport-v1-signal.md",
+    "projects/gem5/src/dev/amdgpu/host_gpu_signal_state.cc",
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "projects/self-amdgpu-runtime/tests/signal_test.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

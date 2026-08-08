@@ -3,11 +3,11 @@
   "goal_id": "GSIM-001",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 1,
-  "checkpoint_id": "CP-0006",
-  "checkpoint_sha256": "400fd2c985ab4966d7d418b76fdd020bafa05fa214c34fa58a7082380166fd05",
+  "checkpoint_id": "CP-0007",
+  "checkpoint_sha256": "16791b56437d7b2c17bb025c8403e0a1a18f35b543c378a1b2872c76d3f0a0d7",
   "phase_id": "P1",
   "state": "ready",
-  "next_action_id": "P1-SIGNAL-01",
-  "next_action_summary": "Implement and validate the bounded single-daemon signal and event completion path.",
+  "next_action_id": "P1-DISPATCH-01",
+  "next_action_summary": "Bind functional allocations to gem5 GPU VA and execute one traced trivial gfx950 AQL dispatch using the CP7 signal wait and D2H verification path.",
   "resume_command": "scripts/resume.sh --verify"
 }

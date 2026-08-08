@@ -342,6 +342,67 @@ class HostTransportIntegrationHarnessTest(unittest.TestCase):
                     require_reuse=True,
                 )
 
+    def test_signal_result_validation_requires_retry_and_new_generation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cp7-harness-test-") as temp:
+            harness = integration.Harness(harness_args(), Path(temp))
+            payload = {
+                "signal": {
+                    "status": 0,
+                    "signal_id": "0x0000000000000007",
+                    "generation": "0x8877665544332211",
+                    "initial_value": -7,
+                    "load_before": -7,
+                    "wait": {
+                        "condition": "gte",
+                        "compare": 0,
+                        "first_status": 11,
+                        "first_status_name": "timed out",
+                        "completion_status": 0,
+                        "observed_value": 42,
+                        "sequence": "0x0000000000000001",
+                        "retried_without_send": True,
+                    },
+                    "stored_value": 42,
+                    "load_after": 42,
+                    "destroyed": True,
+                    "reuse": {
+                        "signal_id": "0x0000000000000007",
+                        "generation": "0x8877665544332212",
+                        "initial_value": -7,
+                        "destroyed": True,
+                    },
+                }
+            }
+            self.assertEqual(
+                harness.validate_signal_success(
+                    payload, expected_initial=-7, expected_stored=42
+                ),
+                payload["signal"],
+            )
+
+            repeated = json.loads(json.dumps(payload))
+            repeated["signal"]["reuse"]["generation"] = (
+                repeated["signal"]["generation"]
+            )
+            with self.assertRaises(integration.CheckFailure):
+                harness.validate_signal_success(
+                    repeated, expected_initial=-7, expected_stored=42
+                )
+
+            regressed = json.loads(json.dumps(payload))
+            regressed["signal"]["reuse"]["generation"] = "0x1"
+            with self.assertRaises(integration.CheckFailure):
+                harness.validate_signal_success(
+                    regressed, expected_initial=-7, expected_stored=42
+                )
+
+            replayed = json.loads(json.dumps(payload))
+            replayed["signal"]["wait"]["retried_without_send"] = False
+            with self.assertRaises(integration.CheckFailure):
+                harness.validate_signal_success(
+                    replayed, expected_initial=-7, expected_stored=42
+                )
+
     @unittest.skipUnless(
         hasattr(socket, "SOCK_SEQPACKET") and Path("/proc/net/unix").exists(),
         "Linux seqpacket and procfs are required",

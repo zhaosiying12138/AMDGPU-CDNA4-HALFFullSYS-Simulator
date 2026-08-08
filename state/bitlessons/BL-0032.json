@@ -1,0 +1,24 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0032",
+  "checkpoint_id": "CP-0007",
+  "question_or_symptom": "Reusing a signal slot after disconnect or destroy can let a delayed callback or copied handle mutate a newer signal.",
+  "observation": "The bridge has 1024 lowest-free slots, daemon-lifetime nonzero generations that never wrap, and ownership scoped to the client file-descriptor generation. Callbacks revalidate owner, slot, signal generation, wait sequence, and originating request ID; disconnect releases the complete owner generation.",
+  "evidence_ids": ["EV-0015", "EV-0016", "EV-0017"],
+  "conclusion": "Signal IDs are only slot coordinates; stale-work safety requires a daemon-lifetime generation plus transport-owner generation at every lifecycle and callback boundary.",
+  "decision": "Allocate the lowest free slot, advance a strict monotonic generation only after an accepted CREATE, bind every signal and wait to the owning descriptor generation, reject stale or foreign identities, and cancel callbacks before slot reuse or disconnect cleanup.",
+  "invalidated_assumptions": [
+    "A signal ID remains unique after its slot is freed.",
+    "Checking the wire generation alone is enough to authorize an asynchronous callback."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-signal.json",
+    "projects/gem5/src/dev/amdgpu/host_gpu_signal_state.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/runtime.h"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

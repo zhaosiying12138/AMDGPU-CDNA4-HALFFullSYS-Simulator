@@ -1,0 +1,24 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0034",
+  "checkpoint_id": "CP-0007",
+  "question_or_symptom": "A nominal per-kind completion limit can undercount the records retained by one session when queue and signal work become ready together.",
+  "observation": "Queue completion construction releases a queue inflight credit before its frame is sent, while prior queue completions may remain queued. The safe outbound bound is 25 records: eight old queue completions, eight newly admitted queue completions, eight signal waits/completions, and one synchronous ACK. A ready signal remains busy until its full frame is sent.",
+  "evidence_ids": ["EV-0015", "EV-0016", "EV-0017"],
+  "conclusion": "Backpressure limits must count each ownership cohort at the point it can coexist, and completion resources must live through complete-send success.",
+  "decision": "Enforce the session-wide 25-record bound, retain signal wait resources through socket send completion, disconnect on send failure or overflow, and test queue-completion interleaving while signal ACK and completion records are outstanding.",
+  "invalidated_assumptions": [
+    "An eight-record limit per operation kind protects the total outbound queue.",
+    "Constructing a completion is equivalent to delivering it to the peer."
+  ],
+  "applies_to": [
+    "protocol/host-transport-v1-signal.json",
+    "docs/host-transport-v1-signal.md",
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_signal_state.cc",
+    "projects/self-amdgpu-runtime/src/transport.c"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}

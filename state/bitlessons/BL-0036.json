@@ -1,0 +1,24 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0036",
+  "checkpoint_id": "CP-0007",
+  "question_or_symptom": "A signal operation can expose a remote value locally before its ACK, completion, tick, or trigger metadata has passed validation.",
+  "observation": "A complete signal request send followed by timeout, EOF, or a noncanonical response poisons the session, while a canonical non-OK ACK is reusable. After a successful WAIT ACK, timeout or cancellation is retryable without resending. The runtime must stage candidate LOAD/STORE values and publish result fields only after all response and completion checks pass.",
+  "evidence_ids": ["EV-0015", "EV-0016", "EV-0017"],
+  "conclusion": "Signal handles need two distinct commit boundaries: remote indeterminate-ACK poison before acknowledgement and atomic local result publication after complete validation.",
+  "decision": "Serialize signal calls per instance, form one absolute deadline after argument checks, distinguish pre-ACK poison from post-ACK wait retry, retain accepted waits across local timeout, validate exact identity/predicate/value/tick/correlation, and commit cached value and trigger state only at the final success boundary.",
+  "invalidated_assumptions": [
+    "A timeout is always retryable because signal operations are logically idempotent.",
+    "Updating the cached value before validating a successful STORE response cannot leak state after protocol rejection."
+  ],
+  "applies_to": [
+    "docs/host-transport-v1-signal.md",
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "projects/self-amdgpu-runtime/src/transport_internal.h",
+    "projects/self-amdgpu-runtime/tests/signal_test.c",
+    "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/runtime.h"
+  ],
+  "confidence": "high",
+  "supersedes": [],
+  "status": "active"
+}
