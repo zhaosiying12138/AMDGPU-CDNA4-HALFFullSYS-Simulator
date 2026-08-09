@@ -1,0 +1,665 @@
+{
+  "checkpoint_id": "CP-0012",
+  "claim": "The gem5 child records one successful native mold link with 24 SCons jobs, final binary identity, gfx950 decoder differential coverage, and existing host-state regressions.",
+  "command_argv": [
+    [
+      "env",
+      "PATH=/home/zhaosiying/amdgpu-sim/env/gem5-build/sysroot/usr/bin:$PATH",
+      "/home/zhaosiying/amdgpu-sim/env/gem5-build/bin/scons",
+      "-j24",
+      "--linker=mold",
+      "build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt",
+      "build/VEGA_X86/gem5.opt"
+    ],
+    [
+      "bash",
+      "-c",
+      "printf '%s\\n' 'NOT EXECUTED (CP-0012 evidence replay descriptor)' 'cwd=projects/gem5' 'PATH=\"/home/zhaosiying/amdgpu-sim/../../env/gem5-build/sysroot/usr/bin:/home/zhaosiying/amdgpu-sim/../../env/gem5-build/bin:/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/zhaosiying/.codex/tmp/arg0/codex-arg0nGvdqo:/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/zhaosiying/miniforge3/envs/triton-dev/bin:/home/zhaosiying/miniforge3/condabin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.3/bin/x64:/mnt/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.3/bin:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0:/mnt/c/WINDOWS/System32/OpenSSH:/mnt/c/Program Files/nodejs:/mnt/c/Program Files/Git/cmd:/mnt/c/Program Files/NVIDIA Corporation/Nsight Compute 2026.2.1:/mnt/c/Program Files/NVIDIA Corporation/NVIDIA App/NvDLISR:/mnt/c/Program Files (x86)/NVIDIA Corporation/PhysX/Common:/mnt/c/Users/Admin1/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/Admin1/AppData/Roaming/npm:/mnt/c/Users/Admin1/AppData/Local/Programs/Microsoft VS Code/bin:/snap/bin\"' '\"/home/zhaosiying/amdgpu-sim/../../env/gem5-build/bin/scons\" -j24 --linker=mold build/VEGA_X86/gem5.opt'"
+    ],
+    [
+      "projects/gem5/build/VEGA_X86/gem5.opt",
+      "-B"
+    ],
+    [
+      "sha256sum",
+      "projects/gem5/build/VEGA_X86/gem5.opt",
+      "projects/gem5/build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt"
+    ],
+    [
+      "stat",
+      "-c",
+      "%s %y %n",
+      "projects/gem5/build/VEGA_X86/gem5.opt",
+      "projects/gem5/build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt"
+    ],
+    [
+      "projects/gem5/build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_dispatch_state.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_memory_state.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_queue_state.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_signal_state.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_socket_utils.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "git",
+      "-C",
+      "projects/gem5",
+      "diff",
+      "--check",
+      "--",
+      "src/arch/amdgpu/vega/SConscript",
+      "src/arch/amdgpu/vega/gpu_decoder.cc",
+      "src/arch/amdgpu/vega/gpu_decoder.hh",
+      "src/arch/amdgpu/vega/insts/instructions.hh",
+      "src/arch/amdgpu/vega/insts/vop2.cc",
+      "src/arch/amdgpu/vega/gpu_decoder.test.cc"
+    ],
+    [
+      "sha256sum",
+      "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.hsaco",
+      "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.repro.hsaco",
+      "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.disasm",
+      "artifacts/evidence/CP-0012/toolchain/oclc_isa_version_950.bc"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "printf '%s\\n' 'NOT EXECUTED (CP-0012 evidence replay descriptor)' 'cwd=projects/gem5' 'PATH=\"/home/zhaosiying/amdgpu-sim/../../env/gem5-build/sysroot/usr/bin:/home/zhaosiying/amdgpu-sim/../../env/gem5-build/bin:/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/zhaosiying/.codex/tmp/arg0/codex-arg0nGvdqo:/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/home/zhaosiying/miniforge3/envs/triton-dev/bin:/home/zhaosiying/miniforge3/condabin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.3/bin/x64:/mnt/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.3/bin:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0:/mnt/c/WINDOWS/System32/OpenSSH:/mnt/c/Program Files/nodejs:/mnt/c/Program Files/Git/cmd:/mnt/c/Program Files/NVIDIA Corporation/Nsight Compute 2026.2.1:/mnt/c/Program Files/NVIDIA Corporation/NVIDIA App/NvDLISR:/mnt/c/Program Files (x86)/NVIDIA Corporation/PhysX/Common:/mnt/c/Users/Admin1/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/Admin1/AppData/Roaming/npm:/mnt/c/Users/Admin1/AppData/Local/Programs/Microsoft VS Code/bin:/snap/bin\"' '\"/home/zhaosiying/amdgpu-sim/../../env/gem5-build/bin/scons\" -j24 --linker=mold build/VEGA_X86/gem5.opt'"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "mold24-argv-descriptor",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/mold24-argv-descriptor.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e9df5b6d1cc769f594d63c699146fc40e47ab5bcd3b16cf31076d6967a467f2f",
+        "size": 2115,
+        "tracked": false
+      },
+      "result": "Retained exact mold/24 SCons argv descriptor; the original link was completed once and was not replayed.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/mold24-argv-descriptor.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/mold24-argv-descriptor.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9593eb79e9a47666a57b754bd96eccf0f8f898881fa2e47432ac945895a393ab",
+        "size": 1475,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/VEGA_X86/gem5.opt",
+        "-B"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "final-build-info",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/final-build-info.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ce3ec0e60ae48c8cf7a2c27f639bfd312acf8386f4bbc8ac2f60b28e75d2455d",
+        "size": 627,
+        "tracked": false
+      },
+      "result": "Final gem5 -B build identity passed.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/final-build-info.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/final-build-info.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d5f9222a9ca8b0df26c0405049f653467b1d4bb7f18f621ce00d9b75363e40a6",
+        "size": 1645,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "projects/gem5/build/VEGA_X86/gem5.opt",
+        "projects/gem5/build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:04+00:00",
+      "exit_code": 0,
+      "id": "final-binary-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/final-binary-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a42f5db6258ec4881afbabc227b59af30bd811c110e87d235ffb31e4e179ccc2",
+        "size": 713,
+        "tracked": false
+      },
+      "result": "Final gem5 and decoder-test SHA-256 identities passed.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/final-binary-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/final-binary-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8cddc4080c484ce2fb38342271576b3d90c0a5ae6823f6cd0c16d6d5e71214bf",
+        "size": 237,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "stat",
+        "-c",
+        "%s %y %n",
+        "projects/gem5/build/VEGA_X86/gem5.opt",
+        "projects/gem5/build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "final-binary-stat",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/final-binary-stat.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "554e95d15da02a3d9a5ae73cbd1b7ecc8f52855760d2af1c3059eeee633841ff",
+        "size": 730,
+        "tracked": false
+      },
+      "result": "Final gem5 and decoder-test size/mtime identities passed.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/final-binary-stat.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/final-binary-stat.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "05fd1d7cdab2b75329bcbc30fede1cfd367f0df95272536b327fcab777881401",
+        "size": 199,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "gpu-decoder-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/gpu-decoder-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e4bb9c2d2057ab51b1022f138543fb27d9a37e9c6c0137940f96185b46457a14",
+        "size": 671,
+        "tracked": false
+      },
+      "result": "Gfx-version decoder isolation GTest passed 1/1.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/gpu-decoder-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/gpu-decoder-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5f4d0ac6a131be2a8dff8c492267af2e9788648ec2d57333c36ddb31acb9d0aa",
+        "size": 493,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_dispatch_state.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "host-dispatch-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-dispatch-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "639b8c536a00b4019ba404c496d2921e3d53222440fb64584800695368f4ec76",
+        "size": 682,
+        "tracked": false
+      },
+      "result": "Existing host dispatch regression passed 12/12.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-dispatch-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-dispatch-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "65f1415246ac943e967fc7de141ea17197cd7a721ecd88b96598d4a76963ce7e",
+        "size": 2474,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_memory_state.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "host-memory-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-memory-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f59d313e05c01d8eac65c82c24fd879396f636f28e4db3d0e030f56ec32f829b",
+        "size": 676,
+        "tracked": false
+      },
+      "result": "Host memory regression passed 8/8.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-memory-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-memory-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5742dac03dfc3856b3d21112d33cf4a226e9b256876ee1202033f36e6b64f870",
+        "size": 1635,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "host-protocol-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-protocol-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e1e999b95d42080ba9d405127915dc8c303d1d2c1a9614edabb574f2ae28561d",
+        "size": 676,
+        "tracked": false
+      },
+      "result": "Host protocol regression passed 39/39.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-protocol-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-protocol-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "dfb7d36efa849536a8b66656c089103543500707215c1cdb27d2a4fd4554073f",
+        "size": 5673,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_queue_state.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "host-queue-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-queue-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7baefbd95dae51b9f15336201ed5184e8a8972760e7b630c6ccc28fb717a46f4",
+        "size": 673,
+        "tracked": false
+      },
+      "result": "Host queue regression passed 12/12.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-queue-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-queue-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b6733f685e4346a51c111862ebf271d9edec5c6b6986382ce0777996f81d7571",
+        "size": 2134,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_signal_state.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "host-signal-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-signal-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "27aeb670b70da8786a6b1f3350c1185e34b3bd4acde72427b294412ffbbcef39",
+        "size": 676,
+        "tracked": false
+      },
+      "result": "Host signal regression passed 12/12.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-signal-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-signal-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6f672ab235341fd3d5d0fc86c086a1cab12752d33c44067061db3b9eac681de5",
+        "size": 2286,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_socket_utils.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "host-socket-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-socket-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2922c7d1e3649624c207089ecda97bef796d08af3113dcfb81fba60b45260c42",
+        "size": 676,
+        "tracked": false
+      },
+      "result": "Host socket regression passed 23/23.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-socket-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/host-socket-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "732fa89d784c3ff51d52b9802e9480272607094f3cc332c8e0bc6dd3e442ec92",
+        "size": 4137,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "projects/gem5",
+        "diff",
+        "--check",
+        "--",
+        "src/arch/amdgpu/vega/SConscript",
+        "src/arch/amdgpu/vega/gpu_decoder.cc",
+        "src/arch/amdgpu/vega/gpu_decoder.hh",
+        "src/arch/amdgpu/vega/insts/instructions.hh",
+        "src/arch/amdgpu/vega/insts/vop2.cc",
+        "src/arch/amdgpu/vega/gpu_decoder.test.cc"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "child-diff-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/child-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "38acdf6de41b223cd1a72f927cb692ca008033594f8c950f5f7e8ba9f9a2a022",
+        "size": 913,
+        "tracked": false
+      },
+      "result": "Gem5 child diff check passed.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/child-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/child-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.hsaco",
+        "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.repro.hsaco",
+        "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.disasm",
+        "artifacts/evidence/CP-0012/toolchain/oclc_isa_version_950.bc"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "fixture-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/fixture-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "43ad6ec74e341d19060a5d3fec07d12dcc1fdf6e6334fa722e5a6e7b9de03ebd",
+        "size": 848,
+        "tracked": false
+      },
+      "result": "Generated gfx950 fixture and device-library identity hashes passed.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/fixture-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/gem5-tests/fixture-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "217cb13803ddc5bc06706c02973b687eaab8146fa4215fab28eeae78783b4c37",
+        "size": 500,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": "projects/gem5",
+  "ended_at": "2026-08-09T02:36:04+00:00",
+  "environment_fingerprint": {
+    "device_libs_tree": "9da20ec22ab6c7fe8b81693db14dfa17c901f483",
+    "llvm_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+    "mold_version": "2.40.4",
+    "scons_version": "4.10.1.055b01f429d58b686701a56df863a817c36bb103",
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4"
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0012/builds/gem5.opt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a594ee36ed413907c90bf1d0e895a058fa82d2258d68e73955c07fc7c40f4218",
+      "size": 1185783248,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/builds/gpu_decoder.test.opt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "aeba7d1b116c7bd672fec02f7a0bb4c7faf3dbab8fbb07537eefcac209e76632",
+      "size": 1187576608,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/gem5-mold24-final.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "fa8f5ac690d1f7d9ae9cd1d438784532aa22f53bb5f7a861c6f120b4a4ad49aa",
+      "size": 97885,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.hsaco",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b0e07d4d34826177f7261b706dc9bac139d7a59b5217e8094fa714371874efaf",
+      "size": 5672,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.repro.hsaco",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b0e07d4d34826177f7261b706dc9bac139d7a59b5217e8094fa714371874efaf",
+      "size": 5672,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.disasm",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "358ffbd0d9770e355cb3362cfaa5a44fe7cdfc46bba659ef39a8bf99769ae184",
+      "size": 28534,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/toolchain/oclc_isa_version_950.bc",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "147f8be3572fa1b64e3379e2dcc1b3817619cdf5cbe047bf9ed9da9f93cd8860",
+      "size": 2948,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0030",
+  "limitations": [
+    "This checkpoint freezes a reproducible toolchain and decoder differential boundary only; it does not claim generic HSACO transport or gem5 execution of the generated image.",
+    "The runtime materializer copies a validated kernel code range locally; it does not map PT_LOAD segments, upload code, construct dynamic AQL/kernarg, or perform ISA admission.",
+    "The CP-0008 wire/bridge still carries the handwritten pinned fixture. HIP, OpenCL, Triton, PyTorch, vLLM, and model execution remain out of scope.",
+    "The pinned LLVM metadata contains the known gfx1250_revision anomaly; it is retained as a bounded compiler observation, not canonical gfx950 proof.",
+    "Runtime evidence covers the GCC and Clang ASan/UBSan static code-object matrices; shared-library ABI/package coverage for these new symbols remains a later gate."
+  ],
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T02:36:00+00:00",
+  "type": "gem5-codeobj-build"
+}

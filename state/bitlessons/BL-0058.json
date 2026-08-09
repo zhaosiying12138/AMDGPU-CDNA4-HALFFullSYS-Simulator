@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "docs/gem5-build.md",
+    "scripts/build_gem5_mold24.sh",
+    "state/evidence/EV-0030.json"
+  ],
+  "checkpoint_id": "CP-0012",
+  "conclusion": "The native SCons mold selector and -j24 setting make a link reproducible and auditable, but do not by themselves establish a runtime performance improvement.",
+  "confidence": "high",
+  "decision": "Keep the exact argv, tool versions, freshness chain, and final binary identity as acceptance evidence; treat performance as a separate measured gate.",
+  "evidence_ids": [
+    "EV-0030",
+    "EV-0032"
+  ],
+  "id": "BL-0058",
+  "invalidated_assumptions": [
+    "A faster linker invocation is automatically a simulator performance result."
+  ],
+  "observation": "The frozen gem5 link completed with native --linker=mold and 24 SCons jobs, while the retained evidence separately records binary identity and source-to-object freshness.",
+  "question_or_symptom": "How should a slow gem5 link be accelerated without losing provenance?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

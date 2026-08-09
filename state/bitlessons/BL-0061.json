@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/llvm-project/llvm/lib/Target/AMDGPU/GCNSubtarget.cpp",
+    "state/evidence/EV-0031.json"
+  ],
+  "checkpoint_id": "CP-0012",
+  "conclusion": "The pinned compiler's gfx1250_revision metadata anomaly must remain explicit and cannot be silently treated as canonical gfx950 metadata.",
+  "confidence": "high",
+  "decision": "Carry the anomaly as a bounded limitation and require a later compiler metadata policy or fix before broad code-object claims.",
+  "evidence_ids": [
+    "EV-0031",
+    "EV-0032"
+  ],
+  "id": "BL-0061",
+  "invalidated_assumptions": [
+    "Every metadata key emitted for a gfx950 object is necessarily a gfx950-specific feature."
+  ],
+  "observation": "The pinned LLVM output contains .gfx1250_revision: B0 even though the ELF target is gfx950; the source path and output are retained for later triage.",
+  "question_or_symptom": "Can the generated metadata be used as an unqualified gfx950 ABI contract?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

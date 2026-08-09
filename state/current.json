@@ -1,9 +1,9 @@
 {
-  "checkpoint_id": "CP-0011",
-  "checkpoint_sha256": "2a90593952d60712c437266820f4b15b306e72236456792092e1b6a98a12fc9b",
+  "checkpoint_id": "CP-0012",
+  "checkpoint_sha256": "eacba1796413f0fc5f75cd2e33a30349122d94399d86ef66bfc5cf1750e20e09",
   "goal_id": "GSIM-001",
-  "next_action_id": "P3-CODEOBJ-02",
-  "next_action_summary": "Build and freeze the pinned gfx950 toolchain/device-libs output and prove gem5 decoder execution equivalence.",
+  "next_action_id": "P3-CODEOBJ-03",
+  "next_action_summary": "Implement versioned HSACO transport, PT_LOAD mapping, dynamic AQL/kernarg, and one real gfx950 code-object execution path.",
   "phase_id": "P3",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,

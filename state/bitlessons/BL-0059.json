@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "projects/gem5/src/arch/amdgpu/vega/gpu_decoder.cc",
+    "projects/gem5/src/arch/amdgpu/vega/gpu_decoder.test.cc",
+    "state/evidence/EV-0030.json"
+  ],
+  "checkpoint_id": "CP-0012",
+  "conclusion": "Recycled gfx950 literal-FMA opcode slots require architecture-specific aliases and a reset of shared decoder overrides before every ISA selection.",
+  "confidence": "high",
+  "decision": "Keep gfx942/gfx950 fixups bounded to the documented primary slots and exercise mixed ISA selection order in a regression test.",
+  "evidence_ids": [
+    "EV-0030",
+    "EV-0032"
+  ],
+  "id": "BL-0059",
+  "invalidated_assumptions": [
+    "A static decoder table can retain the previous ISA's recycled opcode mappings safely."
+  ],
+  "observation": "The decoder test passes gfx950, gfx942, and gfx90a in sequence and verifies both literal-FMA aliases and restored legacy slots.",
+  "question_or_symptom": "Why can a decoder pass one ISA test and still misdecode a later ISA in the same process?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

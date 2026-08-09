@@ -1,0 +1,26 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/code_object.h",
+    "projects/self-amdgpu-runtime/src/code_object.c",
+    "docs/host-transport-v1-codeobj.md",
+    "state/evidence/EV-0031.json"
+  ],
+  "checkpoint_id": "CP-0012",
+  "conclusion": "Parsing and caller-local copying of a selected HSACO code range is a metadata/materialization boundary, not code-object transport or gem5 execution.",
+  "confidence": "high",
+  "decision": "Keep PT_LOAD mapping, descriptor upload, dynamic AQL/kernarg construction, wire capability negotiation, and ISA execution as the next separate gate.",
+  "evidence_ids": [
+    "EV-0030",
+    "EV-0031",
+    "EV-0032"
+  ],
+  "id": "BL-0062",
+  "invalidated_assumptions": [
+    "A byte-exact local code copy proves that the existing handwritten CP-0008 bridge can execute the HSACO."
+  ],
+  "observation": "The runtime binding explicitly marks metadata-only and requires-code-object-transport flags, while the gem5 wire remains fixture-only and no PT_LOAD/AQL execution evidence exists.",
+  "question_or_symptom": "What does the new runtime API actually prove about HSACO execution?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

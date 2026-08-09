@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-09`
 
-**State at this commit:** `P3-CODEOBJ-01 accepted; next-P3-CODEOBJ-02`
+**State at this commit:** `P3-CODEOBJ-02 accepted; next-P3-CODEOBJ-03`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -327,6 +327,10 @@ LLVM/device-libs executable build, no gfx950-specific decoder feature proof,
 execution fixture is source-locked. `P3-CODEOBJ-02` must close those blockers
 with a reproducible toolchain/device-libs build, decoder differential proof,
 and a deterministic execution fixture before any HIP/OpenCL or Triton claim.
+All CP-0012 and later acceptance links of `build/VEGA_X86/gem5.opt` use the
+checked-in `scripts/build_gem5_mold24.sh` wrapper and the recorded
+`scons -j24 --linker=mold` procedure in `docs/gem5-build.md`; its exact argv,
+tool versions, freshness chain, and final binary hash are evidence.
 
 ### P4 — HIP and OpenCL host APIs
 
@@ -463,6 +467,7 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | P2-KMT-ABI-02 | P2 | Typed libhsakmt shim and versioned daemon KFD/DRM operation envelope |
 | P3-CODEOBJ-01 | P3 | Pinned gfx950 code-object and kernarg ABI fixtures |
 | P3-CODEOBJ-02 | P3 | Pinned toolchain/device-libs build and gfx950 decoder/execution proof |
+| P3-CODEOBJ-03 | P3 | Versioned HSACO transport, PT_LOAD mapping, dynamic AQL/kernarg, and gem5 execution |
 | P4-HIP-01 | P4 | Minimal transparent HIP/OpenCL launch surface |
 | P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
 | P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
@@ -649,6 +654,16 @@ device-libs build, gfx950 decoder proof, unsupported `v_fmamk_f32`, and missing
 reduction fixture as blockers. The next unique action is `P3-CODEOBJ-02`:
 freeze the compiler/device-libs output and prove decoder/execution equivalence
 before adding HIP/OpenCL or Triton launch claims.
+
+`CP-0012` is accepted at the bounded toolchain and decoder boundary. It records
+the pinned LLVM/device-libs build, two independent byte-identical gfx950
+device-library manifests and HSACO outputs, the native gem5
+`--linker=mold -j24` procedure, gfx942/gfx950 literal-FMA decoder aliases with
+ISA-table reset isolation, and runtime-local selected-kernel materialization.
+It does not claim HSACO upload, PT_LOAD mapping, dynamic AQL/kernarg creation,
+generic gem5 code-object execution, or HIP/OpenCL/Triton support. The next
+unique action is `P3-CODEOBJ-03`: add the versioned code-object transport and
+prove one real mapped gfx950 image through gem5.
 `SOURCE_LOCK.json` remains byte-immutable, and existing `PROJECT_LANES`
 declarations remain historically anchored and append-only.
 

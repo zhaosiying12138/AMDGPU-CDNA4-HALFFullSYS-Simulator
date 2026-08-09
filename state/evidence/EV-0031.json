@@ -1,0 +1,607 @@
+{
+  "checkpoint_id": "CP-0012",
+  "claim": "The runtime child validates and locally materializes the selected pinned gfx950 code ranges with GCC and Clang ASan/UBSan CTest coverage and reproducible device-library/HSACO identities.",
+  "command_argv": [
+    [
+      "ctest",
+      "--test-dir",
+      "build/cp11-codeobj-dev",
+      "--output-on-failure"
+    ],
+    [
+      "cmake",
+      "-E",
+      "env",
+      "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
+      "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1",
+      "ctest",
+      "--test-dir",
+      "build/cp11-codeobj-asan",
+      "--output-on-failure"
+    ],
+    [
+      "ninja",
+      "-C",
+      "build/cp11-codeobj-dev",
+      "-n"
+    ],
+    [
+      "ninja",
+      "-C",
+      "build/cp11-codeobj-asan",
+      "-n"
+    ],
+    [
+      "sha256sum",
+      "build/cp11-codeobj-dev/libself_amdgpu_runtime.a",
+      "build/cp11-codeobj-dev/sagr-handshake",
+      "build/cp11-codeobj-dev/tests/self_amdgpu_runtime_code_object_test",
+      "build/cp11-codeobj-asan/libself_amdgpu_runtime.a",
+      "build/cp11-codeobj-asan/tests/self_amdgpu_runtime_code_object_test"
+    ],
+    [
+      "sha256sum",
+      "artifacts/evidence/CP-0012/runtime/runtime-dev.a",
+      "artifacts/evidence/CP-0012/runtime/runtime-asan.a",
+      "artifacts/evidence/CP-0012/runtime/sagr-handshake",
+      "artifacts/evidence/CP-0012/runtime/code-object-test",
+      "artifacts/evidence/CP-0012/runtime/code-object-test-asan"
+    ],
+    [
+      "sha256sum",
+      "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.tracked.cl",
+      "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.generated.cl",
+      "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.hsaco",
+      "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.repro.hsaco"
+    ],
+    [
+      "sha256sum",
+      "artifacts/evidence/CP-0012/toolchain/device-libs.bitcode.sha256",
+      "artifacts/evidence/CP-0012/toolchain/device-libs-repro.bitcode.sha256",
+      "artifacts/evidence/CP-0012/toolchain/oclc_isa_version_950.bc"
+    ],
+    [
+      "sha256sum",
+      "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/code_object.h",
+      "projects/self-amdgpu-runtime/src/code_object.c",
+      "projects/self-amdgpu-runtime/tests/code_object_test.c"
+    ],
+    [
+      "git",
+      "-C",
+      "projects/self-amdgpu-runtime",
+      "diff",
+      "--check",
+      "--",
+      "include/self_amdgpu_runtime/code_object.h",
+      "src/code_object.c",
+      "tests/code_object_test.c"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build/cp11-codeobj-dev",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-09T02:36:03+00:00",
+      "exit_code": 0,
+      "id": "ctest-dev",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/ctest-dev.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6cb369c9e67a0ec8295630d9c988e48df49d2430c7aab88bffd24c5c7ceedcb1",
+        "size": 679,
+        "tracked": false
+      },
+      "result": "GCC runtime CTest passed 12/12.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/ctest-dev.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/ctest-dev.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "57b2008ad8b4124fb8335acbbd49098a4104f02522595d08c9567f2f54c4e35f",
+        "size": 1740,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "cmake",
+        "-E",
+        "env",
+        "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
+        "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1",
+        "ctest",
+        "--test-dir",
+        "build/cp11-codeobj-asan",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-09T02:36:04+00:00",
+      "exit_code": 0,
+      "id": "ctest-asan",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/ctest-asan.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6f0fd59d7d2e8403b12760eb2bb18fec87ba91b0d8a4cbb6eb7895a6f002ad1e",
+        "size": 823,
+        "tracked": false
+      },
+      "result": "Clang ASan/UBSan runtime CTest passed 12/12.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/ctest-asan.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/ctest-asan.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ceeaa83b064bce24dba9eeb8ec827409d1c2a77187a1373289c0ddc7fc4d25df",
+        "size": 1742,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ninja",
+        "-C",
+        "build/cp11-codeobj-dev",
+        "-n"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "dev-ninja-dry-run",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/dev-ninja-dry-run.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "cca24af9ef05bae2e7867d6e57419bc781db7360b145f6d1620dea6827c58931",
+        "size": 670,
+        "tracked": false
+      },
+      "result": "GCC build freshness dry-run showed only the intended CP-0012 code-object rebuild.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/dev-ninja-dry-run.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/dev-ninja-dry-run.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "60973ddab611b58793f1b0c8bf521a78745a0a4e38ff24f9dd60f25eaa3b42f5",
+        "size": 1076,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ninja",
+        "-C",
+        "build/cp11-codeobj-asan",
+        "-n"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-09T02:36:01+00:00",
+      "exit_code": 0,
+      "id": "asan-ninja-dry-run",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/asan-ninja-dry-run.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "58ae51871f8b1a93503cb297c7054ebc22f520ce051798b225055472aa87e8eb",
+        "size": 673,
+        "tracked": false
+      },
+      "result": "ASan/UBSan build freshness dry-run showed only the intended CP-0012 code-object rebuild.",
+      "started_at": "2026-08-09T02:36:01+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/asan-ninja-dry-run.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/asan-ninja-dry-run.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "78e4611d876ffd8ecfe911fc7d6fe42af587324b1e4e70aed5e481e777ac5d1e",
+        "size": 1033,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "build/cp11-codeobj-dev/libself_amdgpu_runtime.a",
+        "build/cp11-codeobj-dev/sagr-handshake",
+        "build/cp11-codeobj-dev/tests/self_amdgpu_runtime_code_object_test",
+        "build/cp11-codeobj-asan/libself_amdgpu_runtime.a",
+        "build/cp11-codeobj-asan/tests/self_amdgpu_runtime_code_object_test"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "current-artifact-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/current-artifact-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "75735d8789f0001063f21802312b009cb88ca859c4a43109e7c1b35c510ff132",
+        "size": 938,
+        "tracked": false
+      },
+      "result": "Current runtime static and sanitizer artifact hashes passed.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/current-artifact-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/current-artifact-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6df0d220ad96d0435d3706f1ea09148ce8b211fe345043f157916b361c7a65de",
+        "size": 598,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "artifacts/evidence/CP-0012/runtime/runtime-dev.a",
+        "artifacts/evidence/CP-0012/runtime/runtime-asan.a",
+        "artifacts/evidence/CP-0012/runtime/sagr-handshake",
+        "artifacts/evidence/CP-0012/runtime/code-object-test",
+        "artifacts/evidence/CP-0012/runtime/code-object-test-asan"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "final-artifact-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/final-artifact-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9519341e4179e422a3c8e7cb1817f7b0388f5b02ed27ac4d8b0590abeec29ed6",
+        "size": 897,
+        "tracked": false
+      },
+      "result": "Retained runtime artifact copies match their recorded hashes.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/final-artifact-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/final-artifact-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "030787bebd402a13b1dca17c9de99b7df13159332976e258eeb1dd582b821bad",
+        "size": 588,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.tracked.cl",
+        "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.generated.cl",
+        "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.hsaco",
+        "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.repro.hsaco"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:01+00:00",
+      "exit_code": 0,
+      "id": "fixture-identity",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/fixture-identity.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "08a9f0917b1e46177fbe73c6aef63aee2cc7961cbbea383083bfcc5a75ad9d62",
+        "size": 864,
+        "tracked": false
+      },
+      "result": "Tracked/generated gfx950 vecadd fixture identities passed.",
+      "started_at": "2026-08-09T02:36:01+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/fixture-identity.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/fixture-identity.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1354143829fd88cb52a2f1a895440a2544b3b679943f21de7792364c91d85673",
+        "size": 506,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "artifacts/evidence/CP-0012/toolchain/device-libs.bitcode.sha256",
+        "artifacts/evidence/CP-0012/toolchain/device-libs-repro.bitcode.sha256",
+        "artifacts/evidence/CP-0012/toolchain/oclc_isa_version_950.bc"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:01+00:00",
+      "exit_code": 0,
+      "id": "toolchain-manifest-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/toolchain-manifest-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b5682e826ff63c31dcc2ba137b0c9af13e98ce13999cf8f2d2f1d818df1532d9",
+        "size": 828,
+        "tracked": false
+      },
+      "result": "Two independent 74-file device-library manifests are byte-identical.",
+      "started_at": "2026-08-09T02:36:01+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/toolchain-manifest-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/toolchain-manifest-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "033a4744b5e0ab38a7cc0788738fdebafe04ef6304351cffbe11f15c7fa59504",
+        "size": 393,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/code_object.h",
+        "projects/self-amdgpu-runtime/src/code_object.c",
+        "projects/self-amdgpu-runtime/tests/code_object_test.c"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "source-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/source-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b5c36f47a630a3d334d854f70849ea268cbb2e5f98ab419557af34e52972d89e",
+        "size": 781,
+        "tracked": false
+      },
+      "result": "Runtime CP-0012 source file hashes recorded.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/source-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/source-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "686f76c6e11090ba0dd5c0dd783e18dbc6d235e10f490cc9ca2bd2aeb3f24856",
+        "size": 370,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "projects/self-amdgpu-runtime",
+        "diff",
+        "--check",
+        "--",
+        "include/self_amdgpu_runtime/code_object.h",
+        "src/code_object.c",
+        "tests/code_object_test.c"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:36:00+00:00",
+      "exit_code": 0,
+      "id": "child-diff-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/child-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "fc1896211f4d91115b8eb8e80dfaea8f4fbeaf121fe5f4bcbb044cb0564aecc8",
+        "size": 775,
+        "tracked": false
+      },
+      "result": "Runtime child diff check passed.",
+      "started_at": "2026-08-09T02:36:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/child-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/runtime-tests/child-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": "projects/self-amdgpu-runtime",
+  "ended_at": "2026-08-09T02:36:04+00:00",
+  "environment_fingerprint": {
+    "device_libs_tree": "9da20ec22ab6c7fe8b81693db14dfa17c901f483",
+    "llvm_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+    "mold_version": "2.40.4",
+    "scons_version": "4.10.1.055b01f429d58b686701a56df863a817c36bb103",
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4"
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0012/runtime/runtime-dev.a",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d10bff7083925488f4798c405ae9c2ef5fe477ee8b487dea038baa798bfe2cd1",
+      "size": 488864,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/runtime/runtime-asan.a",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5a69b27841bcf28908f71dc221e169fc5fc28a5ab459247ef942fbcd0eddeacc",
+      "size": 2543516,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/runtime/sagr-handshake",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "dc36f187240e359c72d0427025bb1cd95a6aa4c17a9cc67264d7583e306c90e0",
+      "size": 276248,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/runtime/code-object-test",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "2ed65d2d8c100c27f0e5f43d8d16b3e69068ac6288a1fe1663daa32b0ee86b05",
+      "size": 61080,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/runtime/code-object-test-asan",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a9261ada1bb44ea7d275bad4db5448a86cefdb16ca25d5a6b61d57cd4cc8bc0e",
+      "size": 1996976,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.tracked.cl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ccf18f38859d161c38979b201965f042a6fcd1641d5feb922a320837d360cdb1",
+      "size": 236,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.generated.cl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b0c093c9c54cd3717f71a031a29d55db02907bae86d1244e6a4a314b1c1c5197",
+      "size": 158,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.hsaco",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b0e07d4d34826177f7261b706dc9bac139d7a59b5217e8094fa714371874efaf",
+      "size": 5672,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/fixtures/vecadd-gfx950.repro.hsaco",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b0e07d4d34826177f7261b706dc9bac139d7a59b5217e8094fa714371874efaf",
+      "size": 5672,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/toolchain/device-libs.bitcode.sha256",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1da876da7c80aa22c12f8a39efc988e38d3cfa3c482ee6a0d6d011578b13b091",
+      "size": 7939,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/toolchain/device-libs-repro.bitcode.sha256",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1da876da7c80aa22c12f8a39efc988e38d3cfa3c482ee6a0d6d011578b13b091",
+      "size": 7939,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0012/toolchain/oclc_isa_version_950.bc",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "147f8be3572fa1b64e3379e2dcc1b3817619cdf5cbe047bf9ed9da9f93cd8860",
+      "size": 2948,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0031",
+  "limitations": [
+    "This checkpoint freezes a reproducible toolchain and decoder differential boundary only; it does not claim generic HSACO transport or gem5 execution of the generated image.",
+    "The runtime materializer copies a validated kernel code range locally; it does not map PT_LOAD segments, upload code, construct dynamic AQL/kernarg, or perform ISA admission.",
+    "The CP-0008 wire/bridge still carries the handwritten pinned fixture. HIP, OpenCL, Triton, PyTorch, vLLM, and model execution remain out of scope.",
+    "The pinned LLVM metadata contains the known gfx1250_revision anomaly; it is retained as a bounded compiler observation, not canonical gfx950 proof.",
+    "Runtime evidence covers the GCC and Clang ASan/UBSan static code-object matrices; shared-library ABI/package coverage for these new symbols remains a later gate."
+  ],
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T02:36:00+00:00",
+  "type": "runtime-codeobj-materializer"
+}

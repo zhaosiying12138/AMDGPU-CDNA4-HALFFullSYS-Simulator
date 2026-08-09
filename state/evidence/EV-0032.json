@@ -1,0 +1,285 @@
+{
+  "checkpoint_id": "CP-0012",
+  "claim": "The CP-0012 umbrella binds the mold/24 gem5 link method, pinned gfx950 toolchain/device-library reproducibility, decoder differential evidence, and the runtime metadata/materialization boundary without overclaiming generic code-object execution.",
+  "command_argv": [
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "-q",
+      "tests/test_host_transport_codeobj_spec.py"
+    ],
+    [
+      "bash",
+      "-c",
+      "git -C projects/gem5 rev-parse HEAD HEAD^{tree}; git -C projects/self-amdgpu-runtime rev-parse HEAD HEAD^{tree}"
+    ],
+    [
+      "bash",
+      "-c",
+      "test -z \"\"; test -z \"\"; printf 'gem5=clean\\nruntime=clean\\n'"
+    ],
+    [
+      "python3",
+      "scripts/transaction.py",
+      "status"
+    ],
+    [
+      "sha256sum",
+      "PLAN.md",
+      "README.md",
+      "GOAL.md",
+      "docs/gem5-build.md",
+      "scripts/build_gem5_mold24.sh",
+      "scripts/build_gfx950_toolchain.sh",
+      "tests/fixtures/gfx950/vecadd.cl"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "-q",
+        "tests/test_host_transport_codeobj_spec.py"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:33:01+00:00",
+      "exit_code": 0,
+      "id": "root-codeobj-spec",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/root-codeobj-spec.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2eacf794aca5ce69b4c9620579ac91f53d22a3b0d3f19cd961464334d6f3e39a",
+        "size": 650,
+        "tracked": false
+      },
+      "result": "Root code-object authority regression passed 13/13.",
+      "started_at": "2026-08-09T02:33:01+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/root-codeobj-spec.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "553be79cec3dc2c1731edd3c742168c6c9e297ad5cf7729bfde14d1e89d91751",
+        "size": 98,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/root-codeobj-spec.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "git -C projects/gem5 rev-parse HEAD HEAD^{tree}; git -C projects/self-amdgpu-runtime rev-parse HEAD HEAD^{tree}"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:44:50+00:00",
+      "exit_code": 0,
+      "id": "umbrella-child-identities",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/umbrella-child-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d5f357c601e4c94aea70b83455de87a825b40e2039403621dc7bcc9113667ffa",
+        "size": 708,
+        "tracked": false
+      },
+      "result": "Recorded CP-0012 child heads and trees match the transaction journal.",
+      "started_at": "2026-08-09T02:44:50+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/umbrella-child-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/umbrella-child-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "99d961e4d7f5cef1a8090b4f8ba9093ee5bd286cd1df8a4f142846ece53b9eab",
+        "size": 164,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "test -z \"\"; test -z \"\"; printf 'gem5=clean\\nruntime=clean\\n'"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:44:50+00:00",
+      "exit_code": 0,
+      "id": "umbrella-child-status",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/umbrella-child-status.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "646b80428674b9ea7858b8265c8509366aa794e55da488c3e01e36e0d2c1b43a",
+        "size": 654,
+        "tracked": false
+      },
+      "result": "Both CP-0012 child worktrees are clean after the consolidated commits.",
+      "started_at": "2026-08-09T02:44:50+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/umbrella-child-status.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/umbrella-child-status.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4c1551f530b35f7254ce8141e98702e0adbe3a3df53ab039c1fedf6f5b4c5259",
+        "size": 25,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "scripts/transaction.py",
+        "status"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:44:50+00:00",
+      "exit_code": 0,
+      "id": "umbrella-transaction-status",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/umbrella-transaction-status.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ad2181960a4cec4a04923de75426ccba272e71235ca8f20fea9bb94eedb026d8",
+        "size": 629,
+        "tracked": false
+      },
+      "result": "The CP-0012 journal remains in prepare after child recording, before root finalization.",
+      "started_at": "2026-08-09T02:44:50+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/umbrella-transaction-status.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/umbrella-transaction-status.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0b555f9d313f4d95d583dad392511e1a57d883005452fc647533c98943161e66",
+        "size": 77,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "PLAN.md",
+        "README.md",
+        "GOAL.md",
+        "docs/gem5-build.md",
+        "scripts/build_gem5_mold24.sh",
+        "scripts/build_gfx950_toolchain.sh",
+        "tests/fixtures/gfx950/vecadd.cl"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T02:47:19+00:00",
+      "exit_code": 0,
+      "id": "umbrella-root-doc-hashes-final",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0012/umbrella-root-doc-hashes-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "62fb05a96f32bb5c326f8dc6a2f58fd4cf77c3bfdc78d4445e864bf3afb42cec",
+        "size": 783,
+        "tracked": false
+      },
+      "result": "Final CP-0012 root docs, wrapper, toolchain helper, and tracked fixture hashes captured before staging.",
+      "started_at": "2026-08-09T02:47:19+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0012/umbrella-root-doc-hashes-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0012/umbrella-root-doc-hashes-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f767b80a9d7ffc5a12a8906b0daede1f3ca61d46c552fcd8bdd9d78b594f7769",
+        "size": 602,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T02:47:19+00:00",
+  "environment_fingerprint": {
+    "child_transaction_phase": "children_recorded",
+    "device_libs_tree": "9da20ec22ab6c7fe8b81693db14dfa17c901f483",
+    "gem5_build_doc_sha256": "a6affa4ccaefb2c6ce9099c4a9f1692da4785bab8258e80e2a7445b17d2ca761",
+    "gem5_head": "3938af681bfe39c4933fa031af27f9c2b81c82c8",
+    "gem5_tree": "b2424adfc03f588393bb2083bb8148d4dc17611f",
+    "gem5_wrapper_sha256": "2bc2a7052b32cfe2db91ad790a1625e1c83157a3604c635e05cd05ebb59919f5",
+    "goal_sha256": "1c2ecab08f8e79fce72308376b92a22ce4d310fb93d77b33795b65f5f81a59d6",
+    "llvm_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+    "mold_version": "2.40.4",
+    "next_action_id": "P3-CODEOBJ-03",
+    "plan_sha256": "39dec7b521dd51b18b48279cc68649bd1d4b8e503f81aaf2110563208e2a5f42",
+    "readme_sha256": "ae5bdb1972c1ccc7dd048c68f3445456858d744b6a0cdf1293a38b226020a085",
+    "runtime_head": "f99a9a7e7e90dfec067f4f42d90f0c44d14f6729",
+    "runtime_tree": "89bc56d529a47dbd21b9c4ec5ce7d67e04a8a9",
+    "scons_version": "4.10.1.055b01f429d58b686701a56df863a817c36bb103",
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "transaction_phase": "prepare"
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0012/gem5-mold24-final.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "fa8f5ac690d1f7d9ae9cd1d438784532aa22f53bb5f7a861c6f120b4a4ad49aa",
+      "size": 97885,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0032",
+  "includes": {
+    "EV-0030": "307182afe3619f804430c4e7598103444da0ebc757230cd4c8005229764ac592",
+    "EV-0031": "874c83ad5e6ef26f058071bf80cb3e13ec4f56bbf358b4644d6ab5a9bdf83561"
+  },
+  "limitations": [
+    "This checkpoint freezes a reproducible toolchain and decoder differential boundary only; it does not claim generic HSACO transport or gem5 execution of the generated image.",
+    "The runtime materializer copies a validated kernel code range locally; it does not map PT_LOAD segments, upload code, construct dynamic AQL/kernarg, or perform ISA admission.",
+    "The CP-0008 wire/bridge still carries the handwritten pinned fixture. HIP, OpenCL, Triton, PyTorch, vLLM, and model execution remain out of scope.",
+    "The pinned LLVM metadata contains the known gfx1250_revision anomaly; it is retained as a bounded compiler observation, not canonical gfx950 proof.",
+    "Runtime evidence covers the GCC and Clang ASan/UBSan static code-object matrices; shared-library ABI/package coverage for these new symbols remains a later gate.",
+    "Root coordinator staging and transaction finalization remain pending; child targets are recorded and clean."
+  ],
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T02:33:01+00:00",
+  "type": "cp12-umbrella"
+}

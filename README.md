@@ -35,6 +35,9 @@ state of multiple gem5 daemon instances without probing physical GPUs.
 Read [PLAN.md](PLAN.md) for the complete staged plan and [GOAL.md](GOAL.md) for
 the immutable acceptance anchor.  A blank-context handoff starts with:
 
+Gem5 acceptance builds use the recorded mold/24-job procedure in
+[docs/gem5-build.md](docs/gem5-build.md).
+
 ```text
 继续执行 amdgpu-sim 计划。从 checkpoint 指定的下一条唯一动作继续：先读取
 PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、最新 checkpoint 和
@@ -86,9 +89,13 @@ The runtime validates the two tracked gfx950 ELF V6 images, MsgPack metadata,
 PT_LOAD/relocation structure, exact descriptor and code symbols, hidden
 kernarg offsets, and 64-byte resource descriptors; gem5 binds the same
 provenance without embedding HSACO bytes. This is parser and provenance
-evidence only. The authority still blocks execution on the absent pinned
-LLVM/device-libs executable, missing gfx950 decoder feature proof, the
-`v_fmamk_f32` instruction in one fixture, and the lack of a source-locked
-reduction/vecadd execution fixture. The next action is `P3-CODEOBJ-02`.
+evidence only.
+
+`CP-0012` is now accepted as the pinned toolchain and decoder boundary. It
+records the reproducible device-libraries/HSACO identities, the native
+`mold`/24-job gem5 link method, gfx942/gfx950 decoder alias isolation, and
+runtime-local selected-kernel byte materialization. It still does not claim
+HSACO wire upload, PT_LOAD mapping, dynamic AQL/kernarg, or real gem5 execution;
+the next action is `P3-CODEOBJ-03`.
 
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

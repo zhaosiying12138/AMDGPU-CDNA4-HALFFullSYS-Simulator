@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "scripts/build_gfx950_toolchain.sh",
+    "tests/fixtures/gfx950/vecadd.cl",
+    "state/evidence/EV-0031.json"
+  ],
+  "checkpoint_id": "CP-0012",
+  "conclusion": "Toolchain reproducibility requires independent device-library manifests and byte-identical HSACO outputs, not only a successful compiler invocation.",
+  "confidence": "high",
+  "decision": "Retain both 74-file bitcode manifests and both independently produced gfx950 HSACO identities before promoting a compiler path.",
+  "evidence_ids": [
+    "EV-0031",
+    "EV-0032"
+  ],
+  "id": "BL-0060",
+  "invalidated_assumptions": [
+    "One successful device-library build is sufficient to prove deterministic code-object output."
+  ],
+  "observation": "The two independent device-library manifests and vecadd HSACO artifacts compare byte-for-byte, with the target ISA and ELF identity captured separately.",
+  "question_or_symptom": "How can generated gfx950 artifacts be shown to be reproducible rather than merely buildable?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}
