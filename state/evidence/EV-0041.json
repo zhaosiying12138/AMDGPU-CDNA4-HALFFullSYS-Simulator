@@ -1,0 +1,249 @@
+{
+  "checkpoint_id": "CP-0016",
+  "claim": "EV-0041 binds EV-0040 to the final clean gem5 and self-amdgpu-runtime child identities and the CP-0016 prepare journal. It proves only the host-native functional parity/state adapter and HSACO metadata probe boundary; it does not claim PT_LOAD mapping, AQL or GPU execution, Triton end-to-end execution, hardware, timing, or performance.",
+  "command_argv": [
+    [
+      "bash",
+      "-c",
+      "set -eu\nprintf '%s\\n' '== gem5 =='\ngit -C projects/gem5 rev-parse HEAD HEAD^{tree}\nprintf '%s\\n' '== self-amdgpu-runtime =='\ngit -C projects/self-amdgpu-runtime rev-parse HEAD HEAD^{tree}"
+    ],
+    [
+      "bash",
+      "-c",
+      "set -eu\ntest -z \"$(git -C projects/gem5 status --porcelain=v1 --untracked-files=all)\"\ntest -z \"$(git -C projects/self-amdgpu-runtime status --porcelain=v1 --untracked-files=all)\"\nprintf '%s\\n' 'gem5=clean'\nprintf '%s\\n' 'self-amdgpu-runtime=clean'"
+    ],
+    [
+      "python3",
+      "-c",
+      "import json,subprocess\nj=json.load(open(\".git/amdgpu-sim/txn/CP-0016.json\"))\nassert j[\"phase\"]==\"prepare\"\nexpected={\"gem5\":(\"d69dee63c79a9784d5fbccbd6740a300f986d6ed\",\"85ba92ca91589b6cf38c417a27649212ea5fcb25\"),\"self-amdgpu-runtime\":(\"7797360ea04e9c3576c5cc16cf829427e96d3d70\",\"64602386f81d7d27a555f1473b01f051b30c2276\")}\nassert set(j[\"expected_children\"])==set(expected)\nrows=[]\nfor name,(head,tree) in expected.items():\n p=j[\"expected_children\"][name][\"path\"]\n assert j[\"expected_children\"][name][\"head\"]==head and j[\"expected_children\"][name][\"tree\"]==tree\n actual_head=subprocess.check_output([\"git\",\"-C\",p,\"rev-parse\",\"HEAD\"],text=True).strip()\n actual_tree=subprocess.check_output([\"git\",\"-C\",p,\"rev-parse\",\"HEAD^{tree}\"],text=True).strip()\n status=subprocess.check_output([\"git\",\"-C\",p,\"status\",\"--porcelain=v1\",\"--untracked-files=all\"],text=True)\n assert (actual_head,actual_tree,status)==(head,tree,\"\")\n rows.append(f\"{name} head={head} tree={tree} clean\")\nprint(\"phase=prepare expected_children exact; \"+\"; \".join(rows))"
+    ],
+    [
+      "python3",
+      "-c",
+      "import subprocess\nexpected={\"Checkpoint-ID\":\"CP-0016\",\"Goal-ID\":\"GSIM-001\",\"Plan-Revision\":\"2\",\"Source-Lock-SHA256\":\"8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4\",\"Evidence-Manifest-SHA256\":\"f775b483fa49bcf1cd6b8bd81816741ad45f4cab62606ff7259d229340f30786\",\"Change-Kind\":\"code\"}\nfor path,baseline in ((\"projects/gem5\",\"cbf0eae213c5e39c727172b546434287d47b5bbe\"),(\"projects/self-amdgpu-runtime\",\"54f0badb0a30c486334f15daea252ab6b55dd9a5\")):\n text=subprocess.check_output([\"git\",\"-C\",path,\"log\",\"-1\",\"--format=%B\"],text=True)\n for key,value in expected.items(): assert f\"{key}: {value}\" in text,(path,key)\n assert f\"Baseline-Commit: {baseline}\" in text,path\nprint(\"child CP-0016 trailers match EV-0040 and frozen lane baselines\")"
+    ],
+    [
+      "python3",
+      "-c",
+      "import hashlib\np=\"state/evidence/EV-0040.json\"\nh=hashlib.sha256(open(p,\"rb\").read()).hexdigest()\nassert h==\"f775b483fa49bcf1cd6b8bd81816741ad45f4cab62606ff7259d229340f30786\", h\nprint(\"EV-0040=\"+h)"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "set -eu\nprintf '%s\\n' '== gem5 =='\ngit -C projects/gem5 rev-parse HEAD HEAD^{tree}\nprintf '%s\\n' '== self-amdgpu-runtime =='\ngit -C projects/self-amdgpu-runtime rev-parse HEAD HEAD^{tree}"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T11:10:59+00:00",
+      "exit_code": 0,
+      "id": "cp16-child-identities",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0016/cp16-child-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e51ed15191d2c1a63bb19a38741b06f35ef3422823437227dc46a8e1a943bda6",
+        "size": 782,
+        "tracked": false
+      },
+      "result": "The CP-0016 journal and both participant repositories resolve to the final clean child identities.",
+      "started_at": "2026-08-09T11:10:59+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0016/cp16-child-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0016/cp16-child-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4c94b1b9b9da0f24cfd465c9dc00dcafb37cd9012d879eab0b90e423714dddfe",
+        "size": 201,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "set -eu\ntest -z \"$(git -C projects/gem5 status --porcelain=v1 --untracked-files=all)\"\ntest -z \"$(git -C projects/self-amdgpu-runtime status --porcelain=v1 --untracked-files=all)\"\nprintf '%s\\n' 'gem5=clean'\nprintf '%s\\n' 'self-amdgpu-runtime=clean'"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T11:10:59+00:00",
+      "exit_code": 0,
+      "id": "cp16-child-clean",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0016/cp16-child-clean.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "18a7974a53b5063c0fbd7f62d17fc0794442578b2302ed1a5ec9c161d56822d6",
+        "size": 835,
+        "tracked": false
+      },
+      "result": "Both CP-0016 participant worktrees are clean, including untracked-file checks.",
+      "started_at": "2026-08-09T11:10:59+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0016/cp16-child-clean.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0016/cp16-child-clean.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e01744c33aca7ee4a701e2383f27fd768b72f0cde7ff57a41f46150804cebe9e",
+        "size": 37,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import json,subprocess\nj=json.load(open(\".git/amdgpu-sim/txn/CP-0016.json\"))\nassert j[\"phase\"]==\"prepare\"\nexpected={\"gem5\":(\"d69dee63c79a9784d5fbccbd6740a300f986d6ed\",\"85ba92ca91589b6cf38c417a27649212ea5fcb25\"),\"self-amdgpu-runtime\":(\"7797360ea04e9c3576c5cc16cf829427e96d3d70\",\"64602386f81d7d27a555f1473b01f051b30c2276\")}\nassert set(j[\"expected_children\"])==set(expected)\nrows=[]\nfor name,(head,tree) in expected.items():\n p=j[\"expected_children\"][name][\"path\"]\n assert j[\"expected_children\"][name][\"head\"]==head and j[\"expected_children\"][name][\"tree\"]==tree\n actual_head=subprocess.check_output([\"git\",\"-C\",p,\"rev-parse\",\"HEAD\"],text=True).strip()\n actual_tree=subprocess.check_output([\"git\",\"-C\",p,\"rev-parse\",\"HEAD^{tree}\"],text=True).strip()\n status=subprocess.check_output([\"git\",\"-C\",p,\"status\",\"--porcelain=v1\",\"--untracked-files=all\"],text=True)\n assert (actual_head,actual_tree,status)==(head,tree,\"\")\n rows.append(f\"{name} head={head} tree={tree} clean\")\nprint(\"phase=prepare expected_children exact; \"+\"; \".join(rows))"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T11:10:59+00:00",
+      "exit_code": 0,
+      "id": "cp16-journal-children-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0016/cp16-journal-children-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "cbc219eafd60f6f431c65aeade2b1f515ba8f98a6025d300199b99f302fc9c35",
+        "size": 1714,
+        "tracked": false
+      },
+      "result": "The CP-0016 prepare journal expected_children exactly matches both clean child HEAD/tree identities.",
+      "started_at": "2026-08-09T11:10:59+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0016/cp16-journal-children-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0016/cp16-journal-children-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "06805e9725146d9cab859efdf87d36e15663b775854072ffd0a0e6b9b6aa1a62",
+        "size": 261,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import subprocess\nexpected={\"Checkpoint-ID\":\"CP-0016\",\"Goal-ID\":\"GSIM-001\",\"Plan-Revision\":\"2\",\"Source-Lock-SHA256\":\"8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4\",\"Evidence-Manifest-SHA256\":\"f775b483fa49bcf1cd6b8bd81816741ad45f4cab62606ff7259d229340f30786\",\"Change-Kind\":\"code\"}\nfor path,baseline in ((\"projects/gem5\",\"cbf0eae213c5e39c727172b546434287d47b5bbe\"),(\"projects/self-amdgpu-runtime\",\"54f0badb0a30c486334f15daea252ab6b55dd9a5\")):\n text=subprocess.check_output([\"git\",\"-C\",path,\"log\",\"-1\",\"--format=%B\"],text=True)\n for key,value in expected.items(): assert f\"{key}: {value}\" in text,(path,key)\n assert f\"Baseline-Commit: {baseline}\" in text,path\nprint(\"child CP-0016 trailers match EV-0040 and frozen lane baselines\")"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T11:10:59+00:00",
+      "exit_code": 0,
+      "id": "cp16-trailers-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0016/cp16-trailers-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9ab00b3029e2a2be39ce7037561206e85f84e179c097fd195a866513c229f4a6",
+        "size": 1388,
+        "tracked": false
+      },
+      "result": "Both child commits carry CP-0016, GSIM-001, source-lock, EV-0040, and frozen lane baseline trailers.",
+      "started_at": "2026-08-09T11:10:59+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0016/cp16-trailers-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0016/cp16-trailers-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "bdbcf29b450956365637729114ad5fcace9de373ce942322b1402982cbec7873",
+        "size": 63,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import hashlib\np=\"state/evidence/EV-0040.json\"\nh=hashlib.sha256(open(p,\"rb\").read()).hexdigest()\nassert h==\"f775b483fa49bcf1cd6b8bd81816741ad45f4cab62606ff7259d229340f30786\", h\nprint(\"EV-0040=\"+h)"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T11:10:59+00:00",
+      "exit_code": 0,
+      "id": "cp16-included-evidence-sha",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0016/cp16-included-evidence-sha.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a395cd947fba1e565ef267a3806f00fed9fc9184a33cb4a27377df4052d9edc3",
+        "size": 809,
+        "tracked": false
+      },
+      "result": "The detailed EV-0040 manifest hash matches the included evidence file.",
+      "started_at": "2026-08-09T11:10:59+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0016/cp16-included-evidence-sha.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0016/cp16-included-evidence-sha.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f6faac6bb94c421afa96e1812882b6db78176b3c9369161cbeb501d684848fee",
+        "size": 73,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T11:10:59+00:00",
+  "environment_fingerprint": {
+    "checkpoint": "CP-0016",
+    "ev0040_sha256": "f775b483fa49bcf1cd6b8bd81816741ad45f4cab62606ff7259d229340f30786",
+    "gem5_head": "d69dee63c79a9784d5fbccbd6740a300f986d6ed",
+    "gem5_tree": "85ba92ca91589b6cf38c417a27649212ea5fcb25",
+    "runtime_head": "7797360ea04e9c3576c5cc16cf829427e96d3d70",
+    "runtime_tree": "64602386f81d7d27a555f1473b01f051b30c2276",
+    "transaction_phase": "prepare"
+  },
+  "exit_code": 0,
+  "external_artifacts": [],
+  "id": "EV-0041",
+  "includes": {
+    "EV-0040": "f775b483fa49bcf1cd6b8bd81816741ad45f4cab62606ff7259d229340f30786"
+  },
+  "limitations": [
+    "The journal is still in prepare before root staging and commit; root finalization remains pending.",
+    "Child identity evidence does not turn the functional oracle into a GPU pipeline or Triton execution claim."
+  ],
+  "redactions": [],
+  "result": "The final CP-0016 child identities, clean states, frozen baseline/trailer bindings, and included EV-0040 hash are consistent.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T11:10:59+00:00",
+  "type": "cp16-child-identity-umbrella"
+}

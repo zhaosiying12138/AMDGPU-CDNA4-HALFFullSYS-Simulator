@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0015-host-native-control-core-accepted; next-P3-HOST-NATIVE-03`
+**Current state:** `CP-0016-host-native-functional-parity-accepted; next-P3-HOST-NATIVE-03-A`
 
 **Current phase:** `P3`
 
@@ -81,7 +81,7 @@ advance a phase without a new checkpoint and root coordinator commit.
 继续执行 amdgpu-sim 计划。当前目录是 /home/zhaosiying/amdgpu-sim。
 先读取 PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、其引用的
 最新 checkpoint/bitlesson/evidence，运行 scripts/resume.sh --verify。
-CP-0015 host-native control-core/build boundary 已 accepted；从唯一 next_action `P3-HOST-NATIVE-03` 继续，不要再次
+CP-0016 host-native functional-parity boundary 已 accepted；从唯一 next_action `P3-HOST-NATIVE-03-A` 继续，不要再次
 begin CP-0014，也不要重做 bootstrap、source freeze、authored runtime
 baseline 或已通过的 CP4-CP9 gates，也不要修改已冻结的 SOURCE_LOCK.json
 或已登记的 PROJECT_LANES baseline。CP-0010 只实现 18 个 typed KMT
@@ -93,8 +93,10 @@ gem5 gfx950 decoder、unsupported opcode、pinned device-libs/toolchain proof
 已完成；CP-0013 A1 仅完成 versioned HSACO fixed-record transport/staging，
 不包含 PT_LOAD mapping、动态 AQL/kernarg 或真实 code-object execution。
 当前还没有任何 Triton 端到端通过案例。CP-0015 已完成 no-VEGA_X86
-control-core/build/audit 边界，但没有完成 code-object loader 或执行。下一步
-完成 host-native/gem5 loader parity，再以未修改 Triton vecadd 作为第一用户可见验收。
+control-core/build/audit 边界，CP-0016 又完成了复用既有 memory/queue/signal/dispatch
+state 的 functional parity adapter，但没有完成 PT_LOAD loader、动态 AQL/kernarg
+或 GPU instruction execution。下一步完成 host-native/gem5 loader parity，再以未修改
+Triton vecadd 作为第一用户可见验收。
 在 Triton 用户命令 `tutorial/01-vecadd.py`（当前 pinned checkout 中对应未修改的
 `python/tutorials/01-vector-add.py`）首次透明通过后，先完成可复现的 gem5
 算子 profile、80/20 优化和 threadblock host-parallel 正确性/可行性门禁，再
@@ -135,3 +137,16 @@ claim PT_LOAD mapping, code-object execution, Triton E2E, hardware, timing, or
 performance. The next unique action is `P3-HOST-NATIVE-03`: connect the
 existing runtime protocol and CP13 loader to this target and prove pinned
 gfx950 loader/dispatch parity.
+
+`CP-0016` is accepted at the first host-native functional-parity boundary. The
+new `HostNativeMemoryContext` reuses `HostGPUMemoryState` and the pinned
+dispatch state machine for GPU-VA range checks, functional copies, page leases,
+ownership authorization, and cleanup. Its standalone gfx950 fixture target
+passes the XOR oracle and negative/lifetime checks with `USE_X86_ISA=n`; the
+runtime probe recognizes two pinned gfx950 HSACO metadata records. This still
+does not map PT_LOAD segments, construct dynamic AQL/kernarg, connect
+HSAPacketProcessor/GPUDispatcher/ComputeUnit, execute an ISA kernel, or pass
+Triton. Triton end-to-end remains 0/1. The next unique action is
+`P3-HOST-NATIVE-03-A`: implement the bounded loader/translation/AQL adapter and
+compare it against the existing gem5 front-end before attempting the Triton
+launcher.

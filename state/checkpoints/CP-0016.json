@@ -1,0 +1,190 @@
+{
+  "baseline_commit_marker": "N/A",
+  "bitlesson_ids": [
+    "BL-0074",
+    "BL-0075",
+    "BL-0076"
+  ],
+  "bitlesson_sha256": {
+    "BL-0074": "0e3b45467f314bb06e0369dd47f45990b81da7358ac15dd6cd25040e830c50f2",
+    "BL-0075": "7c5635c30981014080ef981efd2f4bed3dde9cadec16a3c95ee854798e66c3d9",
+    "BL-0076": "9f84b214fee526597e24bcf686eea2051d9f73cb8689371489f74d584639cca4"
+  },
+  "blockers": [],
+  "change_kind": "code",
+  "changes": [
+    "Added HostNativeMemoryContext with GPU-VA range resolution, functional read/write, page leases, dispatch authorization, and explicit cleanup.",
+    "Reused HostGPUMemoryState, HostGPUQueueState, HostGPUSignalState, and HostGPUDispatchState in a standalone gfx950 pinned XOR parity executable before the USE_X86_ISA gate.",
+    "Added runtime HSACO metadata probe evidence for the two pinned gfx950 images and retained the Triton extension/launch boundary as not supported."
+  ],
+  "created_at": "2026-08-09T19:00:00+08:00",
+  "evidence_ids": [
+    "EV-0040",
+    "EV-0041"
+  ],
+  "evidence_manifest_id": "EV-0041",
+  "evidence_manifest_sha256": "2c4032bdb2bf4c31bc8f8e6b870aff5de67716ccc1e18c1244eb0a9c8871b64b",
+  "evidence_sha256": {
+    "EV-0040": "f775b483fa49bcf1cd6b8bd81816741ad45f4cab62606ff7259d229340f30786",
+    "EV-0041": "2c4032bdb2bf4c31bc8f8e6b870aff5de67716ccc1e18c1244eb0a9c8871b64b"
+  },
+  "goal_id": "GSIM-001",
+  "goal_sha256": "9f5e938fae8faa0edb77cad1d6bd2081c216332f754a81d22a536f95d664f48e",
+  "id": "CP-0016",
+  "limitations": [
+    "CP-0016 proves functional memory/dispatch parity and metadata recognition only. It does not map PT_LOAD segments, apply relocations, construct dynamic AQL/kernarg, submit a real queue, connect HSAPacketProcessor/GPUDispatcher/ComputeUnit, or execute an ISA kernel.",
+    "The standalone parity ELF is not a complete host-native GPU pipeline; the remaining Process/ThreadContext/SE-TLB dependency is explicitly retained as the next implementation boundary.",
+    "The two runtime probes are metadata-only and report execution_supported=false. Triton end-to-end remains 0/1 because the pinned extension is blocked by an LLVM TableGen lock mismatch and the environment has no HIP runtime/device.",
+    "No hardware, timing, performance, HIP, OpenCL, PyTorch, vLLM, or model claim is made."
+  ],
+  "next_action": {
+    "argv": [
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0017",
+      "--intent",
+      "Implement bounded PT_LOAD mapping, native translation, descriptor/entry validation, and dynamic AQL/kernarg parity over the CP16 host-native context",
+      "--participant",
+      "gem5=projects/gem5",
+      "--participant",
+      "self-amdgpu-runtime=projects/self-amdgpu-runtime"
+    ],
+    "cwd": ".",
+    "expected": "A locked zero-relocation gfx950 image is validated, mapped into host-native simulated pages, bound to a descriptor and dynamic AQL/kernarg record, and compared against the existing gem5 reference without x86 CPU/system objects or CPU fallback.",
+    "id": "P3-HOST-NATIVE-03-A",
+    "prerequisites": [
+      "CP-0016 root checkpoint is accepted and scripts/resume.sh --verify passes offline.",
+      "Both CP16 child commits and EV-0040/EV-0041 remain immutable.",
+      "The CP13 fixed-record transport and existing code-object parser remain the only ABI authority.",
+      "The adapter must retain atomic rollback and reject unsupported relocations/targets before any mapping or publish."
+    ],
+    "rollback_boundary": "Keep CP-0016 accepted and preserve the standalone parity executable, VEGA_X86 oracle, and metadata-only Triton probe if PT_LOAD, translation, or dynamic AQL validation fails."
+  },
+  "parent_checkpoint": "CP-0015",
+  "phase_id": "P3",
+  "plan_sha256": "4e3b61285b75655b1bb40d085e2619e672792667883b6507bea0f1081a6d5f52",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "administrative_git_dir": "modules/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "clean": true,
+      "head": "d69dee63c79a9784d5fbccbd6740a300f986d6ed",
+      "id": "gem5",
+      "path": "projects/gem5",
+      "tree": "85ba92ca91589b6cf38c417a27649212ea5fcb25"
+    },
+    {
+      "administrative_git_dir": "modules/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "clean": true,
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58"
+    },
+    {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "clean": true,
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489"
+    },
+    {
+      "administrative_git_dir": "modules/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "clean": true,
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "id": "triton",
+      "path": "projects/triton",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1"
+    },
+    {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "clean": true,
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315"
+    },
+    {
+      "administrative_git_dir": "modules/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "clean": true,
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "id": "vllm",
+      "path": "projects/vllm",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb"
+    },
+    {
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "clean": true,
+      "head": "7797360ea04e9c3576c5cc16cf829427e96d3d70",
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "tree": "64602386f81d7d27a555f1473b01f051b30c2276"
+    }
+  ],
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "root_parent_commit": "4089bb70ea9f94a25384ad8bb24869cf4450d687",
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "sequence": 16,
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "status": "accepted",
+  "validation": [
+    {
+      "command": "mold/24 standalone fixture build, audit, and self-test",
+      "cwd": ".",
+      "evidence_id": "EV-0040",
+      "exit_code": 0,
+      "result": "The host_gpu_native_fixture_core target builds with BUILD_GPU=y, BUILD_ISA=n, USE_X86_ISA=n; parity, negative-access, and page-lifetime checks pass and the ELF has no forbidden x86/pipeline symbols."
+    },
+    {
+      "command": "existing host state regressions",
+      "cwd": "projects/gem5",
+      "evidence_id": "EV-0040",
+      "exit_code": 0,
+      "result": "The rebuilt memory, dispatch, queue, and signal tests pass 8/12/12/12 cases; the retained CP15 eight-binary compatibility matrix remains green."
+    },
+    {
+      "command": "runtime HSACO metadata probe and CTest",
+      "cwd": ".",
+      "evidence_id": "EV-0040",
+      "exit_code": 0,
+      "result": "Runtime CTest passes 15/15 and both pinned gfx950 probes report metadata_only=true, execution_supported=false."
+    },
+    {
+      "command": "CP-0016 child/journal/evidence umbrella",
+      "cwd": ".",
+      "evidence_id": "EV-0041",
+      "exit_code": 0,
+      "result": "EV-0040 hash, both clean child HEAD/tree identities, CP16 trailers, and prepare journal expected_children are exact."
+    }
+  ]
+}

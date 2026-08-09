@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_fixture_main.cc",
+    "projects/gem5/src/dev/amdgpu/SConscript",
+    "state/evidence/EV-0040.json",
+    "state/evidence/EV-0041.json"
+  ],
+  "checkpoint_id": "CP-0016",
+  "conclusion": "Functional parity is a useful extraction gate, but it does not prove that the HSAPacketProcessor, GPUCommandProcessor, GPUDispatcher, or ComputeUnit can run without x86 Process/ThreadContext/SE-TLB dependencies.",
+  "confidence": "high",
+  "decision": "Retain the explicit fixture oracle and keep kernel_executed, gpu_pipeline_connected, cpu_fallback, and vega_x86 flags honest until a native translation and packet path is independently exercised.",
+  "evidence_ids": ["EV-0040", "EV-0041"],
+  "id": "BL-0075",
+  "invalidated_assumptions": [
+    "An x86-free control ELF automatically contains the reusable GPU execution pipeline.",
+    "A handwritten XOR result can stand in for an HSACO dispatch result."
+  ],
+  "observation": "The parity JSON explicitly reports kernel_executed=false and gpu_pipeline_connected=false, while the source audit retains the Process/ThreadContext/SE-TLB blocker.",
+  "question_or_symptom": "What evidence is required before calling the extracted binary a simulator rather than a control/state harness?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

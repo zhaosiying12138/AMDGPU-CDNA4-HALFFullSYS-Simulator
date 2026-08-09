@@ -48,13 +48,17 @@ execute kernels on the CPU.
    `System`/CPU/Ruby ports, production GPU DSOs, or device-node probes are
    required at runtime.
 3. Connect CP13 staged code objects to one reused GPU path and compare a pinned
-   gfx950 vecadd output and trace against the gem5 reference.
+   gfx950 vecadd output and trace against the gem5 reference. CP-0016 now
+   provides only the functional memory/dispatch parity adapter and metadata
+   probe; PT_LOAD mapping, native translation, and dynamic AQL/kernarg remain
+   the next gate.
 4. Run the unmodified pinned Triton tutorial through the normal launcher with
    only simulator device selection changed. Capture compiler, HSACO digest,
    transport, dispatch, output, and fallback-counter evidence.
 
-The first three gates are prerequisites for the Triton gate. No current
-checkpoint claims that any of them, or Triton end-to-end, has passed.
+The first three gates are prerequisites for the Triton gate. CP-0016 passes the
+functional parity sub-gate only; no current checkpoint claims PT_LOAD mapping,
+GPU instruction execution, or Triton end-to-end (currently 0/1).
 
 ## Non-goals
 

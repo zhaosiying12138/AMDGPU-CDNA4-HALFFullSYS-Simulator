@@ -1,0 +1,22 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/tools/sagr-triton-hsaco-probe.c",
+    "projects/triton",
+    "state/evidence/EV-0040.json"
+  ],
+  "checkpoint_id": "CP-0016",
+  "conclusion": "The current Triton boundary is metadata-only: the runtime can inspect pinned gfx950 HSACO images, but the normal Triton extension and HIP launch path are not yet available in this checkout.",
+  "confidence": "high",
+  "decision": "Keep Triton end-to-end at 0/1. First build the pinned Triton/LLVM pair or record a reproducible compile-only substitute, then implement PT_LOAD mapping, AQL/kernarg, and a simulator launcher before changing the user-facing claim.",
+  "evidence_ids": ["EV-0040", "EV-0041"],
+  "id": "BL-0076",
+  "invalidated_assumptions": [
+    "A parsed HSACO metadata record is equivalent to a launched Triton kernel.",
+    "An extension built from a different Triton/LLVM checkout can be reused as proof for the pinned checkout."
+  ],
+  "observation": "Two pinned gfx950 probes report metadata_only=true and execution_supported=false; the pinned Triton extension attempt stops at TritonGPUMemoryEffects.td because the available LLVM TableGen API is not the locked LLVM revision, and no HIP runtime/device is present.",
+  "question_or_symptom": "Why has no unmodified Triton vecadd case passed yet, and what is the next reproducible prerequisite?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

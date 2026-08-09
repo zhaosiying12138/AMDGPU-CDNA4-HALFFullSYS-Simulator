@@ -1,9 +1,9 @@
 {
-  "checkpoint_id": "CP-0015",
-  "checkpoint_sha256": "929184ae51c229be5ac3203678b0fef49167a57582444e4415e0faacffd5341c",
+  "checkpoint_id": "CP-0016",
+  "checkpoint_sha256": "9b8073cdc6607899f6f038c73f5f0230acd39b50cb1bb0a263bf26eb60baa511",
   "goal_id": "GSIM-001",
-  "next_action_id": "P3-HOST-NATIVE-03",
-  "next_action_summary": "Connect the accepted CP13 loader and runtime protocol to the host-native target and prove pinned gfx950 loader/dispatch parity; defer Triton execution claims.",
+  "next_action_id": "P3-HOST-NATIVE-03-A",
+  "next_action_summary": "Implement bounded PT_LOAD mapping, native translation, descriptor/entry validation, and dynamic AQL/kernarg parity over the CP16 host-native context; keep Triton execution claims deferred.",
   "phase_id": "P3",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,

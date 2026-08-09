@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_native_memory_context.hh",
+    "projects/gem5/src/dev/amdgpu/host_native_memory_context.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_memory_state.hh",
+    "projects/gem5/src/dev/amdgpu/host_gpu_memory_state.cc",
+    "state/evidence/EV-0040.json"
+  ],
+  "checkpoint_id": "CP-0016",
+  "conclusion": "A host-native functional address adapter can reuse the accepted sparse allocation and pinned dispatch state without introducing a second wire format.",
+  "confidence": "high",
+  "decision": "Keep GPU-VA range resolution, functional copies, page leases, dispatch authorization, and cleanup in a narrow HostNativeMemoryContext; preserve HostGPUMemoryState as the ownership and generation oracle.",
+  "evidence_ids": ["EV-0040", "EV-0041"],
+  "id": "BL-0074",
+  "invalidated_assumptions": [
+    "A host-native adapter must duplicate the existing memory and dispatch ledgers.",
+    "A successful byte copy is sufficient without explicit page lifetime and owner checks."
+  ],
+  "observation": "The fixture target passes GPU-VA range checks, unmapped/cross-allocation/foreign-writer rejection, Busy free protection, disconnect retention, and token cleanup while reusing the existing state classes.",
+  "question_or_symptom": "How can the physical host own simulated GPU memory without importing gem5 Process or x86 translation objects?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

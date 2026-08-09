@@ -126,4 +126,14 @@ GPU pipeline, Triton E2E, hardware, timing, or performance claim is made. The
 next action is `P3-HOST-NATIVE-03`, the pinned gfx950 loader/dispatch parity
 gate between the host-native and gem5 front-ends.
 
+`CP-0016` is accepted at the first functional-parity sub-gate of that
+workstream. It adds a standalone `host_gpu_native_fixture_core` that reuses the
+existing protocol, sparse memory, queue, signal, and pinned dispatch state, plus
+GPU-VA range access and page-lifetime leases. The gfx950 XOR fixture, negative
+access checks, and lifetime cleanup pass with `USE_X86_ISA=n`; the runtime probe
+recognizes the pinned HSACO metadata. This is not PT_LOAD mapping, dynamic
+AQL/kernarg construction, GPU pipeline execution, hardware validation, or
+Triton E2E. Triton remains 0/1, and the next action is
+`P3-HOST-NATIVE-03-A` for bounded loader/translation/AQL parity.
+
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-09`
 
-**State at this commit:** `P3-HOST-NATIVE-02 accepted; next-P3-HOST-NATIVE-03`
+**State at this commit:** `P3-HOST-NATIVE-03 parity sub-gate accepted; next-P3-HOST-NATIVE-03-A`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -471,6 +471,7 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | P3-HOST-NATIVE-01 | P3H | GPU/x86 dependency inventory, reusable-core boundary, and host-native compatibility contract |
 | P3-HOST-NATIVE-02 | P3H | Standalone no-VEGA_X86 build plus host event/memory/queue/signal adapter |
 | P3-HOST-NATIVE-03 | P3H | Pinned gfx950 loader/dispatch parity between host-native and gem5 front-ends |
+| P3-HOST-NATIVE-03-A | P3H | PT_LOAD mapping, native translation, dynamic AQL/kernarg, and parity execution prerequisite |
 | P4-HIP-01 | P4 | Minimal transparent HIP/OpenCL launch surface |
 | P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
 | P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
@@ -699,6 +700,16 @@ GPU pipeline, or pass Triton. The next unique action is
 `P3-HOST-NATIVE-03`: connect the accepted runtime protocol and CP13 loader to
 the target and prove pinned gfx950 loader/dispatch parity.
 
+`CP-0016` is accepted at the first functional-parity sub-gate of
+`P3-HOST-NATIVE-03`. It adds `HostNativeMemoryContext` and page-lifetime
+tokens while reusing the accepted sparse memory, queue, signal, and pinned
+dispatch state. The standalone gfx950 fixture target passes the XOR oracle,
+cross-allocation/unmapped/foreign-owner rejection, and cleanup lifetime checks;
+the runtime probe recognizes two pinned gfx950 HSACO metadata records. This
+does not map PT_LOAD segments, apply relocations, build dynamic AQL/kernarg,
+connect HSAPacketProcessor/GPUDispatcher/ComputeUnit, execute instructions, or
+pass Triton. The next unique action is `P3-HOST-NATIVE-03-A`.
+
 ### P3H - host-native simulator and first Triton gate
 
 The physical machine is already the host; launching a full `VEGA_X86` gem5
@@ -720,15 +731,18 @@ The work is staged as follows:
 2. `P3-HOST-NATIVE-02` is accepted by CP-0015: its standalone control core
    links without `VEGA_X86`/X86 ISA objects and passes no-x86/no-production-DSO
    audits, with direct and legacy state regressions retained.
-3. `P3-HOST-NATIVE-03` is the current action: connect the existing runtime protocol and CP13 code
-   object loader to that target. One pinned gfx950 image must load and produce
-   the same deterministic vecadd output/trace as the gem5 reference before
-   any broader API claim.
+3. `P3-HOST-NATIVE-03` is split into an explicit prerequisite. CP-0016 proves
+   only the functional memory/dispatch parity sub-gate. `P3-HOST-NATIVE-03-A`
+   must connect the CP13 staged image to bounded PT_LOAD mapping, native
+   translation, descriptor/entry validation, and dynamic AQL/kernarg assembly;
+   one pinned gfx950 image must then produce the same deterministic output and
+   trace as the gem5 reference before any broader API claim.
 4. `P3-TRITON-VECADD-01` runs the pinned, unmodified Triton tutorial request
    (`python/tutorials/01-vector-add.py`) through the normal Triton launcher,
    with simulator device selection only. It retains compiler, HSACO digest,
-   transport, dispatch, output, and CPU-fallback evidence. As of CP-0014 no
-   Triton end-to-end case has passed.
+   transport, dispatch, output, and CPU-fallback evidence. As of CP-0016 no
+   Triton end-to-end case has passed (0/1); the pinned Triton extension probe is
+   currently blocked by an LLVM TableGen lock mismatch and missing HIP runtime.
 
 This workstream is not a cycle-accurate replacement. Timing, wider operator
 coverage, host-parallel threadblocks, HIP/OpenCL, PyTorch, vLLM, and Qwen
