@@ -1,0 +1,448 @@
+{
+  "checkpoint_id": "CP-0017",
+  "claim": "EV-0042 records the bounded CP17-A host-native loader increment. It proves that a source-locked zero-relocation gfx950 HSACO can pass the existing CP13 code-object staging and validation path, materialize exact PT_LOAD file/BSS ranges into HostNativeMemoryContext, bind the descriptor and entry addresses, reject unsupported or malformed mappings before allocation, and release its allocation lifetime without VEGA_X86 or gem5 x86 CPU objects. It intentionally contains no final child HEAD/tree identity and makes no AQL, GPU instruction, Triton, PyTorch, vLLM, Qwen, timing, or performance claim.",
+  "command_argv": [
+    [
+      "bash",
+      "-lc",
+      "set -eu; GEM5_JOBS=24 scripts/build_gem5_mold24.sh build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt"
+    ],
+    [
+      "build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt",
+      "../rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco"
+    ],
+    [
+      "python3",
+      "projects/gem5/util/host_native/check_control_core.py",
+      "--profile",
+      "ptload",
+      "--build-opts",
+      "projects/gem5/build_opts/HOSTGPU_NATIVE_CONTROL",
+      "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; c=projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_control_core.opt; f=projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_fixture_core.opt; \"$c\"; python3 projects/gem5/util/host_native/check_control_core.py --profile control \"$c\"; \"$f\"; python3 projects/gem5/util/host_native/check_control_core.py --profile fixture \"$f\"; (cd projects/gem5 && python3 -m unittest -q util/host_native/test_check_boundary.py); printf \"%s\\n\" cp16_native_regressions=5/5"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; root=projects/gem5/build/VEGA_X86/dev/amdgpu; for test in host_gpu_protocol.test.opt host_gpu_code_object_state.test.opt host_gpu_memory_state.test.opt host_gpu_dispatch_state.test.opt host_gpu_queue_state.test.opt host_gpu_signal_state.test.opt host_gpu_kmt_state.test.opt host_gpu_socket_utils.test.opt; do printf \"== %s ==\\n\" \"$test\"; \"$root/$test\" --gtest_color=no; done; printf \"%s\\n\" legacy_state_regressions=8/8"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; b=projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt; file \"$b\"; stat -c \"size=%s mode=%A mtime=%y\" \"$b\"; readelf -n \"$b\" | rg \"Build ID\"; sha256sum \"$b\"; printf \"%s\\n\" \"== dynamic ==\"; ldd \"$b\"; printf \"%s\\n\" \"== forbidden undefined/defined ==\"; nm -C --undefined-only \"$b\" | rg -i \"X86ISA|BaseCPU|ThreadContext|Process|SETranslatingPortProxy|AMDGPUDevice|GPUDispatcher|HSAPacketProcessor|ComputeUnit|gem5::System|gem5::Process\" || true; nm -C --defined-only \"$b\" | rg -i \"X86ISA|BaseCPU|ThreadContext|Process|SETranslatingPortProxy|AMDGPUDevice|GPUDispatcher|HSAPacketProcessor|ComputeUnit|gem5::System|gem5::Process\" || true"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; b=projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt; for p in projects/gem5/src/dev/amdgpu/host_gpu_native_ptload_main.cc projects/gem5/src/dev/amdgpu/host_native_code_object_mapper.cc projects/gem5/src/dev/amdgpu/host_native_code_object_mapper.hh projects/gem5/src/dev/amdgpu/host_native_memory_context.cc projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.cc projects/gem5/src/dev/amdgpu/host_gpu_memory_state.cc; do test \"$b\" -nt \"$p\"; done; for o in projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_main.o projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_native_code_object_mapper.o projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_native_memory_context.o projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_code_object_state.o projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_memory_state.o; do test \"$b\" -nt \"$o\" || test \"$b\" -ef \"$o\"; done; stat -c \"%n %s %y\" \"$b\" projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_main.o projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_native_code_object_mapper.o; printf \"%s\\n\" source_object_binary_freshness=asserted"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; git -C projects/gem5 diff --check; printf \"%s\\n\" \"== status ==\"; git -C projects/gem5 status --short; printf \"%s\\n\" \"== tracked changed ==\"; git -C projects/gem5 diff --name-only; printf \"%s\\n\" \"== untracked ==\"; git -C projects/gem5 ls-files --others --exclude-standard; printf \"%s\\n\" \"== source sha256 ==\"; for f in src/dev/amdgpu/SConscript src/dev/amdgpu/host_gpu_code_object_state.cc src/dev/amdgpu/host_gpu_code_object_state.hh src/dev/amdgpu/host_gpu_memory_state.cc src/dev/amdgpu/host_gpu_memory_state.hh src/dev/amdgpu/host_native_memory_context.cc src/dev/amdgpu/host_native_memory_context.hh src/dev/amdgpu/host_native_code_object_mapper.cc src/dev/amdgpu/host_native_code_object_mapper.hh src/dev/amdgpu/host_gpu_native_ptload_main.cc util/host_native/check_control_core.py; do sha256sum \"projects/gem5/$f\"; done; printf \"%s\\n\" \"== build opts ==\"; cat projects/gem5/build_opts/HOSTGPU_NATIVE_CONTROL"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; sha256sum projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/binary_search_kernels.hsaco; readelf -lW projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco | sed -n \"1,45p\"; readelf -Ws projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco | rg \"gpuReadWrite|gpuReadWrite.kd\""
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; GEM5_JOBS=24 scripts/build_gem5_mold24.sh build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T13:02:22+00:00",
+      "exit_code": 0,
+      "id": "gem5-ptload-build",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-build.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2013fb7fb31e56d8681f642664d6e9f60ef578229581632fb1a8b5b02b11c18a",
+        "size": 705,
+        "tracked": false
+      },
+      "result": "The persisted mold/-j24 wrapper rebuilt the no-x86 host-native PT_LOAD target successfully.",
+      "started_at": "2026-08-09T13:02:19+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-build.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-build.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "428cd1cd676f7ec0d437ce2177fcae5addddef15c4b1d6d8b53c621d0b5b259a",
+        "size": 3986,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt",
+        "../rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T13:02:22+00:00",
+      "exit_code": 0,
+      "id": "gem5-ptload-self-test",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-self-test.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6e8a1989e74ea09385cb0e3d241ebcc58fb72314d389a9d1e793b65a45b144cb",
+        "size": 755,
+        "tracked": false
+      },
+      "result": "The staged gpuReadWrite HSACO round-trip materialized exact PT_LOAD tuples, copied file bytes, zero-filled BSS, and preserved descriptor-to-entry identity.",
+      "started_at": "2026-08-09T13:02:22+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-self-test.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-self-test.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5f6544af4c275b532456304dbec7239c7d6a1873a90790821483c27928e0a8ef",
+        "size": 764,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "projects/gem5/util/host_native/check_control_core.py",
+        "--profile",
+        "ptload",
+        "--build-opts",
+        "projects/gem5/build_opts/HOSTGPU_NATIVE_CONTROL",
+        "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T13:02:22+00:00",
+      "exit_code": 0,
+      "id": "gem5-ptload-audit",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-audit.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6fb959afca3217ef54d02026473f7190b3dd948c32be9461f39dcc5de19b418d",
+        "size": 826,
+        "tracked": false
+      },
+      "result": "The standalone ELF passed its build-option, dynamic dependency, symbol, schema, positive flag, and explicit no-AQL/no-execution audit.",
+      "started_at": "2026-08-09T13:02:22+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-audit.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-audit.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c608c89aab0f389ac6f5d75307f114fb94f43a5202a8e8d6e10a8e2d3c37950f",
+        "size": 1785,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; c=projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_control_core.opt; f=projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_fixture_core.opt; \"$c\"; python3 projects/gem5/util/host_native/check_control_core.py --profile control \"$c\"; \"$f\"; python3 projects/gem5/util/host_native/check_control_core.py --profile fixture \"$f\"; (cd projects/gem5 && python3 -m unittest -q util/host_native/test_check_boundary.py); printf \"%s\\n\" cp16_native_regressions=5/5"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T13:02:47+00:00",
+      "exit_code": 0,
+      "id": "gem5-cp16-native-regressions",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/gem5-cp16-native-regressions.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "17db89065d21199add172de2d517965897dd1ad8fee7717d0ad43bbd1b21c8f3",
+        "size": 1108,
+        "tracked": false
+      },
+      "result": "The CP15 control core, CP16 fixture parity target, both audits, and boundary unit tests remained green.",
+      "started_at": "2026-08-09T13:02:47+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/gem5-cp16-native-regressions.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3b16d42942d6d2f64427efbd0ab7d17d9a5f3699902ca1a21f5bdcffd4e491d6",
+        "size": 97,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/gem5-cp16-native-regressions.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8731cd11e687b9cb8a6ed52d5f7e9d54728c264951cace1b1b5c7d3039a359ff",
+        "size": 3292,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; root=projects/gem5/build/VEGA_X86/dev/amdgpu; for test in host_gpu_protocol.test.opt host_gpu_code_object_state.test.opt host_gpu_memory_state.test.opt host_gpu_dispatch_state.test.opt host_gpu_queue_state.test.opt host_gpu_signal_state.test.opt host_gpu_kmt_state.test.opt host_gpu_socket_utils.test.opt; do printf \"== %s ==\\n\" \"$test\"; \"$root/$test\" --gtest_color=no; done; printf \"%s\\n\" legacy_state_regressions=8/8"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T13:02:47+00:00",
+      "exit_code": 0,
+      "id": "gem5-legacy-regressions",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/gem5-legacy-regressions.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7aa574d9995ea3e92ffb9293ed26d8529ee50b881439005bd2e4be8d594253c2",
+        "size": 1033,
+        "tracked": false
+      },
+      "result": "All eight retained VEGA_X86 host protocol/state regression binaries passed without changing their execution path.",
+      "started_at": "2026-08-09T13:02:47+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/gem5-legacy-regressions.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/gem5-legacy-regressions.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "351346ba011f7968de99e3e30a6ea875d94fed95691004ddfec2b11509a9daae",
+        "size": 23137,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; b=projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt; file \"$b\"; stat -c \"size=%s mode=%A mtime=%y\" \"$b\"; readelf -n \"$b\" | rg \"Build ID\"; sha256sum \"$b\"; printf \"%s\\n\" \"== dynamic ==\"; ldd \"$b\"; printf \"%s\\n\" \"== forbidden undefined/defined ==\"; nm -C --undefined-only \"$b\" | rg -i \"X86ISA|BaseCPU|ThreadContext|Process|SETranslatingPortProxy|AMDGPUDevice|GPUDispatcher|HSAPacketProcessor|ComputeUnit|gem5::System|gem5::Process\" || true; nm -C --defined-only \"$b\" | rg -i \"X86ISA|BaseCPU|ThreadContext|Process|SETranslatingPortProxy|AMDGPUDevice|GPUDispatcher|HSAPacketProcessor|ComputeUnit|gem5::System|gem5::Process\" || true"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T13:02:47+00:00",
+      "exit_code": 0,
+      "id": "gem5-ptload-artifact",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-artifact.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2834e81c89f7df6398e348076d6ae4b0dceae0622471a59a81423b79385d382e",
+        "size": 1292,
+        "tracked": false
+      },
+      "result": "The PT_LOAD ELF identity, Build ID, SHA-256, dynamic dependencies, and forbidden symbol scans were retained.",
+      "started_at": "2026-08-09T13:02:47+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-artifact.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-artifact.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "89c4f9ecaefce7e82c9f77ff4b50b93d8fcfea58ed963b4cd04c2004fc15ef9b",
+        "size": 1094,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; b=projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt; for p in projects/gem5/src/dev/amdgpu/host_gpu_native_ptload_main.cc projects/gem5/src/dev/amdgpu/host_native_code_object_mapper.cc projects/gem5/src/dev/amdgpu/host_native_code_object_mapper.hh projects/gem5/src/dev/amdgpu/host_native_memory_context.cc projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.cc projects/gem5/src/dev/amdgpu/host_gpu_memory_state.cc; do test \"$b\" -nt \"$p\"; done; for o in projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_main.o projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_native_code_object_mapper.o projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_native_memory_context.o projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_code_object_state.o projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_memory_state.o; do test \"$b\" -nt \"$o\" || test \"$b\" -ef \"$o\"; done; stat -c \"%n %s %y\" \"$b\" projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_main.o projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_native_code_object_mapper.o; printf \"%s\\n\" source_object_binary_freshness=asserted"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T13:03:15+00:00",
+      "exit_code": 0,
+      "id": "gem5-ptload-freshness",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-freshness.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3fced946b4a798ea95096031368ad8ce950d9eed660424e16cc7a78474864088",
+        "size": 1829,
+        "tracked": false
+      },
+      "result": "Source, object, and final ELF mtimes established that the retained binary was rebuilt after the frozen CP17-A sources.",
+      "started_at": "2026-08-09T13:03:15+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-freshness.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-freshness.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b549fa7b18dcc950f8aab12a4068b7ddc0e0ebd9b7fe0244f9a00ceafc1392f2",
+        "size": 427,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; git -C projects/gem5 diff --check; printf \"%s\\n\" \"== status ==\"; git -C projects/gem5 status --short; printf \"%s\\n\" \"== tracked changed ==\"; git -C projects/gem5 diff --name-only; printf \"%s\\n\" \"== untracked ==\"; git -C projects/gem5 ls-files --others --exclude-standard; printf \"%s\\n\" \"== source sha256 ==\"; for f in src/dev/amdgpu/SConscript src/dev/amdgpu/host_gpu_code_object_state.cc src/dev/amdgpu/host_gpu_code_object_state.hh src/dev/amdgpu/host_gpu_memory_state.cc src/dev/amdgpu/host_gpu_memory_state.hh src/dev/amdgpu/host_native_memory_context.cc src/dev/amdgpu/host_native_memory_context.hh src/dev/amdgpu/host_native_code_object_mapper.cc src/dev/amdgpu/host_native_code_object_mapper.hh src/dev/amdgpu/host_gpu_native_ptload_main.cc util/host_native/check_control_core.py; do sha256sum \"projects/gem5/$f\"; done; printf \"%s\\n\" \"== build opts ==\"; cat projects/gem5/build_opts/HOSTGPU_NATIVE_CONTROL"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T13:03:16+00:00",
+      "exit_code": 0,
+      "id": "gem5-ptload-source",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-source.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8cb1a403713e387803a66609ec327c06e151433d3b05e4256e7c4bf62647036a",
+        "size": 1533,
+        "tracked": false
+      },
+      "result": "The exact nine-file source change set, source SHA-256 values, build options, status, and diff-check result were retained before child commit.",
+      "started_at": "2026-08-09T13:03:16+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-source.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-source.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "767668bf75a9a8f924567a5753950cf01bc29c335fbb70de07e09c0d5b259545",
+        "size": 2461,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; sha256sum projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/binary_search_kernels.hsaco; readelf -lW projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco | sed -n \"1,45p\"; readelf -Ws projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco | rg \"gpuReadWrite|gpuReadWrite.kd\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T13:03:16+00:00",
+      "exit_code": 0,
+      "id": "fixture-hash",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/fixture-hash.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ce3addcc2ddf497c397c6e8f63a7950ef7b40a8c7bd435ca32560b49ce34b4ba",
+        "size": 1091,
+        "tracked": false
+      },
+      "result": "The source-locked gfx950 fixture digests, gpuReadWrite program headers, and code/descriptor symbols matched the mapper oracle.",
+      "started_at": "2026-08-09T13:03:16+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/fixture-hash.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/fixture-hash.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6d66a0f38510b04fa3e53de6597f2382d94ff4d5a5859dbdd8107e922b399228",
+        "size": 2531,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T13:03:16+00:00",
+  "environment_fingerprint": {
+    "aql_submitted": false,
+    "checkpoint": "CP-0017",
+    "cpu_fallback": false,
+    "gem5_build_options": "BUILD_ISA=n; USE_X86_ISA=n; BUILD_GPU=y; VEGA_GPU_ISA=y",
+    "gem5_link_jobs": 24,
+    "gem5_linker": "mold",
+    "gem5_ptload_binary_sha256": "fe46e0538c85943a14af46a0f3315b8d57bfde167e73d1ff8e3203184deb093d",
+    "gem5_ptload_binary_size": 1471728,
+    "gfx950_binarySearch_hsaco_sha256": "cb415571319569f4cdc28872faa2155dfe12be06a8f75fe173df3486fdabc053",
+    "gfx950_gpuReadWrite_hsaco_sha256": "7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56",
+    "gpu_pipeline_connected": false,
+    "kernel_executed": false,
+    "legacy_state_regressions": "8/8",
+    "native_regressions": "5/5",
+    "ptload_cases": "1/1",
+    "qwen_inference_cases": "0/1",
+    "triton_e2e_cases": "0/1",
+    "vega_x86": false
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0017/gem5-builds/host_gpu_native_ptload_core.opt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "fe46e0538c85943a14af46a0f3315b8d57bfde167e73d1ff8e3203184deb093d",
+      "size": 1471728,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0042",
+  "includes": {},
+  "limitations": [
+    "Only the locked zero-relocation gpuReadWrite fixture is mapped; arbitrary relocations and untrusted general ELF loading remain rejected. The mapped VA is image-relative and segment permissions are not enforced.",
+    "The negative mapping cases prove pre-allocation rejection and unchanged allocation/lease counters; copy/zero failure rollback and cross-context teardown are not generic loader claims.",
+    "The mapper stops at functional bytes and descriptor/entry addresses. It does not construct kernarg or AQL, publish a queue, connect HSAPacketProcessor/GPUDispatcher/ComputeUnit, or execute ISA instructions.",
+    "The retained VEGA_X86 regressions are compatibility evidence for reused state machines, not a dependency of the host-native target.",
+    "Triton end-to-end and Qwen3.5-0.8B inference both remain 0/1; no full ROCm, OpenCL CTS, hardware, timing, or performance claim is made."
+  ],
+  "redactions": [],
+  "result": "The CP17-A PT_LOAD target builds with mold/24, passes staged-image, exact segment, BSS, descriptor-entry, pre-allocation rejection, lifetime, and no-x86 audits, and retains the CP16 native and VEGA_X86 state regressions. The next execution boundary remains dynamic kernarg/AQL and the real GPU pipeline.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T13:02:19+00:00",
+  "type": "cp17-host-native-ptload-mapping"
+}

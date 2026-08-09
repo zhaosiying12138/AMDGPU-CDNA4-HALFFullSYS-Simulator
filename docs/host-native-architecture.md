@@ -48,21 +48,24 @@ execute kernels on the CPU.
    `System`/CPU/Ruby ports, production GPU DSOs, or device-node probes are
    required at runtime.
 3. Connect CP13 staged code objects to one reused GPU path and compare a pinned
-   gfx950 vecadd output and trace against the gem5 reference. CP-0016 now
-   provides only the functional memory/dispatch parity adapter and metadata
-   probe; PT_LOAD mapping, native translation, and dynamic AQL/kernarg remain
-   the next gate.
+   gfx950 vecadd output and trace against the gem5 reference. CP-0016 provided
+   the functional memory/dispatch parity adapter and metadata probe. CP-0017-A
+   now stages the locked `gpuReadWrite` HSACO, copies exact PT_LOAD file bytes,
+   zero-fills BSS, and binds descriptor/entry addresses in a no-x86 target.
+   It is fixture-scoped and stops before native translation, dynamic
+   AQL/kernarg, queue submission, and instruction execution.
 4. Run the unmodified pinned Triton tutorial through the normal launcher with
    only simulator device selection changed. Capture compiler, HSACO digest,
    transport, dispatch, output, and fallback-counter evidence.
 
-The first three gates are prerequisites for the Triton gate. CP-0016 passes the
-functional parity sub-gate only; no current checkpoint claims PT_LOAD mapping,
-GPU instruction execution, or Triton end-to-end (currently 0/1).
+The first three gates are prerequisites for the Triton gate. CP-0017-A passes
+the bounded PT_LOAD staging sub-gate only; no current checkpoint claims GPU
+instruction execution or Triton end-to-end (currently 0/1). The next gate is
+native translation plus dynamic AQL/kernarg parity over the reused pipeline.
 
 ## Non-goals
 
 This workstream does not promise cycle accuracy, full ROCr/libhsakmt coverage,
-HIP/OpenCL compatibility, broad Triton operators, host-parallel threadblocks,
+full ROCm/OpenCL CTS, HIP/OpenCL compatibility, broad Triton operators, host-parallel threadblocks,
 PyTorch/vLLM execution, or performance improvement. Those remain separate
 checkpoints after the first deterministic vecadd differential result.

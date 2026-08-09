@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_memory_state.hh",
+    "projects/gem5/src/dev/amdgpu/host_gpu_memory_state.cc",
+    "projects/gem5/src/dev/amdgpu/host_native_memory_context.hh",
+    "projects/gem5/src/dev/amdgpu/host_native_memory_context.cc",
+    "state/evidence/EV-0042.json"
+  ],
+  "checkpoint_id": "CP-0017",
+  "conclusion": "Allocation lifetime must be decided by the shared memory ledger; a context-local lease count cannot safely authorize free when multiple host-native contexts reference the same allocation.",
+  "confidence": "high",
+  "decision": "Count functional page tokens globally in HostGPUMemoryState and reject unmap with Busy before releasing the mapper lease whenever any competing context or dispatch pin remains.",
+  "evidence_ids": ["EV-0042", "EV-0043"],
+  "id": "BL-0078",
+  "invalidated_assumptions": [
+    "One HostNativeMemoryContext can infer the complete allocation lease count.",
+    "It is safe to release a mapping lease before proving that allocation free will succeed."
+  ],
+  "observation": "The cross-context test exposed token collisions and an unretryable Busy free; the accepted implementation moves token identity/counting into the shared memory state and preserves the mapping until the final release succeeds.",
+  "question_or_symptom": "How can unmap remain retryable when another native context or dispatch still retains the allocation?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

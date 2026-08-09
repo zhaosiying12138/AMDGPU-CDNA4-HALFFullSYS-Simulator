@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-09`
 
-**State at this commit:** `P3-HOST-NATIVE-03 parity sub-gate accepted; next-P3-HOST-NATIVE-03-A`
+**State at this commit:** `P3-HOST-NATIVE-03-A PTLOAD staging accepted; next-P3-HOST-NATIVE-03-B`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -389,6 +389,23 @@ atomics, MFMA/GEMM, embedding, RMSNorm, MLP, RoPE, GDN, paged attention, logits,
 and sampling. Each entry keeps its compiler/runtime/simulator identity and
 falls back only by explicit unsupported status, never host arithmetic.
 
+For the official Qwen3.5-0.8B first gate, the generated local manifest is
+currently 15 text-only contracts covering embedding/LM head, RMSNorm, GDN
+convolution/post-prep/chunk/recurrent/norm/L2 families, six full-attention
+layers (QKV/QK norm/partial RoPE/KV cache), and dense MLP. The manifest and
+shape smoke are static source evidence only; they report `passed=false` while
+the AMD device runner is absent. Acceptance requires every listed contract to
+compile and execute on the host-native AMD path, with a differential oracle and
+zero CPU/NVIDIA fallback. Vision remains deferred and full ROCm/OpenCL CTS is
+not an acceptance prerequisite. The offline model preparation is pinned to
+revision `2fc06364715b967f1860aea9cf38778875588b17`; the single safetensors
+weight is `1,746,942,600` bytes with SHA-256
+`04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696`.
+The temporary pinned Triton/LLVM overlay has compile-only gfx950 vecadd
+HSACO SHA-256
+`ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e`;
+this artifact is not an execution result.
+
 ### P6 — PyTorch integration
 
 Build PyTorch against the compatible HIP ABI (with an isolated PrivateUse1
@@ -471,12 +488,14 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | P3-HOST-NATIVE-01 | P3H | GPU/x86 dependency inventory, reusable-core boundary, and host-native compatibility contract |
 | P3-HOST-NATIVE-02 | P3H | Standalone no-VEGA_X86 build plus host event/memory/queue/signal adapter |
 | P3-HOST-NATIVE-03 | P3H | Pinned gfx950 loader/dispatch parity between host-native and gem5 front-ends |
-| P3-HOST-NATIVE-03-A | P3H | PT_LOAD mapping, native translation, dynamic AQL/kernarg, and parity execution prerequisite |
+| P3-HOST-NATIVE-03-A | P3H | Fixture-scoped PT_LOAD staging, descriptor/entry binding, and lifetime checks |
+| P3-HOST-NATIVE-03-B | P3H | Native translation, dynamic AQL/kernarg, and one real pinned pipeline differential |
 | P4-HIP-01 | P4 | Minimal transparent HIP/OpenCL launch surface |
 | P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
 | P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
 | P5-PARALLEL-TB-01 | P5B | Safe serial-versus-parallel threadblock experiment |
 | P5-OPS-01 | P5C | Broader model-operator manifest and differential gates |
+| P5-QWEN35-OPS-01 | P5C | All 15 text-only Qwen3.5-0.8B operator contracts execute on AMD with no fallback |
 | P6-PYTORCH-01 | P6 | PyTorch eager/compile device foundation |
 | P7-VLLM-SINGLE-01 | P7 | Single-daemon Qwen model path |
 | P8-COLLECTIVE-01 | P8 | N-rank functional collective semantics |
@@ -710,6 +729,17 @@ does not map PT_LOAD segments, apply relocations, build dynamic AQL/kernarg,
 connect HSAPacketProcessor/GPUDispatcher/ComputeUnit, execute instructions, or
 pass Triton. The next unique action is `P3-HOST-NATIVE-03-A`.
 
+`CP-0017` is accepted at the bounded PT_LOAD staging sub-gate. Its no-x86
+`host_gpu_native_ptload_core` reuses the CP13 staged-image state and the
+`HostGPUMemoryState`/`HostNativeMemoryContext` ledgers to materialize the locked
+gfx950 `gpuReadWrite` image, check exact segment tuples, copy `filesz`, zero
+`memsz-filesz`, bind descriptor/entry addresses, and retain leases across Busy
+unmap attempts. The negative cases are pre-allocation malformed/unsupported
+rejections; the mapper is fixture-scoped and does not enforce segment
+permissions, apply relocations, construct kernarg/AQL, submit a queue, or
+execute instructions. The next unique action is
+`P3-HOST-NATIVE-03-B`: native translation plus dynamic AQL/kernarg parity.
+
 ### P3H - host-native simulator and first Triton gate
 
 The physical machine is already the host; launching a full `VEGA_X86` gem5
@@ -731,24 +761,28 @@ The work is staged as follows:
 2. `P3-HOST-NATIVE-02` is accepted by CP-0015: its standalone control core
    links without `VEGA_X86`/X86 ISA objects and passes no-x86/no-production-DSO
    audits, with direct and legacy state regressions retained.
-3. `P3-HOST-NATIVE-03` is split into an explicit prerequisite. CP-0016 proves
-   only the functional memory/dispatch parity sub-gate. `P3-HOST-NATIVE-03-A`
-   must connect the CP13 staged image to bounded PT_LOAD mapping, native
-   translation, descriptor/entry validation, and dynamic AQL/kernarg assembly;
-   one pinned gfx950 image must then produce the same deterministic output and
-   trace as the gem5 reference before any broader API claim.
+3. `P3-HOST-NATIVE-03` is split into explicit loader and execution gates.
+   CP-0016 proves only functional memory/dispatch parity. CP-0017-A connects
+   the CP13 staged image to fixture-scoped PT_LOAD materialization and
+   descriptor/entry validation. `P3-HOST-NATIVE-03-B` must add native
+   translation, dynamic kernarg/AQL assembly, queue submission, and one pinned
+   gfx950 output/trace differential through the reused GPU pipeline before any
+   Triton launch claim.
 4. `P3-TRITON-VECADD-01` runs the pinned, unmodified Triton tutorial request
    (`python/tutorials/01-vector-add.py`) through the normal Triton launcher,
    with simulator device selection only. It retains compiler, HSACO digest,
-   transport, dispatch, output, and CPU-fallback evidence. As of CP-0016 no
-   Triton end-to-end case has passed (0/1); the pinned Triton extension probe is
-   currently blocked by an LLVM TableGen lock mismatch and missing HIP runtime.
+   transport, dispatch, output, and CPU-fallback evidence. As of CP-0017 no
+   Triton end-to-end case has passed (0/1). The exact LLVM/Triton pair now has
+   a temporary AMD-only overlay that builds `libtriton.so` and compile-only
+   gfx950 vecadd HSACO; the overlay is not yet a committed launcher or device
+   execution path.
 
 This workstream is not a cycle-accurate replacement. Timing, wider operator
-coverage, host-parallel threadblocks, HIP/OpenCL, PyTorch, vLLM, and Qwen
-remain later gates after the first vecadd differential result. If a reused
-gem5 module cannot be separated without changing semantics, keep the adapter
-explicit and retain the gem5 path as the oracle.
+coverage, host-parallel threadblocks, HIP/OpenCL CTS, PyTorch, vLLM, and Qwen
+remain later gates after the first vecadd differential result. Full ROCm and
+OpenCL CTS are not prerequisites for the Qwen-specific operator gate. If a
+reused gem5 module cannot be separated without changing semantics, keep the
+adapter explicit and retain the gem5 path as the oracle.
 
 The exact blank-context continuation contract remains in `GOAL.md`; the
 machine-executable argv, prerequisites, expected gate, and rollback boundary

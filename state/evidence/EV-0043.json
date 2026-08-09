@@ -1,0 +1,542 @@
+{
+  "checkpoint_id": "CP-0017",
+  "claim": "EV-0043 binds the CP17-A PTLOAD staging evidence, the clean gem5 child, the offline Qwen3.5-0.8B preparation and 15-contract text-only manifest, and a reproducible gfx950 Triton compile-only probe. It proves no-x86 staging and compiler preparation only: Triton end-to-end, GPU instruction execution, dynamic AQL/kernarg, PyTorch/vLLM inference, hardware, timing, and performance remain unproven.",
+  "command_argv": [
+    [
+      "bash",
+      "-c",
+      "set -eu; printf \"%s\\n\" \"== gem5 ==\"; git -C projects/gem5 rev-parse HEAD HEAD^{tree}; printf \"%s\\n\" \"== self-amdgpu-runtime ==\"; git -C projects/self-amdgpu-runtime rev-parse HEAD HEAD^{tree}"
+    ],
+    [
+      "bash",
+      "-c",
+      "set -eu; test -z \"$(git -C projects/gem5 status --porcelain=v1 --untracked-files=all)\"; test -z \"$(git -C projects/self-amdgpu-runtime status --porcelain=v1 --untracked-files=all)\"; printf \"%s\\n\" gem5=clean self-amdgpu-runtime=clean"
+    ],
+    [
+      "python3",
+      "-c",
+      "\nimport json\njournal = json.load(open(\".git/amdgpu-sim/txn/CP-0017.json\", encoding=\"utf-8\"))\nexpected = {\n    \"gem5\": {\n        \"head\": \"ad5172cd761d6638ef473bc4150682c882f778be\",\n        \"path\": \"projects/gem5\",\n        \"tree\": \"b3e2706cad60b1e573df5e02de50211de44db094\",\n    }\n}\nassert journal[\"checkpoint_id\"] == \"CP-0017\"\nassert journal[\"phase\"] == \"prepare\"\nassert journal[\"participants_locked\"] is True\nassert set(journal[\"declared_children\"]) == {\"gem5\"}\nassert journal[\"expected_children\"] == expected\nassert \"self-amdgpu-runtime\" not in journal[\"declared_children\"]\nassert \"self-amdgpu-runtime\" not in journal[\"expected_children\"]\nprint(\"phase=prepare; declared_children=gem5; expected_children=gem5; runtime_nonparticipant=true\")\n"
+    ],
+    [
+      "python3",
+      "-c",
+      "\nimport hashlib\npath = \"state/evidence/EV-0042.json\"\nactual = hashlib.sha256(open(path, \"rb\").read()).hexdigest()\nexpected = \"81e4871f1b089b076bb5a9731418eb730c55459639fa03e6fd1fdddb32518096\"\nassert actual == expected, actual\nprint(\"EV-0042=\" + actual)\n"
+    ],
+    [
+      "build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt",
+      "../rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco"
+    ],
+    [
+      "python3",
+      "projects/gem5/util/host_native/check_control_core.py",
+      "--profile",
+      "ptload",
+      "--build-opts",
+      "projects/gem5/build_opts/HOSTGPU_NATIVE_CONTROL",
+      "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; root=projects/gem5/build/VEGA_X86/dev/amdgpu; for test in host_gpu_protocol.test.opt host_gpu_code_object_state.test.opt host_gpu_memory_state.test.opt host_gpu_dispatch_state.test.opt host_gpu_queue_state.test.opt host_gpu_signal_state.test.opt host_gpu_kmt_state.test.opt host_gpu_socket_utils.test.opt; do printf \"== %s ==\\n\" \"$test\"; \"$root/$test\" --gtest_color=no; done; printf \"%s\\n\" legacy_state_regressions=8/8"
+    ],
+    [
+      "python3",
+      "-c",
+      "\nimport hashlib\nimport json\nfrom pathlib import Path\nroot = Path(\"models/Qwen3.5-0.8B\")\nmanifest_path = root / \"manifest.json\"\nmanifest_bytes = manifest_path.read_bytes()\nmanifest_sha = hashlib.sha256(manifest_bytes).hexdigest()\nassert manifest_sha == \"de2281cc73a1329d13245cb9658be910cf435e72c4ea0277c4f8811a24edf762\", manifest_sha\nmanifest = json.loads(manifest_bytes)\nassert manifest[\"model_id\"] == \"Qwen/Qwen3.5-0.8B\"\nassert manifest[\"revision\"] == \"2fc06364715b967f1860aea9cf38778875588b17\"\nassert manifest[\"download_status\"] == \"complete\"\nassert len(manifest[\"files\"]) == 4\ntotal = 0\nfor name, expected in sorted(manifest[\"files\"].items()):\n    path = root / name\n    actual_size = path.stat().st_size\n    actual_sha = hashlib.sha256(path.read_bytes()).hexdigest()\n    assert actual_size == expected[\"bytes\"], name\n    assert actual_sha == expected[\"sha256\"], name\n    total += actual_size\n    print(f\"{name} bytes={actual_size} sha256={actual_sha}\")\nassert total == 1759804389, total\nprint(f\"model=Qwen/Qwen3.5-0.8B revision={manifest[\"revision\"]} files=4 bytes={total} manifest_sha256={manifest_sha} text_only_first_gate=true vision_deferred=true full_rocm_opencl_cts_required=false\")\n"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\nprintf \"%s  %s\\n\" \\\n  \"cfe0b65166f3fd7412855dfaf28f8274381cfbb75d139b8e68781d5d8f4a76a9\" tools/qwen35_operator_manifest.py \\\n  \"123ee0b2a0f9ea7559d2282da5b375297f5cf52589b2faa82fef75d9346d600b\" tools/qwen35_operator_manifest.json \\\n  \"ecfa7dd6ac329e7936f43e155024de46615035d3e836d1a72df4d61d71aad2a2\" tools/qwen35_operator_smoke.py \\\n  \"3a2a6f412efa5705df904b741f91c34752a8f5c4183a031fa20f033f225dfa0d\" tests/test_qwen35_operator_manifest.py | sha256sum -c -\npython3 -m pytest -q tests/test_qwen35_operator_manifest.py\npython3 tools/qwen35_operator_manifest.py --output /tmp/qwen35-operator-manifest-cp17.json\ncmp -s /tmp/qwen35-operator-manifest-cp17.json tools/qwen35_operator_manifest.json\npython3 tools/qwen35_operator_smoke.py > /tmp/qwen35-operator-smoke-cp17.json\nset +e\npython3 tools/qwen35_operator_manifest.py --strict-runtime --output /tmp/qwen35-operator-manifest-strict-cp17.json\nstrict_rc=$?\nset -e\ntest \"$strict_rc\" -eq 2\ncmp -s /tmp/qwen35-operator-manifest-strict-cp17.json tools/qwen35_operator_manifest.json\npython3 - <<\"PY\"\nimport json\nm=json.load(open(\"tools/qwen35_operator_manifest.json\", encoding=\"utf-8\"))\ns=json.load(open(\"/tmp/qwen35-operator-smoke-cp17.json\", encoding=\"utf-8\"))\nassert m[\"summary\"][\"static_source_ok\"] is True\nassert m[\"summary\"][\"contract_count\"] == 15\nassert m[\"counts\"][\"configured_layer_count\"] == 24\nassert m[\"counts\"][\"configured_layer_type_counts\"] == {\"full_attention\": 6, \"linear_attention\": 18}\nassert m[\"counts\"][\"contract_static_source_ok_count\"] == 15\nassert m[\"counts\"][\"triton_source_symbol_count\"] == 50\nassert m[\"counts\"][\"custom_registration_count\"] == 33\nassert m[\"runtime_probe\"][\"amd_ready\"] is False\nassert m[\"runtime_probe\"][\"hip_runtime\"] is False\nassert m[\"runtime_probe\"][\"cuda_runtime\"] is True\nassert m[\"summary\"][\"runtime_status\"] == \"blocked\"\nassert s[\"static_contract\"][\"passed\"] is True\nassert s[\"passed\"] is False\nassert s[\"runtime\"][\"status\"] == \"blocked\"\nassert s[\"fallback_audit\"][\"cpu_fallback_counted_as_pass\"] is False\nassert s[\"fallback_audit\"][\"nvidia_fallback_counted_as_pass\"] is False\nunsupported = [x[\"backend\"] for x in m[\"unsupported_backends\"]]\nassert unsupported == [\"cpu\", \"cuda_nvidia\", \"gdn_flashinfer\", \"gdn_cutedsl\"]\nprint(\"qwen35_text_only=true layers=24 linear=18 full=6 contracts=15 static_source_ok=15/15\")\nprint(\"manifest_sha256=cfe-tool-hash-bound; static_files=4/4; pytest=5 passed; strict_runtime_rc=2; runtime=blocked; amd_execution=false; cpu_or_nvidia_fallback_pass=false\")\nPY"
+    ],
+    [
+      "env",
+      "-u",
+      "TRITON_PLUGIN_DIRS",
+      "PYTHONHASHSEED=0",
+      "TRITON_BACKENDS_IN_TREE=1",
+      "TRITON_CACHE_DIR=/tmp/cp17-triton-probe-cache",
+      "PYTHONPATH=/tmp/cp17-triton-patch/python:/home/zhaosiying/builds/triton-ws-bf64a5db/venv/lib/python3.14/site-packages",
+      "LD_LIBRARY_PATH=/tmp/cp17-llvm-b010-build/lib:/tmp/cp17-triton-patch-build3",
+      "/home/zhaosiying/builds/triton-ws-bf64a5db/venv/bin/python",
+      "/tmp/cp17_vecadd_probe.py"
+    ],
+    [
+      "python3",
+      "-c",
+      "\nimport hashlib\nimport json\nfrom pathlib import Path\nimport subprocess\n\ndef sha(path):\n    return hashlib.sha256(Path(path).read_bytes()).hexdigest()\n\ncapture = json.load(open(\"artifacts/evidence/CP-0017/triton-gfx950-compile-only.json\", encoding=\"utf-8\"))\nassert capture[\"schema\"] == \"amdgpu-sim.command-evidence.v1\"\nassert capture[\"exit_code\"] == 0\nstdout = Path(capture[\"stdout\"][\"path\"]).read_text(encoding=\"utf-8\")\nassert sha(capture[\"stdout\"][\"path\"]) == capture[\"stdout\"][\"sha256\"]\nassert \"COMPILE_OK [\" in stdout\nfor stage in (\"amdgcn\", \"hsaco\", \"llir\", \"source\", \"ttgir\", \"ttir\"):\n    assert repr(stage) in stdout\nassert \"HSACO bytes 5408\" in stdout\nassert \"HSACO_SHA256 ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e\" in stdout\nassert \"backend_name=\" in stdout and \"hip\" in stdout\nassert \"arch=\" in stdout and \"gfx950\" in stdout\nhsaco = Path(\"artifacts/evidence/CP-0017/triton-builds/vecadd-gfx950.hsaco\")\nassert hsaco.stat().st_size == 5408\nassert sha(hsaco) == \"ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e\"\nlib = Path(\"/tmp/cp17-triton-patch-build3/libtriton.so\")\nassert lib.stat().st_size == 175304440\nassert sha(lib) == \"bc28ba99d51c959140f50061d2a163f7ddd18c4f7d25fe3b9af3de529b889e49\"\nprobe = Path(\"/tmp/cp17_vecadd_probe.py\")\nassert sha(probe) == \"6336d12066ddb181f03fd5ae2441e90d330a22d1bf33450c081b80fd9287a033\"\ncache = Path(\"/tmp/cp17-triton-patch-build3/CMakeCache.txt\").read_text(encoding=\"utf-8\")\nfor line in (\n    \"CMAKE_BUILD_TYPE:STRING=Release\",\n    \"LLVM_DIR:PATH=/tmp/cp17-llvm-b010-build/lib/cmake/llvm\",\n    \"LLVM_SYSPATH:PATH=/tmp/cp17-llvm-b010-build\",\n    \"TRITON_BUILD_PYTHON_MODULE:BOOL=ON\",\n    \"TRITON_CODEGEN_BACKENDS:STRING=amd;nvidia\",\n    \"TRITON_OFFLINE_BUILD:BOOL=ON\",\n    \"CMAKE_HOME_DIRECTORY:INTERNAL=/tmp/cp17-triton-patch\",\n):\n    assert line in cache, line\ntriton_identity = subprocess.check_output([\"git\", \"-C\", \"projects/triton\", \"rev-parse\", \"HEAD\", \"HEAD^{tree}\"], text=True).splitlines()\nassert triton_identity == [\"cd513e2798db0f4675b3d1205c8e76eb3381a0b3\", \"944754ed44b5414f2b72fed267455abc9f6fc8c1\"]\nassert subprocess.check_output([\"git\", \"-C\", \"projects/triton\", \"status\", \"--porcelain=v1\", \"--untracked-files=all\"], text=True) == \"\"\nllvm_meta = subprocess.check_output([\"git\", \"-C\", \"projects/llvm-project\", \"show\", \"-s\", \"--format=%H%n%T\", \"b010a18d2b648cab83c83967ff26b8fde11acdc6\"], text=True).splitlines()\nassert llvm_meta == [\"b010a18d2b648cab83c83967ff26b8fde11acdc6\", \"1cabfeea0f09b6983c8bb92f4161910fe2b7dca6\"]\nprint(\"compile_only=true stages=ttir,ttgir,llir,amdgcn,hsaco target=hip:gfx950 hsaco_bytes=5408 hsaco_sha256=ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e\")\nprint(\"libtriton_bytes=175304440 libtriton_sha256=bc28ba99d51c959140f50061d2a163f7ddd18c4f7d25fe3b9af3de529b889e49 triton_pinned_head=cd513e2798db0f4675b3d1205c8e76eb3381a0b3\")\nprint(\"llvm_commit_object=b010a18d2b648cab83c83967ff26b8fde11acdc6 llvm_tree=1cabfeea0f09b6983c8bb92f4161910fe2b7dca6 source_overlay_temporary=true runtime_execution=false\")\n"
+    ]
+  ],
+  "command_results": [
+    {
+      "id": "cp17-child-identities",
+      "argv": [
+        "bash",
+        "-c",
+        "set -eu; printf \"%s\\n\" \"== gem5 ==\"; git -C projects/gem5 rev-parse HEAD HEAD^{tree}; printf \"%s\\n\" \"== self-amdgpu-runtime ==\"; git -C projects/self-amdgpu-runtime rev-parse HEAD HEAD^{tree}"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T13:38:48+00:00",
+      "ended_at": "2026-08-09T13:38:48+00:00",
+      "exit_code": 0,
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/cp17-child-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 790,
+        "sha256": "12237d6a82185250b5f230461954938dbd81f279b6d9837695880630a317c7b7"
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/cp17-child-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 201,
+        "sha256": "3b2a83f91261b660669b5e940cee098fed2100da176a7f8837175faa7b70ed62"
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/cp17-child-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": "The CP17 gem5 child identity is the expected clean target; the runtime child remains unchanged."
+    },
+    {
+      "id": "cp17-child-clean",
+      "argv": [
+        "bash",
+        "-c",
+        "set -eu; test -z \"$(git -C projects/gem5 status --porcelain=v1 --untracked-files=all)\"; test -z \"$(git -C projects/self-amdgpu-runtime status --porcelain=v1 --untracked-files=all)\"; printf \"%s\\n\" gem5=clean self-amdgpu-runtime=clean"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T13:39:09+00:00",
+      "ended_at": "2026-08-09T13:39:09+00:00",
+      "exit_code": 0,
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/cp17-child-clean.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 817,
+        "sha256": "04ba384a77c11036e9c5003bce2a6599537a1ca18c831cdfefcbc3b606281479"
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/cp17-child-clean.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 37,
+        "sha256": "e01744c33aca7ee4a701e2383f27fd768b72f0cde7ff57a41f46150804cebe9e"
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/cp17-child-clean.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": "Both project lanes are clean, including untracked-file checks."
+    },
+    {
+      "id": "cp17-journal-gem5-only",
+      "argv": [
+        "python3",
+        "-c",
+        "\nimport json\njournal = json.load(open(\".git/amdgpu-sim/txn/CP-0017.json\", encoding=\"utf-8\"))\nexpected = {\n    \"gem5\": {\n        \"head\": \"ad5172cd761d6638ef473bc4150682c882f778be\",\n        \"path\": \"projects/gem5\",\n        \"tree\": \"b3e2706cad60b1e573df5e02de50211de44db094\",\n    }\n}\nassert journal[\"checkpoint_id\"] == \"CP-0017\"\nassert journal[\"phase\"] == \"prepare\"\nassert journal[\"participants_locked\"] is True\nassert set(journal[\"declared_children\"]) == {\"gem5\"}\nassert journal[\"expected_children\"] == expected\nassert \"self-amdgpu-runtime\" not in journal[\"declared_children\"]\nassert \"self-amdgpu-runtime\" not in journal[\"expected_children\"]\nprint(\"phase=prepare; declared_children=gem5; expected_children=gem5; runtime_nonparticipant=true\")\n"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T13:38:04+00:00",
+      "ended_at": "2026-08-09T13:38:04+00:00",
+      "exit_code": 0,
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/cp17-journal-gem5-only.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 1395,
+        "sha256": "804672aff07a4cef87daea72bd6b5f9b85494d9319fd4edece63f173de8b34f1"
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/cp17-journal-gem5-only.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 91,
+        "sha256": "f057e20c276051820591ca11b03c7b815a8addb9c5be7c42ee91e33a835f6239"
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/cp17-journal-gem5-only.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": "The CP17 prepare journal contains exactly the gem5 participant and its recorded HEAD/tree; the unchanged runtime is not a participant."
+    },
+    {
+      "id": "cp17-included-evidence-sha",
+      "argv": [
+        "python3",
+        "-c",
+        "\nimport hashlib\npath = \"state/evidence/EV-0042.json\"\nactual = hashlib.sha256(open(path, \"rb\").read()).hexdigest()\nexpected = \"81e4871f1b089b076bb5a9731418eb730c55459639fa03e6fd1fdddb32518096\"\nassert actual == expected, actual\nprint(\"EV-0042=\" + actual)\n"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T13:38:04+00:00",
+      "ended_at": "2026-08-09T13:38:04+00:00",
+      "exit_code": 0,
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/cp17-included-evidence-sha.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 869,
+        "sha256": "eec549ce19113ca36b049dbaf61beb11f907020268bb5525bfbd754fa90e9015"
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/cp17-included-evidence-sha.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 73,
+        "sha256": "6a6f4ed908bfa13c7d6d8e5b85d05ae37188a14780d1e07acee91c17e24e9138"
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/cp17-included-evidence-sha.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": "The included EV-0042 manifest hash is exact."
+    },
+    {
+      "id": "gem5-ptload-self-test",
+      "argv": [
+        "build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt",
+        "../rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-09T13:02:22+00:00",
+      "ended_at": "2026-08-09T13:02:22+00:00",
+      "exit_code": 0,
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-self-test.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 755,
+        "sha256": "6e8a1989e74ea09385cb0e3d241ebcc58fb72314d389a9d1e793b65a45b144cb"
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-self-test.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 764,
+        "sha256": "5f6544af4c275b532456304dbec7239c7d6a1873a90790821483c27928e0a8ef"
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-self-test.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": "The no-x86 PTLOAD self-test passes its staging, file-copy, zero-fill, descriptor, entry, atomic-preallocation, and lifetime flags."
+    },
+    {
+      "id": "gem5-ptload-audit",
+      "argv": [
+        "python3",
+        "projects/gem5/util/host_native/check_control_core.py",
+        "--profile",
+        "ptload",
+        "--build-opts",
+        "projects/gem5/build_opts/HOSTGPU_NATIVE_CONTROL",
+        "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T13:02:22+00:00",
+      "ended_at": "2026-08-09T13:02:22+00:00",
+      "exit_code": 0,
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-audit.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 826,
+        "sha256": "6fb959afca3217ef54d02026473f7190b3dd948c32be9461f39dcc5de19b418d"
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-audit.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 1785,
+        "sha256": "c608c89aab0f389ac6f5d75307f114fb94f43a5202a8e8d6e10a8e2d3c37950f"
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/gem5-ptload-audit.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": "The PTLOAD ELF has only permitted host DSOs and no forbidden x86 or production GPU symbols."
+    },
+    {
+      "id": "gem5-legacy-regressions",
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; root=projects/gem5/build/VEGA_X86/dev/amdgpu; for test in host_gpu_protocol.test.opt host_gpu_code_object_state.test.opt host_gpu_memory_state.test.opt host_gpu_dispatch_state.test.opt host_gpu_queue_state.test.opt host_gpu_signal_state.test.opt host_gpu_kmt_state.test.opt host_gpu_socket_utils.test.opt; do printf \"== %s ==\\n\" \"$test\"; \"$root/$test\" --gtest_color=no; done; printf \"%s\\n\" legacy_state_regressions=8/8"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T13:02:47+00:00",
+      "ended_at": "2026-08-09T13:02:47+00:00",
+      "exit_code": 0,
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/gem5-legacy-regressions.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 1033,
+        "sha256": "7aa574d9995ea3e92ffb9293ed26d8529ee50b881439005bd2e4be8d594253c2"
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/gem5-legacy-regressions.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 23137,
+        "sha256": "351346ba011f7968de99e3e30a6ea875d94fed95691004ddfec2b11509a9daae"
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/gem5-legacy-regressions.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": "The retained VEGA_X86 state regression matrix remains green as a compatibility oracle."
+    },
+    {
+      "id": "qwen35-model-preparation-final",
+      "argv": [
+        "python3",
+        "-c",
+        "\nimport hashlib\nimport json\nfrom pathlib import Path\nroot = Path(\"models/Qwen3.5-0.8B\")\nmanifest_path = root / \"manifest.json\"\nmanifest_bytes = manifest_path.read_bytes()\nmanifest_sha = hashlib.sha256(manifest_bytes).hexdigest()\nassert manifest_sha == \"de2281cc73a1329d13245cb9658be910cf435e72c4ea0277c4f8811a24edf762\", manifest_sha\nmanifest = json.loads(manifest_bytes)\nassert manifest[\"model_id\"] == \"Qwen/Qwen3.5-0.8B\"\nassert manifest[\"revision\"] == \"2fc06364715b967f1860aea9cf38778875588b17\"\nassert manifest[\"download_status\"] == \"complete\"\nassert len(manifest[\"files\"]) == 4\ntotal = 0\nfor name, expected in sorted(manifest[\"files\"].items()):\n    path = root / name\n    actual_size = path.stat().st_size\n    actual_sha = hashlib.sha256(path.read_bytes()).hexdigest()\n    assert actual_size == expected[\"bytes\"], name\n    assert actual_sha == expected[\"sha256\"], name\n    total += actual_size\n    print(f\"{name} bytes={actual_size} sha256={actual_sha}\")\nassert total == 1759804389, total\nprint(f\"model=Qwen/Qwen3.5-0.8B revision={manifest[\"revision\"]} files=4 bytes={total} manifest_sha256={manifest_sha} text_only_first_gate=true vision_deferred=true full_rocm_opencl_cts_required=false\")\n"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T13:38:04+00:00",
+      "ended_at": "2026-08-09T13:38:06+00:00",
+      "exit_code": 0,
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/qwen35-model-preparation-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 1860,
+        "sha256": "8909bdde4fff4440083350e929d6c976b0a57a9929b52b55d6b0a8199cafbde9"
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/qwen35-model-preparation-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 707,
+        "sha256": "4e5a0bbd11719a5603d5e48d88d24949b3414dec688dea7909d80527195c75b7"
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/qwen35-model-preparation-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": "The pinned Qwen3.5-0.8B model files are present and hash-verified offline; vision is deferred and full CTS is out of scope."
+    },
+    {
+      "id": "qwen35-static-contract-strict",
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\nprintf \"%s  %s\\n\" \\\n  \"cfe0b65166f3fd7412855dfaf28f8274381cfbb75d139b8e68781d5d8f4a76a9\" tools/qwen35_operator_manifest.py \\\n  \"123ee0b2a0f9ea7559d2282da5b375297f5cf52589b2faa82fef75d9346d600b\" tools/qwen35_operator_manifest.json \\\n  \"ecfa7dd6ac329e7936f43e155024de46615035d3e836d1a72df4d61d71aad2a2\" tools/qwen35_operator_smoke.py \\\n  \"3a2a6f412efa5705df904b741f91c34752a8f5c4183a031fa20f033f225dfa0d\" tests/test_qwen35_operator_manifest.py | sha256sum -c -\npython3 -m pytest -q tests/test_qwen35_operator_manifest.py\npython3 tools/qwen35_operator_manifest.py --output /tmp/qwen35-operator-manifest-cp17.json\ncmp -s /tmp/qwen35-operator-manifest-cp17.json tools/qwen35_operator_manifest.json\npython3 tools/qwen35_operator_smoke.py > /tmp/qwen35-operator-smoke-cp17.json\nset +e\npython3 tools/qwen35_operator_manifest.py --strict-runtime --output /tmp/qwen35-operator-manifest-strict-cp17.json\nstrict_rc=$?\nset -e\ntest \"$strict_rc\" -eq 2\ncmp -s /tmp/qwen35-operator-manifest-strict-cp17.json tools/qwen35_operator_manifest.json\npython3 - <<\"PY\"\nimport json\nm=json.load(open(\"tools/qwen35_operator_manifest.json\", encoding=\"utf-8\"))\ns=json.load(open(\"/tmp/qwen35-operator-smoke-cp17.json\", encoding=\"utf-8\"))\nassert m[\"summary\"][\"static_source_ok\"] is True\nassert m[\"summary\"][\"contract_count\"] == 15\nassert m[\"counts\"][\"configured_layer_count\"] == 24\nassert m[\"counts\"][\"configured_layer_type_counts\"] == {\"full_attention\": 6, \"linear_attention\": 18}\nassert m[\"counts\"][\"contract_static_source_ok_count\"] == 15\nassert m[\"counts\"][\"triton_source_symbol_count\"] == 50\nassert m[\"counts\"][\"custom_registration_count\"] == 33\nassert m[\"runtime_probe\"][\"amd_ready\"] is False\nassert m[\"runtime_probe\"][\"hip_runtime\"] is False\nassert m[\"runtime_probe\"][\"cuda_runtime\"] is True\nassert m[\"summary\"][\"runtime_status\"] == \"blocked\"\nassert s[\"static_contract\"][\"passed\"] is True\nassert s[\"passed\"] is False\nassert s[\"runtime\"][\"status\"] == \"blocked\"\nassert s[\"fallback_audit\"][\"cpu_fallback_counted_as_pass\"] is False\nassert s[\"fallback_audit\"][\"nvidia_fallback_counted_as_pass\"] is False\nunsupported = [x[\"backend\"] for x in m[\"unsupported_backends\"]]\nassert unsupported == [\"cpu\", \"cuda_nvidia\", \"gdn_flashinfer\", \"gdn_cutedsl\"]\nprint(\"qwen35_text_only=true layers=24 linear=18 full=6 contracts=15 static_source_ok=15/15\")\nprint(\"manifest_sha256=cfe-tool-hash-bound; static_files=4/4; pytest=5 passed; strict_runtime_rc=2; runtime=blocked; amd_execution=false; cpu_or_nvidia_fallback_pass=false\")\nPY"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T13:39:25+00:00",
+      "ended_at": "2026-08-09T13:39:31+00:00",
+      "exit_code": 0,
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/qwen35-static-contract-strict.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 3253,
+        "sha256": "5bf0fbf20f859ec1fc03dfffefdf982545f27764a2b8890cad64414db63d5dfa"
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/qwen35-static-contract-strict.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 927,
+        "sha256": "83bd9af2572a27d4ab98dc89777b4bd016a4c7fee6baa4cb459140228f655ca2"
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/qwen35-static-contract-strict.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": "The text-only Qwen manifest has 15 source/registration contracts and a passing static shape/source gate, while strict AMD runtime status remains blocked."
+    },
+    {
+      "id": "triton-gfx950-compile-only",
+      "argv": [
+        "env",
+        "-u",
+        "TRITON_PLUGIN_DIRS",
+        "PYTHONHASHSEED=0",
+        "TRITON_BACKENDS_IN_TREE=1",
+        "TRITON_CACHE_DIR=/tmp/cp17-triton-probe-cache",
+        "PYTHONPATH=/tmp/cp17-triton-patch/python:/home/zhaosiying/builds/triton-ws-bf64a5db/venv/lib/python3.14/site-packages",
+        "LD_LIBRARY_PATH=/tmp/cp17-llvm-b010-build/lib:/tmp/cp17-triton-patch-build3",
+        "/home/zhaosiying/builds/triton-ws-bf64a5db/venv/bin/python",
+        "/tmp/cp17_vecadd_probe.py"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T13:29:15+00:00",
+      "ended_at": "2026-08-09T13:29:15+00:00",
+      "exit_code": 0,
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/triton-gfx950-compile-only.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 1034,
+        "sha256": "fc0da183cc22ec34e3e81d3a5036dc48fd157939c27626f59b02a87a755ea723"
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/triton-gfx950-compile-only.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 1260,
+        "sha256": "450f6cd9b0678056e087c890809572684c5599232ed2d35ac12668501e7084df"
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/triton-gfx950-compile-only.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": "The direct temporary Triton/LLVM probe compiles vecadd through gfx950 HSACO; this is compile-only and not execution evidence."
+    },
+    {
+      "id": "triton-gfx950-compile-only-provenance",
+      "argv": [
+        "python3",
+        "-c",
+        "\nimport hashlib\nimport json\nfrom pathlib import Path\nimport subprocess\n\ndef sha(path):\n    return hashlib.sha256(Path(path).read_bytes()).hexdigest()\n\ncapture = json.load(open(\"artifacts/evidence/CP-0017/triton-gfx950-compile-only.json\", encoding=\"utf-8\"))\nassert capture[\"schema\"] == \"amdgpu-sim.command-evidence.v1\"\nassert capture[\"exit_code\"] == 0\nstdout = Path(capture[\"stdout\"][\"path\"]).read_text(encoding=\"utf-8\")\nassert sha(capture[\"stdout\"][\"path\"]) == capture[\"stdout\"][\"sha256\"]\nassert \"COMPILE_OK [\" in stdout\nfor stage in (\"amdgcn\", \"hsaco\", \"llir\", \"source\", \"ttgir\", \"ttir\"):\n    assert repr(stage) in stdout\nassert \"HSACO bytes 5408\" in stdout\nassert \"HSACO_SHA256 ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e\" in stdout\nassert \"backend_name=\" in stdout and \"hip\" in stdout\nassert \"arch=\" in stdout and \"gfx950\" in stdout\nhsaco = Path(\"artifacts/evidence/CP-0017/triton-builds/vecadd-gfx950.hsaco\")\nassert hsaco.stat().st_size == 5408\nassert sha(hsaco) == \"ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e\"\nlib = Path(\"/tmp/cp17-triton-patch-build3/libtriton.so\")\nassert lib.stat().st_size == 175304440\nassert sha(lib) == \"bc28ba99d51c959140f50061d2a163f7ddd18c4f7d25fe3b9af3de529b889e49\"\nprobe = Path(\"/tmp/cp17_vecadd_probe.py\")\nassert sha(probe) == \"6336d12066ddb181f03fd5ae2441e90d330a22d1bf33450c081b80fd9287a033\"\ncache = Path(\"/tmp/cp17-triton-patch-build3/CMakeCache.txt\").read_text(encoding=\"utf-8\")\nfor line in (\n    \"CMAKE_BUILD_TYPE:STRING=Release\",\n    \"LLVM_DIR:PATH=/tmp/cp17-llvm-b010-build/lib/cmake/llvm\",\n    \"LLVM_SYSPATH:PATH=/tmp/cp17-llvm-b010-build\",\n    \"TRITON_BUILD_PYTHON_MODULE:BOOL=ON\",\n    \"TRITON_CODEGEN_BACKENDS:STRING=amd;nvidia\",\n    \"TRITON_OFFLINE_BUILD:BOOL=ON\",\n    \"CMAKE_HOME_DIRECTORY:INTERNAL=/tmp/cp17-triton-patch\",\n):\n    assert line in cache, line\ntriton_identity = subprocess.check_output([\"git\", \"-C\", \"projects/triton\", \"rev-parse\", \"HEAD\", \"HEAD^{tree}\"], text=True).splitlines()\nassert triton_identity == [\"cd513e2798db0f4675b3d1205c8e76eb3381a0b3\", \"944754ed44b5414f2b72fed267455abc9f6fc8c1\"]\nassert subprocess.check_output([\"git\", \"-C\", \"projects/triton\", \"status\", \"--porcelain=v1\", \"--untracked-files=all\"], text=True) == \"\"\nllvm_meta = subprocess.check_output([\"git\", \"-C\", \"projects/llvm-project\", \"show\", \"-s\", \"--format=%H%n%T\", \"b010a18d2b648cab83c83967ff26b8fde11acdc6\"], text=True).splitlines()\nassert llvm_meta == [\"b010a18d2b648cab83c83967ff26b8fde11acdc6\", \"1cabfeea0f09b6983c8bb92f4161910fe2b7dca6\"]\nprint(\"compile_only=true stages=ttir,ttgir,llir,amdgcn,hsaco target=hip:gfx950 hsaco_bytes=5408 hsaco_sha256=ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e\")\nprint(\"libtriton_bytes=175304440 libtriton_sha256=bc28ba99d51c959140f50061d2a163f7ddd18c4f7d25fe3b9af3de529b889e49 triton_pinned_head=cd513e2798db0f4675b3d1205c8e76eb3381a0b3\")\nprint(\"llvm_commit_object=b010a18d2b648cab83c83967ff26b8fde11acdc6 llvm_tree=1cabfeea0f09b6983c8bb92f4161910fe2b7dca6 source_overlay_temporary=true runtime_execution=false\")\n"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T13:38:04+00:00",
+      "ended_at": "2026-08-09T13:38:04+00:00",
+      "exit_code": 0,
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0017/triton-gfx950-compile-only-provenance.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 3851,
+        "sha256": "f19653e8b5e7a38f5d41a3b0c17da113f037a09019d1647d4be5c8808eb616c7"
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0017/triton-gfx950-compile-only-provenance.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 500,
+        "sha256": "4652aa10bf311fda60f5cfaaf62188b6d9f6aab3cc96a3004c2a58f35dfaea89"
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0017/triton-gfx950-compile-only-provenance.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false,
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "result": "The temporary pinned Triton/LLVM AMD overlay compiles an unmodified vecadd probe through gfx950 HSACO and verifies the locked source/tool identities; this is compile-only and not execution evidence."
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T13:39:31+00:00",
+  "environment_fingerprint": {
+    "checkpoint": "CP-0017",
+    "gem5_head": "ad5172cd761d6638ef473bc4150682c882f778be",
+    "gem5_tree": "b3e2706cad60b1e573df5e02de50211de44db094",
+    "runtime_head": "7797360ea04e9c3576c5cc16cf829427e96d3d70",
+    "runtime_tree": "64602386f81d7d27a555f1473b01f051b30c2276",
+    "ev0042_sha256": "81e4871f1b089b076bb5a9731418eb730c55459639fa03e6fd1fdddb32518096",
+    "qwen_model_revision": "2fc06364715b967f1860aea9cf38778875588b17",
+    "qwen_contract_count": 15,
+    "triton_compile_only": true,
+    "triton_e2e_cases": "0/1",
+    "transaction_phase": "prepare"
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0017/triton-builds/vecadd-gfx950.hsaco",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "tracked": false,
+      "size": 5408,
+      "sha256": "ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e"
+    }
+  ],
+  "id": "EV-0043",
+  "includes": {
+    "EV-0042": "81e4871f1b089b076bb5a9731418eb730c55459639fa03e6fd1fdddb32518096"
+  },
+  "limitations": [
+    "The Qwen manifest is a source/registration closure for the text-only model path, not an AMD execution result; every contract remains unpassed until it runs through GemSim with a differential oracle.",
+    "The Triton result uses a temporary patched probe overlay and reaches TTIR/TTGIR/LLIR/AMDGCN/HSACO only. Its CMake graph still retains NVIDIA plugin sources, it is not a committed launcher, and no device or simulator instruction executed.",
+    "CP17-A maps one locked zero-relocation gpuReadWrite image in a fixture-scoped, image-relative host context. It does not enforce segment permissions, apply relocations, construct dynamic kernarg/AQL, submit a queue, or connect the GPU pipeline.",
+    "The CP17 journal is still in prepare until root staging, coordinator commit, and finalize. Full ROCm/OpenCL CTS is deliberately not a prerequisite for the Qwen-specific gate."
+  ],
+  "redactions": [],
+  "result": "The accepted CP17-A staging and static Qwen/Triton preparation evidence are reproducible; the next gate remains native translation plus dynamic AQL/kernarg and one real pinned GPU-pipeline differential.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T13:02:22+00:00",
+  "type": "cp17-umbrella-host-native-qwen-preparation"
+}

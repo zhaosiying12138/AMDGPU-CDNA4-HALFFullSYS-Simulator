@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "tools/qwen35_operator_manifest.py",
+    "tools/qwen35_operator_manifest.json",
+    "tools/qwen35_operator_smoke.py",
+    "tests/test_qwen35_operator_manifest.py",
+    "state/evidence/EV-0043.json"
+  ],
+  "checkpoint_id": "CP-0017",
+  "conclusion": "A model-specific operator closure is the right scope-control artifact for Qwen3.5-0.8B, but source discovery and shape checks are not AMD execution results.",
+  "confidence": "high",
+  "decision": "Use the 15 text-only contracts as the required execution matrix, exclude full ROCm/OpenCL CTS from the critical path, and keep each contract failed until it executes through GemSim with a differential oracle and zero CPU/NVIDIA fallback.",
+  "evidence_ids": ["EV-0043"],
+  "id": "BL-0079",
+  "invalidated_assumptions": [
+    "The full ROCm or OpenCL CTS must pass before model-specific progress is useful.",
+    "Static Triton symbol discovery or execution on an NVIDIA device can count as AMD simulator coverage."
+  ],
+  "observation": "The source-grounded manifest finds 15 text-only contracts across 18 GDN and 6 full-attention layers, while the strict runtime smoke remains blocked because the current PyTorch environment has CUDA but no HIP device path.",
+  "question_or_symptom": "How can the project narrow validation to the operators the target model actually uses without weakening the no-fallback requirement?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

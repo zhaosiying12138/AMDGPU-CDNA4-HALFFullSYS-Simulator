@@ -21,7 +21,16 @@ The first hard acceptance target is the official text-only
 two independent gem5 instances, producing at least one greedy token with the
 same token ID as the reference and no CPU arithmetic fallback.  The protocol
 is N-rank from the beginning so TP=4/8 can follow without a pair-specific
-rewrite.
+rewrite.  The checkpoint is already downloaded at the pinned revision under
+`models/`; its first software gate is a source-grounded 15-contract text-only
+operator manifest.  Full ROCm/OpenCL CTS is deliberately not a prerequisite;
+every operator used by this model still needs an AMD execution result, and
+CPU/NVIDIA fallback is never counted as a pass.
+
+The local preparation is reproducible from the recorded Hugging Face mirror
+capture: revision `2fc06364715b967f1860aea9cf38778875588b17`, one
+`1,746,942,600`-byte safetensors file, SHA-256
+`04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696`.
 
 Two later goals are explicit in plan revision 2. Once the user's unmodified
 Triton `tutorial/01-vecadd.py` request (the pinned checkout's
@@ -135,5 +144,19 @@ recognizes the pinned HSACO metadata. This is not PT_LOAD mapping, dynamic
 AQL/kernarg construction, GPU pipeline execution, hardware validation, or
 Triton E2E. Triton remains 0/1, and the next action is
 `P3-HOST-NATIVE-03-A` for bounded loader/translation/AQL parity.
+
+`CP-0017` is accepted at the bounded host-native PT_LOAD staging boundary.
+The no-x86 target stages the locked gfx950 `gpuReadWrite` image, checks exact
+PT_LOAD tuples, copies file bytes, zero-fills BSS, binds descriptor/entry
+addresses, and preserves page leases across Busy/unmap cases.  This is a
+fixture-scoped staging gate only: no segment permissions, relocations, dynamic
+kernarg/AQL, queue submission, GPU instruction execution, or Triton E2E is
+claimed.  The next action is native translation plus dynamic AQL/kernarg parity.
+
+The pinned Triton/LLVM overlay currently reaches gfx950 HSACO compilation only
+(vecadd SHA-256
+`ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e`); no
+Triton request has executed in GemSim yet, so the user-facing Triton count is
+still `0/1`.
 
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

@@ -1,9 +1,9 @@
 {
-  "checkpoint_id": "CP-0016",
-  "checkpoint_sha256": "9b8073cdc6607899f6f038c73f5f0230acd39b50cb1bb0a263bf26eb60baa511",
+  "checkpoint_id": "CP-0017",
+  "checkpoint_sha256": "396bfca0217114ff842ea21faea54bcb8ac42b4511c6324e9a2ecaddcf57a7c2",
   "goal_id": "GSIM-001",
-  "next_action_id": "P3-HOST-NATIVE-03-A",
-  "next_action_summary": "Implement bounded PT_LOAD mapping, native translation, descriptor/entry validation, and dynamic AQL/kernarg parity over the CP16 host-native context; keep Triton execution claims deferred.",
+  "next_action_id": "P3-HOST-NATIVE-03-B",
+  "next_action_summary": "Connect the mapped gfx950 image to native translation, dynamic AQL/kernarg, queue submission, and one real GPU-pipeline differential; keep Triton/Qwen claims deferred.",
   "phase_id": "P3",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,

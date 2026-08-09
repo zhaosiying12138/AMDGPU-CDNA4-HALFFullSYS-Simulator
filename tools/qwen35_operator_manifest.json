@@ -1,0 +1,2586 @@
+{
+  "backend_support": {
+    "external_unverified": [
+      {
+        "backend": "rocm_aiter_triton",
+        "counts_as_pass": false,
+        "reason": "AITER GDN/attention kernels are imported conditionally from the external aiter package; this manifest only audits vLLM source.",
+        "source_evidence": [
+          {
+            "kind": "import",
+            "line": 12,
+            "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+            "symbol": "rocm_aiter_ops"
+          },
+          {
+            "kind": "reference",
+            "line": 72,
+            "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+            "symbol": "GDN_AITER_TRITON_AVAILABLE"
+          },
+          {
+            "kind": "reference",
+            "line": 478,
+            "source": "vllm/platforms/rocm.py",
+            "symbol": "ROCM_AITER_UNIFIED_ATTN"
+          },
+          {
+            "kind": "import",
+            "line": 822,
+            "source": "vllm/platforms/rocm.py",
+            "symbol": "rocm_aiter_ops"
+          },
+          {
+            "kind": "import",
+            "line": 10,
+            "source": "vllm/v1/attention/backends/rocm_attn.py",
+            "symbol": "rocm_aiter_ops"
+          }
+        ],
+        "status": "external_dependency_unverified"
+      },
+      {
+        "backend": "flash_attn_rotary_external",
+        "counts_as_pass": false,
+        "reason": "ROCm ApplyRotaryEmb may import flash_attn.ops.triton.rotary; the package is not part of this repository lock.",
+        "source_evidence": [
+          {
+            "kind": "reference",
+            "line": 138,
+            "source": "vllm/model_executor/layers/rotary_embedding/common.py",
+            "symbol": "apply_rotary_emb_flash_attn"
+          },
+          {
+            "kind": "function",
+            "line": 252,
+            "source": "vllm/model_executor/layers/rotary_embedding/common.py",
+            "symbol": "forward_hip"
+          }
+        ],
+        "status": "external_dependency_unverified"
+      }
+    ],
+    "target": {
+      "backend": "triton_amd_host_native",
+      "counts_as_pass": false,
+      "reason": "Static source closure is ready; an AMD device runner must compile and execute every contract before this becomes a pass.",
+      "source_evidence": [
+        {
+          "kind": "function",
+          "line": 17,
+          "source": "vllm/model_executor/layers/mamba/ops/causal_conv1d.py",
+          "symbol": "_causal_conv1d_fwd_kernel"
+        },
+        {
+          "kind": "function",
+          "line": 179,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "kernel_unified_attention"
+        }
+      ],
+      "status": "blocked_no_amd_runtime"
+    },
+    "unsupported": [
+      {
+        "backend": "cpu",
+        "counts_as_pass": false,
+        "reason": "CPU GDN/custom-op branches are diagnostic fallbacks and are explicitly out of scope.",
+        "source_evidence": [
+          {
+            "kind": "function",
+            "line": 640,
+            "source": "vllm/model_executor/layers/activation.py",
+            "symbol": "forward_cpu"
+          },
+          {
+            "kind": "function",
+            "line": 941,
+            "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+            "symbol": "forward_cpu"
+          },
+          {
+            "kind": "reference",
+            "line": 974,
+            "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+            "symbol": "cpu_gdn_attention_core"
+          }
+        ],
+        "status": "forbidden_for_gate"
+      },
+      {
+        "backend": "cuda_nvidia",
+        "counts_as_pass": false,
+        "reason": "A CUDA build/device is not HIP; NVIDIA execution cannot be promoted to an AMD result.",
+        "source_evidence": [
+          {
+            "kind": "reference",
+            "line": 112,
+            "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+            "symbol": "is_cuda"
+          },
+          {
+            "kind": "function",
+            "line": 832,
+            "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+            "symbol": "forward_cuda"
+          },
+          {
+            "kind": "reference",
+            "line": 324,
+            "source": "vllm/model_executor/models/qwen3_next.py",
+            "symbol": "use_fused_qk_norm_rope_gate"
+          },
+          {
+            "kind": "reference",
+            "line": 327,
+            "source": "vllm/model_executor/models/qwen3_next.py",
+            "symbol": "is_cuda"
+          }
+        ],
+        "status": "forbidden_for_amd_gate"
+      },
+      {
+        "backend": "gdn_flashinfer",
+        "counts_as_pass": false,
+        "reason": "The local resolver selects FlashInfer only on CUDA-capability branches; it is not an AMD Triton closure.",
+        "source_evidence": [
+          {
+            "kind": "function",
+            "line": 88,
+            "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+            "symbol": "_resolve_gdn_prefill_backend"
+          },
+          {
+            "kind": "function",
+            "line": 166,
+            "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+            "symbol": "fi_chunk_gated_delta_rule"
+          }
+        ],
+        "status": "unsupported_on_rocm"
+      },
+      {
+        "backend": "gdn_cutedsl",
+        "counts_as_pass": false,
+        "reason": "CuteDSL is an opt-in CUDA/Blackwell branch in the checked-out resolver, not a generic AMD Triton backend.",
+        "source_evidence": [
+          {
+            "kind": "function",
+            "line": 88,
+            "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+            "symbol": "_resolve_gdn_prefill_backend"
+          },
+          {
+            "kind": "function",
+            "line": 300,
+            "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+            "symbol": "forward_cutedsl"
+          }
+        ],
+        "status": "unsupported_on_rocm"
+      }
+    ],
+    "unsupported_backend_names": [
+      "cpu",
+      "cuda_nvidia",
+      "gdn_flashinfer",
+      "gdn_cutedsl"
+    ]
+  },
+  "contracts": [
+    {
+      "alternate_path": null,
+      "alternate_source_evidence": [],
+      "alternate_triton_symbols": [],
+      "amd_lowering": "backend_required",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "pluggable_layer_and_gemm",
+      "cpu_fallback_forbidden": true,
+      "description": "Vocabulary lookup; tied LM head for this checkpoint.",
+      "execution_gate": "amd_device_tensor_and_gemm",
+      "id": "embedding.lookup",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [
+        "vocab_parallel_embedding"
+      ],
+      "required_symbols": [
+        "Qwen3_5ForCausalLM",
+        "Qwen3_5Model",
+        "VocabParallelEmbedding"
+      ],
+      "source_evidence": [
+        {
+          "registration": "vocab_parallel_embedding",
+          "source": "vllm/model_executor/layers/vocab_parallel_embedding.py"
+        },
+        {
+          "kind": "class",
+          "line": 198,
+          "source": "vllm/model_executor/layers/vocab_parallel_embedding.py",
+          "symbol": "VocabParallelEmbedding"
+        },
+        {
+          "kind": "import",
+          "line": 50,
+          "source": "vllm/model_executor/models/qwen3_5.py",
+          "symbol": "VocabParallelEmbedding"
+        },
+        {
+          "kind": "class",
+          "line": 215,
+          "source": "vllm/model_executor/models/qwen3_5.py",
+          "symbol": "Qwen3_5Model"
+        },
+        {
+          "kind": "class",
+          "line": 429,
+          "source": "vllm/model_executor/models/qwen3_5.py",
+          "symbol": "Qwen3_5ForCausalLM"
+        },
+        {
+          "kind": "import",
+          "line": 45,
+          "source": "vllm/model_executor/models/qwen3_next.py",
+          "symbol": "VocabParallelEmbedding"
+        }
+      ],
+      "source_keys": [
+        "qwen_model",
+        "qwen_next",
+        "embedding"
+      ],
+      "stage": "input",
+      "static_source_ok": true,
+      "triton_symbols": []
+    },
+    {
+      "alternate_path": null,
+      "alternate_source_evidence": [],
+      "alternate_triton_symbols": [],
+      "amd_lowering": "backend_required",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "custom_op",
+      "cpu_fallback_forbidden": true,
+      "description": "Gemma RMSNorm before attention, after attention, and final norm.",
+      "execution_gate": "amd_rms_norm",
+      "id": "decoder.rms_norm",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [
+        "gemma_rms_norm"
+      ],
+      "required_symbols": [
+        "Qwen3_5RMSNorm",
+        "GemmaRMSNorm"
+      ],
+      "source_evidence": [
+        {
+          "registration": "gemma_rms_norm",
+          "source": "vllm/model_executor/layers/layernorm.py"
+        },
+        {
+          "kind": "class",
+          "line": 132,
+          "source": "vllm/model_executor/layers/layernorm.py",
+          "symbol": "GemmaRMSNorm"
+        },
+        {
+          "kind": "import",
+          "line": 39,
+          "source": "vllm/model_executor/models/qwen3_5.py",
+          "symbol": "Qwen3_5RMSNorm"
+        }
+      ],
+      "source_keys": [
+        "qwen_model",
+        "qwen_next",
+        "layernorm"
+      ],
+      "stage": "decoder",
+      "static_source_ok": true,
+      "triton_symbols": []
+    },
+    {
+      "alternate_path": null,
+      "alternate_source_evidence": [],
+      "alternate_triton_symbols": [],
+      "amd_lowering": "backend_required",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "column_parallel_gemm",
+      "cpu_fallback_forbidden": true,
+      "description": "QKVZ and BA projections, followed by Qwen3.5 non-interleaved split.",
+      "execution_gate": "amd_gemm",
+      "id": "gdn.input_projection",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [
+        "qwen_gated_delta_net_attention"
+      ],
+      "required_symbols": [
+        "QwenGatedDeltaNetAttention",
+        "create_qkvz_proj",
+        "create_ba_proj",
+        "MergedColumnParallelLinear"
+      ],
+      "source_evidence": [
+        {
+          "kind": "class",
+          "line": 661,
+          "source": "vllm/model_executor/layers/linear.py",
+          "symbol": "MergedColumnParallelLinear"
+        },
+        {
+          "registration": "qwen_gated_delta_net_attention",
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
+        },
+        {
+          "kind": "import",
+          "line": 24,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "MergedColumnParallelLinear"
+        },
+        {
+          "kind": "class",
+          "line": 345,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "QwenGatedDeltaNetAttention"
+        },
+        {
+          "kind": "function",
+          "line": 493,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "create_qkvz_proj"
+        },
+        {
+          "kind": "function",
+          "line": 519,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "create_ba_proj"
+        },
+        {
+          "kind": "import",
+          "line": 41,
+          "source": "vllm/model_executor/models/qwen3_5.py",
+          "symbol": "QwenGatedDeltaNetAttention"
+        }
+      ],
+      "source_keys": [
+        "qwen_model",
+        "gdn",
+        "linear"
+      ],
+      "stage": "linear_attention",
+      "static_source_ok": true,
+      "triton_symbols": []
+    },
+    {
+      "alternate_path": null,
+      "alternate_source_evidence": [],
+      "alternate_triton_symbols": [],
+      "amd_lowering": "generic_triton_candidate",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "triton_kernel",
+      "cpu_fallback_forbidden": true,
+      "description": "Causal width-4 convolution over packed QKV.",
+      "execution_gate": "amd_triton_compile_and_run",
+      "id": "gdn.conv.prefill",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [],
+      "required_symbols": [
+        "causal_conv1d_fn",
+        "_causal_conv1d_fwd_kernel"
+      ],
+      "source_evidence": [
+        {
+          "kind": "import",
+          "line": 35,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "causal_conv1d_fn"
+        },
+        {
+          "kind": "function",
+          "line": 17,
+          "source": "vllm/model_executor/layers/mamba/ops/causal_conv1d.py",
+          "symbol": "_causal_conv1d_fwd_kernel"
+        },
+        {
+          "kind": "function",
+          "line": 17,
+          "source": "vllm/model_executor/layers/mamba/ops/causal_conv1d.py",
+          "symbol": "_causal_conv1d_fwd_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 481,
+          "source": "vllm/model_executor/layers/mamba/ops/causal_conv1d.py",
+          "symbol": "causal_conv1d_fn"
+        }
+      ],
+      "source_keys": [
+        "gdn",
+        "conv"
+      ],
+      "stage": "linear_attention.prefill",
+      "static_source_ok": true,
+      "triton_symbols": [
+        "_causal_conv1d_fwd_kernel"
+      ]
+    },
+    {
+      "alternate_path": null,
+      "alternate_source_evidence": [],
+      "alternate_triton_symbols": [],
+      "amd_lowering": "generic_triton_candidate",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "triton_kernel",
+      "cpu_fallback_forbidden": true,
+      "description": "Single-token causal convolution state update.",
+      "execution_gate": "amd_triton_compile_and_run",
+      "id": "gdn.conv.decode",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [],
+      "required_symbols": [
+        "causal_conv1d_update",
+        "_causal_conv1d_update_kernel"
+      ],
+      "source_evidence": [
+        {
+          "kind": "import",
+          "line": 35,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "causal_conv1d_update"
+        },
+        {
+          "kind": "function",
+          "line": 763,
+          "source": "vllm/model_executor/layers/mamba/ops/causal_conv1d.py",
+          "symbol": "_causal_conv1d_update_kernel"
+        },
+        {
+          "kind": "function",
+          "line": 763,
+          "source": "vllm/model_executor/layers/mamba/ops/causal_conv1d.py",
+          "symbol": "_causal_conv1d_update_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 1096,
+          "source": "vllm/model_executor/layers/mamba/ops/causal_conv1d.py",
+          "symbol": "causal_conv1d_update"
+        }
+      ],
+      "source_keys": [
+        "gdn",
+        "conv"
+      ],
+      "stage": "linear_attention.decode",
+      "static_source_ok": true,
+      "triton_symbols": [
+        "_causal_conv1d_update_kernel"
+      ]
+    },
+    {
+      "alternate_path": null,
+      "alternate_source_evidence": [],
+      "alternate_triton_symbols": [],
+      "amd_lowering": "generic_triton_candidate",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "triton_kernel",
+      "cpu_fallback_forbidden": true,
+      "description": "Fused Q/K normalization, V layout, decay and beta preparation.",
+      "execution_gate": "amd_triton_compile_and_run",
+      "id": "gdn.post_conv_prep",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [],
+      "required_symbols": [
+        "fused_post_conv_prep",
+        "_fused_post_conv_kernel"
+      ],
+      "source_evidence": [
+        {
+          "kind": "import",
+          "line": 51,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "fused_post_conv_prep"
+        },
+        {
+          "kind": "function",
+          "line": 20,
+          "source": "vllm/third_party/flash_linear_attention/ops/fused_gdn_prefill_post_conv.py",
+          "symbol": "_fused_post_conv_kernel"
+        },
+        {
+          "kind": "function",
+          "line": 20,
+          "source": "vllm/third_party/flash_linear_attention/ops/fused_gdn_prefill_post_conv.py",
+          "symbol": "_fused_post_conv_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 152,
+          "source": "vllm/third_party/flash_linear_attention/ops/fused_gdn_prefill_post_conv.py",
+          "symbol": "fused_post_conv_prep"
+        }
+      ],
+      "source_keys": [
+        "gdn",
+        "fla_post_conv"
+      ],
+      "stage": "linear_attention.prefill",
+      "static_source_ok": true,
+      "triton_symbols": [
+        "_fused_post_conv_kernel"
+      ]
+    },
+    {
+      "alternate_path": null,
+      "alternate_source_evidence": [],
+      "alternate_triton_symbols": [],
+      "amd_lowering": "generic_triton_candidate_with_arch_review",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "triton_kernel_family",
+      "cpu_fallback_forbidden": true,
+      "description": "Chunked gated-delta rule and recurrent-state update.",
+      "execution_gate": "amd_triton_compile_and_run",
+      "id": "gdn.chunk_prefill",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [
+        "chunk_gated_delta_rule"
+      ],
+      "required_symbols": [
+        "ChunkGatedDeltaRule",
+        "chunk_gated_delta_rule",
+        "chunk_gated_delta_rule_fwd",
+        "chunk_local_cumsum",
+        "chunk_scaled_dot_kkt_fwd",
+        "solve_tril",
+        "recompute_w_u_fwd",
+        "chunk_gated_delta_rule_fwd_h",
+        "chunk_fwd_o"
+      ],
+      "source_evidence": [
+        {
+          "registration": "chunk_gated_delta_rule",
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
+        },
+        {
+          "kind": "class",
+          "line": 216,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "ChunkGatedDeltaRule"
+        },
+        {
+          "kind": "reference",
+          "line": 481,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "chunk_gated_delta_rule"
+        },
+        {
+          "kind": "import",
+          "line": 13,
+          "source": "vllm/third_party/flash_linear_attention/ops/chunk.py",
+          "symbol": "chunk_gated_delta_rule_fwd_h"
+        },
+        {
+          "kind": "import",
+          "line": 14,
+          "source": "vllm/third_party/flash_linear_attention/ops/chunk.py",
+          "symbol": "chunk_fwd_o"
+        },
+        {
+          "kind": "import",
+          "line": 15,
+          "source": "vllm/third_party/flash_linear_attention/ops/chunk.py",
+          "symbol": "chunk_scaled_dot_kkt_fwd"
+        },
+        {
+          "kind": "import",
+          "line": 16,
+          "source": "vllm/third_party/flash_linear_attention/ops/chunk.py",
+          "symbol": "chunk_local_cumsum"
+        },
+        {
+          "kind": "import",
+          "line": 18,
+          "source": "vllm/third_party/flash_linear_attention/ops/chunk.py",
+          "symbol": "solve_tril"
+        },
+        {
+          "kind": "import",
+          "line": 20,
+          "source": "vllm/third_party/flash_linear_attention/ops/chunk.py",
+          "symbol": "recompute_w_u_fwd"
+        },
+        {
+          "kind": "function",
+          "line": 23,
+          "source": "vllm/third_party/flash_linear_attention/ops/chunk.py",
+          "symbol": "chunk_gated_delta_rule_fwd"
+        },
+        {
+          "kind": "function",
+          "line": 138,
+          "source": "vllm/third_party/flash_linear_attention/ops/chunk.py",
+          "symbol": "chunk_gated_delta_rule"
+        },
+        {
+          "kind": "function",
+          "line": 45,
+          "source": "vllm/third_party/flash_linear_attention/ops/chunk_delta_h.py",
+          "symbol": "chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 320,
+          "source": "vllm/third_party/flash_linear_attention/ops/chunk_delta_h.py",
+          "symbol": "chunk_gated_delta_rule_fwd_h"
+        },
+        {
+          "kind": "function",
+          "line": 42,
+          "source": "vllm/third_party/flash_linear_attention/ops/chunk_o.py",
+          "symbol": "chunk_fwd_kernel_o",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 141,
+          "source": "vllm/third_party/flash_linear_attention/ops/chunk_o.py",
+          "symbol": "chunk_fwd_o"
+        },
+        {
+          "kind": "function",
+          "line": 47,
+          "source": "vllm/third_party/flash_linear_attention/ops/chunk_scaled_dot_kkt.py",
+          "symbol": "chunk_scaled_dot_kkt_fwd_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 119,
+          "source": "vllm/third_party/flash_linear_attention/ops/chunk_scaled_dot_kkt.py",
+          "symbol": "chunk_scaled_dot_kkt_fwd"
+        },
+        {
+          "kind": "function",
+          "line": 27,
+          "source": "vllm/third_party/flash_linear_attention/ops/cumsum.py",
+          "symbol": "chunk_local_cumsum_scalar_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 84,
+          "source": "vllm/third_party/flash_linear_attention/ops/cumsum.py",
+          "symbol": "chunk_local_cumsum_vector_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 243,
+          "source": "vllm/third_party/flash_linear_attention/ops/cumsum.py",
+          "symbol": "chunk_local_cumsum"
+        },
+        {
+          "kind": "function",
+          "line": 38,
+          "source": "vllm/third_party/flash_linear_attention/ops/solve_tril.py",
+          "symbol": "solve_tril_16x16_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 113,
+          "source": "vllm/third_party/flash_linear_attention/ops/solve_tril.py",
+          "symbol": "merge_16x16_to_32x32_inverse_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 238,
+          "source": "vllm/third_party/flash_linear_attention/ops/solve_tril.py",
+          "symbol": "merge_16x16_to_64x64_inverse_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 507,
+          "source": "vllm/third_party/flash_linear_attention/ops/solve_tril.py",
+          "symbol": "solve_tril"
+        },
+        {
+          "kind": "function",
+          "line": 29,
+          "source": "vllm/third_party/flash_linear_attention/ops/wy_fast.py",
+          "symbol": "recompute_w_u_fwd_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 119,
+          "source": "vllm/third_party/flash_linear_attention/ops/wy_fast.py",
+          "symbol": "recompute_w_u_fwd"
+        }
+      ],
+      "source_keys": [
+        "gdn",
+        "fla_chunk",
+        "fla_cumsum",
+        "fla_kkt",
+        "fla_solve",
+        "fla_wy",
+        "fla_h",
+        "fla_o"
+      ],
+      "stage": "linear_attention.prefill",
+      "static_source_ok": true,
+      "triton_symbols": [
+        "chunk_local_cumsum_scalar_kernel",
+        "chunk_local_cumsum_vector_kernel",
+        "chunk_scaled_dot_kkt_fwd_kernel",
+        "solve_tril_16x16_kernel",
+        "merge_16x16_to_32x32_inverse_kernel",
+        "merge_16x16_to_64x64_inverse_kernel",
+        "recompute_w_u_fwd_kernel",
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+        "chunk_fwd_kernel_o"
+      ]
+    },
+    {
+      "alternate_path": null,
+      "alternate_source_evidence": [],
+      "alternate_triton_symbols": [],
+      "amd_lowering": "generic_triton_candidate",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "triton_kernel_family",
+      "cpu_fallback_forbidden": true,
+      "description": "Packed recurrent gated-delta update with persistent state.",
+      "execution_gate": "amd_triton_compile_and_run",
+      "id": "gdn.recurrent_decode",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [
+        "qwen_gdn_attention_core"
+      ],
+      "required_symbols": [
+        "fused_recurrent_gated_delta_rule_packed_decode",
+        "fused_sigmoid_gating_delta_rule_update"
+      ],
+      "source_evidence": [
+        {
+          "registration": "qwen_gdn_attention_core",
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
+        },
+        {
+          "kind": "import",
+          "line": 51,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "fused_recurrent_gated_delta_rule_packed_decode"
+        },
+        {
+          "kind": "import",
+          "line": 51,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "fused_sigmoid_gating_delta_rule_update"
+        },
+        {
+          "kind": "function",
+          "line": 256,
+          "source": "vllm/third_party/flash_linear_attention/ops/fused_recurrent.py",
+          "symbol": "fused_recurrent_gated_delta_rule_packed_decode_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 339,
+          "source": "vllm/third_party/flash_linear_attention/ops/fused_recurrent.py",
+          "symbol": "fused_recurrent_gated_delta_rule_packed_decode"
+        },
+        {
+          "kind": "function",
+          "line": 24,
+          "source": "vllm/third_party/flash_linear_attention/ops/fused_sigmoid_gating.py",
+          "symbol": "fused_sigmoid_gating_delta_rule_update_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 181,
+          "source": "vllm/third_party/flash_linear_attention/ops/fused_sigmoid_gating.py",
+          "symbol": "fused_sigmoid_gating_delta_rule_update"
+        }
+      ],
+      "source_keys": [
+        "gdn",
+        "fla_recurrent",
+        "fla_sigmoid"
+      ],
+      "stage": "linear_attention.decode",
+      "static_source_ok": true,
+      "triton_symbols": [
+        "fused_recurrent_gated_delta_rule_packed_decode_kernel",
+        "fused_sigmoid_gating_delta_rule_update_kernel"
+      ]
+    },
+    {
+      "alternate_path": null,
+      "alternate_source_evidence": [],
+      "alternate_triton_symbols": [],
+      "amd_lowering": "generic_triton_candidate_with_arch_review",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "triton_kernel_family",
+      "cpu_fallback_forbidden": true,
+      "description": "Optional recurrent/gating and standalone L2-normalization kernels exposed by the GDN implementation.",
+      "execution_gate": "amd_triton_compile_and_run",
+      "id": "gdn.auxiliary_triton_variants",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [],
+      "required_symbols": [
+        "fused_gdn_gating",
+        "l2norm_fwd"
+      ],
+      "source_evidence": [
+        {
+          "kind": "import",
+          "line": 56,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "l2norm_fwd"
+        },
+        {
+          "kind": "function",
+          "line": 1683,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "fused_gdn_gating_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 1718,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "fused_gdn_gating"
+        },
+        {
+          "kind": "function",
+          "line": 27,
+          "source": "vllm/third_party/flash_linear_attention/ops/fused_recurrent.py",
+          "symbol": "fused_recurrent_gated_delta_rule_fwd_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 28,
+          "source": "vllm/third_party/flash_linear_attention/ops/l2norm.py",
+          "symbol": "l2norm_fwd_kernel1",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 59,
+          "source": "vllm/third_party/flash_linear_attention/ops/l2norm.py",
+          "symbol": "l2norm_fwd_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 79,
+          "source": "vllm/third_party/flash_linear_attention/ops/l2norm.py",
+          "symbol": "l2norm_fwd_kernel2",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 95,
+          "source": "vllm/third_party/flash_linear_attention/ops/l2norm.py",
+          "symbol": "l2norm_fwd"
+        }
+      ],
+      "source_keys": [
+        "gdn",
+        "fla_recurrent",
+        "fla_l2norm"
+      ],
+      "stage": "linear_attention.prefill_decode_variants",
+      "static_source_ok": true,
+      "triton_symbols": [
+        "fused_gdn_gating_kernel",
+        "fused_recurrent_gated_delta_rule_fwd_kernel",
+        "l2norm_fwd_kernel1",
+        "l2norm_fwd_kernel",
+        "l2norm_fwd_kernel2"
+      ]
+    },
+    {
+      "alternate_path": null,
+      "alternate_source_evidence": [],
+      "alternate_triton_symbols": [],
+      "amd_lowering": "generic_triton_candidate_with_arch_review",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "triton_kernel_or_native",
+      "cpu_fallback_forbidden": true,
+      "description": "RMSNormGated over recurrent output and z gate.",
+      "execution_gate": "amd_triton_compile_and_run",
+      "id": "gdn.output_norm_gate",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [
+        "rms_norm_gated"
+      ],
+      "required_symbols": [
+        "RMSNormGated",
+        "rms_norm_gated",
+        "layer_norm_gated_fwd_kernel"
+      ],
+      "source_evidence": [
+        {
+          "registration": "rms_norm_gated",
+          "source": "vllm/model_executor/layers/layernorm.py"
+        },
+        {
+          "kind": "class",
+          "line": 172,
+          "source": "vllm/model_executor/layers/layernorm.py",
+          "symbol": "RMSNormGated"
+        },
+        {
+          "kind": "import",
+          "line": 23,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "RMSNormGated"
+        },
+        {
+          "kind": "function",
+          "line": 27,
+          "source": "vllm/third_party/flash_linear_attention/ops/fused_norm_gate.py",
+          "symbol": "layer_norm_gated_fwd_kernel"
+        },
+        {
+          "kind": "function",
+          "line": 27,
+          "source": "vllm/third_party/flash_linear_attention/ops/fused_norm_gate.py",
+          "symbol": "layer_norm_gated_fwd_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 127,
+          "source": "vllm/third_party/flash_linear_attention/ops/fused_norm_gate.py",
+          "symbol": "layer_norm_gated_fwd_kernel1",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 291,
+          "source": "vllm/third_party/flash_linear_attention/ops/fused_norm_gate.py",
+          "symbol": "rms_norm_gated"
+        }
+      ],
+      "source_keys": [
+        "gdn",
+        "layernorm",
+        "fla_norm_gate"
+      ],
+      "stage": "linear_attention",
+      "static_source_ok": true,
+      "triton_symbols": [
+        "layer_norm_gated_fwd_kernel",
+        "layer_norm_gated_fwd_kernel1"
+      ]
+    },
+    {
+      "alternate_path": "vision_or_3d_positions_deferred",
+      "alternate_source_evidence": [
+        {
+          "alternate": true,
+          "kind": "function",
+          "line": 16,
+          "source": "vllm/model_executor/layers/rotary_embedding/mrope.py",
+          "symbol": "_triton_mrope_forward",
+          "triton": true
+        }
+      ],
+      "alternate_triton_symbols": [
+        "_triton_mrope_forward"
+      ],
+      "amd_lowering": "cuda_guarded_fused_path; hip_native_or_flash_attn_path",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "triton_kernel_or_native",
+      "cpu_fallback_forbidden": true,
+      "description": "QKV projection, per-head Q/K RMSNorm, partial RoPE and output gate split.",
+      "execution_gate": "amd_qk_norm_rope_without_cpu_fallback",
+      "id": "full_attention.qkv_qk_norm_rope",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [
+        "apply_rotary_emb"
+      ],
+      "required_symbols": [
+        "Qwen3NextAttention",
+        "_project_qkv_gate",
+        "_fused_qk_rmsnorm_rope_gate_kernel",
+        "ApplyRotaryEmb",
+        "MRotaryEmbedding",
+        "RotaryEmbeddingBase"
+      ],
+      "source_evidence": [
+        {
+          "kind": "function",
+          "line": 17,
+          "source": "vllm/model_executor/layers/fused_qk_norm_rope.py",
+          "symbol": "_fused_qk_rmsnorm_rope_gate_kernel"
+        },
+        {
+          "kind": "function",
+          "line": 17,
+          "source": "vllm/model_executor/layers/fused_qk_norm_rope.py",
+          "symbol": "_fused_qk_rmsnorm_rope_gate_kernel",
+          "triton": true
+        },
+        {
+          "kind": "import",
+          "line": 10,
+          "source": "vllm/model_executor/layers/rotary_embedding/base.py",
+          "symbol": "ApplyRotaryEmb"
+        },
+        {
+          "kind": "class",
+          "line": 15,
+          "source": "vllm/model_executor/layers/rotary_embedding/base.py",
+          "symbol": "RotaryEmbeddingBase"
+        },
+        {
+          "registration": "apply_rotary_emb",
+          "source": "vllm/model_executor/layers/rotary_embedding/common.py"
+        },
+        {
+          "kind": "class",
+          "line": 125,
+          "source": "vllm/model_executor/layers/rotary_embedding/common.py",
+          "symbol": "ApplyRotaryEmb"
+        },
+        {
+          "kind": "import",
+          "line": 11,
+          "source": "vllm/model_executor/layers/rotary_embedding/mrope.py",
+          "symbol": "RotaryEmbeddingBase"
+        },
+        {
+          "kind": "class",
+          "line": 237,
+          "source": "vllm/model_executor/layers/rotary_embedding/mrope.py",
+          "symbol": "MRotaryEmbedding"
+        },
+        {
+          "kind": "class",
+          "line": 229,
+          "source": "vllm/model_executor/models/qwen3_next.py",
+          "symbol": "Qwen3NextAttention"
+        },
+        {
+          "kind": "function",
+          "line": 331,
+          "source": "vllm/model_executor/models/qwen3_next.py",
+          "symbol": "_project_qkv_gate"
+        }
+      ],
+      "source_keys": [
+        "qwen_next",
+        "qk_rope",
+        "rotary",
+        "rotary_base",
+        "mrope",
+        "layernorm"
+      ],
+      "stage": "full_attention",
+      "static_source_ok": true,
+      "triton_symbols": [
+        "_fused_qk_rmsnorm_rope_gate_kernel"
+      ]
+    },
+    {
+      "alternate_path": "ROCM_ATTN_default; TRITON_ATTN_fallback; AITER_external_optional",
+      "alternate_source_evidence": [],
+      "alternate_triton_symbols": [],
+      "amd_lowering": "rocm_backend_or_triton_attention_required",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "attention_backend",
+      "cpu_fallback_forbidden": true,
+      "description": "KV-cache update and causal paged attention for six full-attention layers.",
+      "execution_gate": "amd_kv_cache_and_attention",
+      "id": "full_attention.kv_cache_attention",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [
+        "unified_kv_cache_update",
+        "unified_attention_with_output"
+      ],
+      "required_symbols": [
+        "Attention",
+        "unified_kv_cache_update",
+        "unified_attention_with_output",
+        "RocmAttentionBackend",
+        "TritonAttentionBackend",
+        "GDN_ATTN",
+        "chunked_prefill_paged_decode",
+        "kernel_paged_attention_2d",
+        "context_attention_fwd",
+        "reshape_and_cache_kernel_flash",
+        "triton_reshape_and_cache_flash",
+        "triton_reshape_and_cache_flash_per_token_head_quant",
+        "unified_attention",
+        "kernel_unified_attention",
+        "reduce_segments",
+        "has_native_kv_cache_layout"
+      ],
+      "source_evidence": [
+        {
+          "registration": "unified_attention_with_output",
+          "source": "vllm/model_executor/layers/attention/attention.py"
+        },
+        {
+          "registration": "unified_kv_cache_update",
+          "source": "vllm/model_executor/layers/attention/attention.py"
+        },
+        {
+          "kind": "class",
+          "line": 218,
+          "source": "vllm/model_executor/layers/attention/attention.py",
+          "symbol": "Attention"
+        },
+        {
+          "kind": "function",
+          "line": 713,
+          "source": "vllm/model_executor/layers/attention/attention.py",
+          "symbol": "unified_kv_cache_update"
+        },
+        {
+          "kind": "function",
+          "line": 757,
+          "source": "vllm/model_executor/layers/attention/attention.py",
+          "symbol": "unified_attention_with_output"
+        },
+        {
+          "kind": "import",
+          "line": 22,
+          "source": "vllm/model_executor/models/qwen3_next.py",
+          "symbol": "Attention"
+        },
+        {
+          "kind": "reference",
+          "line": 189,
+          "source": "vllm/v1/attention/backends/registry.py",
+          "symbol": "GDN_ATTN"
+        },
+        {
+          "kind": "import",
+          "line": 30,
+          "source": "vllm/v1/attention/backends/rocm_attn.py",
+          "symbol": "chunked_prefill_paged_decode"
+        },
+        {
+          "kind": "import",
+          "line": 30,
+          "source": "vllm/v1/attention/backends/rocm_attn.py",
+          "symbol": "has_native_kv_cache_layout"
+        },
+        {
+          "kind": "import",
+          "line": 35,
+          "source": "vllm/v1/attention/backends/rocm_attn.py",
+          "symbol": "triton_reshape_and_cache_flash"
+        },
+        {
+          "kind": "class",
+          "line": 165,
+          "source": "vllm/v1/attention/backends/rocm_attn.py",
+          "symbol": "RocmAttentionBackend"
+        },
+        {
+          "kind": "import",
+          "line": 349,
+          "source": "vllm/v1/attention/backends/rocm_attn.py",
+          "symbol": "context_attention_fwd"
+        },
+        {
+          "kind": "import",
+          "line": 38,
+          "source": "vllm/v1/attention/backends/triton_attn.py",
+          "symbol": "context_attention_fwd"
+        },
+        {
+          "kind": "import",
+          "line": 39,
+          "source": "vllm/v1/attention/backends/triton_attn.py",
+          "symbol": "triton_reshape_and_cache_flash"
+        },
+        {
+          "kind": "import",
+          "line": 39,
+          "source": "vllm/v1/attention/backends/triton_attn.py",
+          "symbol": "triton_reshape_and_cache_flash_per_token_head_quant"
+        },
+        {
+          "kind": "import",
+          "line": 43,
+          "source": "vllm/v1/attention/backends/triton_attn.py",
+          "symbol": "unified_attention"
+        },
+        {
+          "kind": "class",
+          "line": 271,
+          "source": "vllm/v1/attention/backends/triton_attn.py",
+          "symbol": "TritonAttentionBackend"
+        },
+        {
+          "kind": "import",
+          "line": 17,
+          "source": "vllm/v1/attention/ops/chunked_prefill_paged_decode.py",
+          "symbol": "context_attention_fwd"
+        },
+        {
+          "kind": "function",
+          "line": 24,
+          "source": "vllm/v1/attention/ops/chunked_prefill_paged_decode.py",
+          "symbol": "has_native_kv_cache_layout"
+        },
+        {
+          "kind": "function",
+          "line": 41,
+          "source": "vllm/v1/attention/ops/chunked_prefill_paged_decode.py",
+          "symbol": "cdiv_fn",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 46,
+          "source": "vllm/v1/attention/ops/chunked_prefill_paged_decode.py",
+          "symbol": "kernel_paged_attention_2d"
+        },
+        {
+          "kind": "function",
+          "line": 46,
+          "source": "vllm/v1/attention/ops/chunked_prefill_paged_decode.py",
+          "symbol": "kernel_paged_attention_2d",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 271,
+          "source": "vllm/v1/attention/ops/chunked_prefill_paged_decode.py",
+          "symbol": "chunked_prefill_paged_decode"
+        },
+        {
+          "kind": "function",
+          "line": 39,
+          "source": "vllm/v1/attention/ops/prefix_prefill.py",
+          "symbol": "_paged_kv_cache_offsets",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 107,
+          "source": "vllm/v1/attention/ops/prefix_prefill.py",
+          "symbol": "_fwd_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 497,
+          "source": "vllm/v1/attention/ops/prefix_prefill.py",
+          "symbol": "_fwd_kernel_alibi",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 777,
+          "source": "vllm/v1/attention/ops/prefix_prefill.py",
+          "symbol": "context_attention_fwd"
+        },
+        {
+          "kind": "function",
+          "line": 22,
+          "source": "vllm/v1/attention/ops/triton_attention_helpers.py",
+          "symbol": "cdiv_fn",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 28,
+          "source": "vllm/v1/attention/ops/triton_attention_helpers.py",
+          "symbol": "apply_softcap",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 45,
+          "source": "vllm/v1/attention/ops/triton_attention_helpers.py",
+          "symbol": "resolve_seq_and_query_len",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 79,
+          "source": "vllm/v1/attention/ops/triton_attention_helpers.py",
+          "symbol": "find_seq_idx",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 110,
+          "source": "vllm/v1/attention/ops/triton_attention_helpers.py",
+          "symbol": "init_softmax_M",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 142,
+          "source": "vllm/v1/attention/ops/triton_attention_helpers.py",
+          "symbol": "compute_tile_loop_bounds",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 242,
+          "source": "vllm/v1/attention/ops/triton_attention_helpers.py",
+          "symbol": "store_segm_reduce_scalars",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 272,
+          "source": "vllm/v1/attention/ops/triton_attention_helpers.py",
+          "symbol": "compute_kv_seq_mask",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 379,
+          "source": "vllm/v1/attention/ops/triton_attention_helpers.py",
+          "symbol": "apply_alibi_to_score",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 401,
+          "source": "vllm/v1/attention/ops/triton_attention_helpers.py",
+          "symbol": "load_qq_bias_tile",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 418,
+          "source": "vllm/v1/attention/ops/triton_attention_helpers.py",
+          "symbol": "softmax_step",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 37,
+          "source": "vllm/v1/attention/ops/triton_prefill_attention.py",
+          "symbol": "_fwd_kernel",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 207,
+          "source": "vllm/v1/attention/ops/triton_prefill_attention.py",
+          "symbol": "context_attention_fwd"
+        },
+        {
+          "kind": "function",
+          "line": 34,
+          "source": "vllm/v1/attention/ops/triton_reshape_and_cache_flash.py",
+          "symbol": "reshape_and_cache_kernel_flash"
+        },
+        {
+          "kind": "function",
+          "line": 34,
+          "source": "vllm/v1/attention/ops/triton_reshape_and_cache_flash.py",
+          "symbol": "reshape_and_cache_kernel_flash",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 155,
+          "source": "vllm/v1/attention/ops/triton_reshape_and_cache_flash.py",
+          "symbol": "_reshape_cache_per_token_head",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 272,
+          "source": "vllm/v1/attention/ops/triton_reshape_and_cache_flash.py",
+          "symbol": "triton_reshape_and_cache_flash_per_token_head_quant"
+        },
+        {
+          "kind": "function",
+          "line": 363,
+          "source": "vllm/v1/attention/ops/triton_reshape_and_cache_flash.py",
+          "symbol": "triton_reshape_and_cache_flash"
+        },
+        {
+          "kind": "function",
+          "line": 464,
+          "source": "vllm/v1/attention/ops/triton_reshape_and_cache_flash.py",
+          "symbol": "reshape_and_cache_kernel_flash_diffkv",
+          "triton": true
+        },
+        {
+          "kind": "import",
+          "line": 18,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "apply_alibi_to_score",
+          "triton": true
+        },
+        {
+          "kind": "import",
+          "line": 18,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "apply_softcap",
+          "triton": true
+        },
+        {
+          "kind": "import",
+          "line": 18,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "cdiv_fn",
+          "triton": true
+        },
+        {
+          "kind": "import",
+          "line": 18,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "compute_kv_seq_mask",
+          "triton": true
+        },
+        {
+          "kind": "import",
+          "line": 18,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "compute_tile_loop_bounds",
+          "triton": true
+        },
+        {
+          "kind": "import",
+          "line": 18,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "find_seq_idx",
+          "triton": true
+        },
+        {
+          "kind": "import",
+          "line": 18,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "init_softmax_M",
+          "triton": true
+        },
+        {
+          "kind": "import",
+          "line": 18,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "load_qq_bias_tile",
+          "triton": true
+        },
+        {
+          "kind": "import",
+          "line": 18,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "resolve_seq_and_query_len",
+          "triton": true
+        },
+        {
+          "kind": "import",
+          "line": 18,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "softmax_step",
+          "triton": true
+        },
+        {
+          "kind": "import",
+          "line": 18,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "store_segm_reduce_scalars",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 39,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "_cast_kv_tile",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 68,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "_load_q_td",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 111,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "_load_kv_tile_td",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 146,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "_store_output_td",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 179,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "kernel_unified_attention"
+        },
+        {
+          "kind": "function",
+          "line": 179,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "kernel_unified_attention",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 685,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "reduce_segments"
+        },
+        {
+          "kind": "function",
+          "line": 685,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "reduce_segments",
+          "triton": true
+        },
+        {
+          "kind": "function",
+          "line": 802,
+          "source": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "symbol": "unified_attention"
+        }
+      ],
+      "source_keys": [
+        "qwen_next",
+        "attention",
+        "rocm_attn",
+        "rocm_platform",
+        "rocm_paged",
+        "rocm_prefix",
+        "triton_prefill",
+        "triton_cache",
+        "triton_attn_backend",
+        "triton_unified",
+        "triton_helpers",
+        "attn_backend_registry"
+      ],
+      "stage": "full_attention",
+      "static_source_ok": true,
+      "triton_symbols": [
+        "cdiv_fn",
+        "kernel_paged_attention_2d",
+        "_paged_kv_cache_offsets",
+        "_fwd_kernel",
+        "_fwd_kernel_alibi",
+        "reshape_and_cache_kernel_flash",
+        "_reshape_cache_per_token_head",
+        "reshape_and_cache_kernel_flash_diffkv",
+        "_cast_kv_tile",
+        "_load_q_td",
+        "_load_kv_tile_td",
+        "_store_output_td",
+        "kernel_unified_attention",
+        "reduce_segments",
+        "apply_alibi_to_score",
+        "apply_softcap",
+        "compute_kv_seq_mask",
+        "compute_tile_loop_bounds",
+        "find_seq_idx",
+        "init_softmax_M",
+        "load_qq_bias_tile",
+        "resolve_seq_and_query_len",
+        "softmax_step",
+        "store_segm_reduce_scalars"
+      ]
+    },
+    {
+      "alternate_path": null,
+      "alternate_source_evidence": [],
+      "alternate_triton_symbols": [],
+      "amd_lowering": "backend_required",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "elementwise_and_gemm",
+      "cpu_fallback_forbidden": true,
+      "description": "Sigmoid output gate followed by row-parallel projection.",
+      "execution_gate": "amd_elementwise_and_gemm",
+      "id": "full_attention.output_gate_projection",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [
+        "row_parallel_linear"
+      ],
+      "required_symbols": [
+        "attn_output_gate",
+        "RowParallelLinear"
+      ],
+      "source_evidence": [
+        {
+          "registration": "row_parallel_linear",
+          "source": "vllm/model_executor/layers/linear.py"
+        },
+        {
+          "kind": "class",
+          "line": 1613,
+          "source": "vllm/model_executor/layers/linear.py",
+          "symbol": "RowParallelLinear"
+        },
+        {
+          "kind": "import",
+          "line": 28,
+          "source": "vllm/model_executor/models/qwen3_next.py",
+          "symbol": "RowParallelLinear"
+        },
+        {
+          "kind": "reference",
+          "line": 263,
+          "source": "vllm/model_executor/models/qwen3_next.py",
+          "symbol": "attn_output_gate"
+        }
+      ],
+      "source_keys": [
+        "qwen_next",
+        "linear"
+      ],
+      "stage": "full_attention",
+      "static_source_ok": true,
+      "triton_symbols": []
+    },
+    {
+      "alternate_path": "SwigluStepAndMul_only; Qwen3.5_dense_uses_SiluAndMul",
+      "alternate_source_evidence": [
+        {
+          "alternate": true,
+          "kind": "function",
+          "line": 21,
+          "source": "vllm/model_executor/layers/activation.py",
+          "symbol": "_swiglustep_and_mul_kernel",
+          "triton": true
+        }
+      ],
+      "alternate_triton_symbols": [
+        "_swiglustep_and_mul_kernel"
+      ],
+      "amd_lowering": "backend_required",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "gemm_and_elementwise",
+      "cpu_fallback_forbidden": true,
+      "description": "Dense gate/up projection, SiLU-and-mul, and down projection.",
+      "execution_gate": "amd_gemm_and_activation",
+      "id": "mlp.gate_up_silu_down",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [
+        "row_parallel_linear"
+      ],
+      "required_symbols": [
+        "Qwen3NextMLP",
+        "Qwen2MoeMLP",
+        "SiluAndMul",
+        "gate_up_proj",
+        "down_proj"
+      ],
+      "source_evidence": [
+        {
+          "kind": "class",
+          "line": 112,
+          "source": "vllm/model_executor/layers/activation.py",
+          "symbol": "SiluAndMul"
+        },
+        {
+          "registration": "row_parallel_linear",
+          "source": "vllm/model_executor/layers/linear.py"
+        },
+        {
+          "kind": "import",
+          "line": 41,
+          "source": "vllm/model_executor/models/qwen2_moe.py",
+          "symbol": "SiluAndMul"
+        },
+        {
+          "kind": "class",
+          "line": 73,
+          "source": "vllm/model_executor/models/qwen2_moe.py",
+          "symbol": "Qwen2MoeMLP"
+        },
+        {
+          "kind": "reference",
+          "line": 86,
+          "source": "vllm/model_executor/models/qwen2_moe.py",
+          "symbol": "gate_up_proj"
+        },
+        {
+          "kind": "reference",
+          "line": 94,
+          "source": "vllm/model_executor/models/qwen2_moe.py",
+          "symbol": "down_proj"
+        },
+        {
+          "kind": "import",
+          "line": 73,
+          "source": "vllm/model_executor/models/qwen3_5.py",
+          "symbol": "Qwen3NextMLP"
+        },
+        {
+          "kind": "import",
+          "line": 49,
+          "source": "vllm/model_executor/models/qwen3_next.py",
+          "symbol": "Qwen3NextMLP"
+        }
+      ],
+      "source_keys": [
+        "qwen_model",
+        "qwen_next",
+        "qwen_mlp",
+        "activation",
+        "linear"
+      ],
+      "stage": "decoder",
+      "static_source_ok": true,
+      "triton_symbols": []
+    },
+    {
+      "alternate_path": null,
+      "alternate_source_evidence": [],
+      "alternate_triton_symbols": [],
+      "amd_lowering": "backend_required",
+      "amd_runtime_status": "not_executed",
+      "backend_class": "vocab_parallel_gemm_and_logits",
+      "cpu_fallback_forbidden": true,
+      "description": "Final tied LM head and logits processor; sampling is outside this contract.",
+      "execution_gate": "amd_logits",
+      "id": "lm_head.logits",
+      "missing_alternate_triton_symbols": [],
+      "missing_files": [],
+      "missing_registrations": [],
+      "missing_symbols": [],
+      "missing_triton_symbols": [],
+      "nvidia_runtime_is_not_pass": true,
+      "registrations": [],
+      "required_symbols": [
+        "compute_logits",
+        "LogitsProcessor",
+        "ParallelLMHead"
+      ],
+      "source_evidence": [
+        {
+          "kind": "import",
+          "line": 40,
+          "source": "vllm/model_executor/models/qwen3_5.py",
+          "symbol": "LogitsProcessor"
+        },
+        {
+          "kind": "import",
+          "line": 50,
+          "source": "vllm/model_executor/models/qwen3_5.py",
+          "symbol": "ParallelLMHead"
+        },
+        {
+          "kind": "function",
+          "line": 415,
+          "source": "vllm/model_executor/models/qwen3_5.py",
+          "symbol": "compute_logits"
+        },
+        {
+          "kind": "import",
+          "line": 33,
+          "source": "vllm/model_executor/models/qwen3_next.py",
+          "symbol": "LogitsProcessor"
+        },
+        {
+          "kind": "import",
+          "line": 45,
+          "source": "vllm/model_executor/models/qwen3_next.py",
+          "symbol": "ParallelLMHead"
+        },
+        {
+          "kind": "function",
+          "line": 875,
+          "source": "vllm/model_executor/models/qwen3_next.py",
+          "symbol": "compute_logits"
+        }
+      ],
+      "source_keys": [
+        "qwen_model",
+        "qwen_next"
+      ],
+      "stage": "output",
+      "static_source_ok": true,
+      "triton_symbols": []
+    }
+  ],
+  "counts": {
+    "class_symbol_count": 91,
+    "configured_layer_count": 24,
+    "configured_layer_type_counts": {
+      "full_attention": 6,
+      "linear_attention": 18
+    },
+    "contract_alternate_triton_symbol_count": 2,
+    "contract_amd_runtime_not_executed_count": 15,
+    "contract_count": 15,
+    "contract_required_triton_symbol_count": 46,
+    "contract_static_source_ok_count": 15,
+    "custom_registration_count": 33,
+    "custom_registration_names": [
+      "apply_rotary_emb",
+      "chunk_gated_delta_rule",
+      "column_parallel_linear",
+      "fatrelu_and_mul",
+      "flashinfer_rotary_embedding",
+      "fused_rms_norm_gated",
+      "gelu",
+      "gelu_and_mul",
+      "gelu_and_mul_sparse",
+      "gelu_fast",
+      "gelu_new",
+      "gelu_tanh",
+      "gemma_rms_norm",
+      "mul_and_silu",
+      "parallel_lm_head",
+      "quick_gelu",
+      "qwen_gated_delta_net_attention",
+      "qwen_gdn_attention_core",
+      "relu2",
+      "replicated_linear",
+      "rms_norm",
+      "rms_norm_gated",
+      "rotary_embedding",
+      "row_parallel_linear",
+      "silu_and_mul",
+      "silu_and_mul_with_clamp",
+      "situ_and_mul",
+      "swigluoai_and_mul",
+      "swiglustep_and_mul",
+      "unified_attention_with_output",
+      "unified_kv_cache_update",
+      "vocab_parallel_embedding",
+      "xielu"
+    ],
+    "function_symbol_count": 534,
+    "import_symbol_count": 703,
+    "reference_symbol_count": 6309,
+    "source_file_count": 39,
+    "torch_ops_vllm_count": 6,
+    "torch_ops_vllm_names": [
+      "cpu_gdn_attention_core",
+      "flashinfer_rotary_embedding",
+      "gdn_attention_core_xpu",
+      "qwen_gdn_attention_core",
+      "unified_attention_with_output",
+      "unified_kv_cache_update"
+    ],
+    "triton_decorator_occurrence_count": 74,
+    "triton_source_symbol_count": 50
+  },
+  "model": {
+    "architecture": [
+      "Qwen3_5ForConditionalGeneration"
+    ],
+    "config_sha256": "b90b86f35c8e6925ef74ee04d0e758f0a845c83a42089ad82bbaa948de9b4204",
+    "id": "Qwen/Qwen3.5-0.8B",
+    "model_type": "qwen3_5",
+    "revision": "2fc06364715b967f1860aea9cf38778875588b17",
+    "scope": {
+      "cpu_fallback_allowed": false,
+      "full_rocm_opencl_cts_required": false,
+      "nvidia_runtime_counts_as_amd_pass": false,
+      "text_only_first_gate": true,
+      "vision_path_deferred": true
+    },
+    "text_model_type": "qwen3_5_text"
+  },
+  "purpose": "model-specific text-only Triton operator closure; no CPU fallback",
+  "runtime_probe": {
+    "amd_ready": false,
+    "cuda_runtime": true,
+    "device_name": "NVIDIA GeForce RTX 5090 Laptop GPU",
+    "hip_runtime": false,
+    "reason": "CUDA accelerator detected; NVIDIA execution is not an AMD pass",
+    "torch_importable": true,
+    "torch_origin": "/home/zhaosiying/miniforge3/envs/triton-dev/lib/python3.14/site-packages/torch/__init__.py"
+  },
+  "schema": "amdgpu-sim.qwen35.operator-manifest.v1",
+  "source_files": {
+    "vllm/model_executor/layers/activation.py": {
+      "bytes": 29922,
+      "custom_registration_names": [
+        "fatrelu_and_mul",
+        "gelu",
+        "gelu_and_mul",
+        "gelu_and_mul_sparse",
+        "gelu_fast",
+        "gelu_new",
+        "gelu_tanh",
+        "mul_and_silu",
+        "quick_gelu",
+        "relu2",
+        "silu_and_mul",
+        "silu_and_mul_with_clamp",
+        "situ_and_mul",
+        "swigluoai_and_mul",
+        "swiglustep_and_mul",
+        "xielu"
+      ],
+      "sha256": "157cb7610fba4237350daf7ec3b58c34c7f3fb38de8ff7b9e55584a69ca475c3",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "_swiglustep_and_mul_kernel"
+      ],
+      "triton_decorator_occurrence_count": 1
+    },
+    "vllm/model_executor/layers/attention/attention.py": {
+      "bytes": 33360,
+      "custom_registration_names": [
+        "unified_attention_with_output",
+        "unified_kv_cache_update"
+      ],
+      "sha256": "ecf799b67514fbc593eddad77420ff231701fb9836bbbdfdad37bb34e253763a",
+      "torch_ops_vllm_names": [
+        "unified_attention_with_output",
+        "unified_kv_cache_update"
+      ],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/model_executor/layers/fused_qk_norm_rope.py": {
+      "bytes": 7237,
+      "custom_registration_names": [],
+      "sha256": "3703af53dfef0c7e53035da2bee03ecada7fbd7698b40b05d6fd1ef9cf5077a6",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "_fused_qk_rmsnorm_rope_gate_kernel"
+      ],
+      "triton_decorator_occurrence_count": 1
+    },
+    "vllm/model_executor/layers/layernorm.py": {
+      "bytes": 10489,
+      "custom_registration_names": [
+        "gemma_rms_norm",
+        "rms_norm",
+        "rms_norm_gated"
+      ],
+      "sha256": "3460eba01758849027bb59b8592626406e33ab25b23d2def729bb0ec42afce67",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/model_executor/layers/linear.py": {
+      "bytes": 71150,
+      "custom_registration_names": [
+        "column_parallel_linear",
+        "replicated_linear",
+        "row_parallel_linear"
+      ],
+      "sha256": "d0662fddc4785419002320a4d9eb5183c9268051ebcf31f1c8276e8529633308",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py": {
+      "bytes": 65331,
+      "custom_registration_names": [
+        "chunk_gated_delta_rule",
+        "qwen_gated_delta_net_attention",
+        "qwen_gdn_attention_core"
+      ],
+      "sha256": "90fa90d405972493b2c62742206d13e8661a8de1566d73aae13a025a6561f025",
+      "torch_ops_vllm_names": [
+        "cpu_gdn_attention_core",
+        "gdn_attention_core_xpu",
+        "qwen_gdn_attention_core"
+      ],
+      "triton_decorated_symbols": [
+        "fused_gdn_gating_kernel"
+      ],
+      "triton_decorator_occurrence_count": 1
+    },
+    "vllm/model_executor/layers/mamba/ops/causal_conv1d.py": {
+      "bytes": 51129,
+      "custom_registration_names": [],
+      "sha256": "044d005cfe59fd0818ed421274e04f3e8dd679b8cdb64fca9f4422f2643484b2",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "_causal_conv1d_fwd_kernel",
+        "_causal_conv1d_update_kernel"
+      ],
+      "triton_decorator_occurrence_count": 2
+    },
+    "vllm/model_executor/layers/rotary_embedding/base.py": {
+      "bytes": 10964,
+      "custom_registration_names": [
+        "rotary_embedding"
+      ],
+      "sha256": "c81804498f08f072356a26b41967f211475df2694dabf5da9f488c074d1fdef5",
+      "torch_ops_vllm_names": [
+        "flashinfer_rotary_embedding"
+      ],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/model_executor/layers/rotary_embedding/common.py": {
+      "bytes": 9749,
+      "custom_registration_names": [
+        "apply_rotary_emb",
+        "flashinfer_rotary_embedding"
+      ],
+      "sha256": "39bf5bb498ae45ca7a38269e85aa8b9b257a00c919e2d4d14a7ceb44ac7e9c98",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/model_executor/layers/rotary_embedding/mrope.py": {
+      "bytes": 16406,
+      "custom_registration_names": [],
+      "sha256": "1dbb710466058c8c941f68108a6e41850300ee1f4daa391e256b1c5325caaf18",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "_triton_mrope_forward"
+      ],
+      "triton_decorator_occurrence_count": 1
+    },
+    "vllm/model_executor/layers/vocab_parallel_embedding.py": {
+      "bytes": 22902,
+      "custom_registration_names": [
+        "parallel_lm_head",
+        "vocab_parallel_embedding"
+      ],
+      "sha256": "b3e8a07296607153424b4b7ca5f75f00dcec1bce0f49e54b5eff6262fdf80201",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/model_executor/models/qwen2_moe.py": {
+      "bytes": 18630,
+      "custom_registration_names": [],
+      "sha256": "a35f10db36c4bdb2a4a6314474512589f73a04d12e69206a633e345b3755d4db",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/model_executor/models/qwen3_5.py": {
+      "bytes": 26804,
+      "custom_registration_names": [],
+      "sha256": "761f340e5355e30559987c44cb772d7116305370dfed0ce97107ad183ab901be",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/model_executor/models/qwen3_next.py": {
+      "bytes": 33371,
+      "custom_registration_names": [],
+      "sha256": "e195dc4d5522a8cce5399cb35d9d96d6e5a0c07bf9460ef6912c840dcb7a6dc9",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/model_executor/models/registry.py": {
+      "bytes": 61520,
+      "custom_registration_names": [],
+      "sha256": "be49f1bbd342983e073bacdb8aadc7740d663a61d94113c683a6dd0d9f526c88",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/platforms/interface.py": {
+      "bytes": 48025,
+      "custom_registration_names": [],
+      "sha256": "79be2a3d0d0cf92097fbd53a8432e2fc30a15277afcdf1313eceddf72bfe3375",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/platforms/rocm.py": {
+      "bytes": 39058,
+      "custom_registration_names": [],
+      "sha256": "2d18012d138681c4dc6af8e2456e92f6e8bad9b7d9181050a12fe4e271e4d6bc",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/third_party/flash_linear_attention/ops/chunk.py": {
+      "bytes": 8711,
+      "custom_registration_names": [],
+      "sha256": "c105ead259e86aedc248c53e7c4cef07034d0ff12da608d80265d1dd0990803f",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/third_party/flash_linear_attention/ops/chunk_delta_h.py": {
+      "bytes": 13219,
+      "custom_registration_names": [],
+      "sha256": "1b3ad391f939d9443c6b7adb19e57fe381bd5dccea064e8417a4f85b0e713b26",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64"
+      ],
+      "triton_decorator_occurrence_count": 3
+    },
+    "vllm/third_party/flash_linear_attention/ops/chunk_o.py": {
+      "bytes": 5392,
+      "custom_registration_names": [],
+      "sha256": "3b63b836a8cc561723c23db5a528a0b474d9cd78508d610f0b348c585a889a19",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "chunk_fwd_kernel_o"
+      ],
+      "triton_decorator_occurrence_count": 3
+    },
+    "vllm/third_party/flash_linear_attention/ops/chunk_scaled_dot_kkt.py": {
+      "bytes": 5720,
+      "custom_registration_names": [],
+      "sha256": "7ae41df3755acc7e925a134d848f78bb5fc00b90069039d86403c5853323ea42",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "chunk_scaled_dot_kkt_fwd_kernel"
+      ],
+      "triton_decorator_occurrence_count": 3
+    },
+    "vllm/third_party/flash_linear_attention/ops/cumsum.py": {
+      "bytes": 8062,
+      "custom_registration_names": [],
+      "sha256": "d818215669b451868823202ac0bcea77e7a9d75957254c7c1060a73a55dc39b6",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "chunk_local_cumsum_scalar_kernel",
+        "chunk_local_cumsum_vector_kernel"
+      ],
+      "triton_decorator_occurrence_count": 6
+    },
+    "vllm/third_party/flash_linear_attention/ops/fused_gdn_prefill_post_conv.py": {
+      "bytes": 7935,
+      "custom_registration_names": [],
+      "sha256": "590717b2107abc90d72548de06b5d315229eb2775c94614f3f545df11cc2b5df",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "_fused_post_conv_kernel"
+      ],
+      "triton_decorator_occurrence_count": 1
+    },
+    "vllm/third_party/flash_linear_attention/ops/fused_norm_gate.py": {
+      "bytes": 13328,
+      "custom_registration_names": [
+        "fused_rms_norm_gated"
+      ],
+      "sha256": "e6eb90467f29d8a0a04f2a364d20a2c3191b6ab857841bfb82076b33a6022d1a",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "layer_norm_gated_fwd_kernel",
+        "layer_norm_gated_fwd_kernel1"
+      ],
+      "triton_decorator_occurrence_count": 4
+    },
+    "vllm/third_party/flash_linear_attention/ops/fused_recurrent.py": {
+      "bytes": 21314,
+      "custom_registration_names": [],
+      "sha256": "278efd898d9d1ded2f427cc943f6b746de8f2b90d73bcba9b54d6015fc9478ef",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "fused_recurrent_gated_delta_rule_fwd_kernel",
+        "fused_recurrent_gated_delta_rule_packed_decode_kernel"
+      ],
+      "triton_decorator_occurrence_count": 3
+    },
+    "vllm/third_party/flash_linear_attention/ops/fused_sigmoid_gating.py": {
+      "bytes": 9166,
+      "custom_registration_names": [],
+      "sha256": "000ab8996af9788fdb8843a6a3b91833e7a14c8acc0e1ea073a536330f64cb6f",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "fused_sigmoid_gating_delta_rule_update_kernel"
+      ],
+      "triton_decorator_occurrence_count": 2
+    },
+    "vllm/third_party/flash_linear_attention/ops/l2norm.py": {
+      "bytes": 4077,
+      "custom_registration_names": [],
+      "sha256": "520f4513ef4fc97e6b88dc07877cca8e29da0d34e44673fe989e3af002d86381",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "l2norm_fwd_kernel",
+        "l2norm_fwd_kernel1",
+        "l2norm_fwd_kernel2"
+      ],
+      "triton_decorator_occurrence_count": 5
+    },
+    "vllm/third_party/flash_linear_attention/ops/solve_tril.py": {
+      "bytes": 19536,
+      "custom_registration_names": [],
+      "sha256": "d1a4ff27623a938825052500afa7e2aa24fadd2fa4c9be6376c9128824f86f82",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "merge_16x16_to_32x32_inverse_kernel",
+        "merge_16x16_to_64x64_inverse_kernel",
+        "solve_tril_16x16_kernel"
+      ],
+      "triton_decorator_occurrence_count": 9
+    },
+    "vllm/third_party/flash_linear_attention/ops/wy_fast.py": {
+      "bytes": 4424,
+      "custom_registration_names": [],
+      "sha256": "c9fc8259db0a8746dc04f1d799cb73333457118cf89a0bdce8dde8a80a28cd96",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "recompute_w_u_fwd_kernel"
+      ],
+      "triton_decorator_occurrence_count": 3
+    },
+    "vllm/v1/attention/backends/gdn_attn.py": {
+      "bytes": 22639,
+      "custom_registration_names": [],
+      "sha256": "d11785f378546e4cee9ee4bc40effb881db4651cb201c970a89f1dcf59b315aa",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/v1/attention/backends/registry.py": {
+      "bytes": 11121,
+      "custom_registration_names": [],
+      "sha256": "f92cb5e44073f9d4442978ec2861dc6aba08c0a656d3727c7d59d449da6d25b2",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/v1/attention/backends/rocm_attn.py": {
+      "bytes": 20365,
+      "custom_registration_names": [],
+      "sha256": "1b6ee62a95c94542c345cdc676bec6e8a653bf703f2fbce96af7bf2319d08ce7",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/v1/attention/backends/triton_attn.py": {
+      "bytes": 33865,
+      "custom_registration_names": [],
+      "sha256": "20b4dd5f8c15cd2d6f9598268368f5fc572f2c980eb75327c5992100c49ff3ed",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [],
+      "triton_decorator_occurrence_count": 0
+    },
+    "vllm/v1/attention/ops/chunked_prefill_paged_decode.py": {
+      "bytes": 17225,
+      "custom_registration_names": [],
+      "sha256": "97729ec3ec25f80926244c5610ae6a22b6f794fc485fe1b9bc9886106308dfef",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "cdiv_fn",
+        "kernel_paged_attention_2d"
+      ],
+      "triton_decorator_occurrence_count": 2
+    },
+    "vllm/v1/attention/ops/prefix_prefill.py": {
+      "bytes": 33681,
+      "custom_registration_names": [],
+      "sha256": "e0c9f6b08d20871521d0784652cd30a3d74f5adb5542e921377a2e040a4da758",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "_fwd_kernel",
+        "_fwd_kernel_alibi",
+        "_paged_kv_cache_offsets"
+      ],
+      "triton_decorator_occurrence_count": 3
+    },
+    "vllm/v1/attention/ops/triton_attention_helpers.py": {
+      "bytes": 15788,
+      "custom_registration_names": [],
+      "sha256": "8c730611e7b3c5fb7579ec7846d56a2ab7e348ce06b39136da22072ecc363c95",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "apply_alibi_to_score",
+        "apply_softcap",
+        "cdiv_fn",
+        "compute_kv_seq_mask",
+        "compute_tile_loop_bounds",
+        "find_seq_idx",
+        "init_softmax_M",
+        "load_qq_bias_tile",
+        "resolve_seq_and_query_len",
+        "softmax_step",
+        "store_segm_reduce_scalars"
+      ],
+      "triton_decorator_occurrence_count": 11
+    },
+    "vllm/v1/attention/ops/triton_prefill_attention.py": {
+      "bytes": 8565,
+      "custom_registration_names": [],
+      "sha256": "1fabbe698b34b8f2a0c3bb257d93264ee4fff89911ed86d47c812b3aad2f9181",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "_fwd_kernel"
+      ],
+      "triton_decorator_occurrence_count": 1
+    },
+    "vllm/v1/attention/ops/triton_reshape_and_cache_flash.py": {
+      "bytes": 20737,
+      "custom_registration_names": [],
+      "sha256": "6cac51475b8c656992a21b2d150acd3a16a95a7ab7d49aab151a3ef13c24b80d",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "_reshape_cache_per_token_head",
+        "reshape_and_cache_kernel_flash",
+        "reshape_and_cache_kernel_flash_diffkv"
+      ],
+      "triton_decorator_occurrence_count": 3
+    },
+    "vllm/v1/attention/ops/triton_unified_attention.py": {
+      "bytes": 44514,
+      "custom_registration_names": [],
+      "sha256": "992a2bc892e2e2b43fbd3c8163816ccf7e97ced56cb542bd827adb0ddb2df9fa",
+      "torch_ops_vllm_names": [],
+      "triton_decorated_symbols": [
+        "_cast_kv_tile",
+        "_load_kv_tile_td",
+        "_load_q_td",
+        "_store_output_td",
+        "kernel_unified_attention",
+        "reduce_segments"
+      ],
+      "triton_decorator_occurrence_count": 6
+    }
+  },
+  "source_revisions": {
+    "pytorch": {
+      "dirty": false,
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646"
+    },
+    "triton": {
+      "dirty": false,
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3"
+    },
+    "vllm": {
+      "dirty": false,
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e"
+    }
+  },
+  "summary": {
+    "amd_runtime_executed": false,
+    "amd_runtime_pass": false,
+    "blocker": "CUDA accelerator detected; NVIDIA execution is not an AMD pass",
+    "contract_count": 15,
+    "runtime_status": "blocked",
+    "static_source_ok": true
+  },
+  "topology": {
+    "full_attention_layers": [
+      3,
+      7,
+      11,
+      15,
+      19,
+      23
+    ],
+    "head_dim": 256,
+    "hidden_size": 1024,
+    "intermediate_size": 3584,
+    "layer_type_counts": {
+      "full_attention": 6,
+      "linear_attention": 18
+    },
+    "linear_attention_layers": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      6,
+      8,
+      9,
+      10,
+      12,
+      13,
+      14,
+      16,
+      17,
+      18,
+      20,
+      21,
+      22
+    ],
+    "linear_conv_kernel_dim": 4,
+    "linear_key_head_dim": 128,
+    "linear_num_key_heads": 16,
+    "linear_num_value_heads": 16,
+    "linear_value_head_dim": 128,
+    "num_attention_heads": 8,
+    "num_hidden_layers": 24,
+    "num_key_value_heads": 2,
+    "vocab_size": 248320
+  },
+  "unsupported_backends": [
+    {
+      "backend": "cpu",
+      "counts_as_pass": false,
+      "reason": "CPU GDN/custom-op branches are diagnostic fallbacks and are explicitly out of scope.",
+      "source_evidence": [
+        {
+          "kind": "function",
+          "line": 640,
+          "source": "vllm/model_executor/layers/activation.py",
+          "symbol": "forward_cpu"
+        },
+        {
+          "kind": "function",
+          "line": 941,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "forward_cpu"
+        },
+        {
+          "kind": "reference",
+          "line": 974,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "cpu_gdn_attention_core"
+        }
+      ],
+      "status": "forbidden_for_gate"
+    },
+    {
+      "backend": "cuda_nvidia",
+      "counts_as_pass": false,
+      "reason": "A CUDA build/device is not HIP; NVIDIA execution cannot be promoted to an AMD result.",
+      "source_evidence": [
+        {
+          "kind": "reference",
+          "line": 112,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "is_cuda"
+        },
+        {
+          "kind": "function",
+          "line": 832,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "forward_cuda"
+        },
+        {
+          "kind": "reference",
+          "line": 324,
+          "source": "vllm/model_executor/models/qwen3_next.py",
+          "symbol": "use_fused_qk_norm_rope_gate"
+        },
+        {
+          "kind": "reference",
+          "line": 327,
+          "source": "vllm/model_executor/models/qwen3_next.py",
+          "symbol": "is_cuda"
+        }
+      ],
+      "status": "forbidden_for_amd_gate"
+    },
+    {
+      "backend": "gdn_flashinfer",
+      "counts_as_pass": false,
+      "reason": "The local resolver selects FlashInfer only on CUDA-capability branches; it is not an AMD Triton closure.",
+      "source_evidence": [
+        {
+          "kind": "function",
+          "line": 88,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "_resolve_gdn_prefill_backend"
+        },
+        {
+          "kind": "function",
+          "line": 166,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "fi_chunk_gated_delta_rule"
+        }
+      ],
+      "status": "unsupported_on_rocm"
+    },
+    {
+      "backend": "gdn_cutedsl",
+      "counts_as_pass": false,
+      "reason": "CuteDSL is an opt-in CUDA/Blackwell branch in the checked-out resolver, not a generic AMD Triton backend.",
+      "source_evidence": [
+        {
+          "kind": "function",
+          "line": 88,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "_resolve_gdn_prefill_backend"
+        },
+        {
+          "kind": "function",
+          "line": 300,
+          "source": "vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py",
+          "symbol": "forward_cutedsl"
+        }
+      ],
+      "status": "unsupported_on_rocm"
+    }
+  ]
+}

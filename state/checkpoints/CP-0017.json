@@ -1,0 +1,198 @@
+{
+  "baseline_commit_marker": "N/A",
+  "bitlesson_ids": [
+    "BL-0077",
+    "BL-0078",
+    "BL-0079"
+  ],
+  "bitlesson_sha256": {
+    "BL-0077": "247d6acf82522d152d5e6d61ecee8c413b162c70dc1af4b6a34b16a2cbc47bc0",
+    "BL-0078": "bf4b4090af456823b42206defeaaffb440443a85e4acf55e62f2a9a3a18eb837",
+    "BL-0079": "b156f83c749d737cbe6315ac7d780ea499578dab5e9c91d2cd2f77382d70532f"
+  },
+  "blockers": [],
+  "change_kind": "code",
+  "changes": [
+    "Accepted a standalone BUILD_ISA=n, USE_X86_ISA=n, BUILD_GPU=y PT_LOAD staging target that reuses CP13 image state and the existing memory/lifetime ledgers.",
+    "Materialized the locked gfx950 gpuReadWrite image with exact PT_LOAD file copies, BSS zero-fill, descriptor/entry binding, pre-allocation rejection, and shared cross-context lease accounting; retained VEGA_X86 regressions as the compatibility oracle.",
+    "Prepared the offline Qwen/Qwen3.5-0.8B text-only model and a deterministic 15-contract source/registration manifest; added a strict smoke that refuses CPU/NVIDIA fallback.",
+    "Built a temporary pinned Triton/LLVM AMD overlay to compile a gfx950 vecadd HSACO; no Triton request or simulator instruction has executed yet."
+  ],
+  "created_at": "2026-08-09T21:51:37+08:00",
+  "evidence_ids": [
+    "EV-0042",
+    "EV-0043"
+  ],
+  "evidence_manifest_id": "EV-0043",
+  "evidence_manifest_sha256": "a564ef676f36a56cd4b37027d569d5eec71fb26040144f7cdff5cd0f12716021",
+  "evidence_sha256": {
+    "EV-0042": "81e4871f1b089b076bb5a9731418eb730c55459639fa03e6fd1fdddb32518096",
+    "EV-0043": "a564ef676f36a56cd4b37027d569d5eec71fb26040144f7cdff5cd0f12716021"
+  },
+  "goal_id": "GSIM-001",
+  "goal_sha256": "cedb194aecd508928a333a1a458a418c78dc69e1488924afe447735d66a26acc",
+  "id": "CP-0017",
+  "limitations": [
+    "CP-0017-A is fixture-scoped staging only. It does not enforce segment permissions, apply relocations, construct dynamic kernarg/AQL, submit a queue, connect HSAPacketProcessor/GPUDispatcher/ComputeUnit, or execute an ISA instruction.",
+    "The mapper's negative cases prove pre-allocation malformed/unsupported rejection and shared lifetime behavior; they are not a generic arbitrary-ELF loader or rollback proof.",
+    "The Qwen manifest covers the 15 text-only contracts used by the pinned 24-layer model, but static discovery and shape checks are not AMD execution. Full ROCm/OpenCL CTS remains out of scope for this model-specific gate.",
+    "The temporary patched Triton probe overlay reaches TTIR/TTGIR/LLIR/AMDGCN/HSACO for gfx950; its CMake graph retains NVIDIA plugin sources and it is not a committed launcher. Triton end-to-end remains 0/1; Qwen inference remains 0/1; no PyTorch/vLLM, hardware, timing, or performance claim is made."
+  ],
+  "next_action": {
+    "id": "P3-HOST-NATIVE-03-B",
+    "argv": [
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0018",
+      "--intent",
+      "Connect the mapped gfx950 code object to native translation, dynamic kernarg/AQL construction, queue submission, and one real GPU-pipeline differential before the Triton launcher",
+      "--participant",
+      "gem5=projects/gem5",
+      "--participant",
+      "self-amdgpu-runtime=projects/self-amdgpu-runtime"
+    ],
+    "cwd": ".",
+    "expected": "A pinned zero-relocation gfx950 dispatch reaches the reused HSAPacketProcessor/GPUCommandProcessor/GPUDispatcher/ComputeUnit path through native translation, uses a descriptor-derived kernel object and ABI-complete kernarg/AQL packet, retires with the exact output/trace oracle, and reports zero CPU fallback. This gate must remain separate from the Triton user launcher.",
+    "prerequisites": [
+      "CP-0017 root checkpoint is accepted and scripts/resume.sh --verify passes offline.",
+      "The CP17 gem5 child commit, EV-0042/EV-0043, Qwen model hashes, and 15-contract static manifest remain immutable.",
+      "The CP13 fixed-record transport and existing code-object parser remain the ABI authority; unsupported relocations and non-gfx950 targets must be rejected before mapping or publish.",
+      "The implementation must preserve the VEGA_X86 reference path and keep AQL/kernarg, instruction execution, and Triton claims separately evidenced."
+    ],
+    "rollback_boundary": "Keep CP-0017 accepted, preserve the PTLOAD staging executable, Qwen preparation and compile-only Triton evidence, and retain the VEGA_X86 oracle if native translation, packet assembly, or retirement differential fails."
+  },
+  "parent_checkpoint": "CP-0016",
+  "phase_id": "P3",
+  "plan_sha256": "48cccd31048913f4c3b0d70fb4a22bebb426d4d3123c1d8702d4c59e19abb7b7",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "administrative_git_dir": "modules/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "clean": true,
+      "head": "ad5172cd761d6638ef473bc4150682c882f778be",
+      "id": "gem5",
+      "path": "projects/gem5",
+      "tree": "b3e2706cad60b1e573df5e02de50211de44db094"
+    },
+    {
+      "administrative_git_dir": "modules/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "clean": true,
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58"
+    },
+    {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "clean": true,
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489"
+    },
+    {
+      "administrative_git_dir": "modules/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "clean": true,
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "id": "triton",
+      "path": "projects/triton",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1"
+    },
+    {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "clean": true,
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315"
+    },
+    {
+      "administrative_git_dir": "modules/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "clean": true,
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "id": "vllm",
+      "path": "projects/vllm",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb"
+    },
+    {
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "clean": true,
+      "head": "7797360ea04e9c3576c5cc16cf829427e96d3d70",
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "tree": "64602386f81d7d27a555f1473b01f051b30c2276"
+    }
+  ],
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "root_parent_commit": "3eb7ef2f07d49c2fc0ebf3f9552ff3c9687e3d2a",
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "sequence": 17,
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "status": "accepted",
+  "validation": [
+    {
+      "command": "CP-0017 no-x86 PTLOAD build, self-test, and ELF audit",
+      "cwd": ".",
+      "evidence_id": "EV-0042",
+      "exit_code": 0,
+      "result": "The mold/24 standalone target passes exact PT_LOAD, file-copy, BSS, descriptor-entry, pre-allocation rejection, shared lease, and no-x86/no-production-DSO checks."
+    },
+    {
+      "command": "retained VEGA_X86 and CP16 native regressions",
+      "cwd": "projects/gem5",
+      "evidence_id": "EV-0042",
+      "exit_code": 0,
+      "result": "The CP16 control/fixture checks and eight legacy host-state binaries remain green as compatibility evidence."
+    },
+    {
+      "command": "Qwen3.5-0.8B offline preparation and static operator contract gate",
+      "cwd": ".",
+      "evidence_id": "EV-0043",
+      "exit_code": 0,
+      "result": "The pinned model hashes verify, 15 text-only contracts pass static source/shape checks, and strict runtime status remains blocked without AMD execution."
+    },
+    {
+      "command": "pinned Triton/LLVM gfx950 compile-only probe",
+      "cwd": ".",
+      "evidence_id": "EV-0043",
+      "exit_code": 0,
+      "result": "The temporary AMD overlay compiles vecadd through HSACO with the locked LLVM/Triton identities; no device or simulator instruction executes."
+    },
+    {
+      "command": "CP-0017 child identity, clean state, included evidence, and prepare journal",
+      "cwd": ".",
+      "evidence_id": "EV-0043",
+      "exit_code": 0,
+      "result": "The gem5 child HEAD/tree and clean state match the gem5-only CP17 journal participant, and EV-0042 is hash-bound into the umbrella."
+    }
+  ]
+}

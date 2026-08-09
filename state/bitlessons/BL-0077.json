@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_native_code_object_mapper.hh",
+    "projects/gem5/src/dev/amdgpu/host_native_code_object_mapper.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_ptload_main.cc",
+    "state/evidence/EV-0042.json"
+  ],
+  "checkpoint_id": "CP-0017",
+  "conclusion": "Byte-exact PT_LOAD materialization is a necessary loader boundary, but it is not evidence that an AQL packet reached the reused GPU pipeline or that any instruction executed.",
+  "confidence": "high",
+  "decision": "Keep staging, native translation/AQL construction, queue submission, GPU execution, and user-facing Triton launch as separate gates with separate positive evidence.",
+  "evidence_ids": ["EV-0042", "EV-0043"],
+  "id": "BL-0077",
+  "invalidated_assumptions": [
+    "A mapped descriptor and code entry imply that the kernel executed.",
+    "A compile-only gfx950 HSACO can satisfy the Triton end-to-end gate."
+  ],
+  "observation": "The CP17 target validates and materializes the pinned image while explicitly reporting aql_submitted=false, kernel_executed=false, and gpu_pipeline_connected=false.",
+  "question_or_symptom": "Why does a valid mapped gfx950 image still leave Triton end-to-end at 0/1?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

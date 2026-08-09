@@ -4,12 +4,20 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0016-host-native-functional-parity-accepted; next-P3-HOST-NATIVE-03-A`
+**Current state:** `CP-0017-host-native-ptload-staging-accepted; next-P3-HOST-NATIVE-03-B`
 
 **Current phase:** `P3`
 
 **Model correction:** the official target is `Qwen/Qwen3.5-0.8B`; there is no
 official `Qwen3.5-0.9B` checkpoint in this project.
+
+The pinned Qwen checkpoint is prepared offline under `models/` at revision
+`2fc06364715b967f1860aea9cf38778875588b17`. The first model gate is the
+text-only path: its 24-layer topology (18 linear-attention/GDN layers and 6
+full-attention layers) has a source-grounded 15-contract operator manifest.
+Vision is deferred. Full ROCm and OpenCL CTS are not prerequisites for this
+goal; every operator used by the checkpoint still needs an AMD execution
+result, and CPU or NVIDIA fallback never counts as success.
 
 ## Success criteria
 
@@ -56,7 +64,7 @@ reproducible tests, evidence, checkpoints, and offline packaging.
 ## Out of scope until explicitly promoted
 
 Vision execution, real hardware validation, silent CPU or mock execution,
-unbounded ROCm API compatibility, timing claims before FabricModel, elastic
+unbounded ROCm API compatibility, full ROCm/OpenCL CTS, timing claims before FabricModel, elastic
 rank shrink, unsafe or nondeterministic threadblock parallelism, hardware
 `rocm-smi` compatibility claims, and committing weights/build
 products/environments.
@@ -81,7 +89,7 @@ advance a phase without a new checkpoint and root coordinator commit.
 继续执行 amdgpu-sim 计划。当前目录是 /home/zhaosiying/amdgpu-sim。
 先读取 PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、其引用的
 最新 checkpoint/bitlesson/evidence，运行 scripts/resume.sh --verify。
-CP-0016 host-native functional-parity boundary 已 accepted；从唯一 next_action `P3-HOST-NATIVE-03-A` 继续，不要再次
+CP-0017 host-native PT_LOAD staging boundary 已 accepted；从唯一 next_action `P3-HOST-NATIVE-03-B` 继续，不要再次
 begin CP-0014，也不要重做 bootstrap、source freeze、authored runtime
 baseline 或已通过的 CP4-CP9 gates，也不要修改已冻结的 SOURCE_LOCK.json
 或已登记的 PROJECT_LANES baseline。CP-0010 只实现 18 个 typed KMT
@@ -94,9 +102,11 @@ gem5 gfx950 decoder、unsupported opcode、pinned device-libs/toolchain proof
 不包含 PT_LOAD mapping、动态 AQL/kernarg 或真实 code-object execution。
 当前还没有任何 Triton 端到端通过案例。CP-0015 已完成 no-VEGA_X86
 control-core/build/audit 边界，CP-0016 又完成了复用既有 memory/queue/signal/dispatch
-state 的 functional parity adapter，但没有完成 PT_LOAD loader、动态 AQL/kernarg
-或 GPU instruction execution。下一步完成 host-native/gem5 loader parity，再以未修改
-Triton vecadd 作为第一用户可见验收。
+state 的 functional parity adapter。CP-0017-A 进一步完成了锁定 gfx950 HSACO 的
+CP13 staging、PT_LOAD 文件复制/BSS 清零、descriptor/entry 绑定和 page-lifetime
+测试，但没有完成动态 AQL/kernarg、GPU instruction execution 或 Triton。下一步
+完成 native translation 与动态 packet/kernarg parity，再以未修改 Triton vecadd
+作为第一用户可见验收。
 在 Triton 用户命令 `tutorial/01-vecadd.py`（当前 pinned checkout 中对应未修改的
 `python/tutorials/01-vector-add.py`）首次透明通过后，先完成可复现的 gem5
 算子 profile、80/20 优化和 threadblock host-parallel 正确性/可行性门禁，再
@@ -150,3 +160,14 @@ Triton. Triton end-to-end remains 0/1. The next unique action is
 `P3-HOST-NATIVE-03-A`: implement the bounded loader/translation/AQL adapter and
 compare it against the existing gem5 front-end before attempting the Triton
 launcher.
+
+`CP-0017` is accepted at the bounded host-native PT_LOAD staging boundary. The
+standalone `BUILD_ISA=n; USE_X86_ISA=n; BUILD_GPU=y` target stages the locked
+`gpuReadWrite` gfx950 image, validates exact PT_LOAD tuples, copies `filesz`,
+zero-fills `memsz-filesz`, binds the descriptor/entry relation, and preserves
+allocation leases across Busy/unmap cases. Its negative cases are
+pre-allocation manifest/image rejection; the mapper is fixture-scoped and does
+not enforce segment permissions, apply relocations, build AQL/kernarg, submit a
+queue, or execute an instruction. Triton remains 0/1 and Qwen inference remains
+0/1. The next unique action is `P3-HOST-NATIVE-03-B`: native translation plus
+dynamic AQL/kernarg parity on the reused GPU pipeline.
