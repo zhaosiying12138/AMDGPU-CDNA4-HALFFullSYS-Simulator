@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_b2_main.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_b2_core.cc",
+    "artifacts/evidence/CP-0020/EV-0048-draft.json",
+    "state/evidence/EV-0049.json"
+  ],
+  "checkpoint_id": "CP-0020",
+  "conclusion": "A CPU-less runtime SimObject graph and a CPU-less link configuration are separate claims from the host ELF symbol closure; generic BaseCPU/System symbols in a monolithic x86-64 binary do not prove runtime CPU instantiation.",
+  "confidence": "high",
+  "decision": "Report runtime object counts and binary/link identities independently, and state the CP20 boundary as no runtime CPU/Process/Ruby/TLB/HSAPP/GPUCommandProcessor objects rather than as a universal CPU-free ELF claim.",
+  "evidence_ids": ["EV-0048", "EV-0049"],
+  "id": "BL-0086",
+  "invalidated_assumptions": [
+    "A generic BaseCPU or System symbol in the monolithic ELF means a CPU or System object was instantiated in the B2 runtime graph.",
+    "A zero CPU-object count alone proves that every host-side binary dependency is non-x86."
+  ],
+  "observation": "The CP20 runtime graph contains 79 objects and zero CPU, Process, Ruby, TLB, HSAPP, GPUCommandProcessor, and AMDGPUDevice objects, while the retained x86-64 executable still contains generic BaseCPU/System symbols.",
+  "question_or_symptom": "How should a no-x86 execution result describe runtime ownership without overclaiming from linker symbols?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": ["BL-0083"]
+}

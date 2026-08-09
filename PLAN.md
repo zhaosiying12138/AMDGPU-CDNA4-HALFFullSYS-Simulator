@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-10`
 
-**State at this commit:** `P3-HOST-NATIVE-03-B1 native queue/CP-core admission accepted; next-P3-HOST-NATIVE-03-B2`
+**State at this commit:** `P3-HOST-NATIVE-03-B2 locked gpuReadWrite execution accepted; next-P5-TRITON-VECADD-01`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -491,7 +491,7 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | P3-HOST-NATIVE-03-A | P3H | Fixture-scoped PT_LOAD staging, descriptor/entry binding, and lifetime checks |
 | P3-HOST-NATIVE-03-B0 | P3H | No-x86 descriptor/kernarg/AQL admission and queue/lifecycle contract smoke |
 | P3-HOST-NATIVE-03-B1 | P3H | No-x86 native queue/CP-core address resolution, AQL publication/fetch, and admission without legacy SimObjects or CU execution |
-| P3-HOST-NATIVE-03-B2 | P3H | No-x86 GPUDispatcher/CU one-wave output/trace differential for the pinned gfx950 dispatch |
+| P3-HOST-NATIVE-03-B2 | P3H | No-x86 GPUDispatcher/CU functional output/trace differential for the locked 4-WG/16-wave gfx950 dispatch |
 | P4-HIP-01 | P4 | Minimal transparent HIP/OpenCL launch surface |
 | P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
 | P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
@@ -768,9 +768,24 @@ linked or instantiated. The host read index is unchanged, and packet retire,
 signal decrement, GPUDispatcher/CU connection, wave start, instruction fetch,
 ISA execution, and output differential all remain false. The Qwen model is
 offline-ready and its 15-contract static gate remains valid, but Triton E2E and
+Qwen inference remain 0/1. CP-0020 below closes the bounded execution gate.
+
+`CP-0020` is accepted at `P3-HOST-NATIVE-03-B2` for the locked
+`gpuReadWrite` HSACO. The same native queue/CP admission reaches the reused
+`GPUDispatcher`, `Shader`, `ComputeUnit`, Vega decoder, and instruction path in
+a runtime graph with no CPU, Process, Ruby, TLB, HSAPP, or
+`GPUCommandProcessor` objects. The fixture runs four 256-item workgroups as
+sixteen wave64 waves; the lifecycle listener observes 19 instruction-start
+PCs per wave (304 total), independently matched by CU `numInstrExecuted=304`
+and 16 completed waves. A/B/C are separate 4 KiB allocations and the exact
+oracle is A unchanged, B=gid, C=A over all 1024 elements; packet retirement,
+MQD read-index 0->1, direct-u64 signal 1->0, and pin release are ordered and
+validated. This is one locked functional case only: general gfx950/arbitrary
+HSACO, timing accuracy, fences/barriers, atomics, LDS/scratch, GPU TLB,
+Ruby/coherence, HIP/OpenCL, and performance remain unproven. Triton E2E and
 Qwen inference remain 0/1. The next unique action is
-`P3-HOST-NATIVE-03-B2`: connect the no-x86 GPUDispatcher/CU path and prove one
-pinned gfx950 wave's output/trace differential before Triton vecadd.
+`P5-TRITON-VECADD-01`, the unmodified Triton tutorial through the normal
+launcher with simulator device selection only.
 
 ### P3H - host-native simulator and first Triton gate
 
@@ -802,13 +817,15 @@ The work is staged as follows:
    no-x86 native address resolution plus extracted queue/command-processor-core
    publication, fetch, and admission. It deliberately does not instantiate the
    legacy HSAPP/GPUCommandProcessor SimObjects or claim CU execution.
-   `P3-HOST-NATIVE-03-B2` next connects the no-x86 GPUDispatcher/CU path and
-   proves the pinned gfx950 one-wave output/trace differential before any
-   Triton launch claim.
-4. `P3-TRITON-VECADD-01` runs the pinned, unmodified Triton tutorial request
+   CP-0020 accepts this boundary for one locked fixture: four workgroups,
+   sixteen wave64 waves, nineteen instruction-start PCs per wave, exact A/B/C
+   output coverage, packet retirement, MQD update, and native signal completion.
+   It does not establish generic gfx950, timing, fence/atomic, TLB/Ruby, or
+   arbitrary HSACO semantics.
+4. `P5-TRITON-VECADD-01` runs the pinned, unmodified Triton tutorial request
    (`python/tutorials/01-vector-add.py`) through the normal Triton launcher,
    with simulator device selection only. It retains compiler, HSACO digest,
-   transport, dispatch, output, and CPU-fallback evidence. As of CP-0019 no
+   transport, dispatch, output, and CPU-fallback evidence. As of CP-0020 no
    Triton end-to-end case has passed (0/1). The exact LLVM/Triton pair now has
    a temporary AMD-only overlay that builds `libtriton.so` and compile-only
    gfx950 vecadd HSACO; the overlay is not yet a committed launcher or device

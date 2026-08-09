@@ -180,6 +180,23 @@ GPUDispatcher/CU one-wave output/trace differential, followed by Triton vecadd.
 The Qwen model and static 15-contract gate remain ready, but strict AMD
 execution is still blocked and Qwen inference remains `0/1`.
 
+`CP-0020` is accepted at the bounded no-x86 B2 execution boundary. The locked
+5,528-byte `gfx950` `gpuReadWrite` image travels from the native queue/CP core
+through the reused `GPUDispatcher`, `Shader`, `ComputeUnit`, Vega decoder, and
+instruction path. The dispatch is four 256-item workgroups and sixteen wave64
+waves; the lifecycle records 19 instruction-start PCs per wave (304 total),
+independently matched by CU `numInstrExecuted=304` and 16 completed waves.
+Separate 4 KiB A/B/C allocations pass A unchanged, B=gid, and C=A over all
+1024 elements; packet retirement, MQD read-index `0->1`, direct-u64 signal
+`1->0`, and pin release are also checked. The runtime graph has no CPU,
+Process, Ruby, TLB, HSAPP, or GPUCommandProcessor objects; generic
+`BaseCPU`/`System` symbols retained in the monolithic ELF are not runtime
+instantiations. This is one locked functional case only: generic gfx950,
+arbitrary HSACO, timing accuracy, fences/barriers, atomics, LDS/scratch,
+GPU-TLB/Ruby/coherence, HIP/OpenCL, and performance remain unproven. Triton
+and Qwen remain `0/1`; the next action is the unmodified Triton vecadd through
+the normal launcher with simulator device selection only.
+
 The Qwen smoke now also supports importlib-loaded source-contract tests by
 explicitly adding the repository and `tools/` roots; this fixes test loading only
 and does not change the no-fallback execution policy.

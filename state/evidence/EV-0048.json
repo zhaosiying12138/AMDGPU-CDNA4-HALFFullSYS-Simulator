@@ -1,0 +1,843 @@
+{
+  "checkpoint_id": "CP-0020",
+  "claim": "EV-0048 records the bounded CP20/B2 no-ISA host-native execution increment. It proves that the exact 64-byte AQL packet admitted by the B1 native queue/command core is handed to the reused gem5 GPUDispatcher, Shader, ComputeUnit, Vega decoder, and instruction path for the locked gfx950 gpuReadWrite HSACO. Four 256-item workgroups run as sixteen wave64 waves; the lifecycle listener observes the exact 19-PC instruction-start sequence per wave (304 total), gem5 CU stats independently report 304 instructions executed and 16 waves completed, all 1024 A/B/C elements pass the non-identity B=gid and C=A oracle, the AQL packet retires, the MQD read index advances 0 to 1, and the direct native u64 completion signal changes 1 to 0 before pins are released. CPU-less describes the runtime SimObject graph: the host executable itself is x86-64 and the monolithic gem5 ELF still contains generic CPU/System library symbols.",
+  "command_argv": [
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20.py",
+      "source"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20.py",
+      "semantics"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20.py",
+      "binary"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20.py",
+      "run"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20.py",
+      "stats"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20.py",
+      "graph"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20.py",
+      "logs"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20.py",
+      "checkers"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20.py",
+      "vega"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20.py",
+      "hsaco"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20.py",
+      "qwen"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20.py",
+      "model"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20.py",
+        "source"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:27:28+00:00",
+      "exit_code": 0,
+      "id": "gem5-b2-source-freeze",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-source-freeze.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8d64ab5938ed559f97b9a91e6c35713bbf105d6ae26e2868ea4b889c07925092",
+        "size": 638,
+        "tracked": false
+      },
+      "result": "The renewed frozen gem5 B2 dirty-tree inventory has the exact base identity, 24 modified and six untracked files, per-file hashes, and clean diff checks; the two post-link-newer files are scope-text-only changes.",
+      "started_at": "2026-08-09T19:27:27+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-source-freeze.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-source-freeze.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "958ace1d838909c29076318eb707185e1e1224ea7e18b63d520e367d2bd43427",
+        "size": 4057,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20.py",
+        "semantics"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:29:14+00:00",
+      "exit_code": 0,
+      "id": "gem5-b2-source-semantics",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-source-semantics.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3e4a72b487dc3d83c5132329ecea6ee0426a61bd8bc807e161edb8cb5fa860c",
+        "size": 646,
+        "tracked": false
+      },
+      "result": "The hash-bound B2 source audit validates the locked 4-workgroup/16-wave/19-offset contract, independent A/B/C sentinels and oracle, plain read/write memory restriction, and output-retire-signal-release order.",
+      "started_at": "2026-08-09T19:29:14+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-source-semantics.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-source-semantics.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d8df5f8376e0a2f217487684daf95dd7f1c76f76da0390e01447b639b67e55de",
+        "size": 429,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20.py",
+        "binary"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:27:28+00:00",
+      "exit_code": 0,
+      "id": "gem5-b2-binary-artifact",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-binary-artifact.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "279f69a8f18e137b15a0aadf487705eea866169fe7092abdfeda37326b70e043",
+        "size": 641,
+        "tracked": false
+      },
+      "result": "The retained 813,539,368-byte no-ISA gem5 ELF has the exact SHA-256 and Build ID before and after the run, expected GPU execution symbols, no legacy x86 GPU symbols, and no GPU runtime DSO dependency.",
+      "started_at": "2026-08-09T19:27:27+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-binary-artifact.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-binary-artifact.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "10874f26e5ece91c36c8b43eea2bc921dbbfeec1755cfc88c62f3947fa87f6ea",
+        "size": 453,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20.py",
+        "run"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:26:43+00:00",
+      "exit_code": 0,
+      "id": "gem5-b2-run",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-run.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0ded6232292a04870a0344ad4298dcfbb30e8101b46a9f2b34f255250e3d8d38",
+        "size": 615,
+        "tracked": false
+      },
+      "result": "The hash-pinned snapshot exits successfully at tick 740000 and emits the exact 39-field locked gpuReadWrite B2 result with output, queue, signal, and no-fallback assertions.",
+      "started_at": "2026-08-09T19:26:43+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-run.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-run.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8257f65fa8cad9aad8ff89712a69980ec03ed399ed3def6f34aad84280467d3a",
+        "size": 1182,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20.py",
+        "stats"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:26:43+00:00",
+      "exit_code": 0,
+      "id": "gem5-b2-stats",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-stats.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3d5f9f2d01d0db81a861c79b09d48c5cd4dc7c4efc2dd08bab6b0202112ed76a",
+        "size": 620,
+        "tracked": false
+      },
+      "result": "The generated gem5 stats independently report 304 CU instructions executed and 16 completed wavefronts, with 16 slots at 19 instructions and 24 inactive slots.",
+      "started_at": "2026-08-09T19:26:43+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-stats.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-stats.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3b07a306ddc9566d1feaaa8328a72e5d697fef818df6bd47ee28dbffe734cbe7",
+        "size": 131,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20.py",
+        "graph"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:26:43+00:00",
+      "exit_code": 0,
+      "id": "gem5-b2-object-graph",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-object-graph.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e8bada44437c59db5d8a7a1052f0ce5b8e2f3553972519f70f4cbf7cbd6dc6b1",
+        "size": 634,
+        "tracked": false
+      },
+      "result": "The generated 79-object config graph contains the reused Dispatcher, Shader, ComputeUnit, and 40 wave slots while containing no CPU, Process, Ruby, TLB, HSAPP, GPUCommandProcessor, or AMDGPUDevice instance.",
+      "started_at": "2026-08-09T19:26:43+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-object-graph.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-object-graph.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f959b6b3b16941cae9f4c112bc7c6e37d62741e7140ebf2bea0dca08dd87bafd",
+        "size": 217,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20.py",
+        "logs"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:26:43+00:00",
+      "exit_code": 0,
+      "id": "gem5-b2-retained-logs",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-retained-logs.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "32883186b98161cb65b342cd793e42940ba6becbb53ffa7a665d7a275368d132",
+        "size": 635,
+        "tracked": false
+      },
+      "result": "The canonical build, corrected fixture scope, five host-native checker, and eight VEGA_X86 retained logs all carry successful terminal markers and exact test counts.",
+      "started_at": "2026-08-09T19:26:43+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-retained-logs.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/gem5-b2-retained-logs.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "cbd1e7eb98a6fcd3b527c20eb95f83d3067058b28e892577a090721f472fb0fe",
+        "size": 123,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20.py",
+        "checkers"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:26:43+00:00",
+      "exit_code": 0,
+      "id": "gem5-host-native-checkers",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/gem5-host-native-checkers.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b1c7cbafef05b182853425a458611ad84942ffb95a11c6b08f17425ffb0656c8",
+        "size": 647,
+        "tracked": false
+      },
+      "result": "All five standalone host-native profiles are rerun after freeze and pass their schema, forbidden-symbol, self-test, and no-CPU-fallback contracts.",
+      "started_at": "2026-08-09T19:26:43+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/gem5-host-native-checkers.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/gem5-host-native-checkers.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b9aabd26fad2ad9693faf065bcafe511899398d28ebc3ee1a2b46ae4809acfa9",
+        "size": 670,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20.py",
+        "vega"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:26:43+00:00",
+      "exit_code": 0,
+      "id": "gem5-vega-x86-gtests",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/gem5-vega-x86-gtests.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ccf58b00efbfde34416cc774d12b99de1cdcb8e440c751e8324824bbf2c8987d",
+        "size": 633,
+        "tracked": false
+      },
+      "result": "All eight VEGA_X86 compatibility binaries are rerun and pass 130 of 130 tests with exact counts 43/14/8/12/12/12/5/24.",
+      "started_at": "2026-08-09T19:26:43+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/gem5-vega-x86-gtests.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/gem5-vega-x86-gtests.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7d48c2dbec626d14dbac29c11f5eb89298b6c31dbc49043acb3ed9e2a00b0c91",
+        "size": 473,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20.py",
+        "hsaco"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:26:43+00:00",
+      "exit_code": 0,
+      "id": "locked-gfx950-hsaco",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/locked-gfx950-hsaco.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "69941e81050daab8b6b0d2927f60a9fa8fb122162bf382b24a9eb4fd38b608d7",
+        "size": 632,
+        "tracked": false
+      },
+      "result": "The exact source-locked 5,528-byte gfx950 gpuReadWrite HSACO, kernel symbol, and descriptor symbol retain their pinned identity.",
+      "started_at": "2026-08-09T19:26:43+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/locked-gfx950-hsaco.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/locked-gfx950-hsaco.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "90b5220420c6e6ac31f7a1008070bddc27aa7d3dfb32632f08663f2b6162fab4",
+        "size": 159,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20.py",
+        "qwen"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:26:48+00:00",
+      "exit_code": 0,
+      "id": "qwen35-static-runtime-blocked",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/qwen35-static-runtime-blocked.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c152d237b3de5ab4a6ef20095d70f35f8cbb35fb5f74b45bfc1397bfdeee84a4",
+        "size": 651,
+        "tracked": false
+      },
+      "result": "The Qwen3.5-0.8B text-only 15-contract static gate and five tests pass while AMD runtime remains blocked and CPU/NVIDIA fallback remains disallowed.",
+      "started_at": "2026-08-09T19:26:43+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/qwen35-static-runtime-blocked.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/qwen35-static-runtime-blocked.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "878707583f553d1536f9e563be2e627187b5e788962d16d9730df90275d8f621",
+        "size": 451,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20.py",
+        "model"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:27:27+00:00",
+      "exit_code": 0,
+      "id": "qwen35-model-hashes",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/qwen35-model-hashes.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6c20875275f28376f0872764866b8ab3758668255265eca5df623356fb897f34",
+        "size": 632,
+        "tracked": false
+      },
+      "result": "The complete pinned Qwen3.5-0.8B model manifest and four offline files hash-verify at the locked revision.",
+      "started_at": "2026-08-09T19:27:27+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/qwen35-model-hashes.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/qwen35-model-hashes.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e6f98550010f6ddffc098b85d613a72d299815d832e447e5ed120eeaf9270169",
+        "size": 638,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T19:29:14+00:00",
+  "environment_fingerprint": {
+    "checkpoint": "CP-0020",
+    "participant": "gem5",
+    "gem5_base_head": "bf40bf3bf560018fb62fecb144f3077b05b93b0f",
+    "gem5_base_tree": "e26548be4038375be5a0efaf0ebc418126878ad0",
+    "gem5_identity_scope": "renewed frozen B2 working tree; final child commit identity intentionally deferred",
+    "gem5_tracked_modified_files": 24,
+    "gem5_untracked_files": 6,
+    "post_link_scope_text_only_files": 2,
+    "gem5_build_options": "BUILD_ISA=n; USE_X86_ISA=n; BUILD_GPU=y; VEGA_GPU_ISA=y",
+    "gem5_linker": "mold",
+    "gem5_link_jobs": 24,
+    "b2_binary_sha256": "536c510f446d43f97dc5a231c30607f38587e8c42dc2bc403ed8e3fe249aaa84",
+    "b2_binary_size": 813539368,
+    "b2_build_id": "34ebe2528ea3de623059e54b34d9d4000f457a72",
+    "binary_identity_unchanged_across_run": true,
+    "host_elf_architecture": "x86-64",
+    "generic_base_cpu_symbols_present_in_monolithic_elf": true,
+    "legacy_x86_gpu_symbols_present": false,
+    "gpu_runtime_dynamic_dependencies": 0,
+    "runtime_object_count": 79,
+    "runtime_cpu_objects": 0,
+    "runtime_process_objects": 0,
+    "runtime_ruby_objects": 0,
+    "runtime_tlb_objects": 0,
+    "runtime_hsapp_objects": 0,
+    "runtime_gpu_command_processor_objects": 0,
+    "runtime_amdgpu_device_objects": 0,
+    "gpu_dispatcher_objects": 1,
+    "shader_objects": 1,
+    "compute_unit_objects": 1,
+    "configured_wave_slots": 40,
+    "locked_hsaco_sha256": "7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56",
+    "locked_hsaco_size": 5528,
+    "locked_kernel": "gpuReadWrite",
+    "gfx_target": 950,
+    "aql_header": "0x1502",
+    "grid_size_x": 1024,
+    "workgroup_size_x": 256,
+    "workgroup_completed_count": 4,
+    "wave_started_count": 16,
+    "wave_completed_stat": 16,
+    "instruction_started_count": 304,
+    "instructions_per_wave": 19,
+    "cu_instruction_executed_stat": 304,
+    "per_instruction_retirement_trace": "not_recorded",
+    "scalar_memory_requests": 32,
+    "global_read_lanes": 1024,
+    "global_write_lanes": 2048,
+    "global_store_events": 32,
+    "aql_packet_fetched_count": 1,
+    "command_processor_submitted_count": 1,
+    "gpu_dispatcher_started_count": 1,
+    "hsa_packet_retired_count": 1,
+    "separate_abc_allocations_4k": true,
+    "old_abi_global_offsets_zero": true,
+    "input_a_unchanged": true,
+    "output_b_is_gid": true,
+    "output_c_is_a": true,
+    "output_b_address_coverage": 1024,
+    "output_c_address_coverage": 1024,
+    "host_read_index_before": 0,
+    "host_read_index_after": 1,
+    "native_signal_layout": "direct_u64",
+    "signal_before": 1,
+    "signal_after": 0,
+    "pins_released": true,
+    "locked_kernel_functional_execution": true,
+    "cpu_fallback": false,
+    "nvidia_fallback": false,
+    "host_native_checkers": "5/5",
+    "vega_x86_legacy_gtests": "8/8",
+    "vega_x86_legacy_test_cases": "130/130",
+    "qwen_model_revision": "2fc06364715b967f1860aea9cf38778875588b17",
+    "qwen_model_manifest_sha256": "de2281cc73a1329d13245cb9658be910cf435e72c4ea0277c4f8811a24edf762",
+    "qwen_static_contracts": "15/15",
+    "qwen_runtime_status": "blocked",
+    "triton_e2e_cases": "0/1",
+    "qwen_inference_cases": "0/1",
+    "full_rocm_opencl_cts_required": false
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0020/verify_cp20.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "3f64c070fd861537d92ec00ef327afbee98ec40beb5e2f3a96bb3a966ed60370",
+      "size": 22933,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/gem5-builds/gem5.opt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "536c510f446d43f97dc5a231c30607f38587e8c42dc2bc403ed8e3fe249aaa84",
+      "size": 813539368,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/b2-run/binary.identity.before.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "0e1aeb8de6d798ded05a768e21222349a4a60a1a7125b2fec6521ccad55aba54",
+      "size": 368,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/b2-run/binary.identity.after.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "dd444ba26cc41bb0fb7ba8e96dc43f5fb9075fe863ec43b1f2d38b8e539dac34",
+      "size": 509,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/b2-run/citations.bib",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "02029b8f4a3dd811e2c3340c09884804e5553a0460254e9a24ccd60a588ed7aa",
+      "size": 5071,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/b2-run/config.ini",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ed0d08d4e0f36998f50066b20c54aa8ab8032f7c1268fdabce069021e6c78cca",
+      "size": 15279,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/b2-run/config.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "523253d1f2cec52a57b9ecd6675d7784ffb0e0d834f425a57db818a3a0152f04",
+      "size": 36640,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/b2-run/simerr.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e2cef0e49b87c4066d672dfbf9be3e6c9e7e759c1fecab377e93013d06384d73",
+      "size": 249,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/b2-run/simout.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "27ec0657507f0823f305f57f6e645317d1ca522f0979f784f678b3c3d21057ef",
+      "size": 1622,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/b2-run/stats.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "3a411c4c7e25463e87dcf5abcaf4188d9cecc128c17a579649f6fc9264b4473a",
+      "size": 971483,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-canonical-mold24-final.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "8b99b7f9329af25c7b1050da99c4037d36fca9b1cb2fe4c087e44888d8b21658",
+      "size": 21185,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-b1-mold-final.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a3bb6e7dbf45f13d5288d1ff1e2ec828043e0a50e21f70ebedc7d510da1e269d",
+      "size": 5268,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-check-control.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1ca42d04df1d1b6ce91969e39757239a65a0d07f7de7f5aacc094932f3f627e3",
+      "size": 1504,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-check-dispatch-admission.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "09f40b79196c8b076c0a2f70d2ebd13be8d6f7c0b6272edfbcf20f61874e40e4",
+      "size": 2241,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-check-dispatch-b1.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "40fbf35732dd37b11e5ecfd8bda2acb794356f5c65f76fd85280ab942a25c27b",
+      "size": 3042,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-check-ptload.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "c30e6b9534d1b3007a545f5861fad1a506a9668fc58a83d3e1e9fc6d60a072dd",
+      "size": 2103,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-fixture-wording-build.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7031499f03843c1a9607231780bc550b1f1893bfd84cc78087e578a3c1315cd2",
+      "size": 4912,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-fixture-wording-check.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1b784ce31fde8fa5ac390a6da64136a76a8ac00214279407468acb736b612bcf",
+      "size": 1821,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-vega-x86-gtests-build.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "f1f1d9c02840a888b7aa31ec1927be7304cfe272ae32b87095690746b6240e64",
+      "size": 5607,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-vega-x86-protocol.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e20e054dbefe1c89dce734cf2c841f78bded6678c18a3ca2b61870e3caebcec2",
+      "size": 6595,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-vega-x86-code_object_state.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "22b7402022a89759e388beaa103fcbc673c2c6b0e12a7d7ded24e41db4a114ad",
+      "size": 2834,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-vega-x86-memory_state.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "dd2c8b998b988ac9e00a89486f57cb87fd56f55ddb4ccbaa5ede35d3e570eb2a",
+      "size": 1883,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-vega-x86-dispatch_state.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a32006b72ded1fe0de2e8a6cec9af53448cf8d31eca7972af84a5c8377703875",
+      "size": 2738,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-vega-x86-queue_state.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "f9eabf4e4a9adb680b210d3405d973a707528eb5223d32d8343ccbd60f93adcc",
+      "size": 2389,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-vega-x86-signal_state.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "849d69eab3765a74ea006c4f8a4a2fc8a9257efa778cddd8a3104519ce5e7d62",
+      "size": 2542,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-vega-x86-kmt_state.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "42df1706e4c5bb9e14802483896b7644729b95c715e2d701a2ec0b4cea6e3915",
+      "size": 1323,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/build-logs/cp20-vega-x86-socket_utils.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "c75ddc43b142cef299cd2aa5b2f28266291113301463eae053ccc1abd5d73bd9",
+      "size": 4583,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0048",
+  "includes": {},
+  "limitations": [
+    "B2 is a single source-locked 5,528-byte zero-relocation gfx950 gpuReadWrite case with a fixed descriptor, OLD_ABI kernarg offsets, queue geometry, 19-PC sequence, and functional oracle. It is not a generic gfx950 compatibility claim, arbitrary HSACO loader, relocation proof, or broad operator suite.",
+    "The 304 lifecycle records are instruction-start events. The independent CU numInstrExecuted=304 stat and 16 completed-wave stat prove execution of this locked run, but B2 does not expose or claim a separate per-instruction retirement trace.",
+    "CPU-less means the generated runtime object graph has no CPU, Process, Ruby, TLB, HSAPP, GPUCommandProcessor, or AMDGPUDevice object. The physical host and ELF are x86-64, and gem5's monolithic library still links generic BaseCPU/System symbols that are not instantiated by this config.",
+    "The host-native CU path is functional and accepts only the locked plain read/write traffic; atomics and unsupported memory commands are rejected. General barriers, fences, atomics, scratch/LDS, translation, Ruby coherence, timing accuracy, and arbitrary instruction semantics are not established.",
+    "The direct-u64 completion signal is the bounded native B2 layout, not a proof of legacy amd_signal_t layout, complete HSA runtime signal semantics, or a transparent HIP/OpenCL launcher.",
+    "The five host-native checkers and eight VEGA_X86 binaries are regression evidence. Their standalone boundaries do not independently prove B2 execution; the hash-pinned B2 run, output oracle, stats, and object graph provide that evidence.",
+    "Qwen3.5-0.8B remains offline model-integrity and 15/15 static-contract evidence. Triton end-to-end and Qwen inference remain 0/1; CPU or NVIDIA execution is not an AMD pass. Full ROCm/OpenCL CTS, hardware, timing, throughput, latency, power, and performance claims remain outside scope.",
+    "This detailed evidence binds the renewed frozen dirty-tree source inventory and exact pre/post-run ELF, not the final clean gem5 child commit/tree. The coordinator must bind the eventual child identity in a separate umbrella manifest."
+  ],
+  "redactions": [],
+  "result": "CP20/B2 closes the locked no-x86 GPU execution boundary: the retained ELF and source-locked HSACO run through native queue admission, reused GPUDispatcher/Shader/ComputeUnit/Vega execution, full A/B/C output validation, packet retirement, MQD update, signal completion, and pin release with no runtime CPU object or fallback. Triton vecadd remains the next distinct end-to-end launcher gate.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T19:26:43+00:00",
+  "type": "cp20-b2-host-native-gpu-dispatcher-cu-locked-execution"
+}

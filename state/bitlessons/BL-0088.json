@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_b2_core.cc",
+    "projects/gem5/src/dev/amdgpu/host_native_memory_context.hh",
+    "protocol/host-transport-v1-codeobj.json",
+    "artifacts/evidence/CP-0020/EV-0048-draft.json",
+    "state/evidence/EV-0049.json"
+  ],
+  "checkpoint_id": "CP-0020",
+  "conclusion": "The locked gpuReadWrite fixture can use its observed kernarg compatibility bytes and direct-u64 completion signal for a bounded plain global read/write case, but that does not establish a generic V5/V6 hidden-argument loader, atomics, fences, or GPU translation semantics.",
+  "confidence": "high",
+  "decision": "Preserve the source metadata and fixture bytes, explicitly record zeroed global-offset slots at +24/+32/+40 as fixture-scoped compatibility, accept only plain global read/write, and keep atomics, fences/barriers, LDS/scratch, TLB, and Ruby/coherence blocked.",
+  "evidence_ids": ["EV-0048", "EV-0049"],
+  "id": "BL-0088",
+  "invalidated_assumptions": [
+    "A successful fixture-specific kernarg packing rule is a generic V5/V6 ABI loader proof.",
+    "A direct-u64 signal transition or host-owned address ledger proves atomic/fence or GPU TLB/Ruby semantics."
+  ],
+  "observation": "CP20 preserves the locked 5,528-byte image, passes separate 4 KiB A/B/C plain reads and writes, retires the packet, advances MQD read index 0->1, decrements a direct-u64 signal 1->0, and releases pins; atomics are rejected and translation/timing remain outside scope.",
+  "question_or_symptom": "How can fixture compatibility enable one deterministic execution without silently becoming a general code-object or memory-model claim?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": ["BL-0085"]
+}

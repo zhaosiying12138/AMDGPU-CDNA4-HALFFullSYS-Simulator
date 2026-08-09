@@ -244,6 +244,62 @@
         "unsupported_mnemonics": [],
         "gem5_decoder_status": "All observed mnemonic spellings occur in the locked decoder sources, but gfx950-specific decoder feature equivalence is not proven.",
         "status": "blocked-until-gfx950-decoder-proof"
+      },
+      "functional_execution": {
+        "status": "accepted-locked-functional-case",
+        "checkpoint": "CP-0020",
+        "evidence_manifest": "EV-0049",
+        "evidence_manifest_sha256": "80f81de192cc73e7e9e4e4d6aff0554c69e9f5df5fbe273b137fb97e10d2f270",
+        "detailed_evidence": "EV-0048",
+        "detailed_evidence_sha256": "e8989d2bfb3ba6f3de6b1f33f6a5c218385785e7a18387080469ceca9cecdc8e",
+        "gem5_child_head": "d4b96099040140369b9d55108f7bde21e0acfd59",
+        "gem5_child_tree": "95acf2260a9a9c3b68761fa0695b1350321516",
+        "fixture_sha256": "7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56",
+        "fixture_bytes": 5528,
+        "geometry": {
+          "grid_size_x": 1024,
+          "workgroup_size_x": 256,
+          "workgroup_count": 4,
+          "wavefront_size": 64,
+          "wave_count": 16
+        },
+        "instruction_start_contract": {
+          "pc_count_per_wave": 19,
+          "total_count": 304,
+          "counter_name": "instruction_started_count",
+          "cu_stat_name": "numInstrExecuted",
+          "cu_stat_value": 304,
+          "completed_waves": 16,
+          "event_semantics": "Lifecycle instruction-start events; this count is not a retirement-event count."
+        },
+        "oracle": {
+          "separate_4k_buffers": true,
+          "elements": 1024,
+          "a": "unchanged",
+          "b": "gid",
+          "c": "a"
+        },
+        "completion": {
+          "packet_retired": true,
+          "mqd_read_index_before": 0,
+          "mqd_read_index_after": 1,
+          "signal_layout": "direct_u64",
+          "signal_before": 1,
+          "signal_after": 0,
+          "pins_released": true
+        },
+        "runtime_graph": {
+          "object_count": 79,
+          "cpu_objects": 0,
+          "process_objects": 0,
+          "ruby_objects": 0,
+          "tlb_objects": 0,
+          "hsapp_objects": 0,
+          "gpu_command_processor_objects": 0,
+          "amdgpu_device_objects": 0
+        },
+        "scope": "Plain global read/write operations in this one source-locked fixture; runtime graph absence of CPU objects is the claim boundary.",
+        "not_proven": ["generic gfx950 support", "arbitrary HSACO", "timing accuracy", "fences/barriers", "atomics", "LDS/scratch", "GPU TLB", "Ruby/coherence", "HIP/OpenCL", "Triton", "Qwen", "performance"]
       }
     },
     {
@@ -376,6 +432,19 @@
       }
     }
   ],
+  "execution_addendum": {
+    "checkpoint": "CP-0020",
+    "status": "one-locked-functional-case-accepted-general-gfx950-blocked",
+    "fixture_id": "gfx950-rdc-gpuReadWrite-v1",
+    "evidence_manifest": "EV-0049",
+    "evidence_manifest_sha256": "80f81de192cc73e7e9e4e4d6aff0554c69e9f5df5fbe273b137fb97e10d2f270",
+    "detailed_evidence": "EV-0048",
+    "detailed_evidence_sha256": "e8989d2bfb3ba6f3de6b1f33f6a5c218385785e7a18387080469ceca9cecdc8e",
+    "gem5_child_head": "d4b96099040140369b9d55108f7bde21e0acfd59",
+    "gem5_child_tree": "95acf2260a9a9c3b68761fa0695b1350321516",
+    "acceptance_boundary": "Only the locked gpuReadWrite functional fixture is accepted; the general source-authority ISA audit remains blocked.",
+    "blocked_scope": ["binary-search fixture", "generic gfx950", "arbitrary HSACO", "timing accuracy", "fences/barriers", "atomics", "LDS/scratch", "GPU TLB", "Ruby/coherence", "HIP/OpenCL", "Triton", "Qwen", "performance"]
+  },
   "isa_audit": {
     "method": "Disassemble each tracked file with the available LLVM 21 objdump configured for gfx950, normalize instruction suffixes, and compare names with the locked gem5 decoder source. This is an observation only because the executable toolchain is not in SOURCE_LOCK.",
     "pinned_toolchain": false,
@@ -386,7 +455,7 @@
   },
   "acceptance": {
     "required_before_loader_claim": ["verify source lock and all Git blob/tree hashes", "parse ELF V4-V6 headers and reject unsupported ABI/machine/flags", "decode and validate MsgPack note against LLVM verifier rules", "map PT_LOAD and zero-fill NOBITS safely", "resolve .kd descriptor and .text entry symbols exactly", "apply static and dynamic Elf64_Rela relocations", "construct explicit plus hidden kernarg bytes with alignment and reserved holes", "validate LDS/scratch/dynamic-stack resource coupling", "prove gfx950 decoder feature selection and execute a deterministic fixture"],
-    "fixture_facts": "The two tracked fixtures are source evidence and parser fixtures; their current ISA audit is blocked and does not constitute gem5 execution support.",
+    "fixture_facts": "The two tracked fixtures remain source/parser authority; the general ISA audit is blocked. CP-0020 adds a separate bounded functional record for gpuReadWrite only and does not establish generic gem5 code-object execution support.",
     "no_fallback": "No CPU arithmetic, host-pointer alias, production ROCr/loader substitution, or guessed metadata is an acceptance path."
   },
   "blockers": [
@@ -396,5 +465,5 @@
     {"id": "COBJ-B004", "severity": "blocking", "statement": "No deterministic reduction/vecadd HSACO execution fixture is source-locked for this lane; do not infer reduction correctness from the existing CP-0008 bounded code image."},
     {"id": "COBJ-B005", "severity": "blocking", "statement": "The locked amd/device-libs checkout contains source/templates only; no built bitcode set is pinned. ABI and ISA version constants are generated from @ABI_VERSION@ and @ISA_VERSION@ templates and cannot be claimed reproducible until a toolchain/device-libs build is frozen."}
   ],
-  "forbidden_scope": ["generic HSACO upload message", "arbitrary ELF/MsgPack supplied by a client", "host pointer or raw GPU VA in this authority record", "production /dev/kfd or /dev/dri probing", "CPU fallback or metadata synthesis", "claim of executable gfx950 gem5 support", "performance or timing claim"]
+  "forbidden_scope": ["generic HSACO upload message", "arbitrary ELF/MsgPack supplied by a client", "host pointer or raw GPU VA in this authority record", "production /dev/kfd or /dev/dri probing", "CPU fallback or metadata synthesis", "claim of generic executable gfx950 gem5 support beyond the locked gpuReadWrite case", "performance or timing claim"]
 }

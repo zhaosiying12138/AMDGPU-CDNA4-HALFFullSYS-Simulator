@@ -152,11 +152,24 @@ All 13 unique mnemonic spellings in gpuReadWrite occur in the locked gem5
 decoder source, but gem5's GPU.py gfx950 enum does not imply decoder feature
 equivalence. binary_search has 76 unique spellings and contains
 v_fmamk_f32 twice; that mnemonic is absent from the locked baseline decoder.
-Both fixtures remain blocked, and no executable gfx950 support is claimed.
-A future acceptance must add a proven gfx950 decoder case, resolve unsupported
-opcodes, and retain a differential execution result. The existing CP-0008
-bounded code-image fixture is not a substitute for a HSACO loader or for a
+The general source-authority audit remains blocked, and binary_search remains
+blocked. CP-0020 adds a separate, descendant execution record for the locked
+`gpuReadWrite` bytes only: the 5,528-byte fixture crosses the no-x86 native
+queue/CP core into the reused GPUDispatcher/Shader/ComputeUnit/Vega path,
+executes four 256-item workgroups as sixteen wave64 waves, records the exact
+19-PC instruction-start sequence per wave (304 total), and checks A/B/C output,
+packet retirement, MQD read-index `0->1`, direct-u64 signal `1->0`, and pin
+release. This is an accepted functional boundary for that one fixture, not a
+generic gfx950 decoder/loader or arbitrary-HSACO claim. The existing CP-0008
+bounded code-image fixture is not a substitute for a HSACO loader or a
 reduction fixture.
+
+The fixture's metadata describes hidden ABI fields, while its locked bytes read
+the global-offset slots at kernarg offsets `+24`, `+32`, and `+40`. CP-0020
+zeroes those three slots as fixture-specific compatibility data and preserves
+the source bytes; this does not establish a generic V5/V6 metadata or hidden
+argument loader. Atomics are rejected; only the demonstrated plain global
+read/write path is in scope.
 
 ## Verification
 
@@ -169,7 +182,9 @@ tests/test_host_transport_codeobj_spec.py checks:
   descriptor bytes/fields, and exact symbol relations;
 - metadata versions, targets, kernel resource values, hidden-argument offsets,
   alignment, and kernarg sizes;
-- the explicit blocked ISA status and the absence of any wire message IDs.
+- the explicit blocked general ISA status, the bounded CP-0020 functional
+  addendum, and the absence of any wire message IDs.
 
-The test is a parser/authority check. Passing it does not turn either blocked
-fixture into a runnable gem5 kernel.
+The test is a parser/authority check. Passing it records the one locked
+CP-0020 functional case but does not turn the binary-search fixture or generic
+gfx950/arbitrary HSACO into runnable gem5 kernels.

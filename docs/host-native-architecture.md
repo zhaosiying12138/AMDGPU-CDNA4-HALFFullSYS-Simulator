@@ -19,11 +19,13 @@ boundary needed by those modules.
 
 The CP14 inventory found that the legacy AMDGPU device front-end depends on
 `USE_X86_ISA`, `System`, CPU ports, and Ruby/SE memory context even though the
-generic GPU/Vega layers are primarily guarded by `BUILD_GPU`. CP15-CP19 now
+generic GPU/Vega layers are primarily guarded by `BUILD_GPU`. CP15-CP20 now
 build standalone `HOSTGPU_NATIVE_CONTROL` executables with `BUILD_ISA=n`,
-`USE_X86_ISA=n`, `BUILD_GPU=y`, and `VEGA_GPU_ISA=y`. B1 extracts the
+`USE_X86_ISA=n`, `BUILD_GPU=y`, and `VEGA_GPU_ISA=y`. B1 extracted the
 host-owned address, queue, and command-processor admission responsibilities;
-the legacy device/system front-end remains present as the reference path.
+CP-0020-B2 now connects that admission to the reused GPUDispatcher, Shader,
+ComputeUnit, and Vega instruction path for one locked `gpuReadWrite` fixture.
+The legacy device/system front-end remains present as the reference path.
 
 The host-native process must preserve the CP8/CP13 fixed-width transport and
 the runtime ownership/generation rules. It must not introduce a second wire
@@ -62,7 +64,7 @@ The first three gates are prerequisites for the Triton gate. CP-0017-A passes
 the bounded PT_LOAD staging sub-gate only. CP-0018-B0 adds host-native
 dispatch admission and listener-contract smoke: descriptor/entry validation,
 280-byte hidden kernarg, 64-byte AQL materialization, and queue-control state.
-CP-0019-B1 adds `HostNativeQueueCore` and
+CP-0019-B1 added `HostNativeQueueCore` and
 `HostNativeCommandProcessorCore`: host-owned GPU-VA resolution, queue
 registration, AQL publish/ring/fetch, descriptor/MQD/kernarg/signal-object
 reads, and `HSAQueueEntry` admission. It reuses the existing packet and queue
@@ -70,13 +72,19 @@ ABIs but does not link or instantiate legacy HSAPP/GPUCommandProcessor
 SimObjects. Its `aql_submitted=true` flag is scoped to the extracted native CP
 core. The MQD host read index is unchanged, and GPUDispatcher/CU connection,
 packet retirement, signal decrement, instruction fetch/retirement, ISA
-execution, and output differential remain false. The next gate is
-`P3-HOST-NATIVE-03-B2`, the no-x86 GPUDispatcher/CU one-wave output/trace
-differential. Triton end-to-end remains 0/1.
+execution, and output differential remain false at the historical B1 boundary.
+CP-0020-B2 accepts one locked functional case: four 256-item workgroups,
+sixteen wave64 waves, 19 instruction-start PCs per wave (304 total), exact
+A/B/C output coverage, packet retirement, MQD read-index update, direct-u64
+signal completion, and pin release. The runtime graph still has no CPU,
+Process, Ruby, TLB, HSAPP, or GPUCommandProcessor objects. This does not prove
+generic gfx950/arbitrary HSACO, timing accuracy, fences/barriers, atomics,
+LDS/scratch, GPU TLB/Ruby/coherence, HIP/OpenCL, or performance. The next gate
+is `P5-TRITON-VECADD-01`; Triton and Qwen end-to-end remain 0/1.
 
 ## Non-goals
 
-This workstream does not promise cycle accuracy, full ROCr/libhsakmt coverage,
-full ROCm/OpenCL CTS, HIP/OpenCL compatibility, broad Triton operators, host-parallel threadblocks,
+This workstream does not promise cycle/timing accuracy, full ROCr/libhsakmt coverage,
+fence/barrier or atomic semantics, GPU TLB/Ruby/coherence behavior, full ROCm/OpenCL CTS, HIP/OpenCL compatibility, broad Triton operators, host-parallel threadblocks,
 PyTorch/vLLM execution, or performance improvement. Those remain separate
 checkpoints after the first deterministic vecadd differential result.

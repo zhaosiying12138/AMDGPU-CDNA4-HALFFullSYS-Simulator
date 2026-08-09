@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0019-host-native-queue-CP-core-B1-accepted; next-P3-HOST-NATIVE-03-B2`
+**Current state:** `CP-0020-host-native-gpuReadWrite-B2-accepted; next-P5-TRITON-VECADD-01`
 
 **Current phase:** `P3`
 
@@ -116,8 +116,12 @@ completion-signal object，并复用 `HSAQueueEntry` 完成 native CP-core admis
 这里 `aql_submitted=true` 只表示提取出的 native CP core 已接受 packet；legacy
 HSAPP/GPUCommandProcessor SimObject 没有 link 或 instantiate，GPUDispatcher/CU
 也未连接，read index、retire、signal decrement、instruction fetch 和 kernel output
-仍为 false。下一步用独立 B2 gate 连接 no-x86 GPUDispatcher/CU，证明一个锁定
-gfx950 one-wave output/trace differential，然后才尝试未修改 Triton vecadd。
+仍为 false。CP-0020 的 B2 已在同一 no-x86 front-end 中连接
+GPUDispatcher/Shader/ComputeUnit/Vega instruction path，并完成锁定
+gfx950 gpuReadWrite 的 4 个 256-item workgroup、16 个 wave64、每 wave 19
+个 instruction-start（304 总数）和输出/队列/信号差分；这只是单一 fixture
+的功能边界，不是通用 gfx950、timing、fence/atomic、TLB/Ruby 或任意 HSACO
+支持。下一步是唯一的未修改 Triton vecadd 透明 launcher gate。
 在 Triton 用户命令 `tutorial/01-vecadd.py`（当前 pinned checkout 中对应未修改的
 `python/tutorials/01-vector-add.py`）首次透明通过后，先完成可复现的 gem5
 算子 profile、80/20 优化和 threadblock host-parallel 正确性/可行性门禁，再

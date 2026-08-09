@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_b2_core.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_b2_main.cc",
+    "artifacts/evidence/CP-0020/EV-0048-draft.json",
+    "state/evidence/EV-0049.json"
+  ],
+  "checkpoint_id": "CP-0020",
+  "conclusion": "Dispatch geometry and lifecycle instruction-start events must remain distinct from retirement events and CU statistics: four 256-item workgroups produce sixteen wave64 waves, 19 starts per wave (304 total), and an independent CU numInstrExecuted=304 match.",
+  "confidence": "high",
+  "decision": "Use instruction_started_count and the exact per-wave PC sequence for lifecycle evidence, use numInstrExecuted/completedWfs for CU evidence, and never relabel the 304 start callbacks as 304 retirement events.",
+  "evidence_ids": ["EV-0048", "EV-0049"],
+  "id": "BL-0087",
+  "invalidated_assumptions": [
+    "A lifecycle instruction-start callback is a retirement event.",
+    "A total instruction-start count without workgroup/wave geometry is sufficient to establish coverage."
+  ],
+  "observation": "The locked B2 run records four workgroups, sixteen wave64 waves, an exact 19-PC instruction-start sequence for every wave, instruction_started_count=304, CU numInstrExecuted=304, and 16 completed waves.",
+  "question_or_symptom": "Which counters and event vocabulary prove the bounded wave execution without collapsing distinct lifecycle stages?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": ["BL-0084"]
+}

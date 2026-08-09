@@ -1,0 +1,452 @@
+{
+  "checkpoint_id": "CP-0020",
+  "claim": "EV-0049 binds the detailed EV-0048 CP20/B2 locked host-native execution evidence to the final clean gem5 child, the exact CP20 prepare journal, the required CP20 child trailers, and the accepted CP19 root anchor. It proves a coordinated B2 checkpoint for the one source-locked gfx950 gpuReadWrite fixture: the child d4b960.../95acf2... is clean and trailer-bound, EV-0048 is hash-identical, and its runtime graph has no CPU objects while the locked 4-WG/16-wave execution reports the validated output, stats, retirement, MQD, signal, and pin-release results.",
+  "command_argv": [
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+      "child-identity"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+      "child-clean"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+      "child-trailers"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+      "journal"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+      "root-anchor"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+      "included-ev0048"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+      "qwen"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+      "ev0048-policy"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+        "child-identity"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:40:14+00:00",
+      "exit_code": 0,
+      "id": "cp20-child-identity",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/cp20-child-identity.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "59050d85a6a48bcb77897589d24f05361a8f3bbb8cd663dde7214e4ca7eeefef",
+        "size": 650,
+        "tracked": false
+      },
+      "result": "The final gem5 child commit and tree exactly match the CP20 participant identity.",
+      "started_at": "2026-08-09T19:40:14+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/cp20-child-identity.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/cp20-child-identity.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e7a405fd22b2c6e740eeceba396ebb09043a3e65c7d57adf2ee4f72f0d138a3c",
+        "size": 102,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+        "child-clean"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:40:14+00:00",
+      "exit_code": 0,
+      "id": "cp20-child-clean",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/cp20-child-clean.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3b1c1f1bd364107aca503c416cf1ff5989eb315826a49eb3ff7b1a43ea5bc111",
+        "size": 640,
+        "tracked": false
+      },
+      "result": "The CP20 gem5 participant is clean, including tracked and untracked files.",
+      "started_at": "2026-08-09T19:40:14+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/cp20-child-clean.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/cp20-child-clean.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ca57f36af78b80b50f1e92e9ea7897d17513faa86c591c9c41007781787075a8",
+        "size": 38,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+        "child-trailers"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:40:14+00:00",
+      "exit_code": 0,
+      "id": "cp20-child-trailers",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/cp20-child-trailers.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "45a80102248b9134151cc2fd864bf9eab16711a69ffd8ab91ffaa200f86e39c8",
+        "size": 649,
+        "tracked": false
+      },
+      "result": "The CP20 gem5 child carries the exact checkpoint, source-lock, EV-0048, change-kind, and baseline trailers.",
+      "started_at": "2026-08-09T19:40:14+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/cp20-child-trailers.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/cp20-child-trailers.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0d9133abc842792dd8ae507698d4138ce061c17fd11fcfdf00bdb8a093c03480",
+        "size": 78,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+        "journal"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:40:14+00:00",
+      "exit_code": 0,
+      "id": "cp20-journal-prepare",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/cp20-journal-prepare.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "89f0ed181ec4049de2f3d085e4ac29163e05e5414190d68a02d893f7801645c6",
+        "size": 645,
+        "tracked": false
+      },
+      "result": "The locked CP20 prepare journal records the CP19 root anchor and exact final gem5 child under expected_children.",
+      "started_at": "2026-08-09T19:40:14+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/cp20-journal-prepare.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/cp20-journal-prepare.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "daa3ceaaf00d426dfee6010563435bc383aae2cf60f0f7ffdf9cad0f3476099b",
+        "size": 205,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+        "root-anchor"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:40:14+00:00",
+      "exit_code": 0,
+      "id": "cp20-root-anchor",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/cp20-root-anchor.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "43017c56505cc75ec8eb5946972e89326cb867dfaa032669e397cffafd95e90f",
+        "size": 641,
+        "tracked": false
+      },
+      "result": "The accepted CP19 root commit/tree/parent and its pre-publication gem5 gitlink remain the CP20 transaction anchor.",
+      "started_at": "2026-08-09T19:40:14+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/cp20-root-anchor.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/cp20-root-anchor.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8e8b8623cf5bc772114fac416d733ccda96fb192fc64dddc8f4e526943dda772",
+        "size": 214,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+        "included-ev0048"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:40:14+00:00",
+      "exit_code": 0,
+      "id": "cp20-included-ev0048",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/cp20-included-ev0048.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b4e48ad80717a0cc4155f154bda505db247cdaf416d462b1ee6ca6497bdc3fdc",
+        "size": 653,
+        "tracked": false
+      },
+      "result": "The detailed EV-0048 hash, result count, B2 binary identity, runtime graph boundary, and Qwen static status are exact.",
+      "started_at": "2026-08-09T19:40:14+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/cp20-included-ev0048.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/cp20-included-ev0048.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "64d707a5d8ba8e02c9480839d611e15ca37e73eeba129dbb76f1f898b5bc399d",
+        "size": 166,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+        "qwen"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:40:14+00:00",
+      "exit_code": 0,
+      "id": "cp20-qwen-static-boundary",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/cp20-qwen-static-boundary.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "39e693df10d5b3c0385921acf070821cf4ce49d2f666e51247c344fad6d22658",
+        "size": 651,
+        "tracked": false
+      },
+      "result": "The Qwen3.5-0.8B static 15-contract boundary remains green while AMD runtime, Triton E2E, and inference remain blocked or 0/1; fallback is not counted.",
+      "started_at": "2026-08-09T19:40:14+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/cp20-qwen-static-boundary.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/cp20-qwen-static-boundary.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b0a9ae3e748e780b634ebbb868c44df3821d570fa184ac7ed82866a44736124b",
+        "size": 88,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+        "ev0048-policy"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T19:40:14+00:00",
+      "exit_code": 0,
+      "id": "cp20-ev0048-policy",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0020/cp20-ev0048-policy.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e65467729dbb471293fdf91d49148f6275a56c325b874eaaf9aa9d7138db40f9",
+        "size": 646,
+        "tracked": false
+      },
+      "result": "The included EV-0048 passes the shared evidence policy, external artifact identity, and retained capture-record semantics checks.",
+      "started_at": "2026-08-09T19:40:14+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0020/cp20-ev0048-policy.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0020/cp20-ev0048-policy.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "53c06d810d8098e3448f3cc11dfb8f8e322a0cd7c9f4cbe8578b9e3ab40bd08b",
+        "size": 81,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T19:40:14+00:00",
+  "environment_fingerprint": {
+    "checkpoint": "CP-0020",
+    "transaction_phase": "prepare",
+    "previous_root": "aa20132914a792062a5895309671a03a38f572c0",
+    "previous_root_tree": "058d4224b612a754b2d6aa9e77a696350a6ee603",
+    "previous_root_parent": "e43ae8e3e25353a3edb24c9b807efcf4c6207530",
+    "previous_root_gem5_gitlink": "bf40bf3bf560018fb62fecb144f3077b05b93b0f",
+    "gem5_head": "d4b96099040140369b9d55108f7bde21e0acfd59",
+    "gem5_tree": "95acf2260a9a9a9c3b68761fa0695b1350321516",
+    "gem5_parent": "bf40bf3bf560018fb62fecb144f3077b05b93b0f",
+    "gem5_clean": true,
+    "gem5_base_head": "bf40bf3bf560018fb62fecb144f3077b05b93b0f",
+    "gem5_base_tree": "e26548be4038375be5a0efaf0ebc418126878ad0",
+    "ev0048_sha256": "e8989d2bfb3ba6f3de6b1f33f6a5c218385785e7a18387080469ceca9cecdc8e",
+    "ev0048_command_results": 12,
+    "ev0048_external_descriptors": 27,
+    "ev0048_policy": "pass",
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "b2_binary_sha256": "536c510f446d43f97dc5a231c30607f38587e8c42dc2bc403ed8e3fe249aaa84",
+    "b2_build_id": "34ebe2528ea3de623059e54b34d9d4000f457a72",
+    "runtime_object_count": 79,
+    "runtime_cpu_objects": 0,
+    "workgroup_count": 4,
+    "wave_count": 16,
+    "instruction_started_count": 304,
+    "cu_instruction_executed_stat": 304,
+    "completed_wave_stat": 16,
+    "host_read_index": "0->1",
+    "direct_u64_signal": "1->0",
+    "host_native_checkers": "5/5",
+    "vega_x86_legacy_test_cases": "130/130",
+    "qwen_model_revision": "2fc06364715b967f1860aea9cf38778875588b17",
+    "qwen_static_contracts": "15/15",
+    "qwen_runtime_status": "blocked",
+    "triton_e2e_cases": "0/1",
+    "qwen_inference_cases": "0/1",
+    "cpu_or_nvidia_fallback_pass": false,
+    "next_action": "P5-TRITON-VECADD-01"
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0020/verify_cp20_umbrella.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "45b2a1a3ab5bdee2572adbb48946564548a3ba00e4db7d8e95d69d2379e22b3f",
+      "size": 7119,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/EV-0048-draft.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e8989d2bfb3ba6f3de6b1f33f6a5c218385785e7a18387080469ceca9cecdc8e",
+      "size": 33525,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/qwen35-static-runtime-blocked.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "c152d237b3de5ab4a6ef20095d70f35f8cbb35fb5f74b45bfc1397bfdeee84a4",
+      "size": 651,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/qwen35-static-runtime-blocked.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "878707583f553d1536f9e563be2e627187b5e788962d16d9730df90275d8f621",
+      "size": 451,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0020/qwen35-static-runtime-blocked.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0049",
+  "includes": {
+    "EV-0048": "e8989d2bfb3ba6f3de6b1f33f6a5c218385785e7a18387080469ceca9cecdc8e"
+  },
+  "limitations": [
+    "The transaction is captured in prepare phase with the final child recorded; root allowlist, coordinator commit, and finalization remain coordinator responsibilities.",
+    "EV-0048 is one source-locked 5,528-byte zero-relocation gfx950 gpuReadWrite fixture. It is not a generic gfx950 compatibility, arbitrary HSACO loader, relocation, operator-suite, hardware, timing, throughput, latency, power, or performance claim.",
+    "CPU-less remains strictly the generated runtime SimObject graph boundary. The host and monolithic gem5 ELF are x86-64 and generic BaseCPU/System symbols remain in the ELF; no claim removes those host/library facts.",
+    "The native B2 memory path is limited to the locked plain read/write functional case; atomics, fences/barriers, scratch/LDS, translation, Ruby coherence, and arbitrary instruction semantics remain unproven.",
+    "The Qwen3.5-0.8B result is offline model integrity and 15/15 static contracts only. AMD runtime is blocked; Triton E2E and Qwen inference remain 0/1, and CPU/NVIDIA fallback is not an AMD pass."
+  ],
+  "redactions": [],
+  "result": "The CP20 child, prepare journal, CP19 root anchor, exact EV-0048 hash, audit trailers, clean state, and Qwen boundary are mutually consistent. The coordinator can publish EV-0049 with the CP20 root checkpoint and advance to the separate unmodified Triton vecadd launcher gate.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T19:40:14+00:00",
+  "type": "cp20-b2-root-child-umbrella"
+}

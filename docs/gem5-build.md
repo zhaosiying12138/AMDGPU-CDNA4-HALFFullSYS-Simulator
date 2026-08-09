@@ -25,6 +25,27 @@ Do not replace `--linker=mold` with an unrecorded `LINKFLAGS` override: gem5's
 SCons configuration.  `-j24` controls SCons compilation concurrency; mold
 performs the final link internally in parallel.
 
+## CPU-less/native B2 target
+
+The CP-0020 B2 artifact is the standalone host-native target used for the
+bounded `gpuReadWrite` functional case. "CPU-less" describes the runtime
+SimObject graph, not the host ELF class: the executable is still an x86-64
+monolithic gem5 ELF and may retain generic `BaseCPU`/`System` symbols. Build it
+from `projects/gem5` with the same mold wrapper and the no-x86 configuration:
+
+```bash
+scripts/build_gem5_mold24.sh build/HOSTGPU_NATIVE_CONTROL/gem5.opt
+```
+
+The recorded configuration is `BUILD_ISA=n`, `USE_X86_ISA=n`, `BUILD_GPU=y`,
+and `VEGA_GPU_ISA=y`; no `/dev/kfd` or `/dev/dri` probe is part of the B2 run.
+The CP-0020 binary identity is SHA-256
+`536c510f446d43f97dc5a231c30607f38587e8c42dc2bc403ed8e3fe249aaa84`, build
+ID `34ebe2528ea3de623059e54b34d9d4000f457a72`, and size `813539368` bytes.
+The identity and freshness transcript live in the CP-0020 evidence manifest;
+capture them immediately after the final link before invoking another SCons
+build.
+
 Before an acceptance link, record:
 
 ```bash

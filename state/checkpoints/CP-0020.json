@@ -1,0 +1,200 @@
+{
+  "baseline_commit_marker": "N/A",
+  "bitlesson_ids": [
+    "BL-0086",
+    "BL-0087",
+    "BL-0088"
+  ],
+  "bitlesson_sha256": {
+    "BL-0086": "403d565f7dfbe75a8f6b08aecbcc9ee22f8e6e7be70a90e0d060c9e331a9b057",
+    "BL-0087": "d8e4c339db1cf9907a6807f5f61cb7f3326e78c0b88345238ae8456a0c6f07e4",
+    "BL-0088": "c5b86451778be437d99771540ded6456d1ffc0c6d8efaa42180ef8eef39fa04b"
+  },
+  "blockers": [],
+  "change_kind": "code",
+  "changes": [
+    "Connected CP19 native queue/command-processor admission to the reused no-x86 GPUDispatcher, Shader, ComputeUnit, Vega decoder, and instruction path for the locked gpuReadWrite fixture.",
+    "Accepted one four-workgroup, sixteen-wave functional case with exact 19-PC instruction-start sequence per wave, independent CU numInstrExecuted=304/16 completed-wave evidence, and separate A/B/C output oracle over 1024 elements.",
+    "Recorded packet retirement, MQD read-index 0->1, direct-u64 signal 1->0, pin release, and zero runtime CPU/Process/Ruby/TLB/HSAPP/GPUCommandProcessor/AMDGPUDevice objects while preserving the monolithic ELF symbol boundary.",
+    "Kept generic gfx950/arbitrary HSACO, timing, fences/barriers, atomics, LDS/scratch, GPU TLB/Ruby/coherence, HIP/OpenCL, Triton, Qwen, and performance claims blocked.",
+    "Retained the CP15-CP19 host-native checkers, VEGA_X86 compatibility regressions, pinned Qwen model hashes, and the 15/15 static operator gate."
+  ],
+  "created_at": "2026-08-10T03:40:14+08:00",
+  "evidence_ids": [
+    "EV-0048",
+    "EV-0049"
+  ],
+  "evidence_manifest_id": "EV-0049",
+  "evidence_manifest_sha256": "80f81de192cc73e7e9e4e4d6aff0554c69e9f5df5fbe273b137fb97e10d2f270",
+  "evidence_sha256": {
+    "EV-0048": "e8989d2bfb3ba6f3de6b1f33f6a5c218385785e7a18387080469ceca9cecdc8e",
+    "EV-0049": "80f81de192cc73e7e9e4e4d6aff0554c69e9f5df5fbe273b137fb97e10d2f270"
+  },
+  "goal_id": "GSIM-001",
+  "goal_sha256": "2a990d89806a0caadb429aa204476513baeea19abe37096102e9c6cdeed9a7e8",
+  "id": "CP-0020",
+  "limitations": [
+    "CP-0020 accepts one source-locked gfx950 gpuReadWrite functional case through the reused no-x86 GPUDispatcher/Shader/ComputeUnit/Vega path: four 256-item workgroups, sixteen wave64 waves, exact 19 instruction-start PCs per wave, output oracle, packet retirement, MQD read-index 0->1, direct-u64 signal 1->0, and pin release.",
+    "CPU-less is a runtime graph boundary. The 79-object run has zero CPU, Process, Ruby, TLB, HSAPP, GPUCommandProcessor, and AMDGPUDevice objects, while the retained x86-64 monolithic ELF may contain generic BaseCPU/System symbols.",
+    "instruction_started_count=304 is a lifecycle start-event count, independently matched by CU numInstrExecuted=304 and 16 completed waves; it must not be described as 304 retirement events.",
+    "The locked zero-relocation gpuReadWrite image, fixture-specific kernarg compatibility at offsets +24/+32/+40, queue geometry, and host-owned address ledger are not a generic V5/V6 loader, arbitrary-ELF/HSACO proof, legacy GPU VM/TLB proof, or transparent runtime launcher.",
+    "Generic gfx950/arbitrary HSACO, timing accuracy, fences/barriers, atomics, LDS/scratch, GPU TLB, Ruby/coherence, HIP/OpenCL, and performance remain unproven; only plain global read/write is accepted in the locked fixture.",
+    "Qwen3.5-0.8B evidence remains offline model/hash and static 15-contract source/shape preparation; strict AMD execution is blocked by the detected CUDA/NVIDIA environment, CPU/NVIDIA fallback is not a pass, and inference remains 0/1.",
+    "The retained Triton overlay remains compile-only historical provenance; Triton end-to-end remains 0/1, with no full ROCm/OpenCL CTS, HIP/OpenCL/PyTorch/vLLM, hardware, timing, or performance claim."
+  ],
+  "next_action": {
+    "id": "P5-TRITON-VECADD-01",
+    "argv": [
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0021",
+      "--intent",
+      "Run the pinned unmodified Triton tutorial vecadd through the normal GemSim launcher with simulator device selection only and retain compiler, HSACO, transport, dispatch, output, and fallback evidence",
+      "--participant",
+      "gem5=projects/gem5"
+    ],
+    "cwd": ".",
+    "expected": "The normal unmodified Triton tutorial vecadd request reaches the GemSim launcher with simulator device selection only and retains compiler/LLVM/Triton/HSACO identities, transport and dispatch records, output differential, and explicit zero CPU/NVIDIA fallback. A failed or unavailable runtime remains blocked and does not count as Triton E2E.",
+    "prerequisites": [
+      "CP-0020 root checkpoint is accepted and scripts/resume.sh --verify passes offline.",
+      "The CP20 gem5 child d4b96099040140369b9d55108f7bde21e0acfd59/tree 95acf2260a9a9a9c3b68761fa0695b1350321516 is clean and EV-0048/EV-0049 are hash-bound.",
+      "The source-locked Triton checkout and tutorial file remain unmodified; simulator device selection must be the only launcher-side selection change.",
+      "Retain the no-fallback policy and distinguish compile-only, launcher, transport, execution, correctness, and performance outcomes."
+    ],
+    "rollback_boundary": "Keep CP-0020 B2 accepted, preserve the native queue/CP-core and locked fixture evidence, Qwen preparation, compile-only Triton provenance, and the VEGA_X86 oracle if transparent Triton vecadd launcher/runtime evidence fails."
+  },
+  "parent_checkpoint": "CP-0019",
+  "phase_id": "P3",
+  "plan_sha256": "e5dabac0c310ace9cc5244812d308e0a37e3875efe05a03d3b2a1533d942c623",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "administrative_git_dir": "modules/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "clean": true,
+      "head": "d4b96099040140369b9d55108f7bde21e0acfd59",
+      "id": "gem5",
+      "path": "projects/gem5",
+      "tree": "95acf2260a9a9a9c3b68761fa0695b1350321516"
+    },
+    {
+      "administrative_git_dir": "modules/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "clean": true,
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58"
+    },
+    {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "clean": true,
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489"
+    },
+    {
+      "administrative_git_dir": "modules/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "clean": true,
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "id": "triton",
+      "path": "projects/triton",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1"
+    },
+    {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "clean": true,
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315"
+    },
+    {
+      "administrative_git_dir": "modules/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "clean": true,
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "id": "vllm",
+      "path": "projects/vllm",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb"
+    },
+    {
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "clean": true,
+      "head": "7797360ea04e9c3576c5cc16cf829427e96d3d70",
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "tree": "64602386f81d7d27a555f1473b01f051b30c2276"
+    }
+  ],
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "root_parent_commit": "aa20132914a792062a5895309671a03a38f572c0",
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "sequence": 20,
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "status": "accepted",
+  "validation": [
+    {
+      "command": "CP20-B2 canonical no-x86 build, artifact audit, self-test, and checker",
+      "cwd": ".",
+      "evidence_id": "EV-0048",
+      "exit_code": 0,
+      "result": "The mold/24 HOSTGPU_NATIVE_CONTROL target is bound to the 813,539,368-byte CP20 binary (SHA-256 536c510f446d43f97dc5a231c30607f38587e8c42dc2bc403ed8e3fe249aaa84, Build ID 34ebe2528ea3de623059e54b34d9d4000f457a72) and passes the B2 audit with no runtime CPU/Process/Ruby/TLB/HSAPP/GPUCommandProcessor/AMDGPUDevice objects."
+    },
+    {
+      "command": "locked gfx950 gpuReadWrite four-workgroup functional execution",
+      "cwd": ".",
+      "evidence_id": "EV-0048",
+      "exit_code": 0,
+      "result": "The 5,528-byte zero-relocation gpuReadWrite fixture runs four 256-item workgroups as sixteen wave64 waves; 19 instruction-start PCs per wave (304 total) match CU numInstrExecuted=304 and 16 completed waves, while separate 4 KiB A/B/C buffers pass A unchanged, B=gid, and C=A over 1024 elements."
+    },
+    {
+      "command": "packet retirement, MQD, direct-u64 signal, and pin-release completion",
+      "cwd": "projects/gem5",
+      "evidence_id": "EV-0048",
+      "exit_code": 0,
+      "result": "The packet retires, host MQD read index advances 0->1, direct-u64 completion signal changes 1->0, and all pinned allocations release in the recorded causal order; atomics remain rejected and plain global read/write is the only accepted memory operation."
+    },
+    {
+      "command": "Qwen3.5-0.8B model integrity and strict static/runtime boundary",
+      "cwd": ".",
+      "evidence_id": "EV-0049",
+      "exit_code": 0,
+      "result": "The pinned model hashes and 15/15 static operator contracts pass; AMD runtime is blocked, CPU/NVIDIA fallback is not a pass, and Triton E2E/Qwen inference remain 0/1."
+    },
+    {
+      "command": "CP20 umbrella child identity, clean state, trailers, prepare journal, and EV-0048 inclusion",
+      "cwd": ".",
+      "evidence_id": "EV-0049",
+      "exit_code": 0,
+      "result": "Gem5 HEAD/tree d4b96099040140369b9d55108f7bde21e0acfd59/95acf2260a9a9a9c3b68761fa0695b1350321516 are clean and exactly journal/trailer-bound to CP20 and EV-0048; the accepted CP19 root aa20132914a792062a5895309671a03a38f572c0 is the transaction anchor, and EV-0049 includes EV-0048 by exact SHA-256."
+    }
+  ]
+}
