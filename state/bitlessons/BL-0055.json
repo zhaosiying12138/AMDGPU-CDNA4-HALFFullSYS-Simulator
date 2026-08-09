@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/src/code_object.c",
+    "docs/host-transport-v1-codeobj.md"
+  ],
+  "checkpoint_id": "CP-0011",
+  "conclusion": "The descriptor and code symbols must be resolved from the metadata names and exact protected symbol records.",
+  "confidence": "high",
+  "decision": "Reject missing or mismatched metadata symbols; do not infer a .kd suffix or use e_entry as a kernel object.",
+  "evidence_ids": [
+    "EV-0027",
+    "EV-0028"
+  ],
+  "id": "BL-0055",
+  "invalidated_assumptions": [
+    "Every producer uses a predictable descriptor suffix and a code-object entry point."
+  ],
+  "observation": "The parser now consumes the MsgPack .symbol field and checks its protected STT_OBJECT descriptor independently from the STT_FUNC symbol.",
+  "question_or_symptom": "Guessing a descriptor symbol can bind the wrong 64-byte resource record in a multi-kernel image.",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

@@ -1,0 +1,400 @@
+{
+  "schema": "amdgpu-sim.host-transport-v1.codeobj.v1",
+  "title": "Source-authoritative gfx950 AMDGPU code-object and kernarg ABI",
+  "checkpoint": "P3-CODEOBJ-01",
+  "authority_status": "frozen-source-audit",
+  "base_protocol": "protocol/host-transport-v1.json",
+  "scope": "Pinned ELF/MsgPack/kernel-descriptor/kernarg authority and deterministic tracked HSACO fixtures. This revision defines no code-object upload or execution wire record.",
+  "capability": {
+    "name": "CODE_OBJECT_ABI_V1",
+    "bit": 6,
+    "byte_index": 0,
+    "mask_hex": "40",
+    "negotiation": "Reserved for a future loader extension. It is not selected by this source-only authority and no message type is assigned.",
+    "requires": ["TOPOLOGY_IDENTITY_V1", "KMT_OPERATION_V1"]
+  },
+  "transport": {
+    "header_bytes": 80,
+    "byte_order": "big-endian",
+    "message_types": {},
+    "ancillary_descriptors": 0,
+    "wire_surface": "authority-only; no HSACO bytes, ELF images, MsgPack blobs, kernarg bytes, pointers, or AQL packets are transport-visible",
+    "future_loader_requirement": "Any future request/ack record must be added as a separate reviewed extension with fixed sizes, hash binding, identity checks, and explicit ownership; this manifest is not an upload API."
+  },
+  "source_lock": {
+    "path": "SOURCE_LOCK.json",
+    "schema": "amdgpu-sim.source-lock.v1",
+    "lock_id": "SL-0001",
+    "sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "immutable": true
+  },
+  "project_lanes": {
+    "path": "PROJECT_LANES.json",
+    "schema": "amdgpu-sim.project-lanes.v1",
+    "registry_revision": 1,
+    "sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+    "immutable": true
+  },
+  "source_authority": {
+    "repositories": [
+      {"id": "gem5", "path": "projects/gem5", "commit": "cbf0eae213c5e39c727172b546434287d47b5bbe", "tree": "d6527ec47acf018cb89afab496b974bda79eaa36", "role": "baseline GPU decoder and ISA table"},
+      {"id": "rocm-systems", "path": "projects/rocm-systems", "commit": "92115a2941982a384de161be3f78cf9bff547027", "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58", "role": "ROCr HSA ELF loader and tracked gfx950 HSACO fixtures"},
+      {"id": "llvm-project", "path": "projects/llvm-project", "commit": "73f2a21fe16b34e35fd0e149564b8664e59da392", "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489", "role": "AMDGPU ELF, metadata, descriptor, relocation, and gfx950 definitions"},
+      {"id": "triton", "path": "projects/triton", "commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b", "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1", "role": "AMD target selection and HSACO assembly/link pipeline"}
+    ],
+    "tree_anchors": {
+      "rocr_runtime": "e68c0afe1ce52ab5ec3582bcbde95a5681d44f98",
+      "rocr_gfx950_hsaco_directory": "d87ce62eebd0a860b96e61a201a41f2834782ca4",
+      "llvm_amdgpu": "f010d24ec0a7eda7ddaee698c0c94b2aa02419e9",
+      "llvm_device_libs": "9da20ec22ab6c7fe8b81693db14dfa17c901f483",
+      "triton_amd_backend": "ad1b4559c36f0d5a1955f51c8e27b5e618d5b1b4",
+      "gem5_amdgpu": "fdbe13d98af3577d26abc9d093d4503c94f47f7c"
+    },
+    "files": [
+      {"repository": "gem5", "path": "src/arch/amdgpu/vega/gpu_decoder.cc", "blob": "86a0ba664531efe96056a408441d01b0024e9fee", "sha256": "b7d52f61edd4c4d4329cc5988cba664b92d279344c81a5fb91e36b1d512397af", "role": "decoder dispatch and gfx-version feature selection"},
+      {"repository": "gem5", "path": "src/arch/amdgpu/vega/gpu_decoder.hh", "blob": "df0731ff60ebdc82bf8daea05299915fc601964c", "sha256": "78d5ca5401f287270749a6b30c6ba50ddcfa7112b796895d6976f5cedfdb7596", "role": "decoder/table declarations"},
+      {"repository": "gem5", "path": "src/arch/amdgpu/vega/insts/smem.cc", "blob": "3059b83ef6d08a0cf2ce2b9cdffc8fc292721500", "sha256": "c373fe423545ff180a4e7751808013780ec9e4187fb35aea90551a9fcf280c68", "role": "scalar memory opcode implementations"},
+      {"repository": "gem5", "path": "src/arch/amdgpu/vega/insts/flat.cc", "blob": "4a5d1fa238b4a7199e5b9e79e518392b3b150c0e", "sha256": "8e1e1738666b72649dd1272b0b7a243171f67613c2bae53831f6b4fe1f70ca4e", "role": "flat/global memory opcode implementations"},
+      {"repository": "gem5", "path": "src/arch/amdgpu/vega/insts/vop2.cc", "blob": "0af6842a71442111c598bfcba0c043407ff7beea", "sha256": "e0f029cbc6b60dd162c7cf355225ac8246154c9b98ba70215e04f833ebcf393c", "role": "vector opcode implementations"},
+      {"repository": "gem5", "path": "src/arch/amdgpu/vega/insts/sopp.cc", "blob": "781113b20403dd59a6acbd221a47aa3a370a2487", "sha256": "c4096b9cf069acc32188d834b0aaf38eb8f8fd9a8b20eeeff8f8f463346bd728", "role": "scalar control-flow opcode implementations"},
+      {"repository": "gem5", "path": "src/gpu-compute/GPU.py", "blob": "25857d0c2799af15c82f41a6ccdff4f8b717dcb7", "sha256": "640db3e87c466d2fbf84e0954cec5ab0811b3eeaa4f9e6847ade8ee891f38c34", "role": "GfxVersion enum and compute model configuration"},
+      {"repository": "rocm-systems", "path": "projects/rocr-runtime/runtime/hsa-runtime/libamdhsacode/amd_hsa_code.cpp", "blob": "1039fa1519a1489d8bf78ced0bcd718c4d076dc6", "sha256": "0afbfada30c1a58c6c9310c4f4548474c6fe3580efc99ad3d3d31fb9df5bf19f", "role": "ELF ABI/version, symbols, segments, and machine validation"},
+      {"repository": "rocm-systems", "path": "projects/rocr-runtime/runtime/hsa-runtime/libamdhsacode/amd_elf_image.cpp", "blob": "87f8f403ff3b7ba634390da2dad6a0f45f2380e3", "sha256": "c20d0728c12c2f39d14aae54d3b4693b445f433da0b27273b84de85d29936a22", "role": "ELF image and relocation representation"},
+      {"repository": "rocm-systems", "path": "projects/rocr-runtime/runtime/hsa-runtime/loader/executable.cpp", "blob": "a9794bcb27658e60c6fce36effea08b71f3342bd", "sha256": "ec701c7def268e226e86b539235cd6327887d6cfc9dd7caf96cea1b9faa10827", "role": "load segments, kernel definitions, and relocations"},
+      {"repository": "rocm-systems", "path": "projects/rocr-runtime/runtime/hsa-runtime/loader/AMDHSAKernelDescriptor.h", "blob": "0598024ca52bc5f38fd66bb6b15511ecce30fbc1", "sha256": "c43317a686ceadc3099c39267a8ffda1003eb54604bc5a44bd68bc6471e1a3b1", "role": "ROCr descriptor layout and loader properties"},
+      {"repository": "rocm-systems", "path": "projects/rocr-runtime/runtime/hsa-runtime/inc/amd_hsa_elf.h", "blob": "2278bb957e1bd82ccae2dde92df625355ca20eb6", "sha256": "fbe32b3ac4cd306eea13096c4a0c4ed6fd818d1b9f463f21836d3f8757b07652", "role": "AMDGPU ELF ABI and machine constants"},
+      {"repository": "llvm-project", "path": "llvm/docs/AMDGPUUsage.rst", "blob": "ef45f0ead73f3faff39bab79115f6ee7a987bea6", "sha256": "1a67a6d0a7db6b4c37117b9d0bcee50d21f5479bd173b42381ae90751e2589b6", "role": "ELF V4-V6, metadata, descriptor, and relocation normative definitions"},
+      {"repository": "llvm-project", "path": "llvm/lib/BinaryFormat/AMDGPUMetadataVerifier.cpp", "blob": "a3cd157e6aa619fee641559996e6081010ae5862", "sha256": "8b1b869279027930237d6c3309dc8bca667b628d9d76e47504dfae12297dff25", "role": "required and optional MsgPack key validation"},
+      {"repository": "llvm-project", "path": "llvm/lib/Target/AMDGPU/AMDGPUHSAMetadataStreamer.cpp", "blob": "7f79756e5a566a3b6f0575b4e08d754a5cc897f5", "sha256": "92f0a8ddb260055561d78ad733d101bcb7607df4b6990ed224ffbe5aaddd1410", "role": "metadata emission, hidden-argument layout, and resource fields"},
+      {"repository": "llvm-project", "path": "llvm/include/llvm/Support/AMDHSAKernelDescriptor.h", "blob": "3f966acdf12af8cc9f287208e55094900dac08b8", "sha256": "867b8bfabc6d38e97fe83a4ea5bed76f2e29306ddfde5be9a42ffed6fa68081f", "role": "canonical 64-byte descriptor fields and property bits"},
+      {"repository": "llvm-project", "path": "llvm/include/llvm/BinaryFormat/ELFRelocs/AMDGPU.def", "blob": "0ff7b4c766cc193fe0f75030e87b70e2bc57970b", "sha256": "3b7d257c6010dd62bff19013ac467b0f81f86281fe6c968b21e39746808bc00c", "role": "AMDGPU relocation IDs"},
+      {"repository": "llvm-project", "path": "llvm/lib/Target/AMDGPU/GCNProcessors.td", "blob": "47dc1f182c7b4bffa108a5d7a8e767a0226e294d", "sha256": "b5df5eeedf727476ab08c3ad9c1f0da3fa7260d277daf954123cfc38e8785401", "role": "gfx950 processor and feature definitions"},
+      {"repository": "llvm-project", "path": "llvm/lib/Target/AMDGPU/AMDGPUAsmPrinter.cpp", "blob": "3d337a466a75e817d163432fd3236f61c6f7d134", "sha256": "c25085af0eebb7aa61be9f46f7b7e074be0ef11bc144a1ad95f06e5d54eaf49d", "role": "V4/V5/V6 metadata streamer selection"},
+      {"repository": "llvm-project", "path": "llvm/lib/Target/AMDGPU/MCTargetDesc/AMDGPUTargetStreamer.cpp", "blob": "463387f064ef0b4d15bf312637bb9fcafe21c78c", "sha256": "173424f959b49936be78e9e4ba884811a2ba41b72c8544666439081af89bf138", "role": "MsgPack serialization and metadata note emission"},
+      {"repository": "llvm-project", "path": "amd/device-libs/README.md", "blob": "f8b6547c387a69deca6b20bcd7e8875781dbdb56", "sha256": "40cd3620cfd13a790859743b199081b5d5b4d73252e564b2039024338a84a4ce", "role": "device-library build and bitcode-link contract"},
+      {"repository": "llvm-project", "path": "amd/device-libs/ockl/inc/amd_hsa_elf.h", "blob": "95f89c63541af26e8c96bde788b026ab1580d0c4", "sha256": "618091179558ff31af6d9f6d5b9496a732066cc64c566e1bf50f1e2b2b621ab8", "role": "device-side ELF, symbol, and legacy relocation constants"},
+      {"repository": "llvm-project", "path": "amd/device-libs/ockl/inc/amd_hsa_kernel_code.h", "blob": "6c2742a68a3d4d51d01602208aac921483bb6c47", "sha256": "02665991d4fc7dbda089045a176bc45752d39f6f353f6fab78014ccfd9faf589", "role": "device-side kernel code resource and property bit definitions"},
+      {"repository": "llvm-project", "path": "amd/device-libs/oclc/src/abi_version.cl.in", "blob": "699f8cb64ae80d50790261f2df75469d519ebceb", "sha256": "0ca66a187215d7d8a971e9fb60d68d62450f92e31645d2214c09b43cbc8190f1", "role": "generated device ABI version constant"},
+      {"repository": "llvm-project", "path": "amd/device-libs/oclc/src/isa_version.cl.in", "blob": "654a1d45d709247b1963366350c7669521ec5f25", "sha256": "95ae317c49bdbf3f95b10c00816f8048a0d38a1d48ced9e2d4089e8931c14851", "role": "generated device ISA version constant"},
+      {"repository": "triton", "path": "third_party/amd/backend/compiler.py", "blob": "cc19397979b68b125ecf6a6b2bc2c443d5ace377", "sha256": "5febaa1b43f4656b7c7e2d0972ed2b521ecd15a159e2c41aa9ab780a97492c95", "role": "gfx950 target options and assemble/link pipeline"},
+      {"repository": "triton", "path": "third_party/amd/include/Dialect/TritonAMDGPU/IR/TargetFeatures.h", "blob": "4a30087350df10f0c02bef6646d719e3e1b347d1", "sha256": "12e044293d4238faea290d8c3b9d5d7b286af6dc7dc667d024cf9f341ab61fe8", "role": "target feature declarations"},
+      {"repository": "triton", "path": "third_party/amd/lib/Dialect/TritonAMDGPU/IR/TargetFeatures.cpp", "blob": "dca39e2489a2cf3fcd56a565aa8f3b0c1f6445e6", "sha256": "7fb74ace6bc8f997797027faf81f49e257517a6b90b6d01e95805842f828e7d1", "role": "gfx950 parsing, wavefront, and LDS feature values"},
+      {"repository": "triton", "path": "third_party/amd/backend/driver.py", "blob": "bc7cee8972c941328d904ba763d68f148b4eb4d9", "sha256": "24b908043301e5dfcdbc4cdb17b9b7313e650cdfd4098b2ebfb998af8994be4e", "role": "AMD driver code-object handoff"}
+    ]
+  },
+  "abi_contract": {
+    "elf": {
+      "accepted_code_object_versions": {
+        "V4": {"ei_abiversion": 2, "metadata_version": [1, 1]},
+        "V5": {"ei_abiversion": 3, "metadata_version": [1, 2]},
+        "V6": {"ei_abiversion": 4, "metadata_version": [1, 2]}
+      },
+      "header": {"class": "ELFCLASS64", "class_value": 2, "data": "ELFDATA2LSB", "data_value": 1, "osabi": "ELFOSABI_AMDGPU_HSA", "osabi_value": 64, "machine": "EM_AMDGPU", "machine_value": 224, "type": "ET_DYN", "type_value": 3, "entry": 0, "version": 1, "hsa_loader_requirement": "ET_DYN is required for an HSA code object loaded as an executable image."},
+      "gfx950_machine": {"ef_amdgpu_mach_hex": "4f", "ef_amdgpu_mach_decimal": 79, "ef_amdgpu_xnack": "any", "ef_amdgpu_sramecc": "any", "target": "amdgcn-amd-amdhsa--gfx950"}
+    },
+    "metadata": {
+      "container": {"section": ".note", "section_type": "SHT_NOTE", "owner": "AMDGPU", "note_type": "NT_AMDGPU_METADATA", "note_type_value": 32, "encoding": "MessagePack"},
+      "root": {"type": "map", "required": ["amdhsa.version", "amdhsa.target", "amdhsa.kernels"], "version_shape": "two unsigned integers [major, minor]", "target_shape": "string amdgcn-amd-amdhsa--gfx950", "kernels_shape": "array of maps"},
+      "kernel_required_keys": [".name", ".symbol", ".kernarg_segment_size", ".kernarg_segment_align", ".group_segment_fixed_size", ".private_segment_fixed_size", ".wavefront_size", ".sgpr_count", ".vgpr_count", ".max_flat_workgroup_size"],
+      "kernel_optional_keys": [".language", ".language_version", ".agpr_count", ".uses_dynamic_stack", ".sgpr_spill_count", ".vgpr_spill_count", ".workgroup_processor_mode", ".cluster_dims"],
+      "argument_required_keys": [".offset", ".size", ".value_kind"],
+      "hidden_value_kinds_v5": ["hidden_block_count_x", "hidden_block_count_y", "hidden_block_count_z", "hidden_group_size_x", "hidden_group_size_y", "hidden_group_size_z", "hidden_remainder_x", "hidden_remainder_y", "hidden_remainder_z", "hidden_global_offset_x", "hidden_global_offset_y", "hidden_global_offset_z", "hidden_grid_dims", "hidden_printf_buffer", "hidden_hostcall_buffer", "hidden_default_queue", "hidden_completion_action", "hidden_multigrid_sync_arg", "hidden_heap_v1", "hidden_dynamic_lds_size", "hidden_private_base", "hidden_shared_base", "hidden_queue_ptr"],
+      "emitter_boundary": "ROCr consumes the ELF note but does not implement a MsgPack parser; LLVM AMDGPUHSAMetadataStreamer and AMDGPUTargetStreamer emit and serialize this map."
+    },
+    "relocations": {
+      "record_format": "Elf64_Rela",
+      "addend": "explicit signed 64-bit addend",
+      "ids": {"R_AMDGPU_NONE": 0, "R_AMDGPU_ABS32_LO": 1, "R_AMDGPU_ABS32_HI": 2, "R_AMDGPU_ABS64": 3, "R_AMDGPU_REL32": 4, "R_AMDGPU_REL64": 5, "R_AMDGPU_ABS32": 6, "R_AMDGPU_GOTPCREL": 7, "R_AMDGPU_GOTPCREL32_LO": 8, "R_AMDGPU_GOTPCREL32_HI": 9, "R_AMDGPU_REL32_LO": 10, "R_AMDGPU_REL32_HI": 11, "R_AMDGPU_RELATIVE64": 13, "R_AMDGPU_REL16": 14},
+      "static_formulas": {"R_AMDGPU_ABS32_LO": "(S + A) & 0xFFFFFFFF", "R_AMDGPU_ABS32_HI": "(S + A) >> 32", "R_AMDGPU_ABS64": "S + A", "R_AMDGPU_REL32": "S + A - P", "R_AMDGPU_REL64": "S + A - P", "R_AMDGPU_ABS32": "S + A", "R_AMDGPU_GOTPCREL": "G + GOT + A - P", "R_AMDGPU_GOTPCREL32_LO": "(G + GOT + A - P) & 0xFFFFFFFF", "R_AMDGPU_GOTPCREL32_HI": "(G + GOT + A - P) >> 32", "R_AMDGPU_REL32_LO": "(S + A - P) & 0xFFFFFFFF", "R_AMDGPU_REL32_HI": "(S + A - P) >> 32", "R_AMDGPU_REL16": "((S + A - P) - 4) / 4"},
+      "dynamic_formula": "RELATIVE64 is B + A, where B is the load base.",
+      "loader_order": ["validate version and ISA", "map PT_LOAD segments", "load definition symbols and kernel descriptors", "apply static/dynamic relocations", "publish executable"],
+      "fixture_policy": "Both tracked fixtures contain zero relocation sections; zero is an observed fact, not permission to omit relocation handling in a future loader."
+    },
+    "kernel_descriptor": {
+      "size_bytes": 64,
+      "byte_order": "little-endian",
+      "fields": [
+        {"name": "group_segment_fixed_size", "offset": 0, "bytes": 4, "type": "u32"},
+        {"name": "private_segment_fixed_size", "offset": 4, "bytes": 4, "type": "u32"},
+        {"name": "kernarg_size", "metadata_name": ".kernarg_segment_size", "offset": 8, "bytes": 4, "type": "u32"},
+        {"name": "reserved0", "offset": 12, "bytes": 4, "type": "u32"},
+        {"name": "kernel_code_entry_byte_offset", "offset": 16, "bytes": 8, "type": "i64"},
+        {"name": "reserved1", "offset": 24, "bytes": 20, "type": "bytes"},
+        {"name": "compute_pgm_rsrc3", "offset": 44, "bytes": 4, "type": "u32"},
+        {"name": "compute_pgm_rsrc1", "offset": 48, "bytes": 4, "type": "u32"},
+        {"name": "compute_pgm_rsrc2", "offset": 52, "bytes": 4, "type": "u32"},
+        {"name": "kernel_code_properties", "offset": 56, "bytes": 2, "type": "u16"},
+        {"name": "kernarg_preload", "offset": 58, "bytes": 2, "type": "u16"},
+        {"name": "reserved2", "offset": 60, "bytes": 4, "type": "bytes"}
+      ],
+      "property_bits": {"enable_private_segment_buffer": 0, "enable_dispatch_ptr": 1, "enable_queue_ptr": 2, "enable_kernarg_segment_ptr": 3, "enable_dispatch_id": 4, "enable_flat_scratch_init": 5, "enable_private_segment_size": 6, "reserved0_bits": "7-9", "enable_wavefront32": 10, "enable_dynamic_stack": 11, "reserved1_bits": "12-15"},
+      "kernarg_preload_bits": {"length": {"offset": 0, "width": 7}, "offset": {"offset": 7, "width": 9}},
+      "dispatch_rule": "AQL kernel_object is the load address of the .kd descriptor, not the .text entry symbol. The descriptor entry offset is added to the descriptor address by the loader."
+    },
+    "kernarg": {
+      "alignment_rule": "metadata .kernarg_segment_align is a byte alignment; LLVM emitter uses max(4, maximum argument alignment), and the loader stores/returns the corresponding alignment. Fixture alignment is 8.",
+      "layout_rule": "Explicit arguments are followed by ABI hidden arguments. Offsets are byte offsets, sizes are byte sizes, and holes/reserved ABI slots are significant.",
+      "hidden_layout_v5": [
+        {"value_kind": "hidden_block_count_x/y/z", "type": "u32", "bytes_each": 4, "alignment": 4},
+        {"value_kind": "hidden_group_size_x/y/z", "type": "u16", "bytes_each": 2, "alignment": 2},
+        {"value_kind": "hidden_remainder_x/y/z", "type": "u16", "bytes_each": 2, "alignment": 2},
+        {"value_kind": "reserved", "type": "bytes", "range": "after remainder through global offsets", "alignment": 8},
+        {"value_kind": "hidden_global_offset_x/y/z", "type": "u64", "bytes_each": 8, "alignment": 8},
+        {"value_kind": "hidden_grid_dims", "type": "u16", "bytes": 2, "alignment": 2},
+        {"value_kind": "reserved_or_optional_hidden", "type": "ABI-defined", "rule": "preserve offsets; do not compact or infer absent fields"}
+      ],
+      "fixture_observation": "All tracked kernels use wavefront 64, alignment 8, and no LDS or private fixed allocation; kernarg sizes are 280 or 288 because hidden ABI slots and padding remain in the segment."
+    },
+    "segments_and_resources": {
+      "load_rule": "ROCr maps PT_LOAD segments, copies PROGBITS, zero-fills NOBITS, and validates destination ranges before copy.",
+      "executable_segment": "A PT_LOAD with PF_X contains .text; section alignment is 256 in both fixtures.",
+      "descriptor_segment": ".rodata contains 64-byte descriptors aligned to 64 bytes and is in a read-only PT_LOAD.",
+      "resource_metadata": [".group_segment_fixed_size", ".private_segment_fixed_size", ".uses_dynamic_stack", ".sgpr_count", ".vgpr_count", ".agpr_count", ".sgpr_spill_count", ".vgpr_spill_count"],
+      "lds_rule": "group_segment_fixed_size is fixed LDS allocation in bytes; dynamic LDS requires the hidden_dynamic_lds_size ABI field and a loader/dispatch implementation.",
+      "scratch_rule": "private_segment_fixed_size is fixed scratch/private allocation in bytes; dynamic stack and private/shared base hidden fields must remain coupled to descriptor properties."
+    },
+    "symbols": {
+      "kernel_entry": {"elf_type": "STT_FUNC", "section": ".text", "visibility": "STV_PROTECTED", "name": "metadata .name"},
+      "kernel_descriptor": {"elf_type": "STT_OBJECT", "section": ".rodata", "visibility": "STV_PROTECTED", "name": "metadata .symbol", "size": 64},
+      "lookup": "Resolve metadata .symbol exactly, require a 64-byte descriptor object, then resolve metadata .name as the entry function; do not use a guessed symbol suffix or e_entry."
+    }
+  },
+  "triton_authority": {
+    "target": "gfx950 is parsed as CDNA4 (major 9, minor 5, patch 0), with warp size 64 and 160 KiB shared memory in the locked TargetFeatures source.",
+    "pipeline": "HIPOptions selects warp_size=64 and gfx950 kpack=1, sets ABI version 500, assembles AMDGCN, then links HSACO through the AMD driver.",
+    "reproducibility": "The locked checkout contains source only; no local Triton/LLVM/device-libs build is asserted by this manifest."
+  },
+  "deterministic_fixture_schema": {
+    "required": ["id", "source_path", "repository", "commit", "git_blob", "sha256", "bytes", "elf", "segments", "metadata", "descriptors", "symbols", "relocations", "isa_audit"],
+    "artifact_rule": "A fixture must be a tracked byte-for-byte file at the locked source commit. Generated or hand-authored metadata is invalid.",
+    "hash_rule": "sha256 covers the complete file; git_blob is the Git blob object ID; all offsets and sizes are file-byte offsets unless explicitly marked virtual address."
+  },
+  "deterministic_fixtures": [
+    {
+      "id": "gfx950-rdc-gpuReadWrite-v1",
+      "repository": "rocm-systems",
+      "commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "source_path": "projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco",
+      "git_blob": "66c76f2735ce157f34b58f465d2852773c464472",
+      "sha256": "7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56",
+      "bytes": 5528,
+      "elf": {
+        "abi_version": "V6", "ei_abiversion": 4, "flags_hex": "54f",
+        "sections": {
+          ".note": {"offset_hex": "200", "size_hex": "550"},
+          ".dynsym": {"offset_hex": "750", "size_hex": "48"},
+          ".rodata": {"offset_hex": "800", "vaddr_hex": "800", "size_hex": "40", "alignment": 64},
+          ".text": {"offset_hex": "900", "vaddr_hex": "1900", "size_hex": "480", "alignment": 256},
+          ".dynamic": {"offset_hex": "d80", "vaddr_hex": "2d80", "size_hex": "70"},
+          ".comment": {"offset_hex": "df0", "size_hex": "139"}
+        },
+        "relocation_sections": 0,
+        "comment_sha256": "5a7cc23490ebd8953ba1174bb63ba803f0761b8089bb6786af05639635f0aa33"
+      },
+      "segments": [
+        {"type": "PT_LOAD", "offset_hex": "0", "vaddr_hex": "0", "filesz_hex": "840", "memsz_hex": "840", "flags": "R", "align_hex": "1000"},
+        {"type": "PT_LOAD", "offset_hex": "900", "vaddr_hex": "1900", "filesz_hex": "480", "memsz_hex": "480", "flags": "RX", "align_hex": "1000"},
+        {"type": "PT_LOAD", "offset_hex": "d80", "vaddr_hex": "2d80", "filesz_hex": "70", "memsz_hex": "280", "flags": "RW", "align_hex": "1000"}
+      ],
+      "metadata": {
+        "desc_sha256": "13012b38a62029e0cb7798121f188db945bc6683a7a4ab60ee520bd981725b0a",
+        "version": [1, 2],
+        "target": "amdgcn-amd-amdhsa--gfx950",
+        "kernels": [
+          {
+            "name": "gpuReadWrite", "symbol": "gpuReadWrite.kd",
+            "kernarg_segment_size": 280, "kernarg_segment_align": 8,
+            "group_segment_fixed_size": 0, "private_segment_fixed_size": 0,
+            "uses_dynamic_stack": false, "wavefront_size": 64,
+            "sgpr_count": 22, "vgpr_count": 6, "agpr_count": 0,
+            "sgpr_spill_count": 0, "vgpr_spill_count": 0, "max_flat_workgroup_size": 256,
+            "args": [
+              {"name": "a", "type_name": "int*", "address_space": "global", "is_const": true, "offset": 0, "size": 8, "value_kind": "global_buffer"},
+              {"name": "b", "type_name": "int*", "address_space": "global", "offset": 8, "size": 8, "value_kind": "global_buffer"},
+              {"name": "c", "type_name": "int*", "address_space": "global", "offset": 16, "size": 8, "value_kind": "global_buffer"},
+              {"value_kind": "hidden_block_count_x", "offset": 24, "size": 4},
+              {"value_kind": "hidden_block_count_y", "offset": 28, "size": 4},
+              {"value_kind": "hidden_block_count_z", "offset": 32, "size": 4},
+              {"value_kind": "hidden_group_size_x", "offset": 36, "size": 2},
+              {"value_kind": "hidden_group_size_y", "offset": 38, "size": 2},
+              {"value_kind": "hidden_group_size_z", "offset": 40, "size": 2},
+              {"value_kind": "hidden_remainder_x", "offset": 42, "size": 2},
+              {"value_kind": "hidden_remainder_y", "offset": 44, "size": 2},
+              {"value_kind": "hidden_remainder_z", "offset": 46, "size": 2},
+              {"value_kind": "hidden_global_offset_x", "offset": 64, "size": 8},
+              {"value_kind": "hidden_global_offset_y", "offset": 72, "size": 8},
+              {"value_kind": "hidden_global_offset_z", "offset": 80, "size": 8},
+              {"value_kind": "hidden_grid_dims", "offset": 88, "size": 2}
+            ]
+          }
+        ]
+      },
+      "descriptors": [
+        {"symbol": "gpuReadWrite.kd", "file_offset_hex": "800", "sha256": "4d593541914997359607cb1d01d3abf44ce347d3b84104ae1e80b71274cd9003", "hex": "0000000000000000180100000000000000110000000000000000000000000000000000000000000000000000010000008000af00880000000a00000000000000", "fields": {"group_segment_fixed_size": 0, "private_segment_fixed_size": 0, "kernarg_segment_size": 280, "kernel_code_entry_byte_offset_hex": "1100", "compute_pgm_rsrc3_hex": "1", "compute_pgm_rsrc1_hex": "af0080", "compute_pgm_rsrc2_hex": "88", "kernel_code_properties_hex": "000a", "kernarg_preload_hex": "0000"}}
+      ],
+      "symbols": [
+        {"name": "gpuReadWrite", "type": "STT_FUNC", "binding": "GLOBAL", "visibility": "PROTECTED", "section": ".text", "value_hex": "1900", "size": 120},
+        {"name": "gpuReadWrite.kd", "type": "STT_OBJECT", "binding": "GLOBAL", "visibility": "PROTECTED", "section": ".rodata", "value_hex": "800", "size": 64}
+      ],
+      "relocations": {"count": 0, "sections": []},
+      "isa_audit": {
+        "observation_tool": "/usr/lib/llvm-21/bin/llvm-objdump -d --mcpu=gfx950",
+        "toolchain_pinned": false,
+        "observed_mnemonics": ["global_load_dword", "global_store_dword", "s_and_b32", "s_endpgm", "s_load_dword", "s_load_dwordx8", "s_mul_i32", "s_nop", "s_waitcnt", "v_add_u32_e32", "v_ashrrev_i64", "v_lshl_add_u64", "v_mov_b32_e32"],
+        "unsupported_mnemonics": [],
+        "gem5_decoder_status": "All observed mnemonic spellings occur in the locked decoder sources, but gfx950-specific decoder feature equivalence is not proven.",
+        "status": "blocked-until-gfx950-decoder-proof"
+      }
+    },
+    {
+      "id": "gfx950-rdc-binary-search-v1",
+      "repository": "rocm-systems",
+      "commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "source_path": "projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/binary_search_kernels.hsaco",
+      "git_blob": "1bcdbc0e1727bc13124a90133867bf3a0b330c23",
+      "sha256": "cb415571319569f4cdc28872faa2155dfe12be06a8f75fe173df3486fdabc053",
+      "bytes": 11296,
+      "elf": {
+        "abi_version": "V6", "ei_abiversion": 4, "flags_hex": "54f",
+        "sections": {
+          ".note": {"offset_hex": "200", "size_hex": "1044"},
+          ".dynsym": {"offset_hex": "1248", "size_hex": "a8"},
+          ".rodata": {"offset_hex": "1400", "vaddr_hex": "1400", "size_hex": "c0", "alignment": 64},
+          ".text": {"offset_hex": "1500", "vaddr_hex": "2500", "size_hex": "a40", "alignment": 256},
+          ".dynamic": {"offset_hex": "1f40", "vaddr_hex": "3f40", "size_hex": "70"},
+          ".comment": {"offset_hex": "1fb0", "size_hex": "139"}
+        },
+        "relocation_sections": 0,
+        "comment_sha256": "5a7cc23490ebd8953ba1174bb63ba803f0761b8089bb6786af05639635f0aa33"
+      },
+      "segments": [
+        {"type": "PT_LOAD", "offset_hex": "0", "vaddr_hex": "0", "filesz_hex": "14c0", "memsz_hex": "14c0", "flags": "R", "align_hex": "1000"},
+        {"type": "PT_LOAD", "offset_hex": "1500", "vaddr_hex": "2500", "filesz_hex": "a40", "memsz_hex": "a40", "flags": "RX", "align_hex": "1000"},
+        {"type": "PT_LOAD", "offset_hex": "1f40", "vaddr_hex": "3f40", "filesz_hex": "70", "memsz_hex": "c0", "flags": "RW", "align_hex": "1000"}
+      ],
+      "metadata": {
+        "desc_sha256": "48cca02a7b36a54363ef5a4eab01aaa49a5b5530ec8929f68e83ed57e96542e4",
+        "version": [1, 2],
+        "target": "amdgcn-amd-amdhsa--gfx950",
+        "kernels": [
+          {
+            "name": "binarySearch", "symbol": "binarySearch.kd", "kernarg_segment_size": 280, "kernarg_segment_align": 8,
+            "group_segment_fixed_size": 0, "private_segment_fixed_size": 0, "uses_dynamic_stack": false, "wavefront_size": 64,
+            "sgpr_count": 19, "vgpr_count": 8, "agpr_count": 0, "sgpr_spill_count": 0, "vgpr_spill_count": 0, "max_flat_workgroup_size": 256,
+            "args": [
+              {"name": "outputArray", "type_name": "uint4*", "address_space": "global", "offset": 0, "size": 8, "value_kind": "global_buffer"},
+              {"name": "sortedArray", "type_name": "uint2*", "address_space": "global", "is_const": true, "offset": 8, "size": 8, "value_kind": "global_buffer"},
+              {"name": "findMe", "type_name": "uint", "offset": 16, "size": 4, "value_kind": "by_value"},
+              {"value_kind": "hidden_block_count_x", "offset": 24, "size": 4},
+              {"value_kind": "hidden_block_count_y", "offset": 28, "size": 4},
+              {"value_kind": "hidden_block_count_z", "offset": 32, "size": 4},
+              {"value_kind": "hidden_group_size_x", "offset": 36, "size": 2},
+              {"value_kind": "hidden_group_size_y", "offset": 38, "size": 2},
+              {"value_kind": "hidden_group_size_z", "offset": 40, "size": 2},
+              {"value_kind": "hidden_remainder_x", "offset": 42, "size": 2},
+              {"value_kind": "hidden_remainder_y", "offset": 44, "size": 2},
+              {"value_kind": "hidden_remainder_z", "offset": 46, "size": 2},
+              {"value_kind": "hidden_global_offset_x", "offset": 64, "size": 8},
+              {"value_kind": "hidden_global_offset_y", "offset": 72, "size": 8},
+              {"value_kind": "hidden_global_offset_z", "offset": 80, "size": 8},
+              {"value_kind": "hidden_grid_dims", "offset": 88, "size": 2}
+            ]
+          },
+          {
+            "name": "binarySearch_mulkeys", "symbol": "binarySearch_mulkeys.kd", "kernarg_segment_size": 288, "kernarg_segment_align": 8,
+            "group_segment_fixed_size": 0, "private_segment_fixed_size": 0, "uses_dynamic_stack": false, "wavefront_size": 64,
+            "sgpr_count": 20, "vgpr_count": 6, "agpr_count": 0, "sgpr_spill_count": 0, "vgpr_spill_count": 0, "max_flat_workgroup_size": 256,
+            "args": [
+              {"name": "keys", "type_name": "int*", "address_space": "global", "offset": 0, "size": 8, "value_kind": "global_buffer"},
+              {"name": "input", "type_name": "uint*", "address_space": "global", "offset": 8, "size": 8, "value_kind": "global_buffer"},
+              {"name": "numKeys", "type_name": "uint", "offset": 16, "size": 4, "value_kind": "by_value"},
+              {"name": "output", "type_name": "int*", "address_space": "global", "offset": 24, "size": 8, "value_kind": "global_buffer"},
+              {"value_kind": "hidden_block_count_x", "offset": 32, "size": 4},
+              {"value_kind": "hidden_block_count_y", "offset": 36, "size": 4},
+              {"value_kind": "hidden_block_count_z", "offset": 40, "size": 4},
+              {"value_kind": "hidden_group_size_x", "offset": 44, "size": 2},
+              {"value_kind": "hidden_group_size_y", "offset": 46, "size": 2},
+              {"value_kind": "hidden_group_size_z", "offset": 48, "size": 2},
+              {"value_kind": "hidden_remainder_x", "offset": 50, "size": 2},
+              {"value_kind": "hidden_remainder_y", "offset": 52, "size": 2},
+              {"value_kind": "hidden_remainder_z", "offset": 54, "size": 2},
+              {"value_kind": "hidden_global_offset_x", "offset": 72, "size": 8},
+              {"value_kind": "hidden_global_offset_y", "offset": 80, "size": 8},
+              {"value_kind": "hidden_global_offset_z", "offset": 88, "size": 8},
+              {"value_kind": "hidden_grid_dims", "offset": 96, "size": 2}
+            ]
+          },
+          {
+            "name": "binarySearch_mulkeysConcurrent", "symbol": "binarySearch_mulkeysConcurrent.kd", "kernarg_segment_size": 288, "kernarg_segment_align": 8,
+            "group_segment_fixed_size": 0, "private_segment_fixed_size": 0, "uses_dynamic_stack": false, "wavefront_size": 64,
+            "sgpr_count": 22, "vgpr_count": 12, "agpr_count": 0, "sgpr_spill_count": 0, "vgpr_spill_count": 0, "max_flat_workgroup_size": 256,
+            "args": [
+              {"name": "keys", "type_name": "uint*", "address_space": "global", "offset": 0, "size": 8, "value_kind": "global_buffer"},
+              {"name": "input", "type_name": "uint*", "address_space": "global", "offset": 8, "size": 8, "value_kind": "global_buffer"},
+              {"name": "inputSize", "type_name": "uint", "offset": 16, "size": 4, "value_kind": "by_value"},
+              {"name": "numSubdivisions", "type_name": "uint", "offset": 20, "size": 4, "value_kind": "by_value"},
+              {"name": "output", "type_name": "int*", "address_space": "global", "offset": 24, "size": 8, "value_kind": "global_buffer"},
+              {"value_kind": "hidden_block_count_x", "offset": 32, "size": 4},
+              {"value_kind": "hidden_block_count_y", "offset": 36, "size": 4},
+              {"value_kind": "hidden_block_count_z", "offset": 40, "size": 4},
+              {"value_kind": "hidden_group_size_x", "offset": 44, "size": 2},
+              {"value_kind": "hidden_group_size_y", "offset": 46, "size": 2},
+              {"value_kind": "hidden_group_size_z", "offset": 48, "size": 2},
+              {"value_kind": "hidden_remainder_x", "offset": 50, "size": 2},
+              {"value_kind": "hidden_remainder_y", "offset": 52, "size": 2},
+              {"value_kind": "hidden_remainder_z", "offset": 54, "size": 2},
+              {"value_kind": "hidden_global_offset_x", "offset": 72, "size": 8},
+              {"value_kind": "hidden_global_offset_y", "offset": 80, "size": 8},
+              {"value_kind": "hidden_global_offset_z", "offset": 88, "size": 8},
+              {"value_kind": "hidden_grid_dims", "offset": 96, "size": 2}
+            ]
+          }
+        ]
+      },
+      "descriptors": [
+        {"symbol": "binarySearch.kd", "file_offset_hex": "1400", "sha256": "4d593541914997359607cb1d01d3abf44ce347d3b84104ae1e80b71274cd9003", "hex": "0000000000000000180100000000000000110000000000000000000000000000000000000000000000000000010000008000af00880000000a00000000000000", "fields": {"group_segment_fixed_size": 0, "private_segment_fixed_size": 0, "kernarg_segment_size": 280, "kernel_code_entry_byte_offset_hex": "1100", "compute_pgm_rsrc3_hex": "1", "compute_pgm_rsrc1_hex": "af0080", "compute_pgm_rsrc2_hex": "88", "kernel_code_properties_hex": "000a", "kernarg_preload_hex": "0000"}},
+        {"symbol": "binarySearch_mulkeys.kd", "file_offset_hex": "1440", "sha256": "84d76ba64bcc88ada51f00e79432466d7a6b40d7fcd6a40fa8a5d07b422e4349", "hex": "00000000000000002001000000000000c0110000000000000000000000000000000000000000000000000000010000008000af00880000000a00000000000000", "fields": {"group_segment_fixed_size": 0, "private_segment_fixed_size": 0, "kernarg_segment_size": 288, "kernel_code_entry_byte_offset_hex": "11c0", "compute_pgm_rsrc3_hex": "1", "compute_pgm_rsrc1_hex": "af0080", "compute_pgm_rsrc2_hex": "88", "kernel_code_properties_hex": "000a", "kernarg_preload_hex": "0000"}},
+        {"symbol": "binarySearch_mulkeysConcurrent.kd", "file_offset_hex": "1480", "sha256": "e92346c196e4a18acdd6a8261488c962033a07b0aaf51826b6a85a5d9852b9ca", "hex": "0000000000000000200100000000000080120000000000000000000000000000000000000000000000000000020000008100af00880000000a00000000000000", "fields": {"group_segment_fixed_size": 0, "private_segment_fixed_size": 0, "kernarg_segment_size": 288, "kernel_code_entry_byte_offset_hex": "1280", "compute_pgm_rsrc3_hex": "2", "compute_pgm_rsrc1_hex": "af0081", "compute_pgm_rsrc2_hex": "88", "kernel_code_properties_hex": "000a", "kernarg_preload_hex": "0000"}}
+      ],
+      "symbols": [
+        {"name": "binarySearch", "type": "STT_FUNC", "binding": "GLOBAL", "visibility": "PROTECTED", "section": ".text", "value_hex": "2500", "size": 164},
+        {"name": "binarySearch.kd", "type": "STT_OBJECT", "binding": "GLOBAL", "visibility": "PROTECTED", "section": ".rodata", "value_hex": "1400", "size": 64},
+        {"name": "binarySearch_mulkeys", "type": "STT_FUNC", "binding": "GLOBAL", "visibility": "PROTECTED", "section": ".text", "value_hex": "2600", "size": 212},
+        {"name": "binarySearch_mulkeys.kd", "type": "STT_OBJECT", "binding": "GLOBAL", "visibility": "PROTECTED", "section": ".rodata", "value_hex": "1440", "size": 64},
+        {"name": "binarySearch_mulkeysConcurrent", "type": "STT_FUNC", "binding": "GLOBAL", "visibility": "PROTECTED", "section": ".text", "value_hex": "2700", "size": 1032},
+        {"name": "binarySearch_mulkeysConcurrent.kd", "type": "STT_OBJECT", "binding": "GLOBAL", "visibility": "PROTECTED", "section": ".rodata", "value_hex": "1480", "size": 64}
+      ],
+      "relocations": {"count": 0, "sections": []},
+      "isa_audit": {
+        "observation_tool": "/usr/lib/llvm-21/bin/llvm-objdump -d --mcpu=gfx950",
+        "toolchain_pinned": false,
+        "observed_mnemonic_count": 76,
+        "unsupported_mnemonics": ["v_fmamk_f32"],
+        "unsupported_occurrences": 2,
+        "gem5_decoder_status": "v_fmamk_f32 is absent from the locked baseline decoder source; gfx950-specific decoder feature equivalence is also not proven.",
+        "status": "blocked"
+      }
+    }
+  ],
+  "isa_audit": {
+    "method": "Disassemble each tracked file with the available LLVM 21 objdump configured for gfx950, normalize instruction suffixes, and compare names with the locked gem5 decoder source. This is an observation only because the executable toolchain is not in SOURCE_LOCK.",
+    "pinned_toolchain": false,
+    "gem5_gfx950_feature_proof": false,
+    "gem5_evidence": {"enum_has_gfx950": true, "decoder_set_gfx_version_has_gfx950_case": false, "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe"},
+    "acceptance": "A runnable fixture requires every emitted mnemonic to decode under a proven gfx950 configuration and a retained execution/differential result. Presence of a spelling in a source table is not architectural equivalence.",
+    "current_status": "blocked"
+  },
+  "acceptance": {
+    "required_before_loader_claim": ["verify source lock and all Git blob/tree hashes", "parse ELF V4-V6 headers and reject unsupported ABI/machine/flags", "decode and validate MsgPack note against LLVM verifier rules", "map PT_LOAD and zero-fill NOBITS safely", "resolve .kd descriptor and .text entry symbols exactly", "apply static and dynamic Elf64_Rela relocations", "construct explicit plus hidden kernarg bytes with alignment and reserved holes", "validate LDS/scratch/dynamic-stack resource coupling", "prove gfx950 decoder feature selection and execute a deterministic fixture"],
+    "fixture_facts": "The two tracked fixtures are source evidence and parser fixtures; their current ISA audit is blocked and does not constitute gem5 execution support.",
+    "no_fallback": "No CPU arithmetic, host-pointer alias, production ROCr/loader substitution, or guessed metadata is an acceptance path."
+  },
+  "blockers": [
+    {"id": "COBJ-B001", "severity": "blocking", "statement": "No pinned LLVM/Clang/device-libs executable build is present; fixture .comment names AMD clang/LLD 22 roc-7.2.3 commit f58b06dce1f9c15707c5f808fd002e18c2accf7e, which is not the locked llvm-project commit."},
+    {"id": "COBJ-B002", "severity": "blocking", "statement": "Locked gem5 lists gfx950 in GPU.py but Decoder::setGfxVersion has no gfx950-specific case; instruction-table spelling matches alone cannot establish gfx950 semantics."},
+    {"id": "COBJ-B003", "severity": "blocking", "statement": "binary_search_kernels.hsaco contains v_fmamk_f32 twice, absent from the locked gem5 decoder source."},
+    {"id": "COBJ-B004", "severity": "blocking", "statement": "No deterministic reduction/vecadd HSACO execution fixture is source-locked for this lane; do not infer reduction correctness from the existing CP-0008 bounded code image."},
+    {"id": "COBJ-B005", "severity": "blocking", "statement": "The locked amd/device-libs checkout contains source/templates only; no built bitcode set is pinned. ABI and ISA version constants are generated from @ABI_VERSION@ and @ISA_VERSION@ templates and cannot be claimed reproducible until a toolchain/device-libs build is frozen."}
+  ],
+  "forbidden_scope": ["generic HSACO upload message", "arbitrary ELF/MsgPack supplied by a client", "host pointer or raw GPU VA in this authority record", "production /dev/kfd or /dev/dri probing", "CPU fallback or metadata synthesis", "claim of executable gfx950 gem5 support", "performance or timing claim"]
+}

@@ -1,13 +1,13 @@
 {
-  "schema": "amdgpu-sim.current.v1",
+  "checkpoint_id": "CP-0011",
+  "checkpoint_sha256": "2a90593952d60712c437266820f4b15b306e72236456792092e1b6a98a12fc9b",
   "goal_id": "GSIM-001",
+  "next_action_id": "P3-CODEOBJ-02",
+  "next_action_summary": "Build and freeze the pinned gfx950 toolchain/device-libs output and prove gem5 decoder execution equivalence.",
+  "phase_id": "P3",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,
-  "checkpoint_id": "CP-0010",
-  "checkpoint_sha256": "808609cc81b2d9906b6624d1fe221d02f46074c6f96088bc43c214f33904e52a",
-  "phase_id": "P3",
-  "state": "ready",
-  "next_action_id": "P3-CODEOBJ-01",
-  "next_action_summary": "Freeze pinned gfx950 code-object and kernarg ABI fixtures.",
-  "resume_command": "scripts/resume.sh --verify"
+  "resume_command": "scripts/resume.sh --verify",
+  "schema": "amdgpu-sim.current.v1",
+  "state": "ready"
 }

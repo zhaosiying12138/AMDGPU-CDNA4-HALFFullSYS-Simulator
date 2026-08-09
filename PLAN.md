@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-09`
 
-**State at this commit:** `P2-KMT-ABI-02 accepted; next-P3-CODEOBJ-01`
+**State at this commit:** `P3-CODEOBJ-01 accepted; next-P3-CODEOBJ-02`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -316,11 +316,17 @@ back to host pointers or inherit upstream v1.0 fake-success behavior.
 
 ### P3 — code-object and kernel ABI gate
 
-Use the pinned ROCm LLVM/Clang/device-libs to produce gfx950 HSACO. Reuse ROCr
-ELF V4–V6/MsgPack metadata parsing, relocations, hidden arguments, kernarg
-alignment, LDS/scratch descriptors, and symbol lookup. Audit emitted ISA against
-gem5's supported opcode/features. Gate: deterministic launch metadata and
-vector/reduction fixtures match a reference.
+The P3 gate is split so source evidence cannot be mistaken for executable
+support. `CP-0011` freezes two tracked gfx950 HSACO fixtures and a runtime-side
+ELF V4–V6/MsgPack parser that validates PT_LOAD segments, relocations,
+descriptor symbols, hidden arguments, kernarg alignment, and LDS/scratch
+metadata. Gem5 records the same fixture provenance without embedding code bytes.
+The accepted parser/fixture boundary still has explicit blockers: no pinned
+LLVM/device-libs executable build, no gfx950-specific decoder feature proof,
+`v_fmamk_f32` is absent from the locked decoder, and no reduction/vecadd HSACO
+execution fixture is source-locked. `P3-CODEOBJ-02` must close those blockers
+with a reproducible toolchain/device-libs build, decoder differential proof,
+and a deterministic execution fixture before any HIP/OpenCL or Triton claim.
 
 ### P4 — HIP and OpenCL host APIs
 
@@ -445,11 +451,10 @@ compatibility with physical-card management operations.
 Checkpoint IDs are allocated only when an atomic transaction begins, so this
 table is a planning forecast rather than a fixed total. A difficult phase may
 split into additional checkpoints and no later row may skip its prerequisite.
-If every remaining row closes in exactly one distinct transaction (checkpoint
-IDs are not merged across rows), the nine accepted checkpoints plus these
-fourteen forecast gates imply a minimum of twenty-three checkpoints overall;
-this is a conditional lower bound, not a promise to compress later work into
-those IDs. A difficult row may split into additional checkpoints.
+Each remaining row is a distinct forecast gate and must receive its own
+transaction/checkpoint ID; IDs are never merged across rows. The table is a
+conditional sequence rather than a fixed total: a difficult row may split into
+additional checkpoints, and a later row may not skip its prerequisite.
 
 | Forecast gate | Earliest phase | Result |
 | --- | --- | --- |
@@ -457,6 +462,7 @@ those IDs. A difficult row may split into additional checkpoints.
 | P2-KMT-ABI-01 | P2 | Source-exact thunk/libhsakmt ABI inventory and provider skeleton |
 | P2-KMT-ABI-02 | P2 | Typed libhsakmt shim and versioned daemon KFD/DRM operation envelope |
 | P3-CODEOBJ-01 | P3 | Pinned gfx950 code-object and kernarg ABI fixtures |
+| P3-CODEOBJ-02 | P3 | Pinned toolchain/device-libs build and gfx950 decoder/execution proof |
 | P4-HIP-01 | P4 | Minimal transparent HIP/OpenCL launch surface |
 | P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
 | P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
@@ -634,11 +640,15 @@ statuses. The retained live smoke proves the runtime-to-gem5 envelope and
 cleanup path only; it does not claim a complete 124-PFN ROCr provider, KFD
 attach, topology discovery, HIP, OpenCL, Triton, PyTorch, or vLLM execution.
 
-The next unique action is `P3-CODEOBJ-01`: create the next transaction and
-freeze a pinned gfx950 code-object and kernarg ABI fixture. That gate must
-bind ELF/MsgPack metadata, relocations, hidden arguments, alignment, LDS and
-scratch descriptors to gem5-supported ISA before any HIP/OpenCL or Triton
-claim is made.
+`CP-0011` is accepted at the source-locked code-object fixture boundary. It
+binds two tracked gfx950 ELF V6 images, their MsgPack metadata, PT_LOAD and
+relocation rules, exact protected code/descriptor symbols, hidden kernarg
+holes, descriptor resources, and parser/gem5 provenance tests. It deliberately
+does not claim code-object execution: the authority records the missing pinned
+device-libs build, gfx950 decoder proof, unsupported `v_fmamk_f32`, and missing
+reduction fixture as blockers. The next unique action is `P3-CODEOBJ-02`:
+freeze the compiler/device-libs output and prove decoder/execution equivalence
+before adding HIP/OpenCL or Triton launch claims.
 `SOURCE_LOCK.json` remains byte-immutable, and existing `PROJECT_LANES`
 declarations remain historically anchored and append-only.
 

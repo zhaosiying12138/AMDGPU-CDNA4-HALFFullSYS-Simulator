@@ -1,0 +1,577 @@
+{
+  "checkpoint_id": "CP-0011",
+  "claim": "The CP-0011 umbrella binds the frozen code-object authority, runtime parser acceptance, gem5 provenance fixture, corrected clean child target identities, and strict object integrity. It proves source-locked fixture parsing and launch metadata only; the authority ISA/toolchain blockers remain explicit.",
+  "command_argv": [
+    [
+      "git",
+      "-C",
+      "projects/gem5",
+      "rev-parse",
+      "HEAD",
+      "HEAD^{tree}"
+    ],
+    [
+      "git",
+      "-C",
+      "projects/self-amdgpu-runtime",
+      "rev-parse",
+      "HEAD",
+      "HEAD^{tree}"
+    ],
+    [
+      "git",
+      "-C",
+      "projects/gem5",
+      "status",
+      "--porcelain=v1",
+      "--untracked-files=all"
+    ],
+    [
+      "git",
+      "-C",
+      "projects/self-amdgpu-runtime",
+      "status",
+      "--porcelain=v1",
+      "--untracked-files=all"
+    ],
+    [
+      "git",
+      "-C",
+      "projects/gem5",
+      "fsck",
+      "--strict",
+      "--no-dangling"
+    ],
+    [
+      "git",
+      "-C",
+      "projects/self-amdgpu-runtime",
+      "fsck",
+      "--strict",
+      "--no-dangling"
+    ],
+    [
+      "git",
+      "diff",
+      "--check",
+      "--",
+      "GOAL.md",
+      "PLAN.md",
+      "README.md",
+      "docs/host-transport-v1-codeobj.md",
+      "protocol/host-transport-v1-codeobj.json",
+      "tests/test_host_transport_codeobj_spec.py",
+      "state/bitlessons/BL-0053.json",
+      "state/bitlessons/BL-0054.json",
+      "state/bitlessons/BL-0055.json",
+      "state/bitlessons/BL-0056.json",
+      "state/bitlessons/BL-0057.json",
+      "state/evidence/EV-0027.json",
+      "state/evidence/EV-0028.json"
+    ],
+    [
+      "sha256sum",
+      "GOAL.md",
+      "PLAN.md",
+      "README.md",
+      "docs/host-transport-v1-codeobj.md",
+      "protocol/host-transport-v1-codeobj.json",
+      "tests/test_host_transport_codeobj_spec.py",
+      "state/bitlessons/BL-0053.json",
+      "state/bitlessons/BL-0054.json",
+      "state/bitlessons/BL-0055.json",
+      "state/bitlessons/BL-0056.json",
+      "state/bitlessons/BL-0057.json",
+      "state/evidence/EV-0027.json",
+      "state/evidence/EV-0028.json"
+    ],
+    [
+      "python3",
+      "scripts/transaction.py",
+      "status"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "-q",
+      "tests/test_host_transport_codeobj_spec.py"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "git",
+        "-C",
+        "projects/gem5",
+        "rev-parse",
+        "HEAD",
+        "HEAD^{tree}"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:35:04+00:00",
+      "exit_code": 0,
+      "id": "umbrella-gem5-identity",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/umbrella-gem5-identity.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c10d38f8140f725592f23fff0e1be9eac61e74d2edd1075f555d4f9f14ba97bd",
+        "size": 650,
+        "tracked": false
+      },
+      "result": "Gem5 child target identity recorded after final CP-0011 child commit.",
+      "started_at": "2026-08-09T00:35:04+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/umbrella-gem5-identity.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/umbrella-gem5-identity.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1f9a3f95207f95c90dcb22438c7c0b08da086c9cdfcf09bf427c6d40fa6e4f7a",
+        "size": 82,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "projects/self-amdgpu-runtime",
+        "rev-parse",
+        "HEAD",
+        "HEAD^{tree}"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:35:04+00:00",
+      "exit_code": 0,
+      "id": "umbrella-runtime-identity",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/umbrella-runtime-identity.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3adf39580e76699789ad18e862ec933b6aac0697bfc6559d1d1dac1aed505eae",
+        "size": 671,
+        "tracked": false
+      },
+      "result": "Runtime child target identity recorded after final CP-0011 child commit.",
+      "started_at": "2026-08-09T00:35:04+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/umbrella-runtime-identity.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/umbrella-runtime-identity.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "792fe1f6dd6f0dc2425054d984824030cf5c03bb14d13a1d085a72675a49d742",
+        "size": 82,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "projects/gem5",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:35:04+00:00",
+      "exit_code": 0,
+      "id": "umbrella-gem5-status",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/umbrella-gem5-status.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "41b1989937edff0ed6e0189a37310ef7ed1eced516a80c8169862a1c4aec3207",
+        "size": 662,
+        "tracked": false
+      },
+      "result": "Gem5 child worktree is clean.",
+      "started_at": "2026-08-09T00:35:04+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/umbrella-gem5-status.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/umbrella-gem5-status.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "projects/self-amdgpu-runtime",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:35:04+00:00",
+      "exit_code": 0,
+      "id": "umbrella-runtime-status",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/umbrella-runtime-status.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0f5b41e2d906fa8bcb1200f7bb85d4ee915be27a43c2d6f9e29c44982b897327",
+        "size": 683,
+        "tracked": false
+      },
+      "result": "Runtime child worktree is clean.",
+      "started_at": "2026-08-09T00:35:04+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/umbrella-runtime-status.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/umbrella-runtime-status.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "projects/gem5",
+        "fsck",
+        "--strict",
+        "--no-dangling"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:35:06+00:00",
+      "exit_code": 0,
+      "id": "umbrella-gem5-fsck",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/umbrella-gem5-fsck.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9e30b75a8758f1925737902f43fb2bf0714cf8066504ded01b52bb127b750682",
+        "size": 642,
+        "tracked": false
+      },
+      "result": "Gem5 strict fsck passed.",
+      "started_at": "2026-08-09T00:35:04+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/umbrella-gem5-fsck.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/umbrella-gem5-fsck.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "projects/self-amdgpu-runtime",
+        "fsck",
+        "--strict",
+        "--no-dangling"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:35:04+00:00",
+      "exit_code": 0,
+      "id": "umbrella-runtime-fsck",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/umbrella-runtime-fsck.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "877b1e74c83bc0b0c948c7084e5bf383fdd800e76336da7c0095a344540333cf",
+        "size": 663,
+        "tracked": false
+      },
+      "result": "Runtime strict fsck passed.",
+      "started_at": "2026-08-09T00:35:04+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/umbrella-runtime-fsck.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/umbrella-runtime-fsck.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check",
+        "--",
+        "GOAL.md",
+        "PLAN.md",
+        "README.md",
+        "docs/host-transport-v1-codeobj.md",
+        "protocol/host-transport-v1-codeobj.json",
+        "tests/test_host_transport_codeobj_spec.py",
+        "state/bitlessons/BL-0053.json",
+        "state/bitlessons/BL-0054.json",
+        "state/bitlessons/BL-0055.json",
+        "state/bitlessons/BL-0056.json",
+        "state/bitlessons/BL-0057.json",
+        "state/evidence/EV-0027.json",
+        "state/evidence/EV-0028.json"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:35:40+00:00",
+      "exit_code": 0,
+      "id": "umbrella-root-diff",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/umbrella-root-diff.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "22992f1e7ea2334b8dd08827ef86dfd5bc4ae801e020331e88bc2c947c3cd3b5",
+        "size": 1038,
+        "tracked": false
+      },
+      "result": "Root CP-0011 files have no whitespace errors.",
+      "started_at": "2026-08-09T00:35:40+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/umbrella-root-diff.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/umbrella-root-diff.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "GOAL.md",
+        "PLAN.md",
+        "README.md",
+        "docs/host-transport-v1-codeobj.md",
+        "protocol/host-transport-v1-codeobj.json",
+        "tests/test_host_transport_codeobj_spec.py",
+        "state/bitlessons/BL-0053.json",
+        "state/bitlessons/BL-0054.json",
+        "state/bitlessons/BL-0055.json",
+        "state/bitlessons/BL-0056.json",
+        "state/bitlessons/BL-0057.json",
+        "state/evidence/EV-0027.json",
+        "state/evidence/EV-0028.json"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:35:40+00:00",
+      "exit_code": 0,
+      "id": "umbrella-root-sha",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/umbrella-root-sha.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "522e2e67be20f1df7c8a73cbc32118c746421ae09fe73aa882e7fbd255ed303a",
+        "size": 1008,
+        "tracked": false
+      },
+      "result": "Root authority, lesson, and child-manifest hashes were captured.",
+      "started_at": "2026-08-09T00:35:40+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/umbrella-root-sha.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/umbrella-root-sha.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9ea5b5fcec8d83c74dc4d3577c4539e9203fe8319e15d33f0bc14c86f07871a2",
+        "size": 1206,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "scripts/transaction.py",
+        "status"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:35:40+00:00",
+      "exit_code": 0,
+      "id": "umbrella-status",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/umbrella-status.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "da52c651a80870bcd359b624483f9d0542f4608cb88734e45f1efde541949099",
+        "size": 605,
+        "tracked": false
+      },
+      "result": "CP-0011 transaction remains in prepare state while the corrected child identities are being prepared.",
+      "started_at": "2026-08-09T00:35:40+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/umbrella-status.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/umbrella-status.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "588fa50890cd1a668a5e520ab5a0491bc7489dcff642dd338f6867e6cfa13881",
+        "size": 77,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "-q",
+        "tests/test_host_transport_codeobj_spec.py"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:29:11+00:00",
+      "exit_code": 0,
+      "id": "umbrella-codeobj-test",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/umbrella-codeobj-test.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "342ec5208eceaa40a79ba075c2b1ef4b92d42c72d7c948b20b9e5fb77eed0814",
+        "size": 658,
+        "tracked": false
+      },
+      "result": "Root code-object authority test passed 13/13.",
+      "started_at": "2026-08-09T00:29:11+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/umbrella-codeobj-test.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d85bafaf1900a618431f17c03bfd058ad2f858fa2aadab197021f4de801d00ba",
+        "size": 98,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/umbrella-codeobj-test.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T00:35:40+00:00",
+  "environment_fingerprint": {
+    "authority_docs_sha256": "557555e86f6591fdb29d803e958a26bb6c43afc9ed54b471dfdfe5bfdc326353",
+    "authority_json_sha256": "b87b01626b8574fa7c481203b4b6b69055b7734103e4e4e92d7318cda4eadf16",
+    "authority_test_sha256": "6a3e8582d38e3f6115d2dd2aab252a601936db5846a0347f872f83ae8c196d08",
+    "bitlesson_sha256": {
+      "BL-0053": "dd37319a3a4900485308c25f62199e7d5dff085b48e83ff8bd3fc1900bb97986",
+      "BL-0054": "981fa7ebb7f752745bef4ca2afc3b52348a33893a7f4b979b6477e915d828c37",
+      "BL-0055": "dc24d75801f966b8793e8ef3bd8ef7640380e58b7f0c25d87fb4dd30ce924a3c",
+      "BL-0056": "77c118ff9385cd2695beb1c7e4e62868d428425550c937b69f1fa5c1d359fc2f",
+      "BL-0057": "8681e31734355fea3f2402f1493ec0a7d3b0c87d2ac3abebe4dfc3a47fef8cc6"
+    },
+    "checkpoint": "CP-0011",
+    "ev27_sha256": "18ab62b0f6955550fd2ba2b2c889dbec4b97796a479751370f4dd4f600cb9055",
+    "ev28_sha256": "5e9444261bfb7c72eda08902863f08843972414d87528e6d0f2432a051669a18",
+    "gem5_child_target_head": "47952b0b796900e46460901fa125bbf0671382cf",
+    "gem5_child_target_tree": "1767d94db3dd3ffb1655ea1126b756e219936eb6",
+    "gem5_clean": true,
+    "gem5_fsck": "strict-no-dangling passed",
+    "goal_sha256": "4e7b407dceef8c9fc139bb00fd4591f28813c91ca2e526c0c441f8522af1e8a3",
+    "isa_status": "blocked-until-gfx950-decoder-proof",
+    "plan_sha256": "48c1bf71f3b364196505eea80a8a2d9d84d011216e84f7db5b1033e84bfb3987",
+    "previous_root": "0c41214beba632a523a88ffda2dac95d414a45fe",
+    "readme_sha256": "228cce689d7980578a3e3262ada2f69e6e8de75c36249a537088efa15bab1c42",
+    "runtime_child_target_head": "709d33e696a6c086f58bbc387837cdc43a535d96",
+    "runtime_child_target_tree": "6a780d82458d836739c9ac4a7587dfb8c7b70fc2",
+    "runtime_clean": true,
+    "runtime_fsck": "strict-no-dangling passed",
+    "transaction_phase": "prepare"
+  },
+  "exit_code": 0,
+  "external_artifacts": [],
+  "id": "EV-0029",
+  "includes": {
+    "EV-0027": "18ab62b0f6955550fd2ba2b2c889dbec4b97796a479751370f4dd4f600cb9055",
+    "EV-0028": "5e9444261bfb7c72eda08902863f08843972414d87528e6d0f2432a051669a18"
+  },
+  "limitations": [
+    "The umbrella was captured before CP-0011 root coordinator finalization; transaction status is historical precommit evidence.",
+    "CP-0011 does not claim generic HSACO loading, gfx950 execution, HIP, OpenCL, Triton, PyTorch, vLLM, or model support.",
+    "The authority blockers COBJ-B001 through COBJ-B005 remain prerequisites for P3-CODEOBJ-02.",
+    "Build products, fixture copies, and command streams are ignored external acceptance artifacts."
+  ],
+  "redactions": [],
+  "result": "EV-0027 and EV-0028 are hash-bound; both child repositories are clean and strict fsck passes; root authority and metadata checks pass.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T00:29:11+00:00",
+  "type": "code-object-checkpoint-umbrella"
+}

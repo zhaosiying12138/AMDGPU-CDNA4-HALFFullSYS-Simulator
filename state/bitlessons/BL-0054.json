@@ -1,0 +1,22 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/code_object.h",
+    "state/evidence/EV-0028.json"
+  ],
+  "checkpoint_id": "CP-0011",
+  "conclusion": "Kernarg offsets, alignment, hidden arguments, and reserved holes are part of the ABI and must be materialized exactly.",
+  "confidence": "high",
+  "decision": "Pack by recorded byte offsets and preserve all unassigned bytes; never compact visible arguments.",
+  "evidence_ids": [
+    "EV-0028"
+  ],
+  "id": "BL-0054",
+  "invalidated_assumptions": [
+    "Only visible pointer arguments need to be copied into a launch buffer."
+  ],
+  "observation": "The tracked kernels use 280/288-byte kernarg segments with hidden u32/u16/u64 fields and non-contiguous offsets.",
+  "question_or_symptom": "A compact host argument list would silently move hidden fields and change the kernel ABI.",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

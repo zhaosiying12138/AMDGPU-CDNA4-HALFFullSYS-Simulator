@@ -1,0 +1,22 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_code_object_fixture.hh",
+    "state/evidence/EV-0027.json"
+  ],
+  "checkpoint_id": "CP-0011",
+  "conclusion": "Unsupported code-object instructions or decoder features must fail the execution gate, never fall back to host arithmetic.",
+  "confidence": "high",
+  "decision": "Require a later gfx950 decoder proof and differential execution result before enabling a fixture launch.",
+  "evidence_ids": [
+    "EV-0027"
+  ],
+  "id": "BL-0057",
+  "invalidated_assumptions": [
+    "A successful metadata path can be accepted with a silent CPU implementation for missing GPU instructions."
+  ],
+  "observation": "The gem5 fixture manifest hard-codes Gem5IsaSupported=false and the authority lists v_fmamk_f32 as absent from the locked decoder.",
+  "question_or_symptom": "Allowing a CPU fallback would make parser-only evidence look like GPU execution.",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

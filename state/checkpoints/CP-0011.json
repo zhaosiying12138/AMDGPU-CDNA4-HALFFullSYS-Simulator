@@ -1,0 +1,197 @@
+{
+  "baseline_commit_marker": "N/A",
+  "bitlesson_ids": [
+    "BL-0053",
+    "BL-0054",
+    "BL-0055",
+    "BL-0056",
+    "BL-0057"
+  ],
+  "bitlesson_sha256": {
+    "BL-0053": "dd37319a3a4900485308c25f62199e7d5dff085b48e83ff8bd3fc1900bb97986",
+    "BL-0054": "981fa7ebb7f752745bef4ca2afc3b52348a33893a7f4b979b6477e915d828c37",
+    "BL-0055": "dc24d75801f966b8793e8ef3bd8ef7640380e58b7f0c25d87fb4dd30ce924a3c",
+    "BL-0056": "77c118ff9385cd2695beb1c7e4e62868d428425550c937b69f1fa5c1d359fc2f",
+    "BL-0057": "8681e31734355fea3f2402f1493ec0a7d3b0c87d2ac3abebe4dfc3a47fef8cc6"
+  },
+  "blockers": [],
+  "change_kind": "code",
+  "changes": [
+    "Added the frozen CP-0011 source authority for ELF V4-V6, AMDHSA MsgPack metadata, relocations, descriptors, symbols, hidden kernargs, device-libs templates, and two tracked gfx950 HSACO fixtures.",
+    "Added a bounded self-amdgpu-runtime ELF/MsgPack code-object validator and exact-offset kernarg packer with deterministic malformed-input handling.",
+    "Added a gem5 provenance manifest and regression test for the same fixtures without embedding HSACO bytes or enabling unsupported gfx950 execution.",
+    "Retained GCC and Clang ASan/UBSan runtime matrices, targeted gem5 test/build, authority checks, fixture hashes, and strict child object audits."
+  ],
+  "created_at": "2026-08-09T08:30:00+08:00",
+  "evidence_ids": [
+    "EV-0027",
+    "EV-0028",
+    "EV-0029"
+  ],
+  "evidence_manifest_id": "EV-0029",
+  "evidence_manifest_sha256": "ca636edde79fd59a2e06d15f01dfc1eaa8c870bda179bf8a5f5b770ade0a6c87",
+  "evidence_sha256": {
+    "EV-0027": "18ab62b0f6955550fd2ba2b2c889dbec4b97796a479751370f4dd4f600cb9055",
+    "EV-0028": "5e9444261bfb7c72eda08902863f08843972414d87528e6d0f2432a051669a18",
+    "EV-0029": "ca636edde79fd59a2e06d15f01dfc1eaa8c870bda179bf8a5f5b770ade0a6c87"
+  },
+  "goal_id": "GSIM-001",
+  "goal_sha256": "4e7b407dceef8c9fc139bb00fd4591f28813c91ca2e526c0c441f8522af1e8a3",
+  "id": "CP-0011",
+  "limitations": [
+    "CP-0011 is a parser/provenance boundary. It does not claim a generic HSACO loader, gfx950 execution, HIP, OpenCL, Triton, PyTorch, vLLM, or model support.",
+    "Authority blockers COBJ-B001 through COBJ-B005 remain prerequisites for P3-CODEOBJ-02: pinned compiler/device-libs executable, gfx950 decoder proof, unsupported opcode resolution, a reduction/vecadd execution fixture, and generated device-library identity.",
+    "The gem5 manifest intentionally does not embed code bytes or turn the existing CP-0008 handwritten code image into HSACO evidence.",
+    "Build products, copied fixtures, and command streams are ignored external acceptance artifacts."
+  ],
+  "next_action": {
+    "argv": [
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0012",
+      "--intent",
+      "Build and freeze the pinned gfx950 toolchain/device-libs output and prove gem5 decoder execution equivalence",
+      "--participant",
+      "gem5=projects/gem5",
+      "--participant",
+      "self-amdgpu-runtime=projects/self-amdgpu-runtime"
+    ],
+    "cwd": ".",
+    "expected": "A reproducible pinned LLVM/device-libs build, gfx950 decoder feature proof, unsupported-opcode resolution, and deterministic differential execution fixture are retained before any HIP/OpenCL or Triton launch claim.",
+    "id": "P3-CODEOBJ-02",
+    "prerequisites": [
+      "CP-0011 is accepted and scripts/resume.sh --verify passes offline.",
+      "No transaction journal is active.",
+      "SOURCE_LOCK.json and PROJECT_LANES.json remain byte-identical to their accepted anchors.",
+      "The CP-0011 parser, fixture hashes, hidden-kernarg tests, and explicit ISA blockers remain passing."
+    ],
+    "rollback_boundary": "Keep CP-0011 visible and preserve the parser, fixture provenance, source authority, child baselines, and no-fallback boundary if toolchain or decoder proof fails."
+  },
+  "parent_checkpoint": "CP-0010",
+  "phase_id": "P3",
+  "plan_sha256": "48c1bf71f3b364196505eea80a8a2d9d84d011216e84f7db5b1033e84bfb3987",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "administrative_git_dir": "modules/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "clean": true,
+      "head": "47952b0b796900e46460901fa125bbf0671382cf",
+      "id": "gem5",
+      "path": "projects/gem5",
+      "tree": "1767d94db3dd3ffb1655ea1126b756e219936eb6"
+    },
+    {
+      "administrative_git_dir": "modules/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "clean": true,
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58"
+    },
+    {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "clean": true,
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489"
+    },
+    {
+      "administrative_git_dir": "modules/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "clean": true,
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "id": "triton",
+      "path": "projects/triton",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1"
+    },
+    {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "clean": true,
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315"
+    },
+    {
+      "administrative_git_dir": "modules/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "clean": true,
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "id": "vllm",
+      "path": "projects/vllm",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb"
+    },
+    {
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "clean": true,
+      "head": "709d33e696a6c086f58bbc387837cdc43a535d96",
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "tree": "6a780d82458d836739c9ac4a7587dfb8c7b70fc2"
+    }
+  ],
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "root_parent_commit": "0c41214beba632a523a88ffda2dac95d414a45fe",
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "sequence": 11,
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "status": "accepted",
+  "validation": [
+    {
+      "command": "code-object authority and JSON tests",
+      "cwd": ".",
+      "evidence_id": "EV-0027",
+      "exit_code": 0,
+      "result": "13/13 authority tests, JSON parse, and root diff checks passed."
+    },
+    {
+      "command": "runtime code-object GCC and Clang ASan/UBSan matrices",
+      "cwd": "projects/self-amdgpu-runtime",
+      "evidence_id": "EV-0028",
+      "exit_code": 0,
+      "result": "CTest passed 12/12 in cp11-codeobj-dev and cp11-codeobj-asan; real locked fixtures parsed and kernarg packing checked."
+    },
+    {
+      "command": "gem5 provenance fixture build and regression",
+      "cwd": "projects/gem5",
+      "evidence_id": "EV-0027",
+      "exit_code": 0,
+      "result": "Targeted host_gpu_dispatch_state.test.opt rebuilt and passed 12/12."
+    },
+    {
+      "command": "child identity, fsck, transaction, and root metadata checks",
+      "cwd": ".",
+      "evidence_id": "EV-0029",
+      "exit_code": 0,
+      "result": "Both child targets are clean, strict fsck passed, and EV27/EV28 identities are bound before root finalization."
+    }
+  ]
+}

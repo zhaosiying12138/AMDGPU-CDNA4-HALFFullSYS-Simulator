@@ -78,7 +78,17 @@ canonical gfx950 fixture checks, and daemon-owned simulated resource state.
 The retained gem5 smoke completes the runtime-to-daemon lifecycle with
 `failures=0`, but this remains a translated envelope rather than a complete
 124-PFN ROCr/libhsakmt provider, KFD attach, HIP, OpenCL, Triton, PyTorch, or
-vLLM implementation. The next action is `P3-CODEOBJ-01`, the pinned gfx950
-code-object and kernarg ABI fixture.
+vLLM implementation. The pinned fixture work is recorded by `CP-0011` below;
+the next action is the decoder/toolchain proof that follows it.
+
+`CP-0011` is now accepted as the source-locked code-object fixture boundary.
+The runtime validates the two tracked gfx950 ELF V6 images, MsgPack metadata,
+PT_LOAD/relocation structure, exact descriptor and code symbols, hidden
+kernarg offsets, and 64-byte resource descriptors; gem5 binds the same
+provenance without embedding HSACO bytes. This is parser and provenance
+evidence only. The authority still blocks execution on the absent pinned
+LLVM/device-libs executable, missing gfx950 decoder feature proof, the
+`v_fmamk_f32` instruction in one fixture, and the lack of a source-locked
+reduction/vecadd execution fixture. The next action is `P3-CODEOBJ-02`.
 
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

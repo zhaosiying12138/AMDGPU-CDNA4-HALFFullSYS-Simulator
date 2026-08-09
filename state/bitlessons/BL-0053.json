@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "protocol/host-transport-v1-codeobj.json",
+    "state/evidence/EV-0027.json",
+    "state/evidence/EV-0028.json"
+  ],
+  "checkpoint_id": "CP-0011",
+  "conclusion": "A source-locked ELF/MsgPack parse is provenance and launch-metadata evidence, not proof that gem5 can execute the ISA.",
+  "confidence": "high",
+  "decision": "Keep code-object validation and gfx950 execution acceptance as separate gates.",
+  "evidence_ids": [
+    "EV-0027",
+    "EV-0028"
+  ],
+  "id": "BL-0053",
+  "invalidated_assumptions": [
+    "Matching ELF headers and metadata automatically proves decoder compatibility."
+  ],
+  "observation": "Both locked fixtures validate as ELF V6/gfx950, while the authority records missing gfx950 decoder proof and an unsupported binary-search opcode.",
+  "question_or_symptom": "A parser test passed even though the current gem5 decoder cannot establish gfx950 feature equivalence.",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

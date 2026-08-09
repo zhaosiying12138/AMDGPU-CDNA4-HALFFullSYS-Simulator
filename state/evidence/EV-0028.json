@@ -1,0 +1,358 @@
+{
+  "checkpoint_id": "CP-0011",
+  "claim": "The CP-0011 self-amdgpu-runtime child validates the two locked gfx950 HSACO images, preserves hidden kernarg holes and descriptor relationships, and deterministically reports the current gem5 ISA boundary. GCC and Clang ASan/UBSan matrices pass 12/12.",
+  "command_argv": [
+    [
+      "cmake",
+      "--build",
+      "build/cp11-codeobj-dev",
+      "--parallel",
+      "2"
+    ],
+    [
+      "cmake",
+      "--build",
+      "build/cp11-codeobj-asan",
+      "--parallel",
+      "2"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "build/cp11-codeobj-dev",
+      "--output-on-failure"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "build/cp11-codeobj-asan",
+      "--output-on-failure"
+    ],
+    [
+      "sha256sum",
+      "projects/self-amdgpu-runtime/build/cp11-codeobj-dev/libself_amdgpu_runtime.a",
+      "projects/self-amdgpu-runtime/build/cp11-codeobj-dev/tests/self_amdgpu_runtime_code_object_test",
+      "projects/self-amdgpu-runtime/build/cp11-codeobj-asan/libself_amdgpu_runtime.a",
+      "projects/self-amdgpu-runtime/build/cp11-codeobj-asan/tests/self_amdgpu_runtime_code_object_test"
+    ],
+    [
+      "git",
+      "-C",
+      "projects/self-amdgpu-runtime",
+      "diff",
+      "--check"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        "build/cp11-codeobj-dev",
+        "--parallel",
+        "2"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-09T00:22:25+00:00",
+      "exit_code": 0,
+      "id": "runtime-codeobj-build-dev",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-build-dev.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4f090ef28f73be43548f814d0d6e18254fe5a23d2beb6fddd9c9fb39f550f2c3",
+        "size": 678,
+        "tracked": false
+      },
+      "result": "GCC runtime code-object parser/test build completed.",
+      "started_at": "2026-08-09T00:22:25+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-build-dev.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-build-dev.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8c35b1682f73592d30612d7b0fabdb384fcfff35cb5a076cb48b85b1368aa794",
+        "size": 22,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        "build/cp11-codeobj-asan",
+        "--parallel",
+        "2"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-09T00:22:25+00:00",
+      "exit_code": 0,
+      "id": "runtime-codeobj-build-asan",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-build-asan.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3563a62cda56559e3e7c57a448259cc5895498aa06faebbad8086ce02231b12a",
+        "size": 681,
+        "tracked": false
+      },
+      "result": "Clang ASan/UBSan runtime code-object parser/test build completed.",
+      "started_at": "2026-08-09T00:22:25+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-build-asan.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-build-asan.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8c35b1682f73592d30612d7b0fabdb384fcfff35cb5a076cb48b85b1368aa794",
+        "size": 22,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build/cp11-codeobj-dev",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-09T00:21:09+00:00",
+      "exit_code": 0,
+      "id": "runtime-codeobj-ctest-dev",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-ctest-dev.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d541244897b29037229e1334efe89b3b5103a04be398e7561f48e07c819cc90e",
+        "size": 683,
+        "tracked": false
+      },
+      "result": "GCC runtime CTest passed 12/12, including code-object validation.",
+      "started_at": "2026-08-09T00:21:06+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-ctest-dev.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-ctest-dev.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "dc7b6086fbf0b101067c36a1534c74a17d2945b635b9fee9d0f720d7f23254ed",
+        "size": 1740,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build/cp11-codeobj-asan",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-09T00:21:10+00:00",
+      "exit_code": 0,
+      "id": "runtime-codeobj-ctest-asan",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-ctest-asan.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "613355f6d47ebf37ef0025ca918082cd66e8f2fa834e62e78bfd408acd641302",
+        "size": 686,
+        "tracked": false
+      },
+      "result": "Clang ASan/UBSan runtime CTest passed 12/12, including code-object validation.",
+      "started_at": "2026-08-09T00:21:06+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-ctest-asan.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-ctest-asan.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "009f43914ea73b828a3f995dbdee138aa7293917e0d11a3075d159480e520663",
+        "size": 1742,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "projects/self-amdgpu-runtime/build/cp11-codeobj-dev/libself_amdgpu_runtime.a",
+        "projects/self-amdgpu-runtime/build/cp11-codeobj-dev/tests/self_amdgpu_runtime_code_object_test",
+        "projects/self-amdgpu-runtime/build/cp11-codeobj-asan/libself_amdgpu_runtime.a",
+        "projects/self-amdgpu-runtime/build/cp11-codeobj-asan/tests/self_amdgpu_runtime_code_object_test"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:21:06+00:00",
+      "exit_code": 0,
+      "id": "runtime-codeobj-artifacts",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-artifacts.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2fa991a54be9c8be11483500da532a4dbaddc9a134662ec3d3af922277a6f32b",
+        "size": 958,
+        "tracked": false
+      },
+      "result": "Current runtime code-object libraries/tests were hashed after the final parser fix.",
+      "started_at": "2026-08-09T00:21:06+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-artifacts.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-artifacts.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0fa7571229d518b682d81fd0efb02bc2c8cd3c35ffcf925c944f5bf74e6223d9",
+        "size": 610,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "projects/self-amdgpu-runtime",
+        "diff",
+        "--check"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:21:06+00:00",
+      "exit_code": 0,
+      "id": "runtime-codeobj-diff",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-diff.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "af9be018ac44fb937a7cc0949e7a5a9f3c51a1ac01387dafc6a94a3da27444ab",
+        "size": 639,
+        "tracked": false
+      },
+      "result": "Runtime child source diff has no whitespace errors.",
+      "started_at": "2026-08-09T00:21:06+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-diff.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/runtime-codeobj-diff.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T00:22:25+00:00",
+  "environment_fingerprint": {
+    "authority_docs_sha256": "557555e86f6591fdb29d803e958a26bb6c43afc9ed54b471dfdfe5bfdc326353",
+    "authority_schema_sha256": "b87b01626b8574fa7c481203b4b6b69055b7734103e4e4e92d7318cda4eadf16",
+    "authority_test_sha256": "6a3e8582d38e3f6115d2dd2aab252a601936db5846a0347f872f83ae8c196d08",
+    "checkpoint": "CP-0011",
+    "fixtures": {
+      "binary_search_bytes": 11296,
+      "binary_search_sha256": "cb415571319569f4cdc28872faa2155dfe12be06a8f75fe173df3486fdabc053",
+      "gpuReadWrite_bytes": 5528,
+      "gpuReadWrite_sha256": "7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56"
+    },
+    "isa_status": "blocked-until-gfx950-decoder-proof",
+    "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+    "rocm_systems_commit": "92115a2941982a384de161be3f78cf9bff547027",
+    "rocm_systems_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+    "runtime_asan_ubsan_ctest": "12/12",
+    "runtime_child_phase": "prepare",
+    "runtime_gcc_ctest": "12/12",
+    "runtime_parser": "ELF64/MsgPack/descriptor/symbol/kernarg validator",
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "transaction_phase": "children-recorded",
+    "transport_message_types": []
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0011/runtime-builds/libself_amdgpu_runtime-cp11-dev.a",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d10bff7083925488f4798c405ae9c2ef5fe477ee8b487dea038baa798bfe2cd1",
+      "size": 488864,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0011/runtime-builds/code_object_test-cp11-dev",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "2ed65d2d8c100c27f0e5f43d8d16b3e69068ac6288a1fe1663daa32b0ee86b05",
+      "size": 61080,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0011/runtime-builds/libself_amdgpu_runtime-cp11-asan.a",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5a69b27841bcf28908f71dc221e169fc5fc28a5ab459247ef942fbcd0eddeacc",
+      "size": 2543516,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0011/runtime-builds/code_object_test-cp11-asan",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a9261ada1bb44ea7d275bad4db5448a86cefdb16ca25d5a6b61d57cd4cc8bc0e",
+      "size": 1996976,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0028",
+  "includes": {},
+  "limitations": [
+    "The parser acceptance is limited to source-locked fixture validation and metadata/kernarg preparation; it does not load or execute arbitrary code objects.",
+    "Gem5 gfx950 ISA proof and generated device-library/compiler reproducibility remain blocked by the authority manifest.",
+    "Copied build products and command streams are ignored external acceptance artifacts."
+  ],
+  "redactions": [],
+  "result": "All retained CP-0011 command records exited zero; code-object ISA execution remains explicitly blocked.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T00:21:06+00:00",
+  "type": "runtime-code-object-parser-acceptance"
+}

@@ -1,0 +1,22 @@
+{
+  "applies_to": [
+    "protocol/host-transport-v1-codeobj.json",
+    "docs/host-transport-v1-codeobj.md"
+  ],
+  "checkpoint_id": "CP-0011",
+  "conclusion": "A fixture's compiler comment and source templates do not constitute a pinned compiler or device-library build.",
+  "confidence": "high",
+  "decision": "Record toolchain and generated device-library identities before claiming reproducible HSACO emission.",
+  "evidence_ids": [
+    "EV-0027"
+  ],
+  "id": "BL-0056",
+  "invalidated_assumptions": [
+    "A repository-tracked HSACO proves the locked LLVM and device-libs checkout emitted it."
+  ],
+  "observation": "The fixture .comment names an external AMD clang/LLD build, while the locked LLVM device-libs lane contains source/templates without pinned generated bitcode.",
+  "question_or_symptom": "A future compiler gate could accidentally mix an unpinned external toolchain with locked source claims.",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

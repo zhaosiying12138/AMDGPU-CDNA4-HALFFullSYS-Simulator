@@ -1,0 +1,447 @@
+{
+  "checkpoint_id": "CP-0011",
+  "claim": "The CP-0011 gem5 child binds the two locked gfx950 HSACO fixture identities and metadata summaries without embedding code bytes or claiming execution support. Authority tests, targeted gem5 compilation, and the dispatch-state regression pass; the decoder/ISA blockers remain explicit.",
+  "command_argv": [
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "-v",
+      "tests/test_host_transport_codeobj_spec.py"
+    ],
+    [
+      "python3",
+      "-m",
+      "json.tool",
+      "protocol/host-transport-v1-codeobj.json"
+    ],
+    [
+      "git",
+      "diff",
+      "--check",
+      "--",
+      "docs/host-transport-v1-codeobj.md",
+      "protocol/host-transport-v1-codeobj.json",
+      "tests/test_host_transport_codeobj_spec.py"
+    ],
+    [
+      "sha256sum",
+      "projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco",
+      "projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/binary_search_kernels.hsaco"
+    ],
+    [
+      "git",
+      "-C",
+      "projects/rocm-systems",
+      "rev-parse",
+      "HEAD",
+      "HEAD^{tree}"
+    ],
+    [
+      "env",
+      "PATH=/tmp/cp11-m4/root/usr/bin:/home/zhaosiying/miniforge3/envs/triton-dev/bin:/usr/bin:/bin",
+      "PYTHONPATH=/tmp/cp11-scons",
+      "python3",
+      "-c",
+      "from SCons.Script import main; main()",
+      "-j2",
+      "build/VEGA_X86/dev/amdgpu/host_gpu_dispatch_state.test.opt"
+    ],
+    [
+      "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_dispatch_state.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "git",
+      "-C",
+      "projects/gem5",
+      "diff",
+      "--check"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "-v",
+        "tests/test_host_transport_codeobj_spec.py"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:21:06+00:00",
+      "exit_code": 0,
+      "id": "root-codeobj-spec",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/root-codeobj-spec.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8bcd58f212861d3ae98f072a0991415342a4a3e31385bbcf323f517e1e066d32",
+        "size": 652,
+        "tracked": false
+      },
+      "result": "Frozen source/fixture authority test passed 13/13.",
+      "started_at": "2026-08-09T00:21:06+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/root-codeobj-spec.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "aa900a9cfe1a7298370bb0e854825083f6bef8e5a28242dbe086709ca4782271",
+        "size": 2202,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/root-codeobj-spec.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "json.tool",
+        "protocol/host-transport-v1-codeobj.json"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:21:06+00:00",
+      "exit_code": 0,
+      "id": "root-codeobj-json",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/root-codeobj-json.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "02b6331a8d18641d85913b4a458ebf5b0c4116a74c789cc9cd0b7a797ad99029",
+        "size": 642,
+        "tracked": false
+      },
+      "result": "Code-object authority JSON parses successfully.",
+      "started_at": "2026-08-09T00:21:06+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/root-codeobj-json.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/root-codeobj-json.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3f171c67b1bf95619b308831d7309d9f308d0aab9c55c4aacb9a7c5982ee612b",
+        "size": 68550,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check",
+        "--",
+        "docs/host-transport-v1-codeobj.md",
+        "protocol/host-transport-v1-codeobj.json",
+        "tests/test_host_transport_codeobj_spec.py"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:21:06+00:00",
+      "exit_code": 0,
+      "id": "root-codeobj-diff",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/root-codeobj-diff.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1fd9f570691bb8349ef903eac1407ca7834a3b5db320e8717ec25763102f0377",
+        "size": 734,
+        "tracked": false
+      },
+      "result": "Root authority files have no whitespace errors.",
+      "started_at": "2026-08-09T00:21:06+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/root-codeobj-diff.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/root-codeobj-diff.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco",
+        "projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/binary_search_kernels.hsaco"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:21:06+00:00",
+      "exit_code": 0,
+      "id": "fixture-sha",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/fixture-sha.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "cb383c108d031057026fbbf59281bf9e3831f2256f8fbd242e91c53d19baf01d",
+        "size": 779,
+        "tracked": false
+      },
+      "result": "Both locked gfx950 HSACO files match authority byte counts and SHA-256.",
+      "started_at": "2026-08-09T00:21:06+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/fixture-sha.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/fixture-sha.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f89dc22554a6adc5b176bd2a6931b90ea4b57fad0eb1c91e0c0a37b18d303045",
+        "size": 341,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "projects/rocm-systems",
+        "rev-parse",
+        "HEAD",
+        "HEAD^{tree}"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:21:06+00:00",
+      "exit_code": 0,
+      "id": "fixture-source-identity",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/fixture-source-identity.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a5b3586c04f8b2b7250863dc8298b4e3eb37faf77c3c0c1ffb556487064f1e0a",
+        "size": 660,
+        "tracked": false
+      },
+      "result": "ROCm systems checkout matches locked commit/tree.",
+      "started_at": "2026-08-09T00:21:06+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/fixture-source-identity.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/fixture-source-identity.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "43317e5662f02f5eff6688adb52f8a520ccfedbf0d6d07a52c05687ba4b24a8a",
+        "size": 82,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "env",
+        "PATH=/tmp/cp11-m4/root/usr/bin:/home/zhaosiying/miniforge3/envs/triton-dev/bin:/usr/bin:/bin",
+        "PYTHONPATH=/tmp/cp11-scons",
+        "python3",
+        "-c",
+        "from SCons.Script import main; main()",
+        "-j2",
+        "build/VEGA_X86/dev/amdgpu/host_gpu_dispatch_state.test.opt"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T00:22:29+00:00",
+      "exit_code": 0,
+      "id": "gem5-codeobj-build",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/gem5-codeobj-build.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6383e22037d693402332e533960222f9d21574bd0e50af9d48106101bd95b45d",
+        "size": 858,
+        "tracked": false
+      },
+      "result": "Targeted gem5 dispatch-state test rebuilt successfully with the new code-object fixture manifest.",
+      "started_at": "2026-08-09T00:22:25+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/gem5-codeobj-build.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/gem5-codeobj-build.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2cd0cdc1f6b829df41d3e72bcb9423957816e7c621ef2c75f1a80788706fc8a5",
+        "size": 3873,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_dispatch_state.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:21:06+00:00",
+      "exit_code": 0,
+      "id": "gem5-codeobj-test",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/gem5-codeobj-test.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "71f8b20e84bc67e6c2f7426e4ca5156762147506404024c262506592fdfb93c9",
+        "size": 656,
+        "tracked": false
+      },
+      "result": "Gem5 dispatch-state binary passed 12/12, including the locked code-object provenance test.",
+      "started_at": "2026-08-09T00:21:06+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/gem5-codeobj-test.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/gem5-codeobj-test.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "65f1415246ac943e967fc7de141ea17197cd7a721ecd88b96598d4a76963ce7e",
+        "size": 2474,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "projects/gem5",
+        "diff",
+        "--check"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T00:21:06+00:00",
+      "exit_code": 0,
+      "id": "gem5-codeobj-diff",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0011/gem5-codeobj-diff.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ef7200a456bb1a792b8e81a6fe50430606283ff68677ab4eaaf9497d8c57acd0",
+        "size": 618,
+        "tracked": false
+      },
+      "result": "Gem5 child source diff has no whitespace errors.",
+      "started_at": "2026-08-09T00:21:06+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0011/gem5-codeobj-diff.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0011/gem5-codeobj-diff.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T00:22:29+00:00",
+  "environment_fingerprint": {
+    "authority_docs_sha256": "557555e86f6591fdb29d803e958a26bb6c43afc9ed54b471dfdfe5bfdc326353",
+    "authority_schema_sha256": "b87b01626b8574fa7c481203b4b6b69055b7734103e4e4e92d7318cda4eadf16",
+    "authority_test_sha256": "6a3e8582d38e3f6115d2dd2aab252a601936db5846a0347f872f83ae8c196d08",
+    "checkpoint": "CP-0011",
+    "fixtures": {
+      "binary_search_bytes": 11296,
+      "binary_search_sha256": "cb415571319569f4cdc28872faa2155dfe12be06a8f75fe173df3486fdabc053",
+      "gpuReadWrite_bytes": 5528,
+      "gpuReadWrite_sha256": "7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56"
+    },
+    "gem5_child_phase": "prepare",
+    "gem5_isa_execution": "not claimed",
+    "gem5_test_count": "12/12",
+    "isa_status": "blocked-until-gfx950-decoder-proof",
+    "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+    "rocm_systems_commit": "92115a2941982a384de161be3f78cf9bff547027",
+    "rocm_systems_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "transaction_phase": "children-recorded",
+    "transport_message_types": []
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0011/gem5-build/host_gpu_dispatch_state.test.opt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "68f10703fcb5b9706ac3494edefd38f013fad96e1243dbf1f0f8b7e719cf8957",
+      "size": 3577344,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0011/fixtures/gpuReadWrite_kernels.hsaco",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56",
+      "size": 5528,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0011/fixtures/binary_search_kernels.hsaco",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "cb415571319569f4cdc28872faa2155dfe12be06a8f75fe173df3486fdabc053",
+      "size": 11296,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0027",
+  "includes": {},
+  "limitations": [
+    "The manifest is provenance and test coverage only; gem5 gfx950 decoder feature equivalence is not proven.",
+    "No generic HSACO loader, HIP, OpenCL, Triton, model, or CPU-fallback claim is made.",
+    "Copied binaries and command streams are ignored external acceptance artifacts."
+  ],
+  "redactions": [],
+  "result": "All retained CP-0011 command records exited zero; code-object ISA execution remains explicitly blocked.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T00:21:06+00:00",
+  "type": "gem5-code-object-fixture-acceptance"
+}
