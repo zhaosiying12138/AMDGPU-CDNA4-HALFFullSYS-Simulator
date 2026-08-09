@@ -153,6 +153,25 @@ fixture-scoped staging gate only: no segment permissions, relocations, dynamic
 kernarg/AQL, queue submission, GPU instruction execution, or Triton E2E is
 claimed.  The next action is native translation plus dynamic AQL/kernarg parity.
 
+`CP-0018` is accepted at the host-native dispatch-admission B0 boundary. The
+no-x86 target reuses the staged gfx950 image and shared host state to load the
+descriptor, bind its entry relation, pack/read back the 280-byte hidden kernarg,
+materialize a 64-byte AQL packet, construct an `HSAQueueEntry`, and exercise
+queue-control and ordered lifecycle-listener contracts. The legacy dispatcher
+object recompiles with the extracted listener symbols. This remains admission
+and control-state evidence only: no HSA queue publication, HSAPP/
+GPUCommandProcessor/GPUDispatcher/ComputeUnit instantiation, AQL submission,
+instruction execution, or GPU output/trace differential is claimed. The static
+Qwen 15-contract gate and offline model hashes remain valid, but strict AMD
+execution is blocked; Triton E2E and Qwen inference remain `0/1`. The next action
+is `P3-HOST-NATIVE-03-B1` for native address translation and real
+HSAPP/command-processor packet publication, with B2 reserved for the first CU
+differential.
+
+The Qwen smoke now also supports importlib-loaded source-contract tests by
+explicitly adding the repository and `tools/` roots; this fixes test loading only
+and does not change the no-fallback execution policy.
+
 The pinned Triton/LLVM overlay currently reaches gfx950 HSACO compilation only
 (vecadd SHA-256
 `ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e`); no

@@ -1,0 +1,426 @@
+{
+  "checkpoint_id": "CP-0018",
+  "claim": "EV-0045 binds the detailed EV-0044 B0 admission evidence to the final clean gem5 child, exact CP18 prepare journal identity, child trailers, and root metadata/Qwen smoke scope. It proves a coordinated admission checkpoint only; root coordinator staging/finalization and GPU-pipeline execution remain later boundaries.",
+  "command_argv": [
+    [
+      "bash",
+      "-lc",
+      "set -eu; test \"$(git -C projects/gem5 rev-parse HEAD)\" = 3af4ab5cc9e7f9174d88a95abb84f7ae5ab16d37; test \"$(git -C projects/gem5 rev-parse HEAD^{tree})\" = e2ab3913ff2d86aaaf70c6f1826b3898f0c0eec4; printf \"gem5 head=%s tree=%s\\\\n\" \"$(git -C projects/gem5 rev-parse HEAD)\" \"$(git -C projects/gem5 rev-parse HEAD^{tree})\""
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; test -z \"$(git -C projects/gem5 status --porcelain=v1 --untracked-files=all)\"; printf \"%s\\\\n\" gem5=clean"
+    ],
+    [
+      "python3",
+      "-c",
+      "import json; j=json.load(open(\".git/amdgpu-sim/txn/CP-0018.json\")); expected={\"gem5\":{\"head\":\"3af4ab5cc9e7f9174d88a95abb84f7ae5ab16d37\",\"tree\":\"e2ab3913ff2d86aaaf70c6f1826b3898f0c0eec4\",\"path\":\"projects/gem5\"}}; assert j[\"checkpoint_id\"]==\"CP-0018\"; assert j[\"phase\"]==\"prepare\"; assert j[\"participants_locked\"] is True; assert j[\"expected_children\"]==expected; print(\"phase=prepare expected_children=gem5 exact\")"
+    ],
+    [
+      "python3",
+      "-c",
+      "import subprocess; text=subprocess.check_output([\"git\",\"-C\",\"projects/gem5\",\"log\",\"-1\",\"--format=%B\"],text=True); expected={\"Checkpoint-ID\":\"CP-0018\",\"Goal-ID\":\"GSIM-001\",\"Plan-Revision\":\"2\",\"Source-Lock-SHA256\":\"8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4\",\"Evidence-Manifest-SHA256\":\"147e946863e5010b8d3aa2d693d9c4bcde7d6674feba5802b611e18b68c9758f\",\"Change-Kind\":\"code\",\"Baseline-Commit\":\"cbf0eae213c5e39c727172b546434287d47b5bbe\"}; assert all(f\"{key}: {value}\" in text for key,value in expected.items()); print(\"child trailers=CP-0018/GSIM-001/plan2/source-lock/EV-0044/code/baseline exact\")"
+    ],
+    [
+      "python3",
+      "-c",
+      "import hashlib; p=\"artifacts/evidence/CP-0018/EV-0044-draft.json\"; h=hashlib.sha256(open(p,\"rb\").read()).hexdigest(); assert h==\"147e946863e5010b8d3aa2d693d9c4bcde7d6674feba5802b611e18b68c9758f\"; print(\"EV-0044=\"+h)"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; python3 -m pytest -q tests/test_qwen35_operator_manifest.py; python3 -c \"import hashlib; p=\\\"tools/qwen35_operator_smoke.py\\\"; print(\\\"qwen_smoke_sha256=\\\"+hashlib.sha256(open(p,\\\"rb\\\").read()).hexdigest())\"; test \"$(sha256sum tools/qwen35_operator_smoke.py | awk \"{print \\$1}\")\" = 5e367ec9672805b1c0d51799a4068fc9730f1a8201cd94b071e2a021192265a1"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; for p in GOAL.md PLAN.md README.md docs/host-native-architecture.md tools/qwen35_operator_smoke.py state/bitlessons/BL-0080.json state/bitlessons/BL-0081.json state/bitlessons/BL-0082.json; do test -f \"$p\"; sha256sum \"$p\"; done; git diff --check; printf \"%s\\\\n\" root_metadata_scope=CP-0018_B0 docs_and_qwen_fix_present=true"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; python3 -m pytest -q tests/test_qwen35_operator_manifest.py; python3 tools/qwen35_operator_smoke.py >/tmp/cp18-qwen-smoke.json; python3 -c \"import json; s=json.load(open(\\\"/tmp/cp18-qwen-smoke.json\\\")); assert s[\\\"static_contract\\\"][\\\"passed\\\"] is True and s[\\\"passed\\\"] is False and s[\\\"runtime\\\"][\\\"status\\\"]==\\\"blocked\\\"; print(\\\"qwen_static=15/15 runtime=blocked passed=false fallback_pass=false\\\")\""
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; test \"$(git rev-parse HEAD)\" = 38137c9b14284cd397cfe4a1ed2adf6fae58f695; test \"$(git -C projects/gem5 rev-parse HEAD)\" = 3af4ab5cc9e7f9174d88a95abb84f7ae5ab16d37; printf \"previous_root=38137c9c child=3af4ab5c transaction=prepare\\\\n\""
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; test \"$(git -C projects/gem5 rev-parse HEAD)\" = 3af4ab5cc9e7f9174d88a95abb84f7ae5ab16d37; test \"$(git -C projects/gem5 rev-parse HEAD^{tree})\" = e2ab3913ff2d86aaaf70c6f1826b3898f0c0eec4; printf \"gem5 head=%s tree=%s\\\\n\" \"$(git -C projects/gem5 rev-parse HEAD)\" \"$(git -C projects/gem5 rev-parse HEAD^{tree})\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T15:29:16+00:00",
+      "exit_code": 0,
+      "id": "cp18-child-identities",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0018/cp18-child-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a828b95c926faf8f057957910f1e299d4bff2f35efd5d265d75986942bd02df9",
+        "size": 918,
+        "tracked": false
+      },
+      "result": "The CP18 journal and gem5 worktree resolve to the final clean child HEAD/tree.",
+      "started_at": "2026-08-09T15:29:16+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0018/cp18-child-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0018/cp18-child-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "11a38bcff3f2e7422efffa9ec8602e6279cee34ede2319197674e95f7c506b94",
+        "size": 97,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; test -z \"$(git -C projects/gem5 status --porcelain=v1 --untracked-files=all)\"; printf \"%s\\\\n\" gem5=clean"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T15:29:16+00:00",
+      "exit_code": 0,
+      "id": "cp18-child-clean",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0018/cp18-child-clean.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "32240ba592995a980b3c2f7306eace4a77bcb5b902aed270f9dda181e7078f74",
+        "size": 698,
+        "tracked": false
+      },
+      "result": "The CP18 gem5 participant is clean, including untracked-file checks.",
+      "started_at": "2026-08-09T15:29:16+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0018/cp18-child-clean.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0018/cp18-child-clean.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6c1c18d2ac33e2fcdc153921d33dd1131cdf51a6eed53205082bc5b41f506a7e",
+        "size": 11,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import json; j=json.load(open(\".git/amdgpu-sim/txn/CP-0018.json\")); expected={\"gem5\":{\"head\":\"3af4ab5cc9e7f9174d88a95abb84f7ae5ab16d37\",\"tree\":\"e2ab3913ff2d86aaaf70c6f1826b3898f0c0eec4\",\"path\":\"projects/gem5\"}}; assert j[\"checkpoint_id\"]==\"CP-0018\"; assert j[\"phase\"]==\"prepare\"; assert j[\"participants_locked\"] is True; assert j[\"expected_children\"]==expected; print(\"phase=prepare expected_children=gem5 exact\")"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T15:29:16+00:00",
+      "exit_code": 0,
+      "id": "cp18-journal-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0018/cp18-journal-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "28500d4c1ee5df10b2cb77bc405148a9f8c77189fbd3def70f1d88bd15888775",
+        "size": 1028,
+        "tracked": false
+      },
+      "result": "The CP18 prepare journal has the locked gem5 participant and exact recorded identity.",
+      "started_at": "2026-08-09T15:29:16+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0018/cp18-journal-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0018/cp18-journal-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "dd54534604e6802005ae56e5c42d518f21270894458ef04668e04f0b5270f2cf",
+        "size": 43,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import subprocess; text=subprocess.check_output([\"git\",\"-C\",\"projects/gem5\",\"log\",\"-1\",\"--format=%B\"],text=True); expected={\"Checkpoint-ID\":\"CP-0018\",\"Goal-ID\":\"GSIM-001\",\"Plan-Revision\":\"2\",\"Source-Lock-SHA256\":\"8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4\",\"Evidence-Manifest-SHA256\":\"147e946863e5010b8d3aa2d693d9c4bcde7d6674feba5802b611e18b68c9758f\",\"Change-Kind\":\"code\",\"Baseline-Commit\":\"cbf0eae213c5e39c727172b546434287d47b5bbe\"}; assert all(f\"{key}: {value}\" in text for key,value in expected.items()); print(\"child trailers=CP-0018/GSIM-001/plan2/source-lock/EV-0044/code/baseline exact\")"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T15:40:59+00:00",
+      "exit_code": 0,
+      "id": "cp18-child-trailers",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0018/cp18-child-trailers.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f1f2b3c9b0f848d17556734a6b4618a7977af27d97819436669c115ac90d66ed",
+        "size": 1247,
+        "tracked": false
+      },
+      "result": "The CP18 gem5 child commit carries the required audit trailers and frozen baseline.",
+      "started_at": "2026-08-09T15:40:59+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0018/cp18-child-trailers.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0018/cp18-child-trailers.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5caf7e27723eb9d0adf5c76239144517b8fc660483180e3a96a7856a7194a8c7",
+        "size": 78,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import hashlib; p=\"artifacts/evidence/CP-0018/EV-0044-draft.json\"; h=hashlib.sha256(open(p,\"rb\").read()).hexdigest(); assert h==\"147e946863e5010b8d3aa2d693d9c4bcde7d6674feba5802b611e18b68c9758f\"; print(\"EV-0044=\"+h)"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T15:29:17+00:00",
+      "exit_code": 0,
+      "id": "cp18-included-ev0044",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0018/cp18-included-ev0044.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d38e4a195255f070ddd346fe616f5e3f5709b759b8a75b4ed97c50a6de86f31c",
+        "size": 812,
+        "tracked": false
+      },
+      "result": "The detailed EV-0044 hash is exact before root finalization.",
+      "started_at": "2026-08-09T15:29:17+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0018/cp18-included-ev0044.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0018/cp18-included-ev0044.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d22bd0859e16843a95663279ef03de253c4e4df327b8186047d398e8f0e8ebee",
+        "size": 73,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; python3 -m pytest -q tests/test_qwen35_operator_manifest.py; python3 -c \"import hashlib; p=\\\"tools/qwen35_operator_smoke.py\\\"; print(\\\"qwen_smoke_sha256=\\\"+hashlib.sha256(open(p,\\\"rb\\\").read()).hexdigest())\"; test \"$(sha256sum tools/qwen35_operator_smoke.py | awk \"{print \\$1}\")\" = 5e367ec9672805b1c0d51799a4068fc9730f1a8201cd94b071e2a021192265a1"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T15:29:19+00:00",
+      "exit_code": 0,
+      "id": "qwen-smoke-import-fix",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0018/qwen-smoke-import-fix.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "bad61f2d458b389f9c070da44a64413580504047c7c993c356439e15d3a01dde",
+        "size": 964,
+        "tracked": false
+      },
+      "result": "The importlib-safe Qwen smoke path passes its static tests and remains strict about blocked runtime execution.",
+      "started_at": "2026-08-09T15:29:17+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0018/qwen-smoke-import-fix.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0018/qwen-smoke-import-fix.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "50a557203878b48a5702335fa1d91b4aab1e6026ff2d6d42a3e144f3f211560b",
+        "size": 181,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; for p in GOAL.md PLAN.md README.md docs/host-native-architecture.md tools/qwen35_operator_smoke.py state/bitlessons/BL-0080.json state/bitlessons/BL-0081.json state/bitlessons/BL-0082.json; do test -f \"$p\"; sha256sum \"$p\"; done; git diff --check; printf \"%s\\\\n\" root_metadata_scope=CP-0018_B0 docs_and_qwen_fix_present=true"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T15:33:32+00:00",
+      "exit_code": 0,
+      "id": "root-metadata-scope",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0018/root-metadata-scope.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3905dd47f059a24c599c15edd3906fdb65b3fa29bacea3375d549a18da20701c",
+        "size": 926,
+        "tracked": false
+      },
+      "result": "The CP18 root metadata/docs scope is hashable and whitespace-clean before staging.",
+      "started_at": "2026-08-09T15:33:32+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0018/root-metadata-scope.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0018/root-metadata-scope.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "16859b0f17e0883bdae752db9fed57fc6f7ae8a9c52acf75de48889ec19caae7",
+        "size": 770,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; python3 -m pytest -q tests/test_qwen35_operator_manifest.py; python3 tools/qwen35_operator_smoke.py >/tmp/cp18-qwen-smoke.json; python3 -c \"import json; s=json.load(open(\\\"/tmp/cp18-qwen-smoke.json\\\")); assert s[\\\"static_contract\\\"][\\\"passed\\\"] is True and s[\\\"passed\\\"] is False and s[\\\"runtime\\\"][\\\"status\\\"]==\\\"blocked\\\"; print(\\\"qwen_static=15/15 runtime=blocked passed=false fallback_pass=false\\\")\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T15:33:36+00:00",
+      "exit_code": 0,
+      "id": "qwen-smoke-result",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0018/qwen-smoke-result.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b69980103390b1e77dd046b7427b252c7e7290af1b34c7ff8026024b704f6541",
+        "size": 1028,
+        "tracked": false
+      },
+      "result": "The Qwen smoke static gate passes while the runtime status remains blocked and fallback is not promoted.",
+      "started_at": "2026-08-09T15:33:32+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0018/qwen-smoke-result.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0018/qwen-smoke-result.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "08a4f70f9412f0b9e00bc2dfb74b23f35d990f8ae43ccd35879f837ac8d382e7",
+        "size": 165,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; test \"$(git rev-parse HEAD)\" = 38137c9b14284cd397cfe4a1ed2adf6fae58f695; test \"$(git -C projects/gem5 rev-parse HEAD)\" = 3af4ab5cc9e7f9174d88a95abb84f7ae5ab16d37; printf \"previous_root=38137c9c child=3af4ab5c transaction=prepare\\\\n\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T15:33:33+00:00",
+      "exit_code": 0,
+      "id": "root-previous-anchor",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0018/root-previous-anchor.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "53bcbf0da21d86b266a6f45ce3cfac6313cd9a7e1f2551adb0b34f557ac49a7f",
+        "size": 836,
+        "tracked": false
+      },
+      "result": "The root coordinator remains at the CP17 anchor while CP18 is in prepare.",
+      "started_at": "2026-08-09T15:33:33+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0018/root-previous-anchor.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0018/root-previous-anchor.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0f3a92e36eac7a14670f34fd26d84f00c86709ba34257eda9a1a7ccc926303b6",
+        "size": 58,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T15:40:59+00:00",
+  "environment_fingerprint": {
+    "checkpoint": "CP-0018",
+    "transaction_phase": "prepare",
+    "previous_root": "38137c9b14284cd397cfe4a1ed2adf6fae58f695",
+    "gem5_head": "3af4ab5cc9e7f9174d88a95abb84f7ae5ab16d37",
+    "gem5_tree": "e2ab3913ff2d86aaaf70c6f1826b3898f0c0eec4",
+    "ev0044_sha256": "147e946863e5010b8d3aa2d693d9c4bcde7d6674feba5802b611e18b68c9758f",
+    "qwen_smoke_sha256": "5e367ec9672805b1c0d51799a4068fc9730f1a8201cd94b071e2a021192265a1",
+    "qwen_static_contracts": "15/15",
+    "qwen_runtime_status": "blocked",
+    "triton_e2e_cases": "0/1",
+    "next_action": "P3-HOST-NATIVE-03-B1"
+  },
+  "exit_code": 0,
+  "external_artifacts": [],
+  "id": "EV-0045",
+  "includes": {
+    "EV-0044": "147e946863e5010b8d3aa2d693d9c4bcde7d6674feba5802b611e18b68c9758f"
+  },
+  "limitations": [
+    "The transaction is still in prepare until the root allowlist, coordinator commit, and finalize transition are completed.",
+    "EV-0044 remains B0 admission/control-state evidence: no HSA queue publication, AQL submission, HSAPP/GPUDispatcher/ComputeUnit execution, instruction differential, Triton E2E, or Qwen inference is claimed.",
+    "The Qwen import-path fix and static 15-contract gate do not change the strict no-CPU/no-NVIDIA fallback policy; AMD runtime status remains blocked."
+  ],
+  "redactions": [],
+  "result": "The CP18 child identity, prepare journal, audit trailers, detailed EV-0044 hash, root metadata scope, and Qwen smoke import fix are mutually consistent; the coordinator can stage the declared B0 checkpoint with next action B1.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T15:29:16+00:00",
+  "type": "cp18-b0-root-child-umbrella"
+}

@@ -1,0 +1,204 @@
+{
+  "baseline_commit_marker": "N/A",
+  "bitlesson_ids": [
+    "BL-0080",
+    "BL-0081",
+    "BL-0082"
+  ],
+  "bitlesson_sha256": {
+    "BL-0080": "368333c7b358d8125559fd5f3cdc4ba4e5c1edf204f38e267b75a7fe3798f96d",
+    "BL-0081": "2ce1aeba82ed0051247bd3d8868da79a72a13178b3e60377d7eceac08437c11f",
+    "BL-0082": "944768f86b1d223426883ef05145682954955f8b8a3e9901bd67972789aa7190"
+  },
+  "blockers": [],
+  "change_kind": "code",
+  "changes": [
+    "Added the no-x86 host_gpu_native_dispatch_admission_core and extracted a shared GPUDispatchLifecycleListener contract while preserving the legacy dispatcher object.",
+    "Reused CP17 staging and host memory/queue state to validate descriptor/entry identity, pack/read back the 280-byte hidden kernarg, materialize a 64-byte AQL image, construct HSAQueueEntry, and exercise queue-control/listener admission smoke.",
+    "Retained CP15/CP16/CP17 checker boundaries, eight VEGA_X86 compatibility regressions, and the legacy dispatcher.o compile; no GPU pipeline execution is claimed.",
+    "Made the Qwen smoke importlib-safe by adding explicit repository/tools import roots; the 15-contract static gate remains valid while strict AMD execution is blocked."
+  ],
+  "created_at": "2026-08-09T23:36:00+08:00",
+  "evidence_ids": [
+    "EV-0044",
+    "EV-0045"
+  ],
+  "evidence_manifest_id": "EV-0045",
+  "evidence_manifest_sha256": "f91a3021f6d201859f4e7fa6dd79679cddbec799001d9207db7fce7f22479991",
+  "evidence_sha256": {
+    "EV-0044": "147e946863e5010b8d3aa2d693d9c4bcde7d6674feba5802b611e18b68c9758f",
+    "EV-0045": "f91a3021f6d201859f4e7fa6dd79679cddbec799001d9207db7fce7f22479991"
+  },
+  "goal_id": "GSIM-001",
+  "goal_sha256": "840197cd7c705d7f16e1a4611d6437a89be1343f3e1dd9833eb807853f654eb1",
+  "id": "CP-0018",
+  "limitations": [
+    "CP-0018-B0 is fixture-scoped admission/control-state evidence. It does not publish an HSA queue, instantiate HSAPacketProcessor/GPUCommandProcessor/GPUDispatcher/ComputeUnit, submit AQL to the GPU path, fetch or retire an instruction, or execute an ISA kernel.",
+    "The 64-byte AQL image is written/read through HostNativeMemoryContext only; queue-control completion and synthetic listener callbacks are not GPU execution or a CU memory/output differential.",
+    "The locked zero-relocation gpuReadWrite descriptor, fixed 280-byte kernarg ABI, and geometry are not a generic arbitrary-ELF loader, relocation/permission proof, or transparent runtime launcher.",
+    "Qwen3.5-0.8B evidence remains offline model/hash and static 15-contract source/shape preparation; strict AMD execution is blocked by the detected CUDA/NVIDIA environment, CPU/NVIDIA fallback is not a pass, and inference remains 0/1.",
+    "The retained Triton overlay remains compile-only historical provenance; Triton end-to-end remains 0/1, with no HIP/OpenCL/PyTorch/vLLM, hardware, timing, or performance claim."
+  ],
+  "next_action": {
+    "id": "P3-HOST-NATIVE-03-B1",
+    "argv": [
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0019",
+      "--intent",
+      "Connect B0 admission to native address translation and real HSAPP/command-processor packet publication while retaining the no-CU boundary",
+      "--participant",
+      "gem5=projects/gem5"
+    ],
+    "cwd": ".",
+    "expected": "The no-x86 B1 target translates the pinned zero-relocation gfx950 descriptor/code/kernarg addresses and publishes a validated AQL packet through the real HSAPacketProcessor/GPUCommandProcessor path, retaining queue/trace correlation and zero CPU fallback while explicitly stopping before GPUDispatcher/ComputeUnit instruction execution. B2 remains the separate CU differential gate.",
+    "prerequisites": [
+      "CP-0018 root checkpoint is accepted and scripts/resume.sh --verify passes offline.",
+      "The CP18 gem5 child commit/tree, EV-0044/EV-0045, Qwen model hashes, and 15-contract static manifest remain immutable.",
+      "The CP13 fixed-record transport, CP17 PT_LOAD mapper, and B0 descriptor/kernarg/AQL contracts remain the ABI authority; unsupported relocations, permissions, and non-gfx950 targets must be rejected before publication.",
+      "The implementation must preserve the VEGA_X86 reference path, avoid host pointers/device nodes, and keep queue publication, CU instruction execution, Triton, and Qwen claims separately evidenced."
+    ],
+    "rollback_boundary": "Keep CP-0018 B0 accepted, preserve the admission executable, CP17 PTLOAD/Qwen preparation and compile-only Triton evidence, and retain the VEGA_X86 oracle if native translation or HSAPP/command-processor publication fails."
+  },
+  "parent_checkpoint": "CP-0017",
+  "phase_id": "P3",
+  "plan_sha256": "2cd3e9ae54f0f77291c23894d91ca1fca828a5de14d6bf4b32aaaf03b1862e60",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "administrative_git_dir": "modules/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "clean": true,
+      "head": "3af4ab5cc9e7f9174d88a95abb84f7ae5ab16d37",
+      "id": "gem5",
+      "path": "projects/gem5",
+      "tree": "e2ab3913ff2d86aaaf70c6f1826b3898f0c0eec4"
+    },
+    {
+      "administrative_git_dir": "modules/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "clean": true,
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58"
+    },
+    {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "clean": true,
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489"
+    },
+    {
+      "administrative_git_dir": "modules/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "clean": true,
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "id": "triton",
+      "path": "projects/triton",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1"
+    },
+    {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "clean": true,
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315"
+    },
+    {
+      "administrative_git_dir": "modules/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "clean": true,
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "id": "vllm",
+      "path": "projects/vllm",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb"
+    },
+    {
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "clean": true,
+      "head": "7797360ea04e9c3576c5cc16cf829427e96d3d70",
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "tree": "64602386f81d7d27a555f1473b01f051b30c2276"
+    }
+  ],
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "root_parent_commit": "38137c9b14284cd397cfe4a1ed2adf6fae58f695",
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "sequence": 18,
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "status": "accepted",
+  "validation": [
+    {
+      "command": "CP18-B0 no-x86 dispatch-admission build, self-test, and checker",
+      "cwd": ".",
+      "evidence_id": "EV-0044",
+      "exit_code": 0,
+      "result": "The mold/24 target and dispatch-admission audit pass with descriptor/entry validation, 280-byte hidden kernarg, 64-byte AQL materialization, queue-control/listener flags, and all explicit no-execution flags."
+    },
+    {
+      "command": "retained CP15/CP16/CP17 checkers and legacy regressions",
+      "cwd": "projects/gem5",
+      "evidence_id": "EV-0044",
+      "exit_code": 0,
+      "result": "The control, fixture, and PTLOAD checkers remain green; eight VEGA_X86 compatibility binaries and the 14/14 code-object suite pass."
+    },
+    {
+      "command": "legacy GPUDispatcher lifecycle-object compile",
+      "cwd": "projects/gem5",
+      "evidence_id": "EV-0044",
+      "exit_code": 0,
+      "result": "The legacy dispatcher.o recompiles and retains the extracted lifecycle-listener symbols; this is object compatibility evidence, not pipeline execution."
+    },
+    {
+      "command": "Qwen static gate and importlib smoke fix",
+      "cwd": ".",
+      "evidence_id": "EV-0044",
+      "exit_code": 0,
+      "result": "The 15-contract static source/shape gate passes after the import-path fix; strict runtime status is blocked on CUDA/NVIDIA and fallback is not promoted."
+    },
+    {
+      "command": "CP18 child identity, clean state, trailers, and prepare journal",
+      "cwd": ".",
+      "evidence_id": "EV-0045",
+      "exit_code": 0,
+      "result": "Gem5 HEAD/tree 3af4ab5cc9e7f9174d88a95abb84f7ae5ab16d37/e2ab3913ff2d86aaaf70c6f1826b3898f0c0eec4 are clean, trailer-bound, and exact in the CP18 prepare journal; EV-0044 is hash-bound."
+    },
+    {
+      "command": "root metadata scope and Qwen smoke regression",
+      "cwd": ".",
+      "evidence_id": "EV-0045",
+      "exit_code": 0,
+      "result": "GOAL/PLAN/README/docs and the qwen smoke import fix are whitespace-clean and hashable; the five static Qwen tests pass while runtime remains blocked."
+    }
+  ]
+}

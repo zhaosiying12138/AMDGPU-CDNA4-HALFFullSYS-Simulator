@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_admission.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_admission_main.cc",
+    "projects/gem5/util/host_native/check_control_core.py",
+    "state/evidence/EV-0044.json"
+  ],
+  "checkpoint_id": "CP-0018",
+  "conclusion": "A host-native dispatch admission record can bind descriptor, hidden kernarg, AQL bytes, and queue-control identities without proving that a GPU packet entered or retired on the execution pipeline.",
+  "confidence": "high",
+  "decision": "Keep B0 admission, B1 native queue publication/translation, and B2 CU differential as separate gates with explicit negative execution flags and a retained VEGA_X86 oracle.",
+  "evidence_ids": ["EV-0044"],
+  "id": "BL-0080",
+  "invalidated_assumptions": [
+    "A nonzero kernel object and kernarg/AQL fields imply GPU execution.",
+    "Queue-control doorbell completion is equivalent to HSAPacketProcessor submission or CU retirement."
+  ],
+  "observation": "The B0 no-x86 target materializes the locked gfx950 image, 280-byte kernarg, and 64-byte AQL image and passes queue/listener contract checks while hsa_queue_published, aql_submitted, gpu_pipeline_connected, and kernel_executed remain false.",
+  "question_or_symptom": "What can be accepted before native queue publication and a real GPU-pipeline differential exist?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

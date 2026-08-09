@@ -16,6 +16,16 @@ from pathlib import Path
 import sys
 from typing import Any
 
+# The smoke module is also loaded by the source-contract tests through an
+# importlib spec, where Python does not automatically add this directory to
+# sys.path. Resolve the repository-local module explicitly so both direct
+# execution and `pytest` from the repository root use the same import path.
+ROOT = Path(__file__).resolve().parents[1]
+TOOLS = ROOT / "tools"
+for _path in (str(ROOT), str(TOOLS)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
 try:
     from qwen35_operator_manifest import ROOT, build_manifest
 except ImportError:  # pragma: no cover - supports importing from the repository root

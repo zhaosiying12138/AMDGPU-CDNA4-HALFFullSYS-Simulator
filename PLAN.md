@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-09`
 
-**State at this commit:** `P3-HOST-NATIVE-03-A PTLOAD staging accepted; next-P3-HOST-NATIVE-03-B`
+**State at this commit:** `P3-HOST-NATIVE-03-B0 dispatch admission accepted; next-P3-HOST-NATIVE-03-B1`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -489,7 +489,9 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | P3-HOST-NATIVE-02 | P3H | Standalone no-VEGA_X86 build plus host event/memory/queue/signal adapter |
 | P3-HOST-NATIVE-03 | P3H | Pinned gfx950 loader/dispatch parity between host-native and gem5 front-ends |
 | P3-HOST-NATIVE-03-A | P3H | Fixture-scoped PT_LOAD staging, descriptor/entry binding, and lifetime checks |
-| P3-HOST-NATIVE-03-B | P3H | Native translation, dynamic AQL/kernarg, and one real pinned pipeline differential |
+| P3-HOST-NATIVE-03-B0 | P3H | No-x86 descriptor/kernarg/AQL admission and queue/lifecycle contract smoke |
+| P3-HOST-NATIVE-03-B1 | P3H | Native address translation and real HSAPP/command-processor packet publication, without CU execution |
+| P3-HOST-NATIVE-03-B2 | P3H | One pinned gfx950 CU output/trace differential through the reused GPU pipeline |
 | P4-HIP-01 | P4 | Minimal transparent HIP/OpenCL launch surface |
 | P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
 | P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
@@ -740,6 +742,21 @@ permissions, apply relocations, construct kernarg/AQL, submit a queue, or
 execute instructions. The next unique action is
 `P3-HOST-NATIVE-03-B`: native translation plus dynamic AQL/kernarg parity.
 
+`CP-0018` is accepted at the `P3-HOST-NATIVE-03-B0` dispatch-admission
+sub-gate. The no-x86 `host_gpu_native_dispatch_admission_core` reuses the CP17
+staged image and shared host memory/queue ledgers to validate the descriptor and
+entry relation, pack/read back the 280-byte hidden kernarg, materialize a 64-byte
+AQL packet, construct an `HSAQueueEntry`, and exercise queue-control and ordered
+lifecycle-listener contracts. The extracted listener header preserves the legacy
+`GPUDispatcher` object interface. B0 does not publish an HSA queue, instantiate
+HSAPP/GPUCommandProcessor/GPUDispatcher/ComputeUnit, submit AQL to the GPU path,
+fetch or retire instructions, or produce a GPU output/trace differential. The
+static Qwen 15-contract gate and offline model hashes remain valid, but strict AMD
+execution is blocked; Triton E2E and Qwen inference remain 0/1. The next unique
+action is `P3-HOST-NATIVE-03-B1`, native address translation plus real
+HSAPP/command-processor packet publication with no CU claim; B2 reserves the
+one-wave CU differential.
+
 ### P3H - host-native simulator and first Triton gate
 
 The physical machine is already the host; launching a full `VEGA_X86` gem5
@@ -761,11 +778,14 @@ The work is staged as follows:
 2. `P3-HOST-NATIVE-02` is accepted by CP-0015: its standalone control core
    links without `VEGA_X86`/X86 ISA objects and passes no-x86/no-production-DSO
    audits, with direct and legacy state regressions retained.
-3. `P3-HOST-NATIVE-03` is split into explicit loader and execution gates.
+3. `P3-HOST-NATIVE-03` is split into explicit loader, admission, publication,
+   and execution gates.
    CP-0016 proves only functional memory/dispatch parity. CP-0017-A connects
    the CP13 staged image to fixture-scoped PT_LOAD materialization and
-   descriptor/entry validation. `P3-HOST-NATIVE-03-B` must add native
-   translation, dynamic kernarg/AQL assembly, queue submission, and one pinned
+   descriptor/entry validation. CP-0018-B0 adds only descriptor-derived
+   kernarg/AQL admission and queue/lifecycle contract smoke. `P3-HOST-NATIVE-03-B1`
+   must add native address translation and real HSAPP/command-processor packet
+   publication without a CU claim; `P3-HOST-NATIVE-03-B2` then adds the pinned
    gfx950 output/trace differential through the reused GPU pipeline before any
    Triton launch claim.
 4. `P3-TRITON-VECADD-01` runs the pinned, unmodified Triton tutorial request

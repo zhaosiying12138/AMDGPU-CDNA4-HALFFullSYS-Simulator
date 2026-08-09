@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0017-host-native-ptload-staging-accepted; next-P3-HOST-NATIVE-03-B`
+**Current state:** `CP-0018-host-native-dispatch-admission-B0-accepted; next-P3-HOST-NATIVE-03-B1`
 
 **Current phase:** `P3`
 
@@ -89,7 +89,7 @@ advance a phase without a new checkpoint and root coordinator commit.
 继续执行 amdgpu-sim 计划。当前目录是 /home/zhaosiying/amdgpu-sim。
 先读取 PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、其引用的
 最新 checkpoint/bitlesson/evidence，运行 scripts/resume.sh --verify。
-CP-0017 host-native PT_LOAD staging boundary 已 accepted；从唯一 next_action `P3-HOST-NATIVE-03-B` 继续，不要再次
+CP-0018 host-native dispatch-admission B0 boundary 已 accepted；从唯一 next_action `P3-HOST-NATIVE-03-B1` 继续，不要再次
 begin CP-0014，也不要重做 bootstrap、source freeze、authored runtime
 baseline 或已通过的 CP4-CP9 gates，也不要修改已冻结的 SOURCE_LOCK.json
 或已登记的 PROJECT_LANES baseline。CP-0010 只实现 18 个 typed KMT
@@ -104,9 +104,14 @@ gem5 gfx950 decoder、unsupported opcode、pinned device-libs/toolchain proof
 control-core/build/audit 边界，CP-0016 又完成了复用既有 memory/queue/signal/dispatch
 state 的 functional parity adapter。CP-0017-A 进一步完成了锁定 gfx950 HSACO 的
 CP13 staging、PT_LOAD 文件复制/BSS 清零、descriptor/entry 绑定和 page-lifetime
-测试，但没有完成动态 AQL/kernarg、GPU instruction execution 或 Triton。下一步
-完成 native translation 与动态 packet/kernarg parity，再以未修改 Triton vecadd
-作为第一用户可见验收。
+测试，但没有完成动态 AQL/kernarg、GPU instruction execution 或 Triton。CP-0018
+B0 又完成了 no-x86 dispatch admission：descriptor/entry 关系、280-byte
+hidden kernarg、64-byte AQL materialization、queue-control 和 listener-contract
+smoke；这些字段仍只经过 host functional memory，未发布 HSA queue、未提交 AQL、
+未连接 HSAPP/GPUDispatcher/ComputeUnit。下一步先完成
+`P3-HOST-NATIVE-03-B1` 的 native address/translation 与 HSAPP/command-processor
+packet publication，再以独立 B2 gate 证明 CU differential，最后才尝试未修改
+Triton vecadd。
 在 Triton 用户命令 `tutorial/01-vecadd.py`（当前 pinned checkout 中对应未修改的
 `python/tutorials/01-vector-add.py`）首次透明通过后，先完成可复现的 gem5
 算子 profile、80/20 优化和 threadblock host-parallel 正确性/可行性门禁，再
@@ -171,3 +176,17 @@ not enforce segment permissions, apply relocations, build AQL/kernarg, submit a
 queue, or execute an instruction. Triton remains 0/1 and Qwen inference remains
 0/1. The next unique action is `P3-HOST-NATIVE-03-B`: native translation plus
 dynamic AQL/kernarg parity on the reused GPU pipeline.
+
+`CP-0018` is accepted at the host-native dispatch-admission B0 boundary. The
+no-x86 `host_gpu_native_dispatch_admission_core` reuses the CP17 staged image and
+host memory/queue state to load the descriptor, verify its entry relation, pack and
+read back the 280-byte hidden kernarg, materialize and round-trip a 64-byte AQL
+packet, construct an `HSAQueueEntry`, and exercise queue-control plus ordered
+lifecycle-listener contract checks. The legacy dispatcher object recompiles with
+the shared listener symbols. This is admission and control-state evidence only:
+no HSA queue publication, HSAPP/GPUCommandProcessor/GPUDispatcher/ComputeUnit
+instantiation, AQL submission, instruction fetch/retirement, or GPU output
+differential is claimed. Triton remains 0/1 and Qwen inference remains 0/1; the
+static 15-contract Qwen gate is valid but strict AMD execution remains blocked.
+The next unique action is `P3-HOST-NATIVE-03-B1` for native address translation
+and real HSAPP/command-processor packet publication, retaining the no-CU boundary.

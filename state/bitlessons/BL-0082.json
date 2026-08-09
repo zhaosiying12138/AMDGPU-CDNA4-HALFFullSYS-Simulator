@@ -1,0 +1,22 @@
+{
+  "applies_to": [
+    "tools/qwen35_operator_smoke.py",
+    "tests/test_qwen35_operator_manifest.py",
+    "state/evidence/EV-0044.json"
+  ],
+  "checkpoint_id": "CP-0018",
+  "conclusion": "A module loaded through importlib.spec_from_file_location must establish the repository and tools import roots explicitly when its sibling manifest is not installed as a package.",
+  "confidence": "high",
+  "decision": "Keep the Qwen smoke import-path fix narrow and test it alongside the static 15-contract gate; never promote CUDA, CPU, or NVIDIA execution to AMD success.",
+  "evidence_ids": ["EV-0044"],
+  "id": "BL-0082",
+  "invalidated_assumptions": [
+    "Running the smoke as a script and loading it through an importlib spec use identical sys.path behavior.",
+    "A passing static source/shape gate means Qwen AMD inference has executed."
+  ],
+  "observation": "The explicit repository/tools path setup makes the importlib-loaded smoke pass its five static tests; the runtime remains blocked on the detected CUDA/NVIDIA environment and fallback counters remain non-passing.",
+  "question_or_symptom": "Why did the Qwen smoke need an import-path fix even though direct execution already worked?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

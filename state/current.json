@@ -1,9 +1,9 @@
 {
-  "checkpoint_id": "CP-0017",
-  "checkpoint_sha256": "396bfca0217114ff842ea21faea54bcb8ac42b4511c6324e9a2ecaddcf57a7c2",
+  "checkpoint_id": "CP-0018",
+  "checkpoint_sha256": "61812e9ee613309698585ffe2de0de886735acd1b2c5313fcd43c8cf118be591",
   "goal_id": "GSIM-001",
-  "next_action_id": "P3-HOST-NATIVE-03-B",
-  "next_action_summary": "Connect the mapped gfx950 image to native translation, dynamic AQL/kernarg, queue submission, and one real GPU-pipeline differential; keep Triton/Qwen claims deferred.",
+  "next_action_id": "P3-HOST-NATIVE-03-B1",
+  "next_action_summary": "Connect B0 admission to native address translation and real HSAPP/command-processor packet publication; keep CU, Triton, and Qwen execution claims deferred.",
   "phase_id": "P3",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,

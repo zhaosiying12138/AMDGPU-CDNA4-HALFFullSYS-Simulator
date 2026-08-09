@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/gem5/src/gpu-compute/dispatch_lifecycle.hh",
+    "projects/gem5/src/gpu-compute/dispatcher.hh",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_admission.cc",
+    "state/evidence/EV-0044.json"
+  ],
+  "checkpoint_id": "CP-0018",
+  "conclusion": "Extracting the dispatch lifecycle listener contract permits the no-x86 admission target to share event vocabulary with the legacy GPUDispatcher without linking or instantiating the legacy pipeline.",
+  "confidence": "high",
+  "decision": "Treat listener callbacks as an ABI/parity contract only; require real HSAPacketProcessor, command-processor, dispatcher, CU, and trace causality evidence before labeling an event as execution.",
+  "evidence_ids": ["EV-0044"],
+  "id": "BL-0081",
+  "invalidated_assumptions": [
+    "A shared listener interface means the no-x86 adapter has already connected to GPU SimObjects.",
+    "Synthetic lifecycle callback order can substitute for packet fetch, instruction retirement, or global-store evidence."
+  ],
+  "observation": "The legacy dispatcher object recompiles with the extracted symbols, while the B0 executable records only a listener-contract smoke and explicitly reports gpu_dispatcher_instantiated=false and gpu_pipeline_connected=false.",
+  "question_or_symptom": "How can host-native extraction preserve event compatibility without overstating pipeline connectivity?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

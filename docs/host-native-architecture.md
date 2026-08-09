@@ -53,15 +53,20 @@ execute kernels on the CPU.
    now stages the locked `gpuReadWrite` HSACO, copies exact PT_LOAD file bytes,
    zero-fills BSS, and binds descriptor/entry addresses in a no-x86 target.
    It is fixture-scoped and stops before native translation, dynamic
-   AQL/kernarg, queue submission, and instruction execution.
+   AQL/kernarg publication, queue submission, and instruction execution.
 4. Run the unmodified pinned Triton tutorial through the normal launcher with
    only simulator device selection changed. Capture compiler, HSACO digest,
    transport, dispatch, output, and fallback-counter evidence.
 
 The first three gates are prerequisites for the Triton gate. CP-0017-A passes
-the bounded PT_LOAD staging sub-gate only; no current checkpoint claims GPU
-instruction execution or Triton end-to-end (currently 0/1). The next gate is
-native translation plus dynamic AQL/kernarg parity over the reused pipeline.
+the bounded PT_LOAD staging sub-gate only. CP-0018-B0 adds host-native
+dispatch admission and listener-contract smoke: descriptor/entry validation,
+280-byte hidden kernarg, 64-byte AQL materialization, and queue-control state,
+without HSA queue publication or GPU-pipeline execution. No current checkpoint
+claims a B0 GPU instruction differential or Triton end-to-end (currently 0/1).
+The next gate is `P3-HOST-NATIVE-03-B1`, native address translation and real
+HSAPP/command-processor packet publication; `B2` reserves the first CU
+differential.
 
 ## Non-goals
 
