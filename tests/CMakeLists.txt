@@ -4,6 +4,33 @@ add_executable(self_amdgpu_runtime_api_test runtime_test.c)
 target_link_libraries(self_amdgpu_runtime_api_test PRIVATE SelfAmdgpuRuntime::runtime)
 add_test(NAME self_amdgpu_runtime.api COMMAND self_amdgpu_runtime_api_test)
 
+# Keep a tiny public-header-only consumer as the extraction gate for CP-0014.
+# This target deliberately has no simulator, ROCr, or device-library linkage;
+# the companion CMake audit checks that property on the produced executable.
+add_executable(
+  self_amdgpu_runtime_host_native_boundary_test
+  host_native_boundary_test.c)
+target_compile_features(
+  self_amdgpu_runtime_host_native_boundary_test
+  PRIVATE c_std_11)
+target_link_libraries(
+  self_amdgpu_runtime_host_native_boundary_test
+  PRIVATE SelfAmdgpuRuntime::runtime)
+if(MSVC)
+  target_compile_options(
+    self_amdgpu_runtime_host_native_boundary_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    self_amdgpu_runtime_host_native_boundary_test
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(
+  NAME self_amdgpu_runtime.host_native.boundary
+  COMMAND
+    "${CMAKE_COMMAND}"
+    "-DSAGR_HOST_NATIVE_BINARY=$<TARGET_FILE:self_amdgpu_runtime_host_native_boundary_test>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/host_native_boundary_audit.cmake")
+
 add_executable(self_amdgpu_runtime_provider_test provider_test.c)
 target_link_libraries(
   self_amdgpu_runtime_provider_test
