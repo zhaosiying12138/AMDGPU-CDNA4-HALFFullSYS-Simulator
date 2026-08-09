@@ -54,6 +54,33 @@ add_test(
 set_tests_properties(self_amdgpu_runtime.kmt_shim PROPERTIES TIMEOUT 30)
 
 add_executable(
+  self_amdgpu_runtime_code_object_test
+  code_object_test.c)
+target_compile_features(self_amdgpu_runtime_code_object_test PRIVATE c_std_11)
+target_include_directories(
+  self_amdgpu_runtime_code_object_test
+  PRIVATE ../include)
+target_link_libraries(
+  self_amdgpu_runtime_code_object_test
+  PRIVATE SelfAmdgpuRuntime::runtime)
+target_compile_definitions(
+  self_amdgpu_runtime_code_object_test
+  PRIVATE
+    SAGR_CODE_OBJECT_GPU_READ_WRITE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco"
+    SAGR_CODE_OBJECT_BINARY_SEARCH_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/binary_search_kernels.hsaco")
+if(MSVC)
+  target_compile_options(self_amdgpu_runtime_code_object_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    self_amdgpu_runtime_code_object_test
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(
+  NAME self_amdgpu_runtime.code_object
+  COMMAND self_amdgpu_runtime_code_object_test)
+set_tests_properties(self_amdgpu_runtime.code_object PROPERTIES TIMEOUT 30)
+
+add_executable(
   self_amdgpu_runtime_protocol_test
   protocol_test.c
   ../src/transport_codec.c)
