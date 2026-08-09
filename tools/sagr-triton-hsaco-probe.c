@@ -79,7 +79,11 @@ int main(int argc, char **argv) {
          "\"kernel\":\"%s\",\"gfx_target\":%u,"
          "\"kernarg_bytes\":%u,\"wavefront_size\":%u,"
          "\"code_bytes\":%llu,\"metadata_only\":%s,"
-         "\"execution_supported\":%s}\n",
+         "\"execution_supported\":%s,\"compile_only\":true,"
+         "\"provenance_only\":true,\"compiler_invoked\":false,"
+         "\"jit\":false,\"launcher\":false,"
+         "\"transport\":false,\"execution\":false,"
+         "\"fallback\":false}\n",
          image_size, info.target, kernel.name, info.gfx_target,
          kernel.kernarg_segment_size, kernel.wavefront_size,
          (unsigned long long)binding.code_size,

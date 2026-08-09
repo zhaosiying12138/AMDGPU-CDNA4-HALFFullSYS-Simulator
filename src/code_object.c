@@ -781,8 +781,17 @@ sagr_status_t sagr_code_object_validate(const void *image, size_t image_size,
   if ((bytes[8] == 2U && info->metadata_minor != 1U) ||
       (bytes[8] >= 3U && info->metadata_minor != 2U))
     return SAGR_STATUS_NOT_SUPPORTED;
-  if (strcmp(info->target, "amdgcn-amd-amdhsa--gfx950") != 0)
+  /*
+   * LLVM's AMD backend emits the explicit gfx target for the pinned RDC
+   * fixtures, while the pinned Triton overlay emits the ABI-equivalent
+   * ``-unknown-gfx950`` spelling.  Both identify gfx950 here; neither implies
+   * that this runtime can execute the image.
+   */
+  if (strcmp(info->target, "amdgcn-amd-amdhsa--gfx950") != 0 &&
+      strcmp(info->target, "amdgcn-amd-amdhsa-unknown-gfx950") != 0)
     return SAGR_STATUS_NOT_SUPPORTED;
+  const int triton_target =
+      strcmp(info->target, "amdgcn-amd-amdhsa-unknown-gfx950") == 0;
   for (kernel_index = 0; kernel_index < info->kernel_count; ++kernel_index) {
     sagr_code_object_kernel_info_t *kernel = &info->kernels[kernel_index];
     elf_symbol_t code_symbol;
@@ -792,6 +801,9 @@ sagr_status_t sagr_code_object_validate(const void *image, size_t image_size,
     if (kernel->name[0] == '\0' || kernel->symbol[0] == '\0' ||
         !validate_kernel_layout(kernel))
       return SAGR_STATUS_PROTOCOL_ERROR;
+    /* Triton's linker leaves the descriptor symbol DEFAULT-visible; the
+     * legacy RDC fixtures use PROTECTED.  This exception stays metadata-only
+     * and does not mark the Triton ISA executable. */
     if (!find_symbol(bytes, image_size, &symtab, &strtab, kernel->name,
                      &code_symbol, &code_section_index) ||
         !find_symbol(bytes, image_size, &symtab, &strtab, kernel->symbol,
@@ -802,7 +814,9 @@ sagr_status_t sagr_code_object_validate(const void *image, size_t image_size,
         (code_symbol.other & UINT8_C(0x03)) != ELF_STV_PROTECTED ||
         (descriptor_symbol.info & UINT8_C(0x0f)) != ELF_STT_OBJECT ||
         (descriptor_symbol.info >> 4) != ELF_STB_GLOBAL ||
-        (descriptor_symbol.other & UINT8_C(0x03)) != ELF_STV_PROTECTED ||
+        ((descriptor_symbol.other & UINT8_C(0x03)) != ELF_STV_PROTECTED &&
+         !(triton_target &&
+           (descriptor_symbol.other & UINT8_C(0x03)) == 0U)) ||
         code_symbol.size == 0U || descriptor_symbol.size != SAGR_CODE_OBJECT_DESCRIPTOR_BYTES) return SAGR_STATUS_PROTOCOL_ERROR;
     {
       elf_section_t code_section;

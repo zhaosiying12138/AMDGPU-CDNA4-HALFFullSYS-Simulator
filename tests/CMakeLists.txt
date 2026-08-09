@@ -107,6 +107,41 @@ add_test(
   COMMAND self_amdgpu_runtime_code_object_test)
 set_tests_properties(self_amdgpu_runtime.code_object PROPERTIES TIMEOUT 30)
 
+# CP-0021 compile/provenance gate for the unmodified pinned Triton tutorial.
+# This target intentionally has no launcher, transport, or gem5 dependency.
+add_executable(
+  self_amdgpu_runtime_triton_vecadd_compile_test
+  triton_vecadd_compile_test.c
+  ../src/sha256.c)
+target_compile_features(
+  self_amdgpu_runtime_triton_vecadd_compile_test
+  PRIVATE c_std_11)
+target_include_directories(
+  self_amdgpu_runtime_triton_vecadd_compile_test
+  PRIVATE ../src ../include)
+target_link_libraries(
+  self_amdgpu_runtime_triton_vecadd_compile_test
+  PRIVATE SelfAmdgpuRuntime::runtime)
+target_compile_definitions(
+  self_amdgpu_runtime_triton_vecadd_compile_test
+  PRIVATE
+    SAGR_TRITON_TUTORIAL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../triton/python/tutorials/01-vector-add.py"
+    SAGR_TRITON_HSACO_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../../artifacts/evidence/CP-0017/triton-builds/vecadd-gfx950.hsaco")
+if(MSVC)
+  target_compile_options(
+    self_amdgpu_runtime_triton_vecadd_compile_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    self_amdgpu_runtime_triton_vecadd_compile_test
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(
+  NAME self_amdgpu_runtime.triton_vecadd_compile
+  COMMAND self_amdgpu_runtime_triton_vecadd_compile_test)
+set_tests_properties(
+  self_amdgpu_runtime.triton_vecadd_compile
+  PROPERTIES TIMEOUT 30)
+
 add_executable(
   self_amdgpu_runtime_code_object_transport_test
   code_object_transport_test.c
