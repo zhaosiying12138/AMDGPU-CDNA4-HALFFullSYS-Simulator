@@ -1,0 +1,191 @@
+{
+  "baseline_commit_marker": "N/A",
+  "bitlesson_ids": [
+    "BL-0063",
+    "BL-0064",
+    "BL-0065",
+    "BL-0066",
+    "BL-0067"
+  ],
+  "bitlesson_sha256": {
+    "BL-0063": "69f2ec0bf51fabe1a7014b8745e23f5c6a7747715d055ed190ce68416bb73eb3",
+    "BL-0064": "0d3b4f13babddf6322a1c3d2bcbc0b3fb6c617417fe69aa1feb35fdfdd4618c5",
+    "BL-0065": "34900c31d2f2629149d28f73f347127c921758c610a9b85eb4739f8a5c880129",
+    "BL-0066": "7fffa58a04d902b2cb95fef9b54515846f12c054e2193289941cdd1882e4709a",
+    "BL-0067": "f723a86aad9e7dddf0d01605d5dafec13714184e409807017634ce72ce97f85c"
+  },
+  "blockers": [],
+  "change_kind": "code",
+  "changes": [
+    "Added the CP-0013 A1 fixed-width code-object transport authority with pointer-free BEGIN/CHUNK/COMMIT records, capability negotiation, manifest validation, and explicit zero-address ACK rules.",
+    "Added runtime-owned bounded HSACO staging with per-chunk CRC-32C, whole-image SHA-256, owner/generation/order validation, immutable commit, and deterministic failure cleanup.",
+    "Added gem5 protocol, bridge routing, ELF/PT_LOAD and descriptor admission checks, and owner-scoped staging state without mapping or execution.",
+    "Retained GCC Debug and Clang ASan/UBSan matrices, native gem5 mold/24 authority builds, independent authority tests, and clean child identity evidence."
+  ],
+  "created_at": "2026-08-09T13:35:00+08:00",
+  "evidence_ids": [
+    "EV-0033",
+    "EV-0034",
+    "EV-0035"
+  ],
+  "evidence_manifest_id": "EV-0035",
+  "evidence_manifest_sha256": "5f7f16d12122ddd89c0a1757ad7ca7210ce412cfca9b700e46458ae4eb23899c",
+  "evidence_sha256": {
+    "EV-0033": "7884466021d549523a88658318169905adcb4d1e8ad0df168203cd1ceedf1b18",
+    "EV-0034": "d118c3aa42674a2fb5c4aaa0271368427ea32d2adb374e44d5313036c486d9a6",
+    "EV-0035": "5f7f16d12122ddd89c0a1757ad7ca7210ce412cfca9b700e46458ae4eb23899c"
+  },
+  "goal_id": "GSIM-001",
+  "goal_sha256": "8c73ee1ebe16e0c5acc7d9b8e60d34a906a04c476150deeb2870308db87897a8",
+  "id": "CP-0013",
+  "limitations": [
+    "CP-0013 proves A1 transport and daemon-owned staging only. It does not map PT_LOAD ranges, apply relocations, publish kernarg bytes, construct an AQL packet, submit a queue, execute gem5 instructions, or claim GPU visibility, decoder admission, kernel correctness, hardware presence, timing, or performance.",
+    "The A1 image is copied into bounded daemon-owned staging and committed by digest; ACK mapping_base_va, descriptor_va, code_va, and kernarg_va remain zero, including on COMMIT success.",
+    "The CP-0012 generated vecadd artifact remains an observation and is not an A1 execution fixture. A2 loader/mapping, A3 AQL/kernarg, and A4 queue/decoder execution are separate gates.",
+    "Runtime coverage is GCC Debug and Clang ASan/UBSan static matrices; shared-library/package ABI coverage and production ROCr/KFD/HIP/OpenCL compatibility are not claimed.",
+    "No Triton, PyTorch, vLLM, model, multi-daemon, collective, or performance claim is made by this checkpoint."
+  ],
+  "next_action": {
+    "argv": [
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0014",
+      "--intent",
+      "Implement the scoped A2 PT_LOAD loader and atomic code-object mapping boundary",
+      "--participant",
+      "gem5=projects/gem5",
+      "--participant",
+      "self-amdgpu-runtime=projects/self-amdgpu-runtime"
+    ],
+    "cwd": ".",
+    "expected": "A2 validates one authority-conforming gfx950 image, maps its PT_LOAD ranges atomically, applies required relocations, and retains deterministic loader evidence without constructing AQL, submitting a queue, or claiming execution.",
+    "id": "P3-CODEOBJ-03-A2",
+    "prerequisites": [
+      "CP-0013 is accepted and scripts/resume.sh --verify passes offline.",
+      "The CP-0013 A1 fixed-record transport, child identities, and zero-address/no-execution boundary remain immutable.",
+      "SOURCE_LOCK.json and PROJECT_LANES.json remain byte-identical to their accepted anchors.",
+      "A2 must copy bytes and IDs from the A1 staged image; it must not serialize host pointers or open production GPU devices."
+    ],
+    "rollback_boundary": "Keep CP-0013 accepted and preserve the A1 transport/staging authority, parser and manifest checks, child baselines, and no-execution boundary if loader or mapping proof fails."
+  },
+  "parent_checkpoint": "CP-0012",
+  "phase_id": "P3",
+  "plan_sha256": "4338ae4d396d1b163b680efc08c6f930eecb905671fe70b0d076eb0cbe772ed2",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "administrative_git_dir": "modules/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "clean": true,
+      "head": "638f70650b5556be2ee04220e86da69dc850c201",
+      "id": "gem5",
+      "path": "projects/gem5",
+      "tree": "4a76592ac896da3de09a39714220098014072e32"
+    },
+    {
+      "administrative_git_dir": "modules/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "clean": true,
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58"
+    },
+    {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "clean": true,
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489"
+    },
+    {
+      "administrative_git_dir": "modules/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "clean": true,
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "id": "triton",
+      "path": "projects/triton",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1"
+    },
+    {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "clean": true,
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315"
+    },
+    {
+      "administrative_git_dir": "modules/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "clean": true,
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "id": "vllm",
+      "path": "projects/vllm",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb"
+    },
+    {
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "clean": true,
+      "head": "bc186e606c709e5955b26e8f9529df4d41492cea",
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "tree": "b1ebb6d1ecbba4a1292a16a8b22286113b1808ab"
+    }
+  ],
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "root_parent_commit": "4fdc5d1c233f283e68dd1283634c88200dea3e7a",
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "sequence": 13,
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "status": "accepted",
+  "validation": [
+    {
+      "command": "runtime A1 transport/staging GCC and Clang sanitizer matrices",
+      "cwd": "projects/self-amdgpu-runtime",
+      "evidence_id": "EV-0033",
+      "exit_code": 0,
+      "result": "GCC Debug and Clang ASan/UBSan CTest each pass 14/14; fixed-record transport, CRC/SHA identity, ownership, ordering, and cleanup tests are retained."
+    },
+    {
+      "command": "gem5 A1 code-object protocol, staging, and regression authority",
+      "cwd": "projects/gem5",
+      "evidence_id": "EV-0034",
+      "exit_code": 0,
+      "result": "Native mold/24 relink exits 0; protocol 43/43, code-object state 14/14, socket 23/23, dispatch 12/12, decoder 1/1, memory 8/8, queue 12/12, signal 12/12, KMT 5/5, and root authority 24/24 pass."
+    },
+    {
+      "command": "CP-0013 child identity and evidence umbrella checks",
+      "cwd": ".",
+      "evidence_id": "EV-0035",
+      "exit_code": 0,
+      "result": "Both child worktrees are clean; journal expected_children exactly match gem5 638f70650b5556be2ee04220e86da69dc850c201/4a76592ac896da3de09a39714220098014072e32 and runtime bc186e606c709e5955b26e8f9529df4d41492cea/b1ebb6d1ecbba4a1292a16a8b22286113b1808ab; EV-0033 and EV-0034 hashes match the umbrella."
+    }
+  ]
+}

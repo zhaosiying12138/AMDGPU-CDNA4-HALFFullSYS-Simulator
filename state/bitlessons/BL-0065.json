@@ -1,0 +1,25 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.cc",
+    "state/evidence/EV-0033.json"
+  ],
+  "checkpoint_id": "CP-0013",
+  "conclusion": "Owner and generation checks, contiguous chunk order, and abort-on-failure are one atomic staging contract rather than independent conveniences.",
+  "confidence": "high",
+  "decision": "Reject stale, foreign, duplicate, gapped, or indeterminate transactions before publication; zeroize mutable staging on failure and disconnect.",
+  "evidence_ids": [
+    "EV-0033",
+    "EV-0034",
+    "EV-0035"
+  ],
+  "id": "BL-0065",
+  "invalidated_assumptions": [
+    "A partially accepted upload can be retained safely and completed after an ownership or connection epoch changes."
+  ],
+  "observation": "Both child suites cover owner/generation mismatches, ordering failures, cleanup, and disconnect behavior while keeping object identities connection-scoped.",
+  "question_or_symptom": "How does A1 prevent a stale or foreign client from publishing bytes into a live code-object identity?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

@@ -1,0 +1,309 @@
+{
+  "schema": "amdgpu-sim.host-transport-v1.codeobj-transport.v1",
+  "title": "GemSim fixed-record HSACO transport envelope version 1.0",
+  "checkpoint": "CP-0013",
+  "lane": "P3-CODEOBJ-03",
+  "authority_status": "frozen-wire-authority-a1",
+  "base_protocol": "protocol/host-transport-v1.json",
+  "code_object_authority": "protocol/host-transport-v1-codeobj.json",
+  "envelope_version": {"major": 1, "minor": 0},
+  "scope": "A pointer-free and descriptor-free transaction for copying one authority-conforming gfx950 HSACO image into daemon-owned staging. A1 freezes transport and validation only; it performs no PT_LOAD mapping, AQL construction, kernarg publication, or gem5 execution.",
+  "capability": {
+    "name": "CODE_OBJECT_TRANSPORT_V1",
+    "bit": 7,
+    "byte_index": 0,
+    "mask_hex": "80",
+    "negotiation": "selected if and only if offered and required by the client and supported by the daemon; bit 6 remains the source-only CODE_OBJECT_ABI_V1 authority and is not repurposed",
+    "requires": ["TOPOLOGY_IDENTITY_V1"],
+    "execution_prerequisites_not_selected_by_a1": ["QUEUE_CONTROL_V1", "MEMORY_CONTROL_V1", "SIGNAL_EVENT_V1", "PINNED_DISPATCH_V1"]
+  },
+  "transport": {
+    "header_bytes": 80,
+    "payload_bytes": 4016,
+    "record_bytes": 4096,
+    "byte_order": "big-endian",
+    "message_types": {
+      "CODE_OBJECT_REQUEST": 16,
+      "CODE_OBJECT_ACK": 17
+    },
+    "reserved_message_types": {
+      "KERNEL_DISPATCH_REQUEST": 18,
+      "KERNEL_DISPATCH_ACK": 19,
+      "KERNEL_DISPATCH_COMPLETION": 20
+    },
+    "reserved_message_type_policy": "reserved for a separately reviewed A2/A3 dispatch extension; no A1 payload is assigned",
+    "request_opcodes": {
+      "BEGIN": 1,
+      "CHUNK": 2,
+      "COMMIT": 3
+    },
+    "ancillary_descriptors": 0,
+    "chunk_data_offset": 48,
+    "chunk_data_bytes": 3968,
+    "record_rule": "every request and ACK is exactly one 4096-byte SOCK_SEQPACKET record: the base 80-byte header plus one 4016-byte payload",
+    "request_id_rule": "every BEGIN, CHUNK, and COMMIT consumes a new nonzero strictly increasing base-header request_id and receives exactly one correlated ACK",
+    "fd_rule": "MSG_TRUNC, MSG_CTRUNC, any SCM_RIGHTS control message, or any ancillary descriptor closes the connection before code-object state changes"
+  },
+  "request_prefix": {
+    "bytes": 48,
+    "fields": [
+      {"name": "major", "offset": 0, "bytes": 2, "type": "u16", "constant": 1},
+      {"name": "minor", "offset": 2, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "opcode", "offset": 4, "bytes": 2, "type": "u16", "values_source": "transport.request_opcodes"},
+      {"name": "flags", "offset": 6, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "object_id", "offset": 8, "bytes": 8, "type": "u64"},
+      {"name": "object_generation", "offset": 16, "bytes": 8, "type": "u64"},
+      {"name": "image_offset", "offset": 24, "bytes": 8, "type": "u64"},
+      {"name": "byte_count", "offset": 32, "bytes": 4, "type": "u32"},
+      {"name": "chunk_index", "offset": 36, "bytes": 4, "type": "u32"},
+      {"name": "chunk_crc32c", "offset": 40, "bytes": 4, "type": "u32"},
+      {"name": "reserved", "offset": 44, "bytes": 4, "type": "u32", "constant": 0}
+    ]
+  },
+  "begin_payload": {
+    "bytes": 4016,
+    "prefix_constraints": {
+      "opcode": "BEGIN",
+      "object_id": 0,
+      "object_generation": 0,
+      "image_offset": 0,
+      "byte_count": 0,
+      "chunk_index": 0,
+      "chunk_crc32c": 0
+    },
+    "manifest_fields": [
+      {"name": "image_size", "offset": 48, "bytes": 8, "type": "u64", "minimum": 1, "maximum": 67108864},
+      {"name": "chunk_data_bytes", "offset": 56, "bytes": 4, "type": "u32", "constant": 3968},
+      {"name": "chunk_count", "offset": 60, "bytes": 4, "type": "u32", "constraint": "ceil(image_size/3968), nonzero"},
+      {"name": "segment_count", "offset": 64, "bytes": 4, "type": "u32", "minimum": 1, "maximum": 16},
+      {"name": "kernel_index", "offset": 68, "bytes": 4, "type": "u32", "constraint": "less-than-parsed-kernel-count"},
+      {"name": "image_sha256", "offset": 72, "bytes": 32, "type": "bytes", "constraint": "nonzero SHA-256 of all image_size bytes"},
+      {"name": "elf_machine", "offset": 104, "bytes": 2, "type": "u16", "constant": 224},
+      {"name": "elf_type", "offset": 106, "bytes": 2, "type": "u16", "constant": 3},
+      {"name": "elf_osabi", "offset": 108, "bytes": 1, "type": "u8", "constant": 64},
+      {"name": "elf_abi_version", "offset": 109, "bytes": 1, "type": "u8", "allowed": [2, 3, 4]},
+      {"name": "reserved0", "offset": 110, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "elf_flags", "offset": 112, "bytes": 4, "type": "u32", "constraint": "low-byte-equals-0x4f"},
+      {"name": "gfx_target", "offset": 116, "bytes": 4, "type": "u32", "constant": 950},
+      {"name": "code_object_version", "offset": 120, "bytes": 4, "type": "u32", "allowed": [4, 5, 6]},
+      {"name": "metadata_major", "offset": 124, "bytes": 4, "type": "u32", "constant": 1},
+      {"name": "metadata_minor", "offset": 128, "bytes": 4, "type": "u32", "allowed": [1, 2]},
+      {"name": "relocation_count", "offset": 132, "bytes": 4, "type": "u32", "a1_constant": 0},
+      {"name": "kernarg_segment_size", "offset": 136, "bytes": 4, "type": "u32", "constraint": "nonzero"},
+      {"name": "kernarg_segment_align", "offset": 140, "bytes": 4, "type": "u32", "constraint": "nonzero-power-of-two"},
+      {"name": "group_segment_fixed_size", "offset": 144, "bytes": 4, "type": "u32"},
+      {"name": "private_segment_fixed_size", "offset": 148, "bytes": 4, "type": "u32"},
+      {"name": "max_flat_workgroup_size", "offset": 152, "bytes": 4, "type": "u32", "constraint": "nonzero"},
+      {"name": "wavefront_size", "offset": 156, "bytes": 4, "type": "u32", "constant": 64},
+      {"name": "sgpr_count", "offset": 160, "bytes": 4, "type": "u32"},
+      {"name": "vgpr_count", "offset": 164, "bytes": 4, "type": "u32"},
+      {"name": "uses_dynamic_stack", "offset": 168, "bytes": 4, "type": "u32", "a1_constant": 0},
+      {"name": "descriptor_size", "offset": 172, "bytes": 4, "type": "u32", "constant": 64},
+      {"name": "descriptor_kernel_code_entry_byte_offset", "offset": 176, "bytes": 8, "type": "i64", "constraint": "descriptor_address-plus-offset-equals-code_address-without-overflow"},
+      {"name": "code_address", "offset": 184, "bytes": 8, "type": "u64", "constraint": "ELF-relative-virtual-address"},
+      {"name": "code_file_offset", "offset": 192, "bytes": 8, "type": "u64", "constraint": "range-inside-image"},
+      {"name": "code_size", "offset": 200, "bytes": 8, "type": "u64", "constraint": "nonzero-range-inside-executable-PT_LOAD"},
+      {"name": "descriptor_address", "offset": 208, "bytes": 8, "type": "u64", "constraint": "ELF-relative-virtual-address-aligned-64"},
+      {"name": "descriptor_file_offset", "offset": 216, "bytes": 8, "type": "u64", "constraint": "64-byte-range-inside-read-only-PT_LOAD"},
+      {"name": "kernel_name", "offset": 224, "bytes": 128, "type": "nul-padded-ascii", "constraint": "nonempty-and-terminated"},
+      {"name": "kernel_symbol", "offset": 352, "bytes": 128, "type": "nul-padded-ascii", "constraint": "nonempty-and-terminated"},
+      {"name": "descriptor", "offset": 480, "bytes": 64, "type": "opaque-little-endian-bytes", "constraint": "equals-image-bytes-at-descriptor_file_offset"}
+    ],
+    "segment_table": {
+      "offset": 544,
+      "record_bytes": 48,
+      "maximum_records": 16,
+      "bytes": 768,
+      "fields": [
+        {"name": "type", "offset": 0, "bytes": 4, "type": "u32", "constant": 1},
+        {"name": "flags", "offset": 4, "bytes": 4, "type": "u32", "allowed": [4, 5, 6]},
+        {"name": "file_offset", "offset": 8, "bytes": 8, "type": "u64"},
+        {"name": "virtual_address", "offset": 16, "bytes": 8, "type": "u64"},
+        {"name": "file_size", "offset": 24, "bytes": 8, "type": "u64"},
+        {"name": "memory_size", "offset": 32, "bytes": 8, "type": "u64", "constraint": "at-least-file_size"},
+        {"name": "alignment", "offset": 40, "bytes": 8, "type": "u64", "constraint": "zero-or-power-of-two"}
+      ],
+      "unused_records": "all zero",
+      "a1_validation": "ranges, additions, alignment, file_size<=memory_size, image bounds, and pairwise file/virtual overlap are validated; no range is mapped"
+    },
+    "reserved_tail": {"offset": 1312, "bytes": 2704, "must_be": "all-zero"}
+  },
+  "chunk_payload": {
+    "bytes": 4016,
+    "prefix_constraints": {
+      "opcode": "CHUNK",
+      "object_id": "live-daemon-issued",
+      "object_generation": "exact-live-generation",
+      "image_offset": "equals-next_expected_offset",
+      "byte_count": "1-through-3968-and-no-more-than-image_size-minus-image_offset",
+      "chunk_index": "equals-next_expected_zero-based-index",
+      "chunk_crc32c": "CRC-32C over exactly byte_count copied bytes"
+    },
+    "copied_bytes": {"offset": 48, "bytes": 3968, "type": "bytes", "active_prefix": "byte_count", "inactive_tail": "all-zero"}
+  },
+  "commit_payload": {
+    "bytes": 4016,
+    "prefix_constraints": {
+      "opcode": "COMMIT",
+      "object_id": "live-daemon-issued",
+      "object_generation": "exact-live-generation",
+      "image_offset": 0,
+      "byte_count": "equals-BEGIN-image_size-and-fits-u32-under-the-A1-limit",
+      "chunk_index": "equals-BEGIN-chunk_count",
+      "chunk_crc32c": 0
+    },
+    "fields": [
+      {"name": "image_sha256", "offset": 48, "bytes": 32, "type": "bytes", "constraint": "equals-BEGIN-image_sha256-and-daemon-SHA-256-over-staging"},
+      {"name": "reserved_tail", "offset": 80, "bytes": 3936, "type": "bytes", "constant": "all-zero"}
+    ]
+  },
+  "ack_payload": {
+    "bytes": 4016,
+    "fields": [
+      {"name": "major", "offset": 0, "bytes": 2, "type": "u16", "constant": 1},
+      {"name": "minor", "offset": 2, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "status", "offset": 4, "bytes": 4, "type": "u32", "values_source": "base_protocol.statuses"},
+      {"name": "opcode", "offset": 8, "bytes": 2, "type": "u16", "values_source": "transport.request_opcodes"},
+      {"name": "flags", "offset": 10, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "reserved0", "offset": 12, "bytes": 4, "type": "u32", "constant": 0},
+      {"name": "object_id", "offset": 16, "bytes": 8, "type": "u64"},
+      {"name": "object_generation", "offset": 24, "bytes": 8, "type": "u64"},
+      {"name": "accepted_offset", "offset": 32, "bytes": 8, "type": "u64"},
+      {"name": "accepted_count", "offset": 40, "bytes": 4, "type": "u32"},
+      {"name": "chunk_index", "offset": 44, "bytes": 4, "type": "u32"},
+      {"name": "mapped_base_va", "offset": 48, "bytes": 8, "type": "u64", "a1_constant": 0},
+      {"name": "descriptor_va", "offset": 56, "bytes": 8, "type": "u64", "a1_constant": 0},
+      {"name": "code_va", "offset": 64, "bytes": 8, "type": "u64", "a1_constant": 0},
+      {"name": "kernarg_va", "offset": 72, "bytes": 8, "type": "u64", "a1_constant": 0},
+      {"name": "image_size", "offset": 80, "bytes": 8, "type": "u64"},
+      {"name": "kernel_index", "offset": 88, "bytes": 4, "type": "u32"},
+      {"name": "segment_count", "offset": 92, "bytes": 4, "type": "u32"},
+      {"name": "sim_tick", "offset": 96, "bytes": 8, "type": "u64"},
+      {"name": "image_sha256", "offset": 104, "bytes": 32, "type": "bytes"},
+      {"name": "error_code", "offset": 136, "bytes": 4, "type": "u32"},
+      {"name": "reserved1", "offset": 140, "bytes": 4, "type": "u32", "constant": 0},
+      {"name": "reserved_tail", "offset": 144, "bytes": 3872, "type": "bytes", "constant": "all-zero"}
+    ]
+  },
+  "opcode_invariants": {
+    "BEGIN": "the daemon validates the complete manifest, allocates a bounded owner-scoped staging object, and returns a fresh nonzero object ID/generation; it creates no process mapping and publishes no GPU address",
+    "CHUNK": "the daemon accepts only the next contiguous index and offset, checks record CRC, copied-byte CRC, bounds, and zero padding, copies into staging, then ACKs exactly that offset/count/index",
+    "COMMIT": "the daemon requires all declared chunks and bytes, recomputes SHA-256 over staging, compares BEGIN and COMMIT identities, marks the staging image immutable, and ACKs; A1 still maps and executes nothing",
+    "failure": "a non-OK ACK publishes no new identity or address, and any post-BEGIN payload, sequence, CRC, padding, digest, ownership, or generation failure aborts and zeroizes the staging transaction",
+    "retry": "the client does not resend an uncertain record in the same connection; timeout, cancellation, connection loss, or indeterminate ACK poisons the session and disconnect cleanup invalidates the object"
+  },
+  "validation_precedence": [
+    "DROP_AND_CLOSE base envelope, record length, header CRC, message type, header reserved field, MSG_TRUNC, MSG_CTRUNC, ancillary data, or uncorrelatable request",
+    "MALFORMED payload flags, opcode shape, payload reserved field, zero padding, count, index, offset, per-chunk CRC, manifest scalar, string termination, descriptor copy, segment range, overlap, or arithmetic overflow",
+    "UNSUPPORTED_VERSION code-object transport version, ELF ABI version, code-object version, or metadata version",
+    "INSTANCE_MISMATCH daemon UUID",
+    "PROTOCOL_STATE connection ID, job epoch, non-increasing request ID, opcode order, stale generation, duplicate chunk, gap, or already committed/aborted object",
+    "TOPOLOGY_MISMATCH negotiated topology identity or gfx target",
+    "UNSUPPORTED_CAPABILITY CODE_OBJECT_TRANSPORT_V1 not selected",
+    "UNAUTHORIZED foreign owner or object",
+    "BUSY owner already has a staging transaction or object is pinned by a future gate",
+    "RESOURCE_EXHAUSTED image, staging, object, chunk-count, or generation ceiling",
+    "PROTOCOL_STATE whole-image digest, manifest-to-image, descriptor-to-image, symbol relation, or complete-byte-count mismatch",
+    "INTERNAL daemon allocation, hashing, cleanup, or transport failure"
+  ],
+  "ownership_and_atomicity": {
+    "owner": "object IDs and generations are scoped to the established connection and daemon instance; neither is a pointer or address",
+    "generation": "daemon-lifetime monotonic nonzero u64, never wraps, and changes on slot reuse",
+    "staging_ceiling_bytes": 67108864,
+    "one_transaction_per_owner": true,
+    "begin_atomicity": "validation and bounded allocation complete before the success ACK; failure creates no visible object",
+    "chunk_atomicity": "CRC, bounds, order, and zero padding are validated before any byte or next-offset state changes",
+    "commit_atomicity": "all bytes and SHA-256 are validated before immutable state is published; failure aborts instead of publishing a partial image",
+    "disconnect": "discard and zeroize every owner-scoped mutable staging image and suppress later ACKs",
+    "sha256_rule": "SHA-256 covers exactly image_size staged bytes in increasing image offset order; CRC-32C is only record/chunk corruption detection and never substitutes for image identity"
+  },
+  "a1_boundary": {
+    "id": "A1",
+    "name": "transport-staging-only",
+    "transport_codec": true,
+    "daemon_staging": true,
+    "manifest_validation": true,
+    "whole_image_sha256": true,
+    "pt_load_mapping": false,
+    "process_page_mapping": false,
+    "relocation_application": false,
+    "kernarg_publication": false,
+    "aql_construction": false,
+    "queue_submission": false,
+    "gem5_execution": false,
+    "isa_supported_by_gemsim": false,
+    "ack_address_rule": "mapped_base_va, descriptor_va, code_va, and kernarg_va are zero in every A1 ACK, including COMMIT success",
+    "no_claim": "A1 proves only exact copied bytes, transaction ownership, and digest-bound metadata. It does not prove loadability, GPU visibility, decoder support, kernel correctness, signal completion, timing, performance, or hardware presence.",
+    "future_gates": [
+      "A2 independently validates and atomically maps PT_LOAD ranges, applies required relocations, and zero-fills memory_size-file_size",
+      "A3 builds complete explicit plus hidden kernarg bytes and a daemon-owned AQL packet from validated handles",
+      "A4 submits through the real HSA queue/fetch/decoder/retirement path and retains output and signal evidence"
+    ]
+  },
+  "source_constraints": {
+    "runtime_parser": {
+      "path": "projects/self-amdgpu-runtime/src/code_object.c",
+      "functions": ["sagr_code_object_validate", "sagr_code_object_describe_dispatch", "sagr_code_object_materialize_kernel_code", "sagr_code_object_pack_kernarg"],
+      "boundary": "the current binding is metadata-only, has no image digest, materializes only one code range, and maps no PT_LOAD; A1 must hash the original copied image and must not set isa_supported_by_gemsim"
+    },
+    "runtime_transport": {
+      "paths": ["projects/self-amdgpu-runtime/src/transport_internal.h", "projects/self-amdgpu-runtime/src/transport_codec.c", "projects/self-amdgpu-runtime/src/transport.c"],
+      "constraints": ["base record maximum is 65536", "capability validation currently accepts bits 0 through 5 only", "existing memory copy uses memfd and SCM_RIGHTS and is not the code-object carrier", "existing pinned dispatch message types 11 through 13 remain unchanged"]
+    },
+    "gem5_protocol": {
+      "paths": ["projects/gem5/src/dev/amdgpu/host_gpu_protocol.hh", "projects/gem5/src/dev/amdgpu/host_gpu_protocol.cc", "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc"],
+      "constraints": ["existing message types end at 15", "established records validate size, identity, reserved bytes, and frame CRC", "ancillary descriptors are accepted only for the existing memory request path", "A1 must not call ensurePacketVisible, writePacketVisible, publishDispatchPacket, or submitDispatchPkt"]
+    },
+    "descriptor_execution_rule_for_future_gates": "AQL kernel_object is the mapped 64-byte .kd descriptor address; gem5 reads that descriptor and computes machine code address as kernel_object plus descriptor_kernel_code_entry_byte_offset. It is never the .text entry address itself."
+  },
+  "observed_vecadd_candidate": {
+    "authority": "CP-0012 generated artifact observation only; ignored artifact is not an A1 acceptance fixture and no execution claim follows",
+    "image_bytes": 5672,
+    "image_sha256_hex": "b0e07d4d34826177f7261b706dc9bac139d7a59b5217e8094fa714371874efaf",
+    "chunk_count": 2,
+    "chunk_byte_counts": [3968, 1704],
+    "segments": [
+      {"flags": 4, "file_offset_hex": "0", "virtual_address_hex": "0", "file_size_hex": "984", "memory_size_hex": "984", "alignment_hex": "1000"},
+      {"flags": 5, "file_offset_hex": "a00", "virtual_address_hex": "1a00", "file_size_hex": "580", "memory_size_hex": "580", "alignment_hex": "1000"},
+      {"flags": 6, "file_offset_hex": "f80", "virtual_address_hex": "2f80", "file_size_hex": "70", "memory_size_hex": "80", "alignment_hex": "1000"}
+    ],
+    "kernel": {
+      "name": "vecadd",
+      "symbol": "vecadd.kd",
+      "code_address_hex": "1a00",
+      "code_file_offset_hex": "a00",
+      "code_size_hex": "a0",
+      "descriptor_address_hex": "8c0",
+      "descriptor_file_offset_hex": "8c0",
+      "descriptor_size": 64,
+      "descriptor_kernel_code_entry_byte_offset_hex": "1140",
+      "entry_relation": "0x8c0 + 0x1140 = 0x1a00"
+    }
+  },
+  "golden": {
+    "identity": {
+      "request_id_hex": "0123456789abcdef",
+      "daemon_instance_uuid_hex": "00112233445566778899aabbccddeeff",
+      "connection_id_hex": "1122334455667788",
+      "job_epoch_hex": "0102030405060708",
+      "object_id_hex": "434f420000000001",
+      "object_generation_hex": "0000000000000001"
+    },
+    "chunk": {
+      "index": 1,
+      "image_offset": 3968,
+      "copied_hex": "7665636164642d677078393530",
+      "copied_bytes": 13,
+      "copied_crc32c_hex": "a89fc8f9"
+    }
+  },
+  "forbidden_scope": [
+    "host pointers, pointer-sized wire fields, function addresses, shared-library handles, or host virtual addresses",
+    "file descriptors, memfd, dma-buf, render-node handles, SCM_RIGHTS, or any ancillary descriptor",
+    "PT_LOAD or process-page mapping in A1",
+    "relocation application, kernarg publication, AQL construction, queue submission, or gem5 execution in A1",
+    "CPU arithmetic fallback, metadata synthesis, guessed symbol suffixes, or treating CRC-32C as image identity",
+    "claiming arbitrary client ELF, generic gfx target support, decoder correctness, runtime correctness, hardware state, timing, or performance"
+  ],
+  "acceptance_boundary": "This CP-0013 A1 authority freezes only the 4096-byte code-object transaction and its deterministic validation/ownership rules. Child runtime/gem5 changes and retained evidence are required before moving any mapping or execution field from false."
+}

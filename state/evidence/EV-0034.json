@@ -1,0 +1,937 @@
+{
+  "checkpoint_id": "CP-0013",
+  "claim": "The gem5 child and root CP-0013 authority pass after one canonical 24-job native mold relink: protocol/state/socket/dispatch/decoder GTests and 24/24 authority tests pass, final binaries and wrapper/docs identities are retained, and the evidence remains A1 staging-only.",
+  "command_argv": [
+    [
+      "bash",
+      "-c",
+      "set -o pipefail; /usr/bin/time -v scripts/build_gem5_mold24.sh build/VEGA_X86/gem5.opt build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt build/VEGA_X86/dev/amdgpu/host_gpu_code_object_state.test.opt 2>&1 | tee /tmp/cp13-gem5-mold24-final.log"
+    ],
+    [
+      "sha256sum",
+      "build/VEGA_X86/gem5.opt",
+      "build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt",
+      "build/VEGA_X86/dev/amdgpu/host_gpu_code_object_state.test.opt"
+    ],
+    [
+      "python3",
+      "-c",
+      "import os; b=['build/VEGA_X86/gem5.opt','build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt','build/VEGA_X86/dev/amdgpu/host_gpu_code_object_state.test.opt']; s=['src/dev/amdgpu/SConscript','src/dev/amdgpu/host_gpu_bridge.cc','src/dev/amdgpu/host_gpu_bridge.hh','src/dev/amdgpu/host_gpu_connection_state.hh','src/dev/amdgpu/host_gpu_protocol.cc','src/dev/amdgpu/host_gpu_protocol.hh','src/dev/amdgpu/host_gpu_protocol.test.cc','src/dev/amdgpu/host_gpu_socket_utils.test.cc','src/dev/amdgpu/host_gpu_code_object_image.cc','src/dev/amdgpu/host_gpu_code_object_image.hh','src/dev/amdgpu/host_gpu_code_object_state.cc','src/dev/amdgpu/host_gpu_code_object_state.hh','src/dev/amdgpu/host_gpu_code_object_state.test.cc']; [print(f'{os.stat(p).st_mtime_ns} {os.stat(p).st_size} {p}') for p in s+b]; assert max(os.stat(p).st_mtime_ns for p in s) < min(os.stat(p).st_mtime_ns for p in b)"
+    ],
+    [
+      "bash",
+      "-c",
+      "command -v mold; mold --version; env/gem5-build/bin/scons --version; sha256sum scripts/build_gem5_mold24.sh docs/gem5-build.md protocol/host-transport-v1-codeobj-transport.json docs/host-transport-v1-codeobj-transport.md tests/test_host_transport_codeobj_transport_spec.py"
+    ],
+    [
+      "sha256sum",
+      "projects/gem5/src/dev/amdgpu/SConscript",
+      "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+      "projects/gem5/src/dev/amdgpu/host_gpu_bridge.hh",
+      "projects/gem5/src/dev/amdgpu/host_gpu_connection_state.hh",
+      "projects/gem5/src/dev/amdgpu/host_gpu_protocol.cc",
+      "projects/gem5/src/dev/amdgpu/host_gpu_protocol.hh",
+      "projects/gem5/src/dev/amdgpu/host_gpu_protocol.test.cc",
+      "projects/gem5/src/dev/amdgpu/host_gpu_socket_utils.test.cc",
+      "projects/gem5/src/dev/amdgpu/host_gpu_code_object_image.cc",
+      "projects/gem5/src/dev/amdgpu/host_gpu_code_object_image.hh",
+      "projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.cc",
+      "projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.hh",
+      "projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.test.cc"
+    ],
+    [
+      "bash",
+      "-c",
+      "set -u; git diff --check -- projects/gem5/src/dev/amdgpu/SConscript projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc projects/gem5/src/dev/amdgpu/host_gpu_bridge.hh projects/gem5/src/dev/amdgpu/host_gpu_connection_state.hh projects/gem5/src/dev/amdgpu/host_gpu_protocol.cc projects/gem5/src/dev/amdgpu/host_gpu_protocol.hh projects/gem5/src/dev/amdgpu/host_gpu_protocol.test.cc projects/gem5/src/dev/amdgpu/host_gpu_socket_utils.test.cc; git diff --no-index --check --no-patch /dev/null projects/gem5/src/dev/amdgpu/host_gpu_code_object_image.cc >/tmp/cp13-gem5-diff-image-cc.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-gem5-diff-image-cc.out; git diff --no-index --check --no-patch /dev/null projects/gem5/src/dev/amdgpu/host_gpu_code_object_image.hh >/tmp/cp13-gem5-diff-image-hh.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-gem5-diff-image-hh.out; git diff --no-index --check --no-patch /dev/null projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.cc >/tmp/cp13-gem5-diff-state-cc.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-gem5-diff-state-cc.out; git diff --no-index --check --no-patch /dev/null projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.hh >/tmp/cp13-gem5-diff-state-hh.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-gem5-diff-state-hh.out; git diff --no-index --check --no-patch /dev/null projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.test.cc >/tmp/cp13-gem5-diff-state-test.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-gem5-diff-state-test.out; printf '%s\\n' 'explicit tracked and untracked gem5 CP-0013 diff-check clean'"
+    ],
+    [
+      "build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "build/VEGA_X86/dev/amdgpu/host_gpu_code_object_state.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "build/VEGA_X86/dev/amdgpu/host_gpu_socket_utils.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "build/VEGA_X86/dev/amdgpu/host_gpu_dispatch_state.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "build/VEGA_X86/dev/amdgpu/host_gpu_memory_state.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "build/VEGA_X86/dev/amdgpu/host_gpu_queue_state.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "build/VEGA_X86/dev/amdgpu/host_gpu_signal_state.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "build/VEGA_X86/dev/amdgpu/host_gpu_kmt_state.test.opt",
+      "--gtest_color=no"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "-v",
+      "tests.test_host_transport_codeobj_spec",
+      "tests.test_host_transport_codeobj_transport_spec"
+    ],
+    [
+      "python3",
+      "-c",
+      "import json; json.load(open('protocol/host-transport-v1-codeobj-transport.json')); json.load(open('protocol/host-transport-v1-codeobj.json')); print('protocol JSON parse: OK')"
+    ],
+    [
+      "sha256sum",
+      "docs/gem5-build.md",
+      "scripts/build_gem5_mold24.sh",
+      "protocol/host-transport-v1-codeobj-transport.json",
+      "docs/host-transport-v1-codeobj-transport.md",
+      "tests/test_host_transport_codeobj_transport_spec.py"
+    ],
+    [
+      "bash",
+      "-c",
+      "set -u; git diff --check -- docs/gem5-build.md scripts/build_gem5_mold24.sh; git diff --no-index --check --no-patch /dev/null docs/host-transport-v1-codeobj-transport.md >/tmp/cp13-root-diff-doc.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-root-diff-doc.out; git diff --no-index --check --no-patch /dev/null protocol/host-transport-v1-codeobj-transport.json >/tmp/cp13-root-diff-json.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-root-diff-json.out; git diff --no-index --check --no-patch /dev/null tests/test_host_transport_codeobj_transport_spec.py >/tmp/cp13-root-diff-test.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-root-diff-test.out; printf '%s\\n' 'explicit root CP-0013 tracked/untracked diff-check clean'"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "set -o pipefail; /usr/bin/time -v scripts/build_gem5_mold24.sh build/VEGA_X86/gem5.opt build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt build/VEGA_X86/dev/amdgpu/host_gpu_code_object_state.test.opt 2>&1 | tee /tmp/cp13-gem5-mold24-final.log"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:10:26+00:00",
+      "exit_code": 0,
+      "id": "mold24-relink",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/mold24-relink.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f440e5b96033826db136765098eae15babb916be14e8c47eb5b6d7b3380b19a3",
+        "size": 841,
+        "tracked": false
+      },
+      "result": "One canonical scripts/build_gem5_mold24.sh relink of the three CP-0013 gem5 targets exits 0 with -j24 and --linker=mold.",
+      "started_at": "2026-08-09T05:09:49+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/mold24-relink.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/mold24-relink.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7eac4bbae0ae7fd0bf34a20980dc449f3a448def519a98e79307ebf8fd9baac9",
+        "size": 99448,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "build/VEGA_X86/gem5.opt",
+        "build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt",
+        "build/VEGA_X86/dev/amdgpu/host_gpu_code_object_state.test.opt"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T05:13:40+00:00",
+      "exit_code": 0,
+      "id": "final-binary-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/final-binary-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f19e3e227fc0fc655d928678e95d50bcaf41a7757db68dff87ca19bfcde8152f",
+        "size": 766,
+        "tracked": false
+      },
+      "result": "Final gem5.opt, protocol-test, and code-object-state-test SHA-256 identities match the relinked artifacts.",
+      "started_at": "2026-08-09T05:13:38+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/final-binary-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/final-binary-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "632ebb4a72dd913055065ba5e3267d2babe389a691539e5aa9e2127ba64d21ef",
+        "size": 337,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import os; b=['build/VEGA_X86/gem5.opt','build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt','build/VEGA_X86/dev/amdgpu/host_gpu_code_object_state.test.opt']; s=['src/dev/amdgpu/SConscript','src/dev/amdgpu/host_gpu_bridge.cc','src/dev/amdgpu/host_gpu_bridge.hh','src/dev/amdgpu/host_gpu_connection_state.hh','src/dev/amdgpu/host_gpu_protocol.cc','src/dev/amdgpu/host_gpu_protocol.hh','src/dev/amdgpu/host_gpu_protocol.test.cc','src/dev/amdgpu/host_gpu_socket_utils.test.cc','src/dev/amdgpu/host_gpu_code_object_image.cc','src/dev/amdgpu/host_gpu_code_object_image.hh','src/dev/amdgpu/host_gpu_code_object_state.cc','src/dev/amdgpu/host_gpu_code_object_state.hh','src/dev/amdgpu/host_gpu_code_object_state.test.cc']; [print(f'{os.stat(p).st_mtime_ns} {os.stat(p).st_size} {p}') for p in s+b]; assert max(os.stat(p).st_mtime_ns for p in s) < min(os.stat(p).st_mtime_ns for p in b)"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T05:13:38+00:00",
+      "exit_code": 0,
+      "id": "final-binary-freshness",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/final-binary-freshness.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d626ed3652b6f0802ce8c2586411f9cf824dc49e66a29fae5ad3c30f2152c27e",
+        "size": 1509,
+        "tracked": false
+      },
+      "result": "Every listed CP-0013 gem5 source/configuration mtime precedes all three final binaries.",
+      "started_at": "2026-08-09T05:13:38+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/final-binary-freshness.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/final-binary-freshness.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8b18ca481a480cd6c2dd5a417d0886e892f75b5eaabf58443fd7e20f0d5f6fca",
+        "size": 1087,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "command -v mold; mold --version; env/gem5-build/bin/scons --version; sha256sum scripts/build_gem5_mold24.sh docs/gem5-build.md protocol/host-transport-v1-codeobj-transport.json docs/host-transport-v1-codeobj-transport.md tests/test_host_transport_codeobj_transport_spec.py"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:13:39+00:00",
+      "exit_code": 0,
+      "id": "tool-versions-identities",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/tool-versions-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "73f75050356faee918d1256b2e116ad6c54feeafbdd5eedfda45e22bbc37c0cf",
+        "size": 889,
+        "tracked": false
+      },
+      "result": "mold 2.40.4, pinned SCons, and wrapper/authority/docs/test SHA-256 identities are retained.",
+      "started_at": "2026-08-09T05:13:38+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/tool-versions-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/tool-versions-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8ac6a73d48705be8a1305330f290a3607c41593fbafa9d436d204564f844278d",
+        "size": 864,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "projects/gem5/src/dev/amdgpu/SConscript",
+        "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+        "projects/gem5/src/dev/amdgpu/host_gpu_bridge.hh",
+        "projects/gem5/src/dev/amdgpu/host_gpu_connection_state.hh",
+        "projects/gem5/src/dev/amdgpu/host_gpu_protocol.cc",
+        "projects/gem5/src/dev/amdgpu/host_gpu_protocol.hh",
+        "projects/gem5/src/dev/amdgpu/host_gpu_protocol.test.cc",
+        "projects/gem5/src/dev/amdgpu/host_gpu_socket_utils.test.cc",
+        "projects/gem5/src/dev/amdgpu/host_gpu_code_object_image.cc",
+        "projects/gem5/src/dev/amdgpu/host_gpu_code_object_image.hh",
+        "projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.cc",
+        "projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.hh",
+        "projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.test.cc"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:13:39+00:00",
+      "exit_code": 0,
+      "id": "gem5-source-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/gem5-source-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "66988130b668f3015fd38961bec8bba7817ddc6095fbda2d595f1f6664067f98",
+        "size": 1392,
+        "tracked": false
+      },
+      "result": "All CP-0013 gem5 source/configuration paths have recorded SHA-256 identities.",
+      "started_at": "2026-08-09T05:13:39+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/gem5-source-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/gem5-source-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "11a21bcee1d0ed51a54dd42aeb3286719193cb9d270fcc96b3c60df2ce9409d9",
+        "size": 1566,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "set -u; git diff --check -- projects/gem5/src/dev/amdgpu/SConscript projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc projects/gem5/src/dev/amdgpu/host_gpu_bridge.hh projects/gem5/src/dev/amdgpu/host_gpu_connection_state.hh projects/gem5/src/dev/amdgpu/host_gpu_protocol.cc projects/gem5/src/dev/amdgpu/host_gpu_protocol.hh projects/gem5/src/dev/amdgpu/host_gpu_protocol.test.cc projects/gem5/src/dev/amdgpu/host_gpu_socket_utils.test.cc; git diff --no-index --check --no-patch /dev/null projects/gem5/src/dev/amdgpu/host_gpu_code_object_image.cc >/tmp/cp13-gem5-diff-image-cc.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-gem5-diff-image-cc.out; git diff --no-index --check --no-patch /dev/null projects/gem5/src/dev/amdgpu/host_gpu_code_object_image.hh >/tmp/cp13-gem5-diff-image-hh.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-gem5-diff-image-hh.out; git diff --no-index --check --no-patch /dev/null projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.cc >/tmp/cp13-gem5-diff-state-cc.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-gem5-diff-state-cc.out; git diff --no-index --check --no-patch /dev/null projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.hh >/tmp/cp13-gem5-diff-state-hh.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-gem5-diff-state-hh.out; git diff --no-index --check --no-patch /dev/null projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.test.cc >/tmp/cp13-gem5-diff-state-test.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-gem5-diff-state-test.out; printf '%s\\n' 'explicit tracked and untracked gem5 CP-0013 diff-check clean'"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:17:55+00:00",
+      "exit_code": 0,
+      "id": "gem5-diff-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/gem5-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1a23dca165e1592feff40666c9e4bba38370921257d7eae335ce9046c05f518d",
+        "size": 2206,
+        "tracked": false
+      },
+      "result": "Explicit tracked and untracked gem5 paths pass whitespace diff-check.",
+      "started_at": "2026-08-09T05:17:55+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/gem5-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/gem5-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0c308cdd7ad5e6ef59be251c7e9667a37583d226925e5c74433e8a10d5cd1eb8",
+        "size": 61,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T05:14:41+00:00",
+      "exit_code": 0,
+      "id": "host-protocol-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-protocol-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "bc7feb403a533eed9f138834aad7c57ae3844f3c7f45fa8814fd72386fca65ec",
+        "size": 674,
+        "tracked": false
+      },
+      "result": "HostGpuProtocol GTest passes 43/43.",
+      "started_at": "2026-08-09T05:14:41+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-protocol-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-protocol-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "66ad0b6ac8977092073936152b77e11ceb29a4d480450e3925ffed619f79d156",
+        "size": 6281,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "build/VEGA_X86/dev/amdgpu/host_gpu_code_object_state.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T05:14:41+00:00",
+      "exit_code": 0,
+      "id": "host-code-object-state-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-code-object-state-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b6ca9dce13a58551ed587e08624f2cac2327a0e87f05b8a7cbbd6bcc3fe9ef34",
+        "size": 701,
+        "tracked": false
+      },
+      "result": "HostGPUCodeObjectState GTest passes 14/14, including staged-image ACK echo and rejection cases.",
+      "started_at": "2026-08-09T05:14:41+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-code-object-state-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-code-object-state-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3e95d6b9a8548824ec763c1fa7a368a6ccdca74c7ead51d28a2d4b6da5755d42",
+        "size": 2566,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "build/VEGA_X86/dev/amdgpu/host_gpu_socket_utils.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T05:14:41+00:00",
+      "exit_code": 0,
+      "id": "host-socket-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-socket-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0aa15aba45334f19488f325fc9973ad992633af60eca267c8f840f6fb4db690f",
+        "size": 674,
+        "tracked": false
+      },
+      "result": "Host GPU socket utility GTest passes 23/23.",
+      "started_at": "2026-08-09T05:14:41+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-socket-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-socket-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "732fa89d784c3ff51d52b9802e9480272607094f3cc332c8e0bc6dd3e442ec92",
+        "size": 4137,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "build/VEGA_X86/dev/amdgpu/host_gpu_dispatch_state.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T05:14:41+00:00",
+      "exit_code": 0,
+      "id": "host-dispatch-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-dispatch-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "48f3883830139ea71fbe2e21530aef8e9444a6b33012677765fe565b06afbeb4",
+        "size": 680,
+        "tracked": false
+      },
+      "result": "Host GPU dispatch-state GTest passes 12/12.",
+      "started_at": "2026-08-09T05:14:41+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-dispatch-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-dispatch-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "65f1415246ac943e967fc7de141ea17197cd7a721ecd88b96598d4a76963ce7e",
+        "size": 2474,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T05:14:41+00:00",
+      "exit_code": 0,
+      "id": "gpu-decoder-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/gpu-decoder-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7e57316f6cff31b008c2ffc908de860a203c7b2886823bfb4df7988e2b1615c1",
+        "size": 669,
+        "tracked": false
+      },
+      "result": "Pinned decoder preload GTest passes 1/1; this is not kernel execution evidence.",
+      "started_at": "2026-08-09T05:14:41+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/gpu-decoder-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/gpu-decoder-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5f4d0ac6a131be2a8dff8c492267af2e9788648ec2d57333c36ddb31acb9d0aa",
+        "size": 493,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "build/VEGA_X86/dev/amdgpu/host_gpu_memory_state.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T05:14:42+00:00",
+      "exit_code": 0,
+      "id": "host-memory-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-memory-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0f5e94200e6cd645584766a3d9dbc3bdff4c122358374ed61de0135011aaa95c",
+        "size": 674,
+        "tracked": false
+      },
+      "result": "Existing host memory-state GTest passes 8/8.",
+      "started_at": "2026-08-09T05:14:42+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-memory-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-memory-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5742dac03dfc3856b3d21112d33cf4a226e9b256876ee1202033f36e6b64f870",
+        "size": 1635,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "build/VEGA_X86/dev/amdgpu/host_gpu_queue_state.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T05:14:42+00:00",
+      "exit_code": 0,
+      "id": "host-queue-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-queue-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8bac5292e7294c10f173e4e1b51ee43d0a59f9c1b3da5a803d91540dfaf7c80c",
+        "size": 671,
+        "tracked": false
+      },
+      "result": "Existing host queue-state GTest passes 12/12.",
+      "started_at": "2026-08-09T05:14:42+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-queue-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-queue-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b6733f685e4346a51c111862ebf271d9edec5c6b6986382ce0777996f81d7571",
+        "size": 2134,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "build/VEGA_X86/dev/amdgpu/host_gpu_signal_state.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T05:14:41+00:00",
+      "exit_code": 0,
+      "id": "host-signal-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-signal-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a8febcb63cca2ea29df5799256a26e79ba3ba1e4399ef97b8bf5006702aa117e",
+        "size": 674,
+        "tracked": false
+      },
+      "result": "Existing host signal-state GTest passes 12/12.",
+      "started_at": "2026-08-09T05:14:41+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-signal-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-signal-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6f672ab235341fd3d5d0fc86c086a1cab12752d33c44067061db3b9eac681de5",
+        "size": 2286,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "build/VEGA_X86/dev/amdgpu/host_gpu_kmt_state.test.opt",
+        "--gtest_color=no"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T05:14:42+00:00",
+      "exit_code": 0,
+      "id": "host-kmt-gtest",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-kmt-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8a93f1e558987cbf7c7ee8033045ec511acd0143e7e1234ba61fe29d7643bb31",
+        "size": 665,
+        "tracked": false
+      },
+      "result": "Existing host KMT-state GTest passes 5/5.",
+      "started_at": "2026-08-09T05:14:42+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-kmt-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/gem5-tests/host-kmt-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c5caeb7a87b9163d285fadc64b482f1874e1bb88fc70b25a319acb70abf51f91",
+        "size": 1084,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "-v",
+        "tests.test_host_transport_codeobj_spec",
+        "tests.test_host_transport_codeobj_transport_spec"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:18:56+00:00",
+      "exit_code": 0,
+      "id": "authority-tests",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/root-tests/authority-tests.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7fc1a7305852be774ebd954c3ff44e555a2e0a52e89aa142a52dd085b32b5e80",
+        "size": 723,
+        "tracked": false
+      },
+      "result": "Root code-object authority and A1 transport specification tests pass 24/24.",
+      "started_at": "2026-08-09T05:18:56+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/root-tests/authority-tests.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ffbf9e63311af2fdd092e63ec106075f560b255cc48241071f8dc6eab80cd9fa",
+        "size": 4230,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/root-tests/authority-tests.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import json; json.load(open('protocol/host-transport-v1-codeobj-transport.json')); json.load(open('protocol/host-transport-v1-codeobj.json')); print('protocol JSON parse: OK')"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:18:56+00:00",
+      "exit_code": 0,
+      "id": "authority-json-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/root-tests/authority-json-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "840fb2fe825b868548838640640d0c4e734677a57907a0f1f29471f48f8b1e97",
+        "size": 786,
+        "tracked": false
+      },
+      "result": "CP-0013 authority JSON files parse successfully.",
+      "started_at": "2026-08-09T05:18:56+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/root-tests/authority-json-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/root-tests/authority-json-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "cb0f34b4c77edf9612c693bf9d5fd9d7084a58eae67af530e807d84f4555e866",
+        "size": 24,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "docs/gem5-build.md",
+        "scripts/build_gem5_mold24.sh",
+        "protocol/host-transport-v1-codeobj-transport.json",
+        "docs/host-transport-v1-codeobj-transport.md",
+        "tests/test_host_transport_codeobj_transport_spec.py"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:18:56+00:00",
+      "exit_code": 0,
+      "id": "root-source-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/root-tests/root-source-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9ce18499fef9032669bd188d837f6808fa8c1e9a4c540c1be2397ea73f85e7fe",
+        "size": 821,
+        "tracked": false
+      },
+      "result": "Wrapper, gem5 build method, authority JSON/docs, and authority-test identities are retained.",
+      "started_at": "2026-08-09T05:18:56+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/root-tests/root-source-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/root-tests/root-source-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "be1e8f57952d7b413d800240a9eb1d82f2aa93620977c5e366c8a3337ceab9e1",
+        "size": 524,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "set -u; git diff --check -- docs/gem5-build.md scripts/build_gem5_mold24.sh; git diff --no-index --check --no-patch /dev/null docs/host-transport-v1-codeobj-transport.md >/tmp/cp13-root-diff-doc.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-root-diff-doc.out; git diff --no-index --check --no-patch /dev/null protocol/host-transport-v1-codeobj-transport.json >/tmp/cp13-root-diff-json.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-root-diff-json.out; git diff --no-index --check --no-patch /dev/null tests/test_host_transport_codeobj_transport_spec.py >/tmp/cp13-root-diff-test.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-root-diff-test.out; printf '%s\\n' 'explicit root CP-0013 tracked/untracked diff-check clean'"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:19:07+00:00",
+      "exit_code": 0,
+      "id": "root-diff-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/root-tests/root-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "103ba2c4a757c93745db88beee52883e1a2524680fd013e6805a2045c008f67a",
+        "size": 1342,
+        "tracked": false
+      },
+      "result": "Explicit tracked and untracked root CP-0013 paths pass whitespace diff-check.",
+      "started_at": "2026-08-09T05:19:07+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/root-tests/root-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/root-tests/root-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "32633160808ae83cc36c0852f92d98202ed743835dad9572f2a5f65e4b1d9c92",
+        "size": 57,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T05:19:07+00:00",
+  "environment_fingerprint": {
+    "a1_only": true,
+    "gem5_child_head": "3938af681bfe39c4933fa031af27f9c2b81c82c8",
+    "linker": "mold",
+    "mold_version": "2.40.4",
+    "scons_jobs": 24,
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4"
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0013/gem5-builds/gem5.opt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "38c4c8a2e099538228ced6686b21e1d02f5c1cfea2e5c320820858bf5f4fda48",
+      "size": 1185948344,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0013/gem5-builds/host_gpu_protocol.test.opt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7331eb8940ba9fe103e367df073c9bf82eec664b999c95ea88753bd0b837ffa8",
+      "size": 4772160,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0013/gem5-builds/host_gpu_code_object_state.test.opt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "c99b003dfc8944be0952dd47bd5e48fb07d2e8d285ee8b366247d259b617b211",
+      "size": 3847840,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0013/gem5-mold24-final.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7eac4bbae0ae7fd0bf34a20980dc449f3a448def519a98e79307ebf8fd9baac9",
+      "size": 99448,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0013/method/build_gem5_mold24.sh",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "3c38f94af78a3cd1c553089c5289d85fafe73a98cf179692d5566ed1a1bb4efe",
+      "size": 1089,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0013/method/gem5-build.md",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1b7f27a76875a64d11bf7580bbc211dbcdd126e2257ef109452cebc758d8804a",
+      "size": 2340,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0013/method/host-transport-v1-codeobj-transport.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a428897466fd96ca43925972e4761429fee62706ca21b179b233aee07d75166c",
+      "size": 20853,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0013/method/host-transport-v1-codeobj-transport.md",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a0ccec86245cc98ae3fccafa577d1c44a84a7ce329f82b6ca13c0c01d2f8651d",
+      "size": 9617,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0013/method/test_host_transport_codeobj_transport_spec.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "c9a057a6528057a26d3dceefbd1f57671d1f35db5db70d74667333fb006b0577",
+      "size": 14442,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0034",
+  "limitations": [
+    "CP-0013 is A1 transport-staging evidence only: every request and ACK is one fixed 4096-byte record with 4096-byte begin/chunk/commit framing, per-chunk CRC-32C, whole-image SHA-256, owner/generation checks, and zero mapped/descriptor/code/kernarg ACK virtual addresses.",
+    "No PT_LOAD mapping, process-page mapping, relocation application, AQL construction, kernarg publication, queue submission, signal execution, gem5 kernel execution, decoder execution, hardware presence, timing, or performance claim is made.",
+    "The HSACO image is copied into daemon-owned staging only; A1 does not prove GPU visibility, ISA admission, loadability, or kernel correctness."
+  ],
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T05:09:49+00:00",
+  "type": "gem5-authority-mold-a1"
+}

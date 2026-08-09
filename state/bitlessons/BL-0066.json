@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_code_object_image.cc",
+    "projects/self-amdgpu-runtime/src/transport_codec.c",
+    "state/evidence/EV-0034.json"
+  ],
+  "checkpoint_id": "CP-0013",
+  "conclusion": "A1 can validate ELF, manifest, PT_LOAD ranges, descriptor bytes, and descriptor-to-code relations without mapping or executing those ranges.",
+  "confidence": "high",
+  "decision": "Retain manifest facts as admission metadata and defer address publication, relocation application, and loader ownership to the independent A2 gate.",
+  "evidence_ids": [
+    "EV-0034",
+    "EV-0035"
+  ],
+  "id": "BL-0066",
+  "invalidated_assumptions": [
+    "Valid PT_LOAD and descriptor metadata implies that gem5 has already mapped or can execute the uploaded image."
+  ],
+  "observation": "The gem5 image validator checks segment bounds, overlap, descriptor equality, and entry relation while every A1 ACK address remains zero.",
+  "question_or_symptom": "What does manifest validation prove before a code-object loader exists?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

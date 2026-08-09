@@ -1,0 +1,514 @@
+{
+  "checkpoint_id": "CP-0013",
+  "claim": "The runtime child builds and validates the CP-0013 A1 code-object transport/staging boundary in GCC Debug and Clang ASan/UBSan configurations: fixed 4096-byte BEGIN/CHUNK/COMMIT records, per-chunk CRC-32C, whole-image SHA-256, owner/generation/ordering/cleanup checks, and no execution or mapping.",
+  "command_argv": [
+    [
+      "cmake",
+      "--build",
+      ".",
+      "--parallel",
+      "24"
+    ],
+    [
+      "cmake",
+      "--build",
+      ".",
+      "--parallel",
+      "24"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "build/cp13-runtime-dev",
+      "--output-on-failure"
+    ],
+    [
+      "cmake",
+      "-E",
+      "env",
+      "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
+      "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1",
+      "ctest",
+      "--test-dir",
+      "build/cp13-runtime-clang-asan",
+      "--output-on-failure"
+    ],
+    [
+      "sha256sum",
+      "build/cp13-runtime-dev/libself_amdgpu_runtime.a",
+      "build/cp13-runtime-dev/tests/self_amdgpu_runtime_code_object_transport_test",
+      "build/cp13-runtime-dev/tests/self_amdgpu_runtime_code_object_upload_test",
+      "build/cp13-runtime-clang-asan/libself_amdgpu_runtime.a",
+      "build/cp13-runtime-clang-asan/tests/self_amdgpu_runtime_code_object_transport_test",
+      "build/cp13-runtime-clang-asan/tests/self_amdgpu_runtime_code_object_upload_test"
+    ],
+    [
+      "sha256sum",
+      "projects/self-amdgpu-runtime/CMakeLists.txt",
+      "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/code_object.h",
+      "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/runtime.h",
+      "projects/self-amdgpu-runtime/src/transport.c",
+      "projects/self-amdgpu-runtime/src/transport_codec.c",
+      "projects/self-amdgpu-runtime/src/transport_internal.h",
+      "projects/self-amdgpu-runtime/src/sha256.c",
+      "projects/self-amdgpu-runtime/src/sha256_internal.h",
+      "projects/self-amdgpu-runtime/tests/CMakeLists.txt",
+      "projects/self-amdgpu-runtime/tests/code_object_transport_test.c",
+      "projects/self-amdgpu-runtime/tests/code_object_upload_test.c"
+    ],
+    [
+      "bash",
+      "-c",
+      "set -u; git diff --check -- projects/self-amdgpu-runtime/CMakeLists.txt projects/self-amdgpu-runtime/include/self_amdgpu_runtime/code_object.h projects/self-amdgpu-runtime/include/self_amdgpu_runtime/runtime.h projects/self-amdgpu-runtime/src/transport.c projects/self-amdgpu-runtime/src/transport_codec.c projects/self-amdgpu-runtime/src/transport_internal.h projects/self-amdgpu-runtime/tests/CMakeLists.txt; git diff --no-index --check --no-patch /dev/null projects/self-amdgpu-runtime/src/sha256.c >/tmp/cp13-runtime-diff-sha256-cc.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-runtime-diff-sha256-cc.out; git diff --no-index --check --no-patch /dev/null projects/self-amdgpu-runtime/src/sha256_internal.h >/tmp/cp13-runtime-diff-sha256-hh.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-runtime-diff-sha256-hh.out; git diff --no-index --check --no-patch /dev/null projects/self-amdgpu-runtime/tests/code_object_transport_test.c >/tmp/cp13-runtime-diff-transport-test.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-runtime-diff-transport-test.out; git diff --no-index --check --no-patch /dev/null projects/self-amdgpu-runtime/tests/code_object_upload_test.c >/tmp/cp13-runtime-diff-upload-test.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-runtime-diff-upload-test.out; printf '%s\\n' 'explicit tracked and untracked runtime CP-0013 diff-check clean'"
+    ],
+    [
+      "bash",
+      "-c",
+      "cmake --version | head -n 1; ctest --version | head -n 1; cc --version | head -n 1; clang --version | head -n 1; printf 'dev-cache\\n'; rg -n 'CMAKE_C_COMPILER:|CMAKE_BUILD_TYPE:|BUILD_TESTING:|SELF_AMDGPU_RUNTIME_BUILD_TESTS:' build/cp13-runtime-dev/CMakeCache.txt; printf 'clang-asan-cache\\n'; rg -n 'CMAKE_C_COMPILER:|CMAKE_BUILD_TYPE:|BUILD_TESTING:|SELF_AMDGPU_RUNTIME_BUILD_TESTS:' build/cp13-runtime-clang-asan/CMakeCache.txt"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "build/cp13-runtime-dev",
+      "-N"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        ".",
+        "--parallel",
+        "24"
+      ],
+      "cwd": "projects/self-amdgpu-runtime/build/cp13-runtime-dev",
+      "ended_at": "2026-08-09T05:16:29+00:00",
+      "exit_code": 0,
+      "id": "build-dev",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/build-dev.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8f68101f36885e5ce408ccec095532fe864df9535c7d9f42796c73614d0417f6",
+        "size": 677,
+        "tracked": false
+      },
+      "result": "GCC Debug runtime build is up to date and exits 0.",
+      "started_at": "2026-08-09T05:16:29+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/build-dev.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/build-dev.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8c35b1682f73592d30612d7b0fabdb384fcfff35cb5a076cb48b85b1368aa794",
+        "size": 22,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        ".",
+        "--parallel",
+        "24"
+      ],
+      "cwd": "projects/self-amdgpu-runtime/build/cp13-runtime-clang-asan",
+      "ended_at": "2026-08-09T05:16:29+00:00",
+      "exit_code": 0,
+      "id": "build-clang-asan",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/build-clang-asan.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "fef2ed24d4ffd9ff2fdb3e420e5899d8f3b52b3eec03d1a9562ab64244239fd5",
+        "size": 699,
+        "tracked": false
+      },
+      "result": "Clang ASan/UBSan runtime build is up to date and exits 0.",
+      "started_at": "2026-08-09T05:16:29+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/build-clang-asan.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/build-clang-asan.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "16d5e42458e8114da4838430e50d089332f364d013a1e5c12b83f474a59d9a72",
+        "size": 752,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build/cp13-runtime-dev",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-09T05:15:24+00:00",
+      "exit_code": 0,
+      "id": "ctest-dev",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/ctest-dev.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "caa90ba0d69af39d3cf36671ae9a0053a17943e80b8d20d7e32bb8305ee08d3e",
+        "size": 679,
+        "tracked": false
+      },
+      "result": "GCC Debug CTest passes 14/14.",
+      "started_at": "2026-08-09T05:15:21+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/ctest-dev.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/ctest-dev.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c0a1764188dc0356ee42d38f68b6524d795f01e7649d6adb71ecbfca8d504ca6",
+        "size": 2103,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "cmake",
+        "-E",
+        "env",
+        "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1",
+        "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1",
+        "ctest",
+        "--test-dir",
+        "build/cp13-runtime-clang-asan",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-09T05:15:25+00:00",
+      "exit_code": 0,
+      "id": "ctest-clang-asan",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/ctest-clang-asan.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "881f0fa331c1b0e2631d07d33aad8fd738556f60abb0303384107093a08474b4",
+        "size": 841,
+        "tracked": false
+      },
+      "result": "Clang ASan/UBSan CTest passes 14/14.",
+      "started_at": "2026-08-09T05:15:21+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/ctest-clang-asan.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/ctest-clang-asan.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e84ae25e345874e3bd484515dbcc3f0a4db2d1e2ad91463d596120622d6a47bb",
+        "size": 2117,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "build/cp13-runtime-dev/libself_amdgpu_runtime.a",
+        "build/cp13-runtime-dev/tests/self_amdgpu_runtime_code_object_transport_test",
+        "build/cp13-runtime-dev/tests/self_amdgpu_runtime_code_object_upload_test",
+        "build/cp13-runtime-clang-asan/libself_amdgpu_runtime.a",
+        "build/cp13-runtime-clang-asan/tests/self_amdgpu_runtime_code_object_transport_test",
+        "build/cp13-runtime-clang-asan/tests/self_amdgpu_runtime_code_object_upload_test"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-09T05:15:21+00:00",
+      "exit_code": 0,
+      "id": "runtime-artifact-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-artifact-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "bd827bbdf76fa9de263b1b077616f8752ff1417dd06935ede8571861fc4d3c6c",
+        "size": 1092,
+        "tracked": false
+      },
+      "result": "Final GCC and Clang-ASan runtime libraries and A1 transport/upload test binaries have recorded SHA-256 identities.",
+      "started_at": "2026-08-09T05:15:21+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-artifact-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-artifact-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2ae5736a84307f5c516b1bb6cb4f80c6dacb1ec062a5d1937861815db80dd78f",
+        "size": 811,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "projects/self-amdgpu-runtime/CMakeLists.txt",
+        "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/code_object.h",
+        "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/runtime.h",
+        "projects/self-amdgpu-runtime/src/transport.c",
+        "projects/self-amdgpu-runtime/src/transport_codec.c",
+        "projects/self-amdgpu-runtime/src/transport_internal.h",
+        "projects/self-amdgpu-runtime/src/sha256.c",
+        "projects/self-amdgpu-runtime/src/sha256_internal.h",
+        "projects/self-amdgpu-runtime/tests/CMakeLists.txt",
+        "projects/self-amdgpu-runtime/tests/code_object_transport_test.c",
+        "projects/self-amdgpu-runtime/tests/code_object_upload_test.c"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:17:04+00:00",
+      "exit_code": 0,
+      "id": "runtime-source-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-source-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f0f234c5e256c098c5390391c6021563cd08219e498169e093aa2d21555f89e7",
+        "size": 1282,
+        "tracked": false
+      },
+      "result": "All CP-0013 runtime source/configuration paths have recorded SHA-256 identities.",
+      "started_at": "2026-08-09T05:17:04+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-source-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-source-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a2ab173279766a659351b4720e53a7461fd1805334c2754f1766dc28dcf2e015",
+        "size": 1326,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "set -u; git diff --check -- projects/self-amdgpu-runtime/CMakeLists.txt projects/self-amdgpu-runtime/include/self_amdgpu_runtime/code_object.h projects/self-amdgpu-runtime/include/self_amdgpu_runtime/runtime.h projects/self-amdgpu-runtime/src/transport.c projects/self-amdgpu-runtime/src/transport_codec.c projects/self-amdgpu-runtime/src/transport_internal.h projects/self-amdgpu-runtime/tests/CMakeLists.txt; git diff --no-index --check --no-patch /dev/null projects/self-amdgpu-runtime/src/sha256.c >/tmp/cp13-runtime-diff-sha256-cc.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-runtime-diff-sha256-cc.out; git diff --no-index --check --no-patch /dev/null projects/self-amdgpu-runtime/src/sha256_internal.h >/tmp/cp13-runtime-diff-sha256-hh.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-runtime-diff-sha256-hh.out; git diff --no-index --check --no-patch /dev/null projects/self-amdgpu-runtime/tests/code_object_transport_test.c >/tmp/cp13-runtime-diff-transport-test.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-runtime-diff-transport-test.out; git diff --no-index --check --no-patch /dev/null projects/self-amdgpu-runtime/tests/code_object_upload_test.c >/tmp/cp13-runtime-diff-upload-test.out 2>&1; rc=$?; test \"$rc\" = 1; test ! -s /tmp/cp13-runtime-diff-upload-test.out; printf '%s\\n' 'explicit tracked and untracked runtime CP-0013 diff-check clean'"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:18:13+00:00",
+      "exit_code": 0,
+      "id": "runtime-diff-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "185703e050bb77ab626245b9c1ac70c5edf4f8188557c2e182756abaebf15afe",
+        "size": 1997,
+        "tracked": false
+      },
+      "result": "Explicit tracked and untracked runtime paths pass whitespace diff-check.",
+      "started_at": "2026-08-09T05:18:13+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c654d227f18c99d04ce99b82b39e454529bbf3555fc81fa443ab796560e22c07",
+        "size": 64,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "cmake --version | head -n 1; ctest --version | head -n 1; cc --version | head -n 1; clang --version | head -n 1; printf 'dev-cache\\n'; rg -n 'CMAKE_C_COMPILER:|CMAKE_BUILD_TYPE:|BUILD_TESTING:|SELF_AMDGPU_RUNTIME_BUILD_TESTS:' build/cp13-runtime-dev/CMakeCache.txt; printf 'clang-asan-cache\\n'; rg -n 'CMAKE_C_COMPILER:|CMAKE_BUILD_TYPE:|BUILD_TESTING:|SELF_AMDGPU_RUNTIME_BUILD_TESTS:' build/cp13-runtime-clang-asan/CMakeCache.txt"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-09T05:17:04+00:00",
+      "exit_code": 0,
+      "id": "runtime-toolchain-identities",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-toolchain-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f0107c4f6ff503157cbfcedc9c5bad5c240c9e914f89533f33676bcd6c48013c",
+        "size": 1091,
+        "tracked": false
+      },
+      "result": "CMake/CTest/compiler identities and both build-cache compiler selections are retained.",
+      "started_at": "2026-08-09T05:17:04+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-toolchain-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-toolchain-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "eb8796d7b2f581e7d0443a39d515fd98173c8b868f269113fdf2521522c7e414",
+        "size": 433,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build/cp13-runtime-dev",
+        "-N"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "ended_at": "2026-08-09T05:17:04+00:00",
+      "exit_code": 0,
+      "id": "runtime-ctest-list",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-ctest-list.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "03e79027bf2687f1b93d088a8f7a864263d67317ad640b4397a5366787998928",
+        "size": 679,
+        "tracked": false
+      },
+      "result": "The configured runtime matrix enumerates 14 CTest entries.",
+      "started_at": "2026-08-09T05:17:04+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-ctest-list.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/runtime-tests/runtime-ctest-list.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4b09e66947e5d30e6efd247cca9d82ee254b419e4ab416fbe5b05e6c7a35f975",
+        "size": 820,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T05:18:13+00:00",
+  "environment_fingerprint": {
+    "a1_only": true,
+    "asan_build_dir": "projects/self-amdgpu-runtime/build/cp13-runtime-clang-asan",
+    "dev_build_dir": "projects/self-amdgpu-runtime/build/cp13-runtime-dev",
+    "runtime_child_head": "f99a9a7e7e90dfec067f4f42d90f0c44d14f6729",
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4"
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0013/runtime-builds/runtime-dev.a",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "26357727aec819f0ebdb09e2e71b26563fba4a8daa829ae61c561a5f93d3c330",
+      "size": 564348,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0013/runtime-builds/code-object-transport-test",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "99ce46cd6272e1d7cf5ba11ce46b39641644910bd93e3a4f190fd830de36976a",
+      "size": 124680,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0013/runtime-builds/code-object-upload-test",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "da512b9499cb3700fe2558d83580b1725317d4586d1a81db6688e1acd8320331",
+      "size": 355072,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0013/runtime-builds/runtime-clang-asan.a",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "9ce59de28aefa2be82b54502e2054d439b21a8172bd5fcf70b09ac47a09ea104",
+      "size": 3072270,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0013/runtime-builds/code-object-transport-test-clang-asan",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d3fcaffa3b12794f146ec341e7940bfcf034a2837411451b46fa1e005b62c350",
+      "size": 2514496,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0013/runtime-builds/code-object-upload-test-clang-asan",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "470bf19f341a8f324bc986a8ccabd821d4229d08ebb186da522adadd87167000",
+      "size": 3739472,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0033",
+  "limitations": [
+    "CP-0013 is A1 transport-staging evidence only: every request and ACK is one fixed 4096-byte record with 4096-byte begin/chunk/commit framing, per-chunk CRC-32C, whole-image SHA-256, owner/generation checks, and zero mapped/descriptor/code/kernarg ACK virtual addresses.",
+    "No PT_LOAD mapping, process-page mapping, relocation application, AQL construction, kernarg publication, queue submission, signal execution, gem5 kernel execution, decoder execution, hardware presence, timing, or performance claim is made.",
+    "The HSACO image is copied into daemon-owned staging only; A1 does not prove GPU visibility, ISA admission, loadability, or kernel correctness."
+  ],
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T05:15:21+00:00",
+  "type": "runtime-codeobj-transport-a1"
+}

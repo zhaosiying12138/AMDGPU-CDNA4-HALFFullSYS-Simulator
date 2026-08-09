@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "protocol/host-transport-v1-codeobj-transport.json",
+    "projects/self-amdgpu-runtime/src/sha256.c",
+    "state/evidence/EV-0033.json"
+  ],
+  "checkpoint_id": "CP-0013",
+  "conclusion": "CRC-32C detects record and chunk corruption, while SHA-256 is the whole-image identity; neither checksum can replace the other's validation scope.",
+  "confidence": "high",
+  "decision": "Validate the copied-byte CRC before mutating staging and recompute SHA-256 over exactly the declared image bytes before publishing an immutable object.",
+  "evidence_ids": [
+    "EV-0033",
+    "EV-0035"
+  ],
+  "id": "BL-0064",
+  "invalidated_assumptions": [
+    "A valid per-chunk CRC is sufficient to establish whole-image identity or complete upload order."
+  ],
+  "observation": "Runtime matrices exercise CRC/SHA failure paths and the protocol explicitly separates copied-chunk corruption detection from final image digest binding.",
+  "question_or_symptom": "Why must an A1 implementation retain both per-chunk CRC-32C and a final whole-image SHA-256?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0012-toolchain-decoder-boundary-accepted; next-P3-CODEOBJ-03`
+**Current state:** `CP-0013-A1-code-object-staging-accepted; next-P3-CODEOBJ-03-A2`
 
 **Current phase:** `P3`
 
@@ -77,8 +77,8 @@ advance a phase without a new checkpoint and root coordinator commit.
 继续执行 amdgpu-sim 计划。当前目录是 /home/zhaosiying/amdgpu-sim。
 先读取 PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、其引用的
 最新 checkpoint/bitlesson/evidence，运行 scripts/resume.sh --verify。
-CP-0012 已 accepted；从唯一 next_action `P3-CODEOBJ-03` 继续，不要再次
-begin CP-0012，也不要重做 bootstrap、source freeze、authored runtime
+CP-0013 A1 已 accepted；从唯一 next_action `P3-CODEOBJ-03-A2` 继续，不要再次
+begin CP-0013，也不要重做 bootstrap、source freeze、authored runtime
 baseline 或已通过的 CP4-CP9 gates，也不要修改已冻结的 SOURCE_LOCK.json
 或已登记的 PROJECT_LANES baseline。CP-0010 只实现 18 个 typed KMT
 操作的固定宽度 shim、版本化 daemon envelope、模拟资源生命周期和
@@ -86,8 +86,9 @@ no-device 证据；它不是完整 124-PFN ROCr/libhsakmt provider，也不宣�
 KFD attach、HIP、OpenCL、Triton、PyTorch 或 vLLM 能力。CP-0011 已冻结
 两份真实 gfx950 HSACO 的 ELF/MsgPack/descriptor/kernarg provenance，但
 gem5 gfx950 decoder、unsupported opcode、pinned device-libs/toolchain proof
-已完成；但 versioned HSACO transport、PT_LOAD mapping、动态 AQL/kernarg
-和真实 code-object execution 仍是下一步的独立前置条件，再推进更高层 API。
+已完成；CP-0013 A1 仅完成 versioned HSACO fixed-record transport/staging，
+不包含 PT_LOAD mapping、动态 AQL/kernarg 或真实 code-object execution。
+下一步 A2 先独立完成 loader/PT_LOAD mapping，再推进更高层 API。
 在 Triton 用户命令 `tutorial/01-vecadd.py`（当前 pinned checkout 中对应未修改的
 `python/tutorials/01-vector-add.py`）首次透明通过后，先完成可复现的 gem5
 算子 profile、80/20 优化和 threadblock host-parallel 正确性/可行性门禁，再
@@ -98,3 +99,13 @@ lease/epoch 的 `rocm-smi` ON/OFF 工具，绝不探测物理卡。
 commit，并同步 checkpoint、bitlesson、evidence。遇到长耗时或 token 切换，
 先形成 coherent partial checkpoint，再暂停。
 ```
+
+`CP-0013` is accepted at the A1 code-object transport/staging boundary. It
+binds fixed 4096-byte BEGIN/CHUNK/COMMIT records, capability negotiation,
+per-chunk CRC-32C, whole-image SHA-256, owner/generation/order checks, and
+atomic staging cleanup in both children. Every successful A1 ACK keeps mapping,
+descriptor, code, and kernarg addresses zero. It does not claim PT_LOAD mapping,
+relocation application, dynamic AQL/kernarg construction, queue submission,
+gem5 code-object execution, hardware presence, timing, or performance. The
+next unique action is `P3-CODEOBJ-03-A2`: independently validate and map one
+authority-conforming image while retaining the A1 boundary.

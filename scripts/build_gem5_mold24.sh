@@ -5,6 +5,7 @@ set -euo pipefail
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 gem5_dir="${root_dir}/projects/gem5"
 scons_bin="${GEM5_SCONS:-${root_dir}/env/gem5-build/bin/scons}"
+sysroot_bin="${root_dir}/env/gem5-build/sysroot/usr/bin"
 jobs="${GEM5_JOBS:-24}"
 
 if [[ ! -x "${scons_bin}" ]]; then
@@ -24,6 +25,14 @@ if [[ ! "${jobs}" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 cd "${gem5_dir}"
-exec env "PATH=$(dirname "${scons_bin}"):${PATH}" \
+if [[ -d "${sysroot_bin}" ]]; then
+  tool_path="${sysroot_bin}:$(dirname "${scons_bin}"):${PATH}"
+else
+  tool_path="$(dirname "${scons_bin}"):${PATH}"
+fi
+if (( $# == 0 )); then
+  set -- build/VEGA_X86/gem5.opt
+fi
+exec env "PATH=${tool_path}" \
   "${scons_bin}" -j"${jobs}" --linker=mold \
-  "${@:-build/VEGA_X86/gem5.opt}"
+  "$@"

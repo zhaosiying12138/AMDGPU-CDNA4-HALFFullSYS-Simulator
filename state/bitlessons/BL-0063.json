@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "protocol/host-transport-v1-codeobj-transport.json",
+    "docs/host-transport-v1-codeobj-transport.md",
+    "state/evidence/EV-0034.json"
+  ],
+  "checkpoint_id": "CP-0013",
+  "conclusion": "A code-object upload remains auditable only when BEGIN, CHUNK, and COMMIT use fixed records with explicit version, identity, bounds, and zero-padding rules.",
+  "confidence": "high",
+  "decision": "Keep the A1 envelope pointer-free and descriptor-free, preserve existing message IDs, and allocate mapping or dispatch fields only in separately reviewed gates.",
+  "evidence_ids": [
+    "EV-0034",
+    "EV-0035"
+  ],
+  "id": "BL-0063",
+  "invalidated_assumptions": [
+    "A variable-size or pointer-bearing upload record can be treated as a stable code-object ABI."
+  ],
+  "observation": "The authority and gem5 tests bind 4096-byte records, capability selection, canonical offsets, reserved zero bytes, and no ancillary descriptors before state changes.",
+  "question_or_symptom": "What makes a code-object upload wire record deterministic across independent runtime and gem5 implementations?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

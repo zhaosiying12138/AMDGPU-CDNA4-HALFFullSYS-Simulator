@@ -96,6 +96,14 @@ records the reproducible device-libraries/HSACO identities, the native
 `mold`/24-job gem5 link method, gfx942/gfx950 decoder alias isolation, and
 runtime-local selected-kernel byte materialization. It still does not claim
 HSACO wire upload, PT_LOAD mapping, dynamic AQL/kernarg, or real gem5 execution;
-the next action is `P3-CODEOBJ-03`.
+its historical next action was the A1 transport gate recorded by `CP-0013`.
+
+`CP-0013` is now accepted at the A1 code-object transport/staging boundary. It
+adds fixed 4096-byte BEGIN/CHUNK/COMMIT records, pointer-free capability and
+identity fields, per-chunk CRC-32C, whole-image SHA-256, owner/generation and
+ordering validation, and daemon-owned atomic staging in both children. A1
+publishes no mapping, descriptor, code, or kernarg address and makes no
+PT_LOAD, AQL, queue-submission, gem5 execution, hardware, timing, or performance
+claim. The next action is the separately scoped `P3-CODEOBJ-03-A2` loader gate.
 
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

@@ -1,0 +1,250 @@
+{
+  "checkpoint_id": "CP-0013",
+  "claim": "The CP-0013 umbrella binds the final clean gem5 and self-amdgpu-runtime child commits to EV-0033 and EV-0034. Those manifests jointly prove only the A1 fixed-record HSACO staging boundary: 4096-byte BEGIN/CHUNK/COMMIT records, per-chunk CRC-32C, whole-image SHA-256, owner/generation/ordering checks, and zero ACK virtual addresses, with no PT_LOAD/AQL/execution claim.",
+  "command_argv": [
+    [
+      "bash",
+      "-c",
+      "git -C projects/gem5 rev-parse HEAD HEAD^{tree}; git -C projects/self-amdgpu-runtime rev-parse HEAD HEAD^{tree}"
+    ],
+    [
+      "bash",
+      "-c",
+      "test -z \"$(git -C projects/gem5 status --porcelain)\"; test -z \"$(git -C projects/self-amdgpu-runtime status --porcelain)\"; printf 'gem5=clean\\nruntime=clean\\n'"
+    ],
+    [
+      "python3",
+      "scripts/transaction.py",
+      "status"
+    ],
+    [
+      "python3",
+      "-c",
+      "import json,subprocess; j=json.load(open('.git/amdgpu-sim/txn/CP-0013.json')); assert j['phase']=='prepare'; expected=j['expected_children']; rows=[]; \nfor name in ('gem5','self-amdgpu-runtime'):\n p=expected[name]['path']; head=subprocess.check_output(['git','-C',p,'rev-parse','HEAD'],text=True).strip(); tree=subprocess.check_output(['git','-C',p,'rev-parse','HEAD^{tree}'],text=True).strip(); status=subprocess.check_output(['git','-C',p,'status','--porcelain'],text=True); assert head==expected[name]['head'] and tree==expected[name]['tree'] and not status, (name,head,tree,status); rows.append(f'{name} head={head} tree={tree} clean'); print('phase=prepare expected_children exact; '+'; '.join(rows))"
+    ],
+    [
+      "sha256sum",
+      "state/evidence/EV-0033.json",
+      "state/evidence/EV-0034.json"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "git -C projects/gem5 rev-parse HEAD HEAD^{tree}; git -C projects/self-amdgpu-runtime rev-parse HEAD HEAD^{tree}"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:30:03+00:00",
+      "exit_code": 0,
+      "id": "child-identities",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/umbrella/child-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c6e81e431e5d2196dfd55d6e413ff10b0cd749a6bbd881446bb810cf686f6b98",
+        "size": 708,
+        "tracked": false
+      },
+      "result": "Recorded final gem5/runtime child HEAD and tree identities.",
+      "started_at": "2026-08-09T05:30:03+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/umbrella/child-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/umbrella/child-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "97f731052d8d94574a922c19e0bef810e2356e545db60bb19931a1289330c7b0",
+        "size": 164,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "test -z \"$(git -C projects/gem5 status --porcelain)\"; test -z \"$(git -C projects/self-amdgpu-runtime status --porcelain)\"; printf 'gem5=clean\\nruntime=clean\\n'"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:30:03+00:00",
+      "exit_code": 0,
+      "id": "child-clean-status",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/umbrella/child-clean-status.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "57d7e4748b56f3b9662d2c415e8f2d024f2f770a1143e2c885ddee0c92b1104a",
+        "size": 765,
+        "tracked": false
+      },
+      "result": "Both child worktrees are clean after their CP-0013 commits.",
+      "started_at": "2026-08-09T05:30:03+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/umbrella/child-clean-status.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/umbrella/child-clean-status.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4c1551f530b35f7254ce8141e98702e0adbe3a3df53ab039c1fedf6f5b4c5259",
+        "size": 25,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "scripts/transaction.py",
+        "status"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:30:03+00:00",
+      "exit_code": 0,
+      "id": "transaction-status",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/umbrella/transaction-status.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f57e6aebaa8e4c5195a4c3e7a8add53dc434e090c5de0a83f85087f7a38f7f43",
+        "size": 629,
+        "tracked": false
+      },
+      "result": "CP-0013 transaction journal is in prepare with expected_children populated; root finalization remains pending.",
+      "started_at": "2026-08-09T05:30:03+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/umbrella/transaction-status.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/umbrella/transaction-status.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4cee8c803ef4bee6828a6c4e1718c6706d5907d9d4b28ef61f8bd42a0c9461a9",
+        "size": 77,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import json,subprocess; j=json.load(open('.git/amdgpu-sim/txn/CP-0013.json')); assert j['phase']=='prepare'; expected=j['expected_children']; rows=[]; \nfor name in ('gem5','self-amdgpu-runtime'):\n p=expected[name]['path']; head=subprocess.check_output(['git','-C',p,'rev-parse','HEAD'],text=True).strip(); tree=subprocess.check_output(['git','-C',p,'rev-parse','HEAD^{tree}'],text=True).strip(); status=subprocess.check_output(['git','-C',p,'status','--porcelain'],text=True); assert head==expected[name]['head'] and tree==expected[name]['tree'] and not status, (name,head,tree,status); rows.append(f'{name} head={head} tree={tree} clean'); print('phase=prepare expected_children exact; '+'; '.join(rows))"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:34:12+00:00",
+      "exit_code": 0,
+      "id": "journal-children-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/umbrella/journal-children-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ead37f8173dcffe47e1ea2ce01a80dec920f85fec58ce8d5cfd9c735e67869a6",
+        "size": 1319,
+        "tracked": false
+      },
+      "result": "Journal expected_children HEAD/tree values exactly match both clean child repositories.",
+      "started_at": "2026-08-09T05:34:12+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/umbrella/journal-children-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/umbrella/journal-children-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4a4c68da998d9de4fe6915d8f23db892cfac7bca96d69435a27f6ba389ba7eb2",
+        "size": 403,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "sha256sum",
+        "state/evidence/EV-0033.json",
+        "state/evidence/EV-0034.json"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T05:30:03+00:00",
+      "exit_code": 0,
+      "id": "included-evidence-sha256",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0013/umbrella/included-evidence-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "331249afaeb6ad852c5b3d99822bcdfb0b049fa1d260524ef49c400159df46c2",
+        "size": 670,
+        "tracked": false
+      },
+      "result": "EV-0033 and EV-0034 file hashes match the includes bound by this umbrella.",
+      "started_at": "2026-08-09T05:30:03+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0013/umbrella/included-evidence-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0013/umbrella/included-evidence-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b5fbc33835168e4f5b4bf35b04b2806a0f0440cfc63629e273df8c9a44463bf4",
+        "size": 188,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T05:34:12+00:00",
+  "environment_fingerprint": {
+    "a1_only": true,
+    "expected_children_recorded": true,
+    "gem5_head": "638f70650b5556be2ee04220e86da69dc850c201",
+    "gem5_tree": "4a76592ac896da3de09a39714220098014072e32",
+    "runtime_head": "bc186e606c709e5955b26e8f9529df4d41492cea",
+    "runtime_tree": "b1ebb6d1ecbba4a1292a16a8b22286113b1808ab",
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "transaction_phase": "prepare"
+  },
+  "exit_code": 0,
+  "external_artifacts": [],
+  "id": "EV-0035",
+  "includes": {
+    "EV-0033": "7884466021d549523a88658318169905adcb4d1e8ad0df168203cd1ceedf1b18",
+    "EV-0034": "d118c3aa42674a2fb5c4aaa0271368427ea32d2adb374e44d5313036c486d9a6"
+  },
+  "limitations": [
+    "A1 stages bytes in daemon-owned memory only; it does not map PT_LOAD segments, construct AQL or kernarg, submit a queue, execute a kernel, or claim decoder/hardware/timing/performance correctness.",
+    "The transaction journal remains in prepare until root coordinator finalization; expected child heads/trees and clean status are explicitly asserted here.",
+    "EV-0033 and EV-0034 are the authoritative detailed runtime/gem5/root evidence; this umbrella adds no new execution surface."
+  ],
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T05:30:03+00:00",
+  "type": "cp13-umbrella-a1"
+}

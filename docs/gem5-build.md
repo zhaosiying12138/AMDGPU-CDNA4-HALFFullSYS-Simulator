@@ -8,6 +8,9 @@ scripts/build_gem5_mold24.sh
 ```
 
 It defaults to `build/VEGA_X86/gem5.opt` and accepts additional SCons targets.
+The wrapper also prepends the environment's `sysroot/usr/bin` so generated
+tools such as `m4` are found consistently when the host PATH does not contain
+them.
 The equivalent command, run from `projects/gem5`, is:
 
 ```bash

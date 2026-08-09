@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-09`
 
-**State at this commit:** `P3-CODEOBJ-02 accepted; next-P3-CODEOBJ-03`
+**State at this commit:** `P3-CODEOBJ-03-A1 accepted; next-P3-CODEOBJ-03-A2`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -661,9 +661,17 @@ device-library manifests and HSACO outputs, the native gem5
 `--linker=mold -j24` procedure, gfx942/gfx950 literal-FMA decoder aliases with
 ISA-table reset isolation, and runtime-local selected-kernel materialization.
 It does not claim HSACO upload, PT_LOAD mapping, dynamic AQL/kernarg creation,
-generic gem5 code-object execution, or HIP/OpenCL/Triton support. The next
-unique action is `P3-CODEOBJ-03`: add the versioned code-object transport and
-prove one real mapped gfx950 image through gem5.
+generic gem5 code-object execution, or HIP/OpenCL/Triton support.
+
+`CP-0013` is accepted as the A1 code-object transport/staging boundary. It
+freezes the 4096-byte BEGIN/CHUNK/COMMIT envelope, capability and identity
+fields, CRC-32C/SHA-256 rules, manifest/PT_LOAD metadata validation, owner and
+generation scope, contiguous ordering, atomic failure cleanup, and the
+zero-address A1 boundary. It proves copied bytes and digest-bound staging only;
+PT_LOAD mapping, relocation application, dynamic AQL/kernarg, queue submission,
+and gem5 execution remain separate gates. The next unique action is
+`P3-CODEOBJ-03-A2`: independently validate and atomically map one image before
+any AQL or execution claim.
 `SOURCE_LOCK.json` remains byte-immutable, and existing `PROJECT_LANES`
 declarations remain historically anchored and append-only.
 

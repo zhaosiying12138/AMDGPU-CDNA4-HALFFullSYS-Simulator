@@ -1,0 +1,25 @@
+{
+  "applies_to": [
+    "protocol/host-transport-v1-codeobj-transport.json",
+    "docs/host-transport-v1-codeobj-transport.md",
+    "state/evidence/EV-0035.json"
+  ],
+  "checkpoint_id": "CP-0013",
+  "conclusion": "A1 is a transport-staging checkpoint, not a code-object execution checkpoint; mapping, AQL/kernarg construction, queue submission, and ISA execution require independent evidence.",
+  "confidence": "high",
+  "decision": "Advance only to the scoped A2 loader/mapping gate and keep the no-execution limitation visible in metadata, docs, and commit trailers.",
+  "evidence_ids": [
+    "EV-0033",
+    "EV-0034",
+    "EV-0035"
+  ],
+  "id": "BL-0067",
+  "invalidated_assumptions": [
+    "A successful BEGIN/CHUNK/COMMIT exchange proves GPU visibility, decoder admission, or kernel correctness."
+  ],
+  "observation": "The umbrella and both detailed manifests explicitly state A1-only scope and reserve A2/A3/A4 for mapping, packet construction, and execution.",
+  "question_or_symptom": "Why must successful code-object staging stop short of claiming a runnable kernel?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}
