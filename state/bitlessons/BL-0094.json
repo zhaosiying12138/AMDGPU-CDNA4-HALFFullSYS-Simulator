@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/src/transport_codec.c",
+    "projects/self-amdgpu-runtime/tests/generic_dispatch_v2_transport_test.c",
+    "protocol/host-transport-v2.json",
+    "state/evidence/EV-0052.json",
+    "state/evidence/EV-0053.json"
+  ],
+  "checkpoint_id": "CP-0022",
+  "conclusion": "The retained Triton vecadd descriptor encodes kernarg preload as 12 DWORDs (48 bytes), and the current native CP path does not implement preload plus the associated entry semantics; a wire gate must reject that case explicitly instead of stripping metadata.",
+  "confidence": "high",
+  "decision": "Carry descriptor_preload_dwords in MAP/ACK metadata, return NOT_SUPPORTED for nonzero preload in the current codec/admission boundary, and leave Triton launcher/execution false until preload-aware mapping and CP support are proven.",
+  "evidence_ids": ["EV-0052", "EV-0053"],
+  "id": "BL-0094",
+  "invalidated_assumptions": [
+    "The preload field is a byte count or can be silently zeroed while retaining the same HSACO.",
+    "A valid Triton HSACO identity plus a representable v2 SUBMIT record establishes executable Triton support."
+  ],
+  "observation": "The exact 5,408-byte HSACO hash and descriptor bytes are bound in the CP21 artifact; CP22 tests derive 12 DWORD/48-byte semantics and assert explicit NOT_SUPPORTED on MAP preload admission.",
+  "question_or_symptom": "How should a future generic loader preserve Triton preload and entry-offset semantics without claiming execution before the native CP is ready?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": ["BL-0091"]
+}

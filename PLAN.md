@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-10`
 
-**State at this commit:** `CP-0021 Triton vecadd compile/provenance boundary accepted; normal launcher blocked; next-CP-0022 generic wire-v2`
+**State at this commit:** `CP-0022 generic wire-v2 codec boundary accepted; normal launcher blocked; next-CP-0023 daemon wire integration`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -495,7 +495,8 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | P4-HIP-01 | P4 | Minimal transparent HIP/OpenCL launch surface |
 | P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
 | CP-0021 | P5 | Hash-bound Triton vecadd compile/provenance prerequisite; normal launcher remains blocked |
-| CP-0022 | P5 | Generic versioned wire-v2 allocation, mapping, descriptor/kernarg/AQL linkage, and launcher handoff |
+| CP-0022 | P5 | Generic payload-v2 codec/admission boundary; daemon mapping and launcher handoff remain blocked |
+| CP-0023 | P5 | Coordinated daemon/client mapping leases, kernarg publication, AQL submission, and normal launcher handoff |
 | P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
 | P5-PARALLEL-TB-01 | P5B | Safe serial-versus-parallel threadblock experiment |
 | P5-OPS-01 | P5C | Broader model-operator manifest and differential gates |
@@ -757,7 +758,7 @@ static Qwen 15-contract gate and offline model hashes remain valid, but strict A
 execution is blocked; Triton E2E and Qwen inference remain 0/1. The next unique
 action is `P3-HOST-NATIVE-03-B1`, native address translation plus real
 HSAPP/command-processor packet publication with no CU claim; B2 reserves the
-one-wave CU differential.
+four-workgroup/sixteen-wave CU differential.
 
 `CP-0019` is accepted at the `P3-HOST-NATIVE-03-B1` native queue and
 command-processor-core sub-gate. The no-x86 `host_gpu_native_b1_core` resolves
@@ -798,8 +799,13 @@ focused code-object set is 4/4; caller-local code/kernarg preparation passes,
 but compiler/JIT invocation, normal launcher, transport, simulator execution,
 output differential, and fallback are all false. Public A1 mapping remains
 zero-address and fixture-only. Triton E2E and Qwen inference remain 0/1. The
-next unique action is CP-0022 for generic versioned wire-v2 allocation,
-mapping, descriptor/kernarg/AQL linkage, and normal launcher handoff.
+`CP-0022` accepts the independent payload-v2 codec/admission boundary: v1
+ framing and records remain byte-compatible, while owner-scoped MAP,
+ ALLOC_KERNARG, SUBMIT_AQL, and UNMAP records are fixed-width and canonically
+ padded. It does not add a daemon handler or publish a GPU VA. The Triton
+ 12-DWORD descriptor preload remains an explicit NOT_SUPPORTED boundary. The
+ next unique action is `CP-0023` for coordinated daemon/client mapping leases,
+ kernarg publication, AQL submission, and normal launcher handoff.
 
 ### P3H - host-native simulator and first Triton gate
 
@@ -845,8 +851,8 @@ The work is staged as follows:
    compiler/JIT, launcher, transport, execution, and fallback remain false.
    Triton end-to-end is still 0/1. The exact LLVM/Triton pair has a temporary
    AMD-only overlay that produced the retained compile artifact; it is not yet
-   a committed launcher or device execution path. CP-0022 is the next generic
-   wire-v2/allocator/AQL gate.
+   a committed launcher or device execution path. CP-0022 now freezes the
+   codec-only wire-v2 boundary; CP-0023 is the next coordinated daemon gate.
 
 This workstream is not a cycle-accurate replacement. Timing, wider operator
 coverage, host-parallel threadblocks, HIP/OpenCL CTS, PyTorch, vLLM, and Qwen

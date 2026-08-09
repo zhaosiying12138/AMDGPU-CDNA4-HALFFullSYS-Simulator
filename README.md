@@ -176,7 +176,7 @@ HSAPP and GPUCommandProcessor SimObjects are neither linked nor instantiated.
 GPUDispatcher/CU connection, host read-index update, packet retirement, signal
 decrement, instruction fetch/retirement, ISA execution, and kernel output all
 remain false. The next action is `P3-HOST-NATIVE-03-B2` for the no-x86
-GPUDispatcher/CU one-wave output/trace differential, followed by Triton vecadd.
+GPUDispatcher/CU four-workgroup/sixteen-wave output/trace differential, followed by Triton vecadd.
 The Qwen model and static 15-contract gate remain ready, but strict AMD
 execution is still blocked and Qwen inference remains `0/1`.
 
@@ -212,6 +212,11 @@ HSACO target is `amdgcn-amd-amdhsa-unknown-gfx950`, and its descriptor preload
 is 12 DWORD (48 bytes). Runtime CTest is 16/16 (focused code-object tests 4/4),
 but compiler/JIT invocation, normal launcher, transport, execution, and
 fallback are all false. The public A1 path still publishes zero VAs and remains
-fixture-only; CP-0022 is the next generic wire-v2 allocator/AQL/launcher gate.
+fixture-only. CP-0022 now accepts the independent payload-v2 codec boundary:
+v1 framing remains unchanged, bit 8 and records 18/19/20 are opt-in, and
+owner-scoped MAP/ALLOC_KERNARG/SUBMIT_AQL/UNMAP records are strictly validated.
+The daemon, normal launcher, mapping leases, kernarg publication, AQL
+submission, execution, and fallback remain false; CP-0023 is the next
+coordinated daemon/client integration gate.
 
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

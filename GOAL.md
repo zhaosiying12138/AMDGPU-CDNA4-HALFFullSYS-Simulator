@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0021-triton-vecadd-compile-provenance-accepted; normal-launcher-blocked; next-CP-0022-generic-wire-v2`
+**Current state:** `CP-0022-generic-wire-v2-codec-boundary-accepted; normal-launcher-blocked; next-CP-0023-daemon-wire-integration`
 
 **Current phase:** `P5`
 
@@ -230,6 +230,21 @@ descriptor preload is 12 DWORD (48 bytes), runtime CTest is 16/16 with focused
 code-object tests 4/4, and caller-local code/kernarg preparation succeeds.
 `compiler_invoked`, `jit`, `launcher`, `transport`, `execution`, and `fallback`
 are all false; Triton E2E and Qwen inference remain `0/1`. Public A1 mapping,
-descriptor, code, and kernarg VAs remain zero and fixture-only. The next unique
-action is CP-0022 for generic versioned wire-v2 allocation, mapping,
-descriptor/kernarg/AQL linkage, and normal launcher handoff without fallback.
+descriptor, code, and kernarg VAs remain zero and fixture-only. CP-0022 accepts
+the independent payload-v2 codec/admission boundary: v1 framing and records
+remain byte-compatible, while owner-scoped MAP, ALLOC_KERNARG, SUBMIT_AQL, and
+UNMAP records are fixed-width and canonically padded. It does not add a daemon
+handler or publish a GPU VA. The Triton 12-DWORD descriptor preload remains an
+explicit NOT_SUPPORTED boundary. The next unique action is CP-0023 for
+coordinated daemon/client mapping leases, kernarg publication, AQL submission,
+and normal launcher handoff without fallback.
+
+`CP-0022` accepts the independent generic payload-v2 codec boundary. It keeps
+the v1 80-byte framing and records byte-identical, adds opt-in capability bit 8
+and message types 18/19/20, and validates owner-scoped MAP, ALLOC_KERNARG,
+SUBMIT_AQL, and UNMAP records with canonical zero padding and daemon-issued GPU
+VA response fields. The codec explicitly rejects the retained Triton
+12-DWORD descriptor preload until native preload and entry-offset semantics are
+implemented. No daemon handler, mapping lease, kernarg publication, AQL queue
+submission, normal launcher, compiler/JIT, gem5 execution, or fallback claim is
+made; those are the CP-0023 integration boundary.

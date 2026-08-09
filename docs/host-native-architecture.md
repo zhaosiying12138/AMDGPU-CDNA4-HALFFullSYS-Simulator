@@ -89,8 +89,13 @@ gate is CP-0022 for generic wire-v2 integration. CP-0021
 records the pinned unmodified tutorial and 5,408-byte HSACO identities,
 12-DWORD (48-byte) descriptor preload, runtime CTest 16/16, and explicit false
 compiler/JIT/launcher/transport/execution/fallback fields. It performs no
-normal launch and leaves public A1 mapping VAs at zero. CP-0022 is the next
-generic wire-v2 allocator/AQL/launcher boundary.
+normal launch and leaves public A1 mapping VAs at zero. CP-0022 now accepts a
+separate payload-v2 codec/admission boundary: v1 framing remains byte-stable,
+bit 8 and records 18/19/20 are opt-in, and owner-scoped mapping, kernarg,
+submit, and unmap identities are strictly validated. The retained Triton
+preload is an explicit NOT_SUPPORTED boundary. No daemon handler, GPU VA
+publication, normal launcher, or execution is claimed; CP-0023 is the next
+coordinated wire/daemon integration gate.
 
 ## Non-goals
 

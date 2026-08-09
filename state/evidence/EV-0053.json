@@ -1,0 +1,285 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0053",
+  "checkpoint_id": "CP-0022",
+  "type": "cp22-generic-wire-v2-root-umbrella",
+  "claim": "EV-0053 binds the CP22 codec evidence to the clean runtime child, the prepare journal, and the CP21 root anchor. The child commit adds a fixed payload-v2 record family with capability dependencies and strict ownership/padding/CRC validation. The accepted boundary remains codec/admission-only: no daemon mapping handler, kernarg publication, AQL submission, normal launcher, gem5 execution, or fallback is claimed.",
+  "command_argv": [
+    [
+      "bash",
+      "-lc",
+      "set -eu\npython3 - <<'PY'\nimport json,subprocess\nfrom pathlib import Path\nr=Path('projects/self-amdgpu-runtime')\nhead=subprocess.check_output(['git','-C',str(r),'rev-parse','HEAD'],text=True).strip(); tree=subprocess.check_output(['git','-C',str(r),'rev-parse','HEAD^{tree}'],text=True).strip(); parent=subprocess.check_output(['git','-C',str(r),'rev-parse','HEAD^'],text=True).strip()\nassert head=='02adb53580c7b7ffef65973dd178fd954e06cf09' and tree=='564a48a12b3689cda3046ea72cd59d66d85e08f2' and parent=='386713738a9eb050394e74152fe5acaf16435abe'\nassert subprocess.check_output(['git','-C',str(r),'status','--porcelain=v1','--untracked-files=all'],text=True)==''\nprint(json.dumps({'head':head,'tree':tree,'parent':parent,'branch':subprocess.check_output(['git','-C',str(r),'branch','--show-current'],text=True).strip(),'clean':True},sort_keys=True))\nPY"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\npython3 - <<'PY'\nimport subprocess\nmsg=subprocess.check_output(['git','-C','projects/self-amdgpu-runtime','show','-s','--format=%B','02adb53580c7b7ffef65973dd178fd954e06cf09'],text=True)\nexpected={'Checkpoint-ID':'CP-0022','Goal-ID':'GSIM-001','Plan-Revision':'2','Source-Lock-SHA256':'8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4','Evidence-Manifest-SHA256':'fdccc84fea71fabf83e157b3fdc804038c6d89c8c680a97c365572984724d402','Change-Kind':'code','Baseline-Commit':'54f0badb0a30c486334f15daea252ab6b55dd9a5'}\nfor k,v in expected.items(): assert msg.count(k+': '+v)==1,(k,msg)\nprint('trailers=pass; exact CP22 child trailers')\nPY"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\npython3 - <<'PY'\nimport json\nj=json.load(open('.git/amdgpu-sim/txn/CP-0022.json'))\nassert j['phase']=='prepare' and j['previous_root']=='708e41377893ba5b7055d798cc728a7b3996af7e'\nassert j['expected_children']['runtime']=={'path':'projects/self-amdgpu-runtime','head':'02adb53580c7b7ffef65973dd178fd954e06cf09','tree':'564a48a12b3689cda3046ea72cd59d66d85e08f2'}\nassert j['root_allowlist']==['GOAL.md','PLAN.md','README.md','docs/host-native-architecture.md','docs/host-transport-v2.md','projects/self-amdgpu-runtime','protocol/host-transport-v2.json','state/bitlessons/BL-0092.json','state/bitlessons/BL-0093.json','state/bitlessons/BL-0094.json','state/checkpoints/CP-0022.json','state/current.json','state/evidence/EV-0052.json','state/evidence/EV-0053.json']\nprint(json.dumps({'phase':j['phase'],'previous_root':j['previous_root'],'child':j['expected_children']['runtime'],'allowlist_count':len(j['root_allowlist'])},sort_keys=True))\nPY"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\npython3 - <<'PY'\nimport hashlib,json,importlib.util\nfrom pathlib import Path\np=Path('artifacts/evidence/CP-0022/EV-0052-draft.json'); v=json.loads(p.read_text()); assert v['id']=='EV-0052' and v['checkpoint_id']=='CP-0022'; assert hashlib.sha256(p.read_bytes()).hexdigest()=='fdccc84fea71fabf83e157b3fdc804038c6d89c8c680a97c365572984724d402'\nspec=Path('scripts/evidence_policy.py'); s=importlib.util.spec_from_file_location('ep',spec); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); ids,arts=m.validate_evidence(v,expected_id='EV-0052',checkpoint_id='CP-0022'); assert len(ids)==6\nprint(json.dumps({'ev0052_sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'result_count':len(ids),'artifact_count':len(arts),'policy':'pass'},sort_keys=True))\nPY"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\nbuild_dir=$(cat /tmp/cp22-runtime-clean-final.path)\nctest --test-dir \"$build_dir\" -R 'self_amdgpu_runtime\\\\.(generic_dispatch_v2_transport|triton_vecadd_compile)' --output-on-failure"
+    ]
+  ],
+  "command_results": [
+    {
+      "id": "umbrella-child-identity",
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\npython3 - <<'PY'\nimport json,subprocess\nfrom pathlib import Path\nr=Path('projects/self-amdgpu-runtime')\nhead=subprocess.check_output(['git','-C',str(r),'rev-parse','HEAD'],text=True).strip(); tree=subprocess.check_output(['git','-C',str(r),'rev-parse','HEAD^{tree}'],text=True).strip(); parent=subprocess.check_output(['git','-C',str(r),'rev-parse','HEAD^'],text=True).strip()\nassert head=='02adb53580c7b7ffef65973dd178fd954e06cf09' and tree=='564a48a12b3689cda3046ea72cd59d66d85e08f2' and parent=='386713738a9eb050394e74152fe5acaf16435abe'\nassert subprocess.check_output(['git','-C',str(r),'status','--porcelain=v1','--untracked-files=all'],text=True)==''\nprint(json.dumps({'head':head,'tree':tree,'parent':parent,'branch':subprocess.check_output(['git','-C',str(r),'branch','--show-current'],text=True).strip(),'clean':True},sort_keys=True))\nPY"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T22:31:30+00:00",
+      "ended_at": "2026-08-09T22:31:30+00:00",
+      "exit_code": 0,
+      "result": "The runtime child is clean on main at the exact CP22 commit, tree, and CP21 parent.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0022/umbrella-child-identity.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5cfc34ccbb7457fcdfb2104c3357738e63b1adc9dfe960d3865d1e0a9464faab",
+        "size": 1457,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0022/umbrella-child-identity.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a5624f525f8b22a03428d8d76599eb1d4f82c77e909f01e3aaedd42ece94480e",
+        "size": 192,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0022/umbrella-child-identity.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "umbrella-child-trailers",
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\npython3 - <<'PY'\nimport subprocess\nmsg=subprocess.check_output(['git','-C','projects/self-amdgpu-runtime','show','-s','--format=%B','02adb53580c7b7ffef65973dd178fd954e06cf09'],text=True)\nexpected={'Checkpoint-ID':'CP-0022','Goal-ID':'GSIM-001','Plan-Revision':'2','Source-Lock-SHA256':'8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4','Evidence-Manifest-SHA256':'fdccc84fea71fabf83e157b3fdc804038c6d89c8c680a97c365572984724d402','Change-Kind':'code','Baseline-Commit':'54f0badb0a30c486334f15daea252ab6b55dd9a5'}\nfor k,v in expected.items(): assert msg.count(k+': '+v)==1,(k,msg)\nprint('trailers=pass; exact CP22 child trailers')\nPY"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T22:31:30+00:00",
+      "ended_at": "2026-08-09T22:31:30+00:00",
+      "exit_code": 0,
+      "result": "The child carries one exact set of CP22, source-lock, evidence, change-kind, and baseline trailers.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0022/umbrella-child-trailers.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e6f25acff12e5125691c8025c6ff815bcca97a6a539d6895daea38dc70741cfc",
+        "size": 1256,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0022/umbrella-child-trailers.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "cb296986ed6345f85513b71fb79875531b3d19f9f1444de78dfdeb450750982b",
+        "size": 41,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0022/umbrella-child-trailers.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "umbrella-journal",
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\npython3 - <<'PY'\nimport json\nj=json.load(open('.git/amdgpu-sim/txn/CP-0022.json'))\nassert j['phase']=='prepare' and j['previous_root']=='708e41377893ba5b7055d798cc728a7b3996af7e'\nassert j['expected_children']['runtime']=={'path':'projects/self-amdgpu-runtime','head':'02adb53580c7b7ffef65973dd178fd954e06cf09','tree':'564a48a12b3689cda3046ea72cd59d66d85e08f2'}\nassert j['root_allowlist']==['GOAL.md','PLAN.md','README.md','docs/host-native-architecture.md','docs/host-transport-v2.md','projects/self-amdgpu-runtime','protocol/host-transport-v2.json','state/bitlessons/BL-0092.json','state/bitlessons/BL-0093.json','state/bitlessons/BL-0094.json','state/checkpoints/CP-0022.json','state/current.json','state/evidence/EV-0052.json','state/evidence/EV-0053.json']\nprint(json.dumps({'phase':j['phase'],'previous_root':j['previous_root'],'child':j['expected_children']['runtime'],'allowlist_count':len(j['root_allowlist'])},sort_keys=True))\nPY"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T22:31:30+00:00",
+      "ended_at": "2026-08-09T22:31:30+00:00",
+      "exit_code": 0,
+      "result": "The CP22 prepare journal binds the previous CP21 root, recorded child, and locked fourteen-path root allowlist.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0022/umbrella-journal.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1bac858e128600a5160cb2cde301809d194172c2d6a36c28f03661517379fb51",
+        "size": 1534,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0022/umbrella-journal.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f695ca98ef510658c5607d3a3ce6fd91e10dad6d85054e373ab3603fc68b0fdf",
+        "size": 260,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0022/umbrella-journal.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "umbrella-ev0052",
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\npython3 - <<'PY'\nimport hashlib,json,importlib.util\nfrom pathlib import Path\np=Path('artifacts/evidence/CP-0022/EV-0052-draft.json'); v=json.loads(p.read_text()); assert v['id']=='EV-0052' and v['checkpoint_id']=='CP-0022'; assert hashlib.sha256(p.read_bytes()).hexdigest()=='fdccc84fea71fabf83e157b3fdc804038c6d89c8c680a97c365572984724d402'\nspec=Path('scripts/evidence_policy.py'); s=importlib.util.spec_from_file_location('ep',spec); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); ids,arts=m.validate_evidence(v,expected_id='EV-0052',checkpoint_id='CP-0022'); assert len(ids)==6\nprint(json.dumps({'ev0052_sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'result_count':len(ids),'artifact_count':len(arts),'policy':'pass'},sort_keys=True))\nPY"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T22:31:31+00:00",
+      "ended_at": "2026-08-09T22:31:31+00:00",
+      "exit_code": 0,
+      "result": "EV-0052 is exact, policy-valid, and contains six successful codec/build/test captures.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0022/umbrella-ev0052.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d99fe90aebb0b012f73085701df455eb869d994b12fb08f7c33d0d330c746a02",
+        "size": 1354,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0022/umbrella-ev0052.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "19ca5113881de80f0a329d174fa8cf944731777339c51db1971be44aa1c1d3a1",
+        "size": 145,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0022/umbrella-ev0052.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "umbrella-regression",
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\nbuild_dir=$(cat /tmp/cp22-runtime-clean-final.path)\nctest --test-dir \"$build_dir\" -R 'self_amdgpu_runtime\\\\.(generic_dispatch_v2_transport|triton_vecadd_compile)' --output-on-failure"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T22:31:31+00:00",
+      "ended_at": "2026-08-09T22:31:31+00:00",
+      "exit_code": 0,
+      "result": "The post-commit focused generic codec and CP21 Triton provenance tests pass.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0022/umbrella-regression.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a16e93a541a8b22e60a84cdea85bebabb40727b57996451a8fd2ea8fac60b201",
+        "size": 783,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0022/umbrella-regression.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0cbb3104c32128947821c2659a3b18c842518647cc1b60505ca21ec268f245c7",
+        "size": 127,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0022/umbrella-regression.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "70c65eb8406433945809319b4c6d97fd6858220abaec39a1562897b7e4d22720",
+        "size": 23,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "started_at": "2026-08-09T22:31:30+00:00",
+  "ended_at": "2026-08-09T22:31:31+00:00",
+  "exit_code": 0,
+  "environment_fingerprint": {
+    "checkpoint": "CP-0022",
+    "transaction_phase": "prepare",
+    "previous_root": "708e41377893ba5b7055d798cc728a7b3996af7e",
+    "previous_root_parent": "1deaf7c8b5cba68e17ce7de0299c7a4383e791f8",
+    "runtime_head": "02adb53580c7b7ffef65973dd178fd954e06cf09",
+    "runtime_tree": "564a48a12b3689cda3046ea72cd59d66d85e08f2",
+    "runtime_parent": "386713738a9eb050394e74152fe5acaf16435abe",
+    "runtime_clean": true,
+    "ev0052_sha256": "fdccc84fea71fabf83e157b3fdc804038c6d89c8c680a97c365572984724d402",
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "payload_version": "2.0 over framing 1.0",
+    "generic_capability_bit": 8,
+    "generic_message_types": "18/19/20",
+    "generic_record_bytes": 4096,
+    "runtime_ctest": "18/18",
+    "focused_post_commit": "2/2",
+    "triton_e2e": "0/1",
+    "compiler_invoked": false,
+    "jit": false,
+    "launcher": false,
+    "transport": false,
+    "execution": false,
+    "fallback": false
+  },
+  "limitations": [
+    "The v2 bit is not advertised or routed by the current daemon or gem5 bridge; the child proves codec behavior only.",
+    "The v1 A1 zero-VA fixture contract remains unchanged.",
+    "The retained Triton 12-DWORD preload is explicitly NOT_SUPPORTED until native preload and entry-offset semantics are implemented.",
+    "No mapping lease, packet-visible allocation, kernarg byte publication, daemon-owned AQL, normal launcher, simulator execution, output differential, timing, or fallback result is claimed.",
+    "Qwen remains offline/static preparation only and Triton E2E remains 0/1."
+  ],
+  "redactions": [],
+  "result": "The child, journal, EV-0052, and post-commit regression identities are consistent; CP22 is ready for root publication and CP23 daemon integration.",
+  "includes": {
+    "EV-0052": "fdccc84fea71fabf83e157b3fdc804038c6d89c8c680a97c365572984724d402"
+  },
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0022/EV-0052-draft.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "fdccc84fea71fabf83e157b3fdc804038c6d89c8c680a97c365572984724d402",
+      "size": 19334,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0022/build_ev0052.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "05b8a13274f40af899aeff31f49cdf842766170169c0a8ef78718f2bb973772f",
+      "size": 6905,
+      "tracked": false
+    }
+  ]
+}

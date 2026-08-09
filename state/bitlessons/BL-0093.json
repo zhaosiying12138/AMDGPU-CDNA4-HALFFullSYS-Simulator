@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/src/transport_codec.c",
+    "projects/self-amdgpu-runtime/tests/generic_dispatch_v2_transport_test.c",
+    "protocol/host-transport-v2.json",
+    "docs/host-transport-v2.md"
+  ],
+  "checkpoint_id": "CP-0022",
+  "conclusion": "A generic request must bind every resource through owner-scoped id/generation pairs and canonical stage ordering; response VAs are daemon-issued simulator addresses, never host pointers, and failed responses must be all-zero apart from status/error/opcode.",
+  "confidence": "high",
+  "decision": "Use fixed 4096-byte records with explicit zero tails, strict CRC and identity checks, bounded geometry/signal/kernarg validation, and stage-specific success fields. Keep mapping, allocation, publication, and execution unimplemented until a coordinated daemon handler exists.",
+  "evidence_ids": ["EV-0052", "EV-0053"],
+  "id": "BL-0093",
+  "invalidated_assumptions": [
+    "A public simulated_va is automatically valid in an AQL packet.",
+    "A successful codec round-trip proves that a daemon mapped memory, published kernarg bytes, or submitted a packet."
+  ],
+  "observation": "The v2 test exercises MAP_OBJECT, ALLOC_KERNARG, SUBMIT_AQL, UNMAP_OBJECT, response identity, CRC, padding, malformed ownership, and canonical failure paths without opening a daemon or invoking gem5.",
+  "question_or_symptom": "Which wire invariants must be established before a future launch handler may publish a packet-visible GPU VA or completion result?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

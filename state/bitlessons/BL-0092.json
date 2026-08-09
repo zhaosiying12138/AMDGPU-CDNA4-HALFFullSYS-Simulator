@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/runtime.h",
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "projects/self-amdgpu-runtime/src/transport_codec.c",
+    "protocol/host-transport-v2.json",
+    "docs/host-transport-v2.md"
+  ],
+  "checkpoint_id": "CP-0022",
+  "conclusion": "A payload version can evolve independently from the v1 envelope, but capability selection must remain explicit and dependency-closed: generic dispatch requires topology, queue, memory, signal, and code-object transport capabilities.",
+  "confidence": "high",
+  "decision": "Keep framing major/minor at 1.0, add payload major/minor 2.0 and capability bit 8, reserve message types 18/19/20, and reject partial or offered-only generic capability selections.",
+  "evidence_ids": ["EV-0052", "EV-0053"],
+  "id": "BL-0092",
+  "invalidated_assumptions": [
+    "A new payload family can silently reuse v1 dispatch IDs or reinterpret A1 code-object records.",
+    "An advertised generic capability is safe without queue, memory, signal, and code-object ownership dependencies."
+  ],
+  "observation": "The runtime codec validates the existing envelope and CRC, a distinct payload version, bit-8 dependency closure, and non-overlapping reserved record IDs while preserving all earlier CTest behavior.",
+  "question_or_symptom": "How can a generic launch wire be introduced without changing byte-level v1 behavior or allowing a partially negotiated capability?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

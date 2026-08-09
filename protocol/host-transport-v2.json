@@ -1,0 +1,213 @@
+{
+  "schema": "amdgpu-sim.host-transport-v2.generic-dispatch.v2",
+  "title": "GemSim generic object mapping and dispatch payload-v2 authority",
+  "checkpoint": "CP-0022",
+  "authority_status": "codec-admission-only",
+  "base_protocol": "protocol/host-transport-v1.json",
+  "scope": "A versioned, fixed-record schema for future object mapping, kernarg allocation, daemon-owned AQL submission, and unmapping. This checkpoint validates the payload codec and ownership rules only; it does not implement a daemon handler, launcher, mapping, or GPU execution.",
+  "versioning": {
+    "framing_major": 1,
+    "framing_minor": 0,
+    "payload_major": 2,
+    "payload_minor": 0,
+    "compatibility": "The v1 80-byte envelope, byte order, CRC-32C rule, and all v1 message records remain unchanged. A v2 payload is opt-in and is never decoded as a v1 record.",
+    "server_status": "The current daemon does not advertise or route this capability. A codec success is not a transport or execution result."
+  },
+  "capability": {
+    "name": "GENERIC_DISPATCH_V2",
+    "word_index": 0,
+    "bit": 8,
+    "mask_hex": "100",
+    "negotiation": "Selected only when offered and required are both set, matching the existing runtime capability policy.",
+    "requires": [
+      "TOPOLOGY_IDENTITY_V1",
+      "QUEUE_CONTROL_V1",
+      "SIMULATED_MEMORY_V1",
+      "SIGNAL_EVENT_V1",
+      "CODE_OBJECT_TRANSPORT_V1"
+    ],
+    "implementation_symbol_names": [
+      "SAGR_CAPABILITY_GENERIC_DISPATCH_WORD",
+      "SAGR_CAPABILITY_GENERIC_DISPATCH_MASK",
+      "SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR",
+      "SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR"
+    ]
+  },
+  "transport": {
+    "header_bytes": 80,
+    "record_bytes": 4096,
+    "payload_bytes": 4016,
+    "byte_order": "big-endian for all serialized scalar fields",
+    "message_types": {
+      "GENERIC_DISPATCH_REQUEST": 18,
+      "GENERIC_DISPATCH_ACK": 19,
+      "GENERIC_DISPATCH_COMPLETION": 20
+    },
+    "opcodes": {
+      "MAP_OBJECT": 1,
+      "ALLOC_KERNARG": 2,
+      "SUBMIT_AQL": 3,
+      "UNMAP_OBJECT": 4
+    },
+    "crc": "The base protocol CRC-32C covers the complete 4096-byte frame using the existing header rule.",
+    "ancillary_descriptors": 0,
+    "host_pointers": false,
+    "client_aql_bytes": false,
+    "fd_carrier": "No FD or SCM_RIGHTS field is part of v2. Existing v1 MEMORY_COPY_H2D remains the future byte-carrier for daemon-owned allocations."
+  },
+  "request_payload": {
+    "bytes": 4016,
+    "common_prefix_bytes": 232,
+    "common_fields": [
+      {"name": "payload_major", "offset": 0, "bytes": 2, "type": "u16", "constant": 2},
+      {"name": "payload_minor", "offset": 2, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "opcode", "offset": 4, "bytes": 2, "type": "u16", "values": {"MAP_OBJECT": 1, "ALLOC_KERNARG": 2, "SUBMIT_AQL": 3, "UNMAP_OBJECT": 4}},
+      {"name": "flags", "offset": 6, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "object_id", "offset": 8, "bytes": 8, "type": "u64", "owner_scoped": true},
+      {"name": "object_generation", "offset": 16, "bytes": 8, "type": "u64", "nonzero": true},
+      {"name": "mapping_id", "offset": 24, "bytes": 8, "type": "u64"},
+      {"name": "mapping_generation", "offset": 32, "bytes": 8, "type": "u64"},
+      {"name": "queue_id", "offset": 40, "bytes": 8, "type": "u64"},
+      {"name": "queue_generation", "offset": 48, "bytes": 8, "type": "u64"},
+      {"name": "queue_sequence", "offset": 56, "bytes": 8, "type": "u64"},
+      {"name": "kernel_index", "offset": 64, "bytes": 4, "type": "u32"},
+      {"name": "reserved0", "offset": 68, "bytes": 4, "type": "u32", "constant": 0},
+      {"name": "image_sha256", "offset": 72, "bytes": 32, "type": "bytes", "nonzero_for_map_submit": true},
+      {"name": "kernel_name", "offset": 104, "bytes": 128, "type": "ASCII_NUL_padded", "nonempty_for_map_submit": true}
+    ],
+    "stage_bodies": {
+      "MAP_OBJECT": {
+        "active_end": 256,
+        "fields": [
+          {"name": "gfx_target", "offset": 232, "bytes": 4, "type": "u32", "constant": 950},
+          {"name": "relocation_count", "offset": 236, "bytes": 4, "type": "u32", "constant": 0},
+          {"name": "kernarg_segment_size", "offset": 240, "bytes": 4, "type": "u32", "range": "1..16777216"},
+          {"name": "kernarg_segment_align", "offset": 244, "bytes": 4, "type": "u32", "range": "power-of-two, 8..65536"},
+          {"name": "descriptor_preload_dwords", "offset": 248, "bytes": 4, "type": "u32", "supported_value": 0, "unsupported_nonzero": true},
+          {"name": "page_size", "offset": 252, "bytes": 4, "type": "u32", "values": [4096, 65536]}
+        ],
+        "identity_rule": "object_id/generation are nonzero; mapping, queue, and signal identities are zero; map identity is daemon-issued in the ACK."
+      },
+      "ALLOC_KERNARG": {
+        "active_end": 256,
+        "fields": [
+          {"name": "size_bytes", "offset": 232, "bytes": 8, "type": "u64", "range": "1..16777216"},
+          {"name": "alignment_bytes", "offset": 240, "bytes": 8, "type": "u64", "range": "power-of-two, 8..65536"},
+          {"name": "allocation_flags", "offset": 248, "bytes": 4, "type": "u32", "constant": 0},
+          {"name": "reserved0", "offset": 252, "bytes": 4, "type": "u32", "constant": 0}
+        ],
+        "identity_rule": "object and mapping identities are nonzero and owner-scoped; queue, signal, image hash, and kernel name are zero; allocation identity and GPU VA are daemon-issued."
+      },
+      "SUBMIT_AQL": {
+        "active_end": 336,
+        "fields": [
+          {"name": "kernarg_allocation_id", "offset": 232, "bytes": 8, "type": "u64", "nonzero": true},
+          {"name": "kernarg_generation", "offset": 240, "bytes": 8, "type": "u64", "nonzero": true},
+          {"name": "kernarg_offset", "offset": 248, "bytes": 8, "type": "u64", "range": "offset+size <= 16777216"},
+          {"name": "kernarg_size", "offset": 256, "bytes": 8, "type": "u64", "range": "1..16777216"},
+          {"name": "signal_id", "offset": 264, "bytes": 8, "type": "u64", "nonzero": true},
+          {"name": "signal_generation", "offset": 272, "bytes": 8, "type": "u64", "nonzero": true},
+          {"name": "expected_signal_value_bits", "offset": 280, "bytes": 8, "type": "u64", "constant": 1},
+          {"name": "grid_x", "offset": 288, "bytes": 4, "type": "u32", "range": "nonzero and >= workgroup_x"},
+          {"name": "grid_y", "offset": 292, "bytes": 4, "type": "u32", "range": "nonzero and >= workgroup_y"},
+          {"name": "grid_z", "offset": 296, "bytes": 4, "type": "u32", "range": "nonzero and >= workgroup_z"},
+          {"name": "workgroup_x", "offset": 300, "bytes": 4, "type": "u32", "range": "1..1024"},
+          {"name": "workgroup_y", "offset": 304, "bytes": 4, "type": "u32", "range": "1..1024"},
+          {"name": "workgroup_z", "offset": 308, "bytes": 4, "type": "u32", "range": "1..1024"},
+          {"name": "num_warps", "offset": 312, "bytes": 4, "type": "u32", "range": "1..32"},
+          {"name": "num_ctas", "offset": 316, "bytes": 4, "type": "u32", "range": "1..8"},
+          {"name": "shared_memory_bytes", "offset": 320, "bytes": 4, "type": "u32", "range": "0..65536"},
+          {"name": "wavefront_size", "offset": 324, "bytes": 4, "type": "u32", "constant": 64},
+          {"name": "launch_flags", "offset": 328, "bytes": 4, "type": "u32", "constant": 0},
+          {"name": "reserved0", "offset": 332, "bytes": 4, "type": "u32", "constant": 0}
+        ],
+        "identity_rule": "object, mapping, queue, kernarg allocation, and signal identities must be nonzero and owner/generation matched. The daemon constructs the 64-byte AQL packet; no packet bytes or host pointer are accepted from the client."
+      },
+      "UNMAP_OBJECT": {
+        "active_end": 232,
+        "fields": [],
+        "identity_rule": "object and mapping identities are nonzero; queue, signal, kernel, hash/name, body, and tail are zero."
+      }
+    },
+    "padding": "All bytes from the stage active_end through offset 4015 are zero."
+  },
+  "response_payload": {
+    "bytes": 4016,
+    "fields": [
+      {"name": "payload_major", "offset": 0, "bytes": 2, "type": "u16", "constant": 2},
+      {"name": "payload_minor", "offset": 2, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "status", "offset": 4, "bytes": 4, "type": "u32", "source": "base protocol wire statuses"},
+      {"name": "opcode", "offset": 8, "bytes": 2, "type": "u16"},
+      {"name": "flags", "offset": 10, "bytes": 2, "type": "u16", "constant": 0},
+      {"name": "error_code", "offset": 12, "bytes": 4, "type": "u32", "failure_nonzero": true},
+      {"name": "object_id", "offset": 16, "bytes": 8, "type": "u64"},
+      {"name": "object_generation", "offset": 24, "bytes": 8, "type": "u64"},
+      {"name": "mapping_id", "offset": 32, "bytes": 8, "type": "u64"},
+      {"name": "mapping_generation", "offset": 40, "bytes": 8, "type": "u64"},
+      {"name": "mapped_base_va", "offset": 48, "bytes": 8, "type": "u64", "daemon_gpu_va": true},
+      {"name": "mapped_end_va", "offset": 56, "bytes": 8, "type": "u64", "daemon_gpu_va": true},
+      {"name": "descriptor_va", "offset": 64, "bytes": 8, "type": "u64", "daemon_gpu_va": true},
+      {"name": "code_va", "offset": 72, "bytes": 8, "type": "u64", "daemon_gpu_va": true},
+      {"name": "entry_va", "offset": 80, "bytes": 8, "type": "u64", "daemon_gpu_va": true},
+      {"name": "mapped_bytes", "offset": 88, "bytes": 8, "type": "u64"},
+      {"name": "kernarg_allocation_id", "offset": 96, "bytes": 8, "type": "u64"},
+      {"name": "kernarg_generation", "offset": 104, "bytes": 8, "type": "u64"},
+      {"name": "kernarg_va", "offset": 112, "bytes": 8, "type": "u64", "daemon_gpu_va": true},
+      {"name": "kernarg_size", "offset": 120, "bytes": 8, "type": "u64"},
+      {"name": "kernarg_alignment", "offset": 128, "bytes": 8, "type": "u64"},
+      {"name": "kernel_index", "offset": 136, "bytes": 4, "type": "u32"},
+      {"name": "segment_count", "offset": 140, "bytes": 4, "type": "u32"},
+      {"name": "descriptor_preload_dwords", "offset": 144, "bytes": 4, "type": "u32"},
+      {"name": "reserved0", "offset": 148, "bytes": 4, "type": "u32", "constant": 0},
+      {"name": "ticket_id", "offset": 152, "bytes": 8, "type": "u64"},
+      {"name": "trace_id", "offset": 160, "bytes": 8, "type": "u64"},
+      {"name": "queue_id", "offset": 168, "bytes": 8, "type": "u64"},
+      {"name": "queue_generation", "offset": 176, "bytes": 8, "type": "u64"},
+      {"name": "queue_sequence", "offset": 184, "bytes": 8, "type": "u64"},
+      {"name": "signal_id", "offset": 192, "bytes": 8, "type": "u64"},
+      {"name": "signal_generation", "offset": 200, "bytes": 8, "type": "u64"},
+      {"name": "signal_value_bits", "offset": 208, "bytes": 8, "type": "u64"},
+      {"name": "packet_va", "offset": 216, "bytes": 8, "type": "u64", "daemon_gpu_va": true},
+      {"name": "packet_crc32c", "offset": 224, "bytes": 4, "type": "u32"},
+      {"name": "output_crc32c", "offset": 228, "bytes": 4, "type": "u32"},
+      {"name": "sim_tick", "offset": 232, "bytes": 8, "type": "u64"},
+      {"name": "admission_tick", "offset": 240, "bytes": 8, "type": "u64"},
+      {"name": "start_tick", "offset": 248, "bytes": 8, "type": "u64"},
+      {"name": "end_tick", "offset": 256, "bytes": 8, "type": "u64"},
+      {"name": "retire_tick", "offset": 264, "bytes": 8, "type": "u64"},
+      {"name": "image_sha256", "offset": 272, "bytes": 32, "type": "bytes"}
+    ],
+    "correlation": "request_id and message_type are envelope/header-derived and are not duplicated in the payload.",
+    "failure_rule": "For a non-OK response, every identity, VA, hash, ticket, trace, CRC, and tick field is zero except the echoed opcode; error_code is nonzero."
+  },
+  "state_rules": {
+    "ordering": ["MAP_OBJECT", "ALLOC_KERNARG", "SUBMIT_AQL", "UNMAP_OBJECT"],
+    "ownership": "Every nonzero object, mapping, queue, allocation, signal, ticket, and generation is connection/owner scoped. Stale or cross-owner generations are rejected before publication.",
+    "aql": "SUBMIT_AQL contains launch metadata only. The daemon owns packet materialization, kernel_object, kernarg VA, completion signal linkage, publication, and CRC.",
+    "memory": "The v2 schema does not make public simulated_va packet-visible by itself. A future handler must return daemon-issued GPU VAs and pin the referenced allocations until completion."
+  },
+  "bounded_fixture_observation": {
+    "tutorial_sha256": "842430949e0ccde4fbce07606cce3ac4bac36bf21b2b12619a31b795ca4029b3",
+    "hsaco_sha256": "ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e",
+    "hsaco_bytes": 5408,
+    "target_spelling": "amdgcn-amd-amdhsa-unknown-gfx950",
+    "kernel": "vecadd",
+    "kernarg_segment_bytes": 48,
+    "kernarg_alignment": 8,
+    "descriptor_preload_dwords": 12,
+    "preload_status": "NOT_SUPPORTED by this codec/admission gate until native preload and +256-byte entry semantics are implemented; the value is never silently stripped."
+  },
+  "acceptance_boundary": {
+    "codec_test": true,
+    "mapping_handler": false,
+    "allocator_handler": false,
+    "kernarg_publication": false,
+    "aql_queue_submission": false,
+    "normal_launcher": false,
+    "gem5_dispatcher_or_cu": false,
+    "compiler_or_jit": false,
+    "execution": false,
+    "fallback": false,
+    "qwen_e2e": false
+  }
+}

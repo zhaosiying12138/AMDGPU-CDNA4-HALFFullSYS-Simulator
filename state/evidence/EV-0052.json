@@ -1,0 +1,325 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0052",
+  "checkpoint_id": "CP-0022",
+  "type": "cp22-generic-wire-v2-codec-child",
+  "claim": "EV-0052 records the CP22 self-amdgpu-runtime codec/admission boundary. It validates fixed 4096-byte payload-v2 request and response records, capability bit 8 dependencies, owner-scoped stage identities, CRC and zero-tail rules, canonical failures, geometry/signal bounds, and the explicit unsupported Triton preload boundary. It does not implement a daemon handler, mapping lease, kernarg publication, AQL submission, launcher, simulator execution, or fallback.",
+  "command_argv": [
+    [
+      "bash",
+      "-lc",
+      "set -eu\npython3 - <<'PY'\nimport hashlib,json,subprocess\nfrom pathlib import Path\nroot=Path('projects/self-amdgpu-runtime')\nstatus=subprocess.check_output(['git','-C',str(root),'status','--porcelain=v1','--untracked-files=all'],text=True)\npaths=[line[3:] for line in status.splitlines() if line]\nexpected=['include/self_amdgpu_runtime/runtime.h','src/transport.c','src/transport_codec.c','src/transport_internal.h','tests/CMakeLists.txt','tests/generic_dispatch_v2_transport_test.c']\nassert sorted(paths)==sorted(expected),paths\nassert subprocess.run(['git','-C',str(root),'diff','--check'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True).returncode==0\ndiff=subprocess.check_output(['git','-C',str(root),'diff','--binary','--full-index','--',*expected])\nh=hashlib.sha256(diff).hexdigest()\nfiles={p:{'bytes':(root/p).stat().st_size,'sha256':hashlib.sha256((root/p).read_bytes()).hexdigest()} for p in expected}\nprint(json.dumps({'base_head':subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip(),'base_tree':subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD^{tree}'],text=True).strip(),'status_paths':paths,'diff_check':'pass','working_diff_sha256':h,'files':files,'scope':'codec/schema/admission-only; no daemon, gem5, launcher, execution, or root edits'},sort_keys=True))\nPY"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\nbuild_dir=$(cat /tmp/cp22-runtime-clean-final.path)\ncmake --build \"$build_dir\" -j4"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\nbuild_dir=$(cat /tmp/cp22-runtime-clean-final.path)\nctest --test-dir \"$build_dir\" --output-on-failure"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\nbuild_dir=$(cat /tmp/cp22-runtime-clean-final.path)\nctest --test-dir \"$build_dir\" -R 'self_amdgpu_runtime\\\\.(generic_dispatch_v2_transport|code_object|code_object_transport|code_object_upload)' --output-on-failure"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\npython3 -m json.tool protocol/host-transport-v2.json >/dev/null\npython3 - <<'PY'\nimport hashlib,json\nfrom pathlib import Path\nschema=Path('protocol/host-transport-v2.json'); docs=Path('docs/host-transport-v2.md')\nvalue=json.loads(schema.read_text())\nassert value['checkpoint']=='CP-0022' and value['versioning']['framing_major']==1 and value['versioning']['payload_major']==2\nassert value['capability']['bit']==8 and value['transport']['record_bytes']==4096\nassert value['transport']['message_types']=={'GENERIC_DISPATCH_REQUEST':18,'GENERIC_DISPATCH_ACK':19,'GENERIC_DISPATCH_COMPLETION':20}\nassert value['acceptance_boundary']['execution'] is False and value['bounded_fixture_observation']['descriptor_preload_dwords']==12\nprint(json.dumps({'schema_sha256':hashlib.sha256(schema.read_bytes()).hexdigest(),'schema_bytes':schema.stat().st_size,'docs_sha256':hashlib.sha256(docs.read_bytes()).hexdigest(),'docs_bytes':docs.stat().st_size,'json':'valid','codec_boundary':'pass','execution':False},sort_keys=True))\nPY"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\npython3 - <<'PY'\nimport hashlib,json,subprocess\nfrom pathlib import Path\nt=Path('projects/triton/python/tutorials/01-vector-add.py'); h=Path('artifacts/evidence/CP-0017/triton-builds/vecadd-gfx950.hsaco')\nassert hashlib.sha256(t.read_bytes()).hexdigest()=='842430949e0ccde4fbce07606cce3ac4bac36bf21b2b12619a31b795ca4029b3'\nassert len(h.read_bytes())==5408 and hashlib.sha256(h.read_bytes()).hexdigest()=='ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e'\nd=h.read_bytes()[0x5c0:0x5c0+64]; assert int.from_bytes(d[58:60],'little')==12\nassert subprocess.check_output(['git','-C','projects/triton','status','--porcelain=v1'],text=True)==''\nprint(json.dumps({'tutorial_sha256':hashlib.sha256(t.read_bytes()).hexdigest(),'hsaco_sha256':hashlib.sha256(h.read_bytes()).hexdigest(),'hsaco_bytes':len(h.read_bytes()),'target':'amdgcn-amd-amdhsa-unknown-gfx950','preload_dwords':12,'preload_bytes':48,'compiler_invoked':False,'jit':False,'launcher':False,'transport':False,'execution':False,'fallback':False},sort_keys=True))\nPY"
+    ]
+  ],
+  "command_results": [
+    {
+      "id": "child-dirty-inventory",
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\npython3 - <<'PY'\nimport hashlib,json,subprocess\nfrom pathlib import Path\nroot=Path('projects/self-amdgpu-runtime')\nstatus=subprocess.check_output(['git','-C',str(root),'status','--porcelain=v1','--untracked-files=all'],text=True)\npaths=[line[3:] for line in status.splitlines() if line]\nexpected=['include/self_amdgpu_runtime/runtime.h','src/transport.c','src/transport_codec.c','src/transport_internal.h','tests/CMakeLists.txt','tests/generic_dispatch_v2_transport_test.c']\nassert sorted(paths)==sorted(expected),paths\nassert subprocess.run(['git','-C',str(root),'diff','--check'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True).returncode==0\ndiff=subprocess.check_output(['git','-C',str(root),'diff','--binary','--full-index','--',*expected])\nh=hashlib.sha256(diff).hexdigest()\nfiles={p:{'bytes':(root/p).stat().st_size,'sha256':hashlib.sha256((root/p).read_bytes()).hexdigest()} for p in expected}\nprint(json.dumps({'base_head':subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip(),'base_tree':subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD^{tree}'],text=True).strip(),'status_paths':paths,'diff_check':'pass','working_diff_sha256':h,'files':files,'scope':'codec/schema/admission-only; no daemon, gem5, launcher, execution, or root edits'},sort_keys=True))\nPY"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T22:26:00+00:00",
+      "ended_at": "2026-08-09T22:26:00+00:00",
+      "exit_code": 0,
+      "result": "The runtime child diff is limited to the CP22 codec, capability, test, and CMake files; the dirty inventory and diff check pass.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0022/child-dirty-inventory.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2c11286dbde0e86e28edf1083cac69e40a0ab9c6b3df08e2f18eb9375e4e034c",
+        "size": 1934,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0022/child-dirty-inventory.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0fe55a102bb29752ed16e5896771c80ec9bdfd388947ebd3e1a0fd9274da8c0c",
+        "size": 1294,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0022/child-dirty-inventory.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-clean-build",
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\nbuild_dir=$(cat /tmp/cp22-runtime-clean-final.path)\ncmake --build \"$build_dir\" -j4"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T22:26:00+00:00",
+      "ended_at": "2026-08-09T22:26:01+00:00",
+      "exit_code": 0,
+      "result": "A fresh static CMake build compiles the runtime and all CP22 test targets without warnings or errors.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0022/runtime-clean-build.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ace9bc5bbfa22980da43c5b358f40362e517716bedd517b862d92cb5e75b39f2",
+        "size": 681,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0022/runtime-clean-build.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "dce8c8a5485b721bd922f9f20df5364b3bfb33b715b98807c5cfbe4ca11c463e",
+        "size": 1039,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0022/runtime-clean-build.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-ctest-full",
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\nbuild_dir=$(cat /tmp/cp22-runtime-clean-final.path)\nctest --test-dir \"$build_dir\" --output-on-failure"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T22:26:01+00:00",
+      "ended_at": "2026-08-09T22:26:04+00:00",
+      "exit_code": 0,
+      "result": "The complete runtime CTest suite passes 18/18, including all prior CP21 tests and the new v2 transport test.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0022/runtime-ctest-full.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "003bc59faf8c2b9543e6efcf824fdf1efe59c3d4c807badd16df51be590429ec",
+        "size": 698,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0022/runtime-ctest-full.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "08e283ecf2fb486c916c71c479af802f40f865e84a651e134b7a8a581a67dbcb",
+        "size": 2718,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0022/runtime-ctest-full.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-ctest-focused",
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\nbuild_dir=$(cat /tmp/cp22-runtime-clean-final.path)\nctest --test-dir \"$build_dir\" -R 'self_amdgpu_runtime\\\\.(generic_dispatch_v2_transport|code_object|code_object_transport|code_object_upload)' --output-on-failure"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T22:26:01+00:00",
+      "ended_at": "2026-08-09T22:26:01+00:00",
+      "exit_code": 0,
+      "result": "The focused v2 and code-object regression selection passes 5/5.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0022/runtime-ctest-focused.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ed0bb6040ec7ee425fa6e0aead4b458fa3d3688887d60c6f6c6a3c4d1e24fd70",
+        "size": 818,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0022/runtime-ctest-focused.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0cbb3104c32128947821c2659a3b18c842518647cc1b60505ca21ec268f245c7",
+        "size": 127,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0022/runtime-ctest-focused.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "70c65eb8406433945809319b4c6d97fd6858220abaec39a1562897b7e4d22720",
+        "size": 23,
+        "tracked": false
+      }
+    },
+    {
+      "id": "schema-codec-check",
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\npython3 -m json.tool protocol/host-transport-v2.json >/dev/null\npython3 - <<'PY'\nimport hashlib,json\nfrom pathlib import Path\nschema=Path('protocol/host-transport-v2.json'); docs=Path('docs/host-transport-v2.md')\nvalue=json.loads(schema.read_text())\nassert value['checkpoint']=='CP-0022' and value['versioning']['framing_major']==1 and value['versioning']['payload_major']==2\nassert value['capability']['bit']==8 and value['transport']['record_bytes']==4096\nassert value['transport']['message_types']=={'GENERIC_DISPATCH_REQUEST':18,'GENERIC_DISPATCH_ACK':19,'GENERIC_DISPATCH_COMPLETION':20}\nassert value['acceptance_boundary']['execution'] is False and value['bounded_fixture_observation']['descriptor_preload_dwords']==12\nprint(json.dumps({'schema_sha256':hashlib.sha256(schema.read_bytes()).hexdigest(),'schema_bytes':schema.stat().st_size,'docs_sha256':hashlib.sha256(docs.read_bytes()).hexdigest(),'docs_bytes':docs.stat().st_size,'json':'valid','codec_boundary':'pass','execution':False},sort_keys=True))\nPY"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T22:26:01+00:00",
+      "ended_at": "2026-08-09T22:26:01+00:00",
+      "exit_code": 0,
+      "result": "The CP22 authority JSON parses, its field/message/capability identities match the codec, and execution remains false.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0022/schema-codec-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "29b0743690962e17ec339c6989390bccbfcc28cc443a167970fb34bd51de1c37",
+        "size": 1618,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0022/schema-codec-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "72b56672a6924b225beabae80b6b9ca0bbaf7972ebb3fea38851c95d17372507",
+        "size": 275,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0022/schema-codec-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "triton-identity",
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\npython3 - <<'PY'\nimport hashlib,json,subprocess\nfrom pathlib import Path\nt=Path('projects/triton/python/tutorials/01-vector-add.py'); h=Path('artifacts/evidence/CP-0017/triton-builds/vecadd-gfx950.hsaco')\nassert hashlib.sha256(t.read_bytes()).hexdigest()=='842430949e0ccde4fbce07606cce3ac4bac36bf21b2b12619a31b795ca4029b3'\nassert len(h.read_bytes())==5408 and hashlib.sha256(h.read_bytes()).hexdigest()=='ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e'\nd=h.read_bytes()[0x5c0:0x5c0+64]; assert int.from_bytes(d[58:60],'little')==12\nassert subprocess.check_output(['git','-C','projects/triton','status','--porcelain=v1'],text=True)==''\nprint(json.dumps({'tutorial_sha256':hashlib.sha256(t.read_bytes()).hexdigest(),'hsaco_sha256':hashlib.sha256(h.read_bytes()).hexdigest(),'hsaco_bytes':len(h.read_bytes()),'target':'amdgcn-amd-amdhsa-unknown-gfx950','preload_dwords':12,'preload_bytes':48,'compiler_invoked':False,'jit':False,'launcher':False,'transport':False,'execution':False,'fallback':False},sort_keys=True))\nPY"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-09T22:26:01+00:00",
+      "ended_at": "2026-08-09T22:26:01+00:00",
+      "exit_code": 0,
+      "result": "The unmodified Triton tutorial and retained 5,408-byte HSACO identities match; preload is bound as 12 DWORD/48 bytes and all execution flags remain false.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0022/triton-identity.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2d7f20ca299fcc42194be8e2bab973f512d889bfeb964bf0767911aef18d2251",
+        "size": 1630,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0022/triton-identity.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c9c57a5db50cc41d8b5fdc5b28ee857e12722b348e15ae1c34b4bf2d3dcbf83d",
+        "size": 401,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0022/triton-identity.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "started_at": "2026-08-09T22:26:00+00:00",
+  "ended_at": "2026-08-09T22:26:04+00:00",
+  "exit_code": 0,
+  "environment_fingerprint": {
+    "checkpoint": "CP-0022",
+    "child_base_head": "386713738a9eb050394e74152fe5acaf16435abe",
+    "child_base_tree": "0011ed99bc09baaa06f57887141217d56c24626d",
+    "child_dirty": true,
+    "child_working_diff_sha256": "cf56091f77d7ee8a299354cf69ee4398c47b5b098eefc153a5240e5661d881cc",
+    "child_status_paths": [
+      "include/self_amdgpu_runtime/runtime.h",
+      "src/transport.c",
+      "src/transport_codec.c",
+      "src/transport_internal.h",
+      "tests/CMakeLists.txt",
+      "tests/generic_dispatch_v2_transport_test.c"
+    ],
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "protocol_framing": "1.0",
+    "payload_version": "2.0",
+    "generic_capability_bit": 8,
+    "generic_message_types": "18/19/20",
+    "generic_record_bytes": 4096,
+    "runtime_ctest": "18/18",
+    "focused_ctest": "5/5",
+    "triton_target": "amdgcn-amd-amdhsa-unknown-gfx950",
+    "triton_hsaco_sha256": "ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e",
+    "triton_preload_dwords": 12,
+    "triton_preload_bytes": 48,
+    "compiler_invoked": false,
+    "jit": false,
+    "launcher": false,
+    "transport": false,
+    "execution": false,
+    "fallback": false
+  },
+  "limitations": [
+    "The child is intentionally captured before its CP22 commit; EV-0053 must bind the eventual commit and clean tree.",
+    "The capability bit is codec/API validation only. The current daemon and gem5 bridge do not advertise or route message types 18/19/20.",
+    "The v1 A1 contract remains fixture-only with zero public mapping, descriptor, code, and kernarg VAs.",
+    "The retained Triton descriptor preload is 12 DWORD (48 bytes) and is explicitly NOT_SUPPORTED until native preload and +256-byte entry semantics are implemented.",
+    "No normal launcher, compiler/JIT invocation, GPU mapping, kernarg byte publication, AQL queue submission, simulator execution, output differential, or CPU/NVIDIA fallback result is claimed."
+  ],
+  "redactions": [],
+  "result": "CP22 child codec and admission tests pass from a fresh build; the result remains codec-only and execution=false.",
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0022/build_ev0052.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "05b8a13274f40af899aeff31f49cdf842766170169c0a8ef78718f2bb973772f",
+      "size": 6905,
+      "tracked": false
+    }
+  ]
+}

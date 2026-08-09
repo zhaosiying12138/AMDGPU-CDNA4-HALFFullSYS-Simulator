@@ -1,9 +1,9 @@
 {
-  "checkpoint_id": "CP-0021",
-  "checkpoint_sha256": "89144b85049dd36ceac660d467312e37cc18c2aa43d8a84ced895284f7f07dd4",
+  "checkpoint_id": "CP-0022",
+  "checkpoint_sha256": "8bd13f89d47bccb7b1ebeb51ed838140913fdd7a006df6998c189fd2402990e0",
   "goal_id": "GSIM-001",
-  "next_action_id": "P5-TRITON-VECADD-02",
-  "next_action_summary": "Implement generic versioned wire-v2 allocation and mapping ownership, descriptor/kernarg/AQL linkage, and normal Triton launcher handoff without CPU or NVIDIA fallback.",
+  "next_action_id": "P5-TRITON-VECADD-02-RUNTIME",
+  "next_action_summary": "Implement coordinated daemon/client v2 mapping leases, packet-visible kernarg publication, preload-aware AQL submission, and normal Triton launcher handoff without CPU or NVIDIA fallback.",
   "phase_id": "P5",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,
