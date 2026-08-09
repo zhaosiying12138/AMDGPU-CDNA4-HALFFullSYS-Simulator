@@ -1,0 +1,27 @@
+{
+  "applies_to": [
+    "GOAL.md",
+    "PLAN.md",
+    "docs/host-native-architecture.md",
+    "state/evidence/EV-0038.json",
+    "state/evidence/EV-0039.json"
+  ],
+  "checkpoint_id": "CP-0015",
+  "conclusion": "A no-x86 control-plane executable is a meaningful separation gate, but it is not a loader, GPU execution, or Triton end-to-end result.",
+  "confidence": "high",
+  "decision": "Advance only to P3-HOST-NATIVE-03, where the accepted CP13 loader and runtime protocol must be connected and compared against the gem5 oracle before the first Triton vecadd gate.",
+  "evidence_ids": [
+    "EV-0038",
+    "EV-0039"
+  ],
+  "id": "BL-0073",
+  "invalidated_assumptions": [
+    "An x86-free control binary implies PT_LOAD mapping, AQL construction, or instruction execution.",
+    "The project already has a passing Triton end-to-end case."
+  ],
+  "observation": "EV-0038 explicitly reports kernel_executed=false and the accepted self-test emits cpu_fallback=false and vega_x86=false; no Triton case has passed.",
+  "question_or_symptom": "What remains after the first independent no-VEGA_X86 binary links?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

@@ -1,0 +1,278 @@
+{
+  "checkpoint_id": "CP-0015",
+  "claim": "The CP-0015 umbrella binds the detailed EV-0038 standalone HOSTGPU_NATIVE_CONTROL build/audit/self-test and legacy-regression evidence to EV-0037's accepted architecture boundary, the exact clean child identities, and the CP-0015 prepare journal. It proves a no-VEGA_X86 control-plane boundary only; it does not claim PT_LOAD mapping, GPU-pipeline execution, Triton end-to-end execution, hardware, timing, or performance.",
+  "command_argv": [
+    [
+      "bash",
+      "-lc",
+      "set -eu; python3 -c \"import json; j=json.load(open('.git/amdgpu-sim/txn/CP-0015.json')); assert set(j['declared_children']) == {'gem5'} and set(j['expected_children']) == {'gem5'}\"; git -C projects/gem5 rev-parse HEAD HEAD^{tree}"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; python3 -c \"import json; j=json.load(open('.git/amdgpu-sim/txn/CP-0015.json')); assert set(j['declared_children']) == {'gem5'} and set(j['expected_children']) == {'gem5'}\"; test -z \"$(git -C projects/gem5 status --porcelain=v1 --untracked-files=all)\"; printf \"gem5=clean\\n\""
+    ],
+    [
+      "python3",
+      "-c",
+      "import json,subprocess; j=json.load(open(\".git/amdgpu-sim/txn/CP-0015.json\")); assert j[\"phase\"]==\"prepare\"; e=j[\"expected_children\"]; h=\"5b2fe12adc22562997de20fa81b1155a65296a81\"; t=\"31e68951c82e21c0fcf769523e8e4d72a83e678f\"; assert set(e)=={\"gem5\"} and e[\"gem5\"][\"head\"]==h and e[\"gem5\"][\"tree\"]==t; p=e[\"gem5\"][\"path\"]; assert subprocess.check_output([\"git\",\"-C\",p,\"rev-parse\",\"HEAD\"],text=True).strip()==h; assert subprocess.check_output([\"git\",\"-C\",p,\"rev-parse\",\"HEAD^{tree}\"],text=True).strip()==t; assert subprocess.check_output([\"git\",\"-C\",p,\"status\",\"--porcelain=v1\",\"--untracked-files=all\"],text=True)==\"\"; print(f\"phase=prepare expected_children exact; gem5 head={h} tree={t} clean\")"
+    ],
+    [
+      "python3",
+      "scripts/transaction.py",
+      "status"
+    ],
+    [
+      "python3",
+      "-c",
+      "import hashlib; expected={\"EV-0037\":\"0deb4c503e6df33d37a7429ae7af84c91d876fa3a9a56fb77cf8e6b81ccb1fe1\",\"EV-0038\":\"06bfcaec333279484fdabb53df56f67d97d70a3ecf70f1637c75a1a522dd55dc\"}; assert all(hashlib.sha256(open(\"state/evidence/\"+k+\".json\",\"rb\").read()).hexdigest()==v for k,v in expected.items()); print(\"EV-0037/EV-0038 hashes match\")"
+    ],
+    [
+      "python3",
+      "-c",
+      "import hashlib; expected={\"GOAL.md\":\"8fbf94d58192542ee4d97257f187a6bf5653070cfb96958c65380b66446d5450\",\"PLAN.md\":\"e4d5e340158e3e7ac1a40571d86788a97bf451525593072161ffcbb0c32c6e87\",\"README.md\":\"4849bb706f5c28204edf5d26781cd410ab9d8c2ed0a72f4e2f364020aef86135\"}; actual={p:hashlib.sha256(open(p,\"rb\").read()).hexdigest() for p in expected}; assert actual==expected, actual; print(\"\\n\".join(f\"{p}={actual[p]}\" for p in expected))"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; python3 -c \"import json; j=json.load(open('.git/amdgpu-sim/txn/CP-0015.json')); assert set(j['declared_children']) == {'gem5'} and set(j['expected_children']) == {'gem5'}\"; git -C projects/gem5 rev-parse HEAD HEAD^{tree}"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T07:51:20+00:00",
+      "exit_code": 0,
+      "id": "child-identities",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0015/child-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7977d6f88fbf4421f7d6d2953abd068d321b98df0d4c05807a988f1edb8df4e8",
+        "size": 810,
+        "tracked": false
+      },
+      "result": "The exact CP-0015 participant identity is retained: gem5 5b2fe12adc22562997de20fa81b1155a65296a81/tree 31e68951c82e21c0fcf769523e8e4d72a83e678f.",
+      "started_at": "2026-08-09T07:51:20+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0015/child-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0015/child-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "51d82daed0f365d52209879dab1588b220214ab14960953208115330d515505c",
+        "size": 82,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; python3 -c \"import json; j=json.load(open('.git/amdgpu-sim/txn/CP-0015.json')); assert set(j['declared_children']) == {'gem5'} and set(j['expected_children']) == {'gem5'}\"; test -z \"$(git -C projects/gem5 status --porcelain=v1 --untracked-files=all)\"; printf \"gem5=clean\\n\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T07:51:21+00:00",
+      "exit_code": 0,
+      "id": "child-clean",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0015/child-clean-status.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b6dfc213fe1ca6b8fe06b318bc00a6945d0689476768481e964c85d92e3b1ba5",
+        "size": 872,
+        "tracked": false
+      },
+      "result": "The CP-0015 gem5 participant worktree is clean, including the untracked-file check.",
+      "started_at": "2026-08-09T07:51:21+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0015/child-clean-status.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0015/child-clean-status.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6c1c18d2ac33e2fcdc153921d33dd1131cdf51a6eed53205082bc5b41f506a7e",
+        "size": 11,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import json,subprocess; j=json.load(open(\".git/amdgpu-sim/txn/CP-0015.json\")); assert j[\"phase\"]==\"prepare\"; e=j[\"expected_children\"]; h=\"5b2fe12adc22562997de20fa81b1155a65296a81\"; t=\"31e68951c82e21c0fcf769523e8e4d72a83e678f\"; assert set(e)=={\"gem5\"} and e[\"gem5\"][\"head\"]==h and e[\"gem5\"][\"tree\"]==t; p=e[\"gem5\"][\"path\"]; assert subprocess.check_output([\"git\",\"-C\",p,\"rev-parse\",\"HEAD\"],text=True).strip()==h; assert subprocess.check_output([\"git\",\"-C\",p,\"rev-parse\",\"HEAD^{tree}\"],text=True).strip()==t; assert subprocess.check_output([\"git\",\"-C\",p,\"status\",\"--porcelain=v1\",\"--untracked-files=all\"],text=True)==\"\"; print(f\"phase=prepare expected_children exact; gem5 head={h} tree={t} clean\")"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T07:51:21+00:00",
+      "exit_code": 0,
+      "id": "journal-children-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0015/journal-children-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5a261d89be7bd4335a96a9375b412e357764bdc59a4fd8e4820a4d156209f4fc",
+        "size": 1345,
+        "tracked": false
+      },
+      "result": "The CP-0015 prepare journal expected_children exactly matches the clean gem5 participant; the unchanged runtime lane is not a CP-0015 participant.",
+      "started_at": "2026-08-09T07:51:21+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0015/journal-children-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0015/journal-children-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6ee1b0dc2f67e61d30f05f4cd1601de2bbe395bad5c5c726a8f5c5971116881f",
+        "size": 142,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "scripts/transaction.py",
+        "status"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T07:51:21+00:00",
+      "exit_code": 0,
+      "id": "transaction-status",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0015/transaction-status.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "fb065af61aa2f39bfec2e6168c0e73b46c751f73c8ee77fff7b790a94de74c08",
+        "size": 611,
+        "tracked": false
+      },
+      "result": "Transaction status retained CP-0015 in prepare with the expected child identities; root preparation/finalization remains the coordinator step.",
+      "started_at": "2026-08-09T07:51:21+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0015/transaction-status.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0015/transaction-status.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "95bfc3b8dd20649a99b6da3eba6149947ebeb7d577dbf3b565a3cff88d6b7b04",
+        "size": 77,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import hashlib; expected={\"EV-0037\":\"0deb4c503e6df33d37a7429ae7af84c91d876fa3a9a56fb77cf8e6b81ccb1fe1\",\"EV-0038\":\"06bfcaec333279484fdabb53df56f67d97d70a3ecf70f1637c75a1a522dd55dc\"}; assert all(hashlib.sha256(open(\"state/evidence/\"+k+\".json\",\"rb\").read()).hexdigest()==v for k,v in expected.items()); print(\"EV-0037/EV-0038 hashes match\")"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T08:10:00+00:00",
+      "exit_code": 0,
+      "id": "included-evidence-sha256",
+      "raw_streams_retained": false,
+      "raw_streams_limitation": "The hash-check output is summarized here; the canonical EV-0037 and EV-0038 JSON files and their identities are retained and hash-bound by this manifest."
+      ,"result": "EV-0037 and EV-0038 hashes match the umbrella includes set."
+      ,"started_at": "2026-08-09T08:10:00+00:00"
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import hashlib; expected={\"GOAL.md\":\"8fbf94d58192542ee4d97257f187a6bf5653070cfb96958c65380b66446d5450\",\"PLAN.md\":\"e4d5e340158e3e7ac1a40571d86788a97bf451525593072161ffcbb0c32c6e87\",\"README.md\":\"4849bb706f5c28204edf5d26781cd410ab9d8c2ed0a72f4e2f364020aef86135\"}; actual={p:hashlib.sha256(open(p,\"rb\").read()).hexdigest() for p in expected}; assert actual==expected, actual; print(\"\\n\".join(f\"{p}={actual[p]}\" for p in expected))"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T08:20:00+00:00",
+      "exit_code": 0,
+      "id": "root-doc-hashes",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0015/root-doc-hashes.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9fda6aed03da9630a9c8ae9446b498c2adb62539f8696f890e3f1494f49e9ed3",
+        "size": 1025,
+        "tracked": false
+      },
+      "result": "GOAL.md, PLAN.md, and README.md hashes are asserted and match the CP-0015 environment fingerprint.",
+      "started_at": "2026-08-09T08:20:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0015/root-doc-hashes.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0015/root-doc-hashes.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "07103cf7af97a339f2d33ccc3ae16b390c698783f17c566842995f16539cab8e",
+        "size": 221,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T08:10:00+00:00",
+  "environment_fingerprint": {
+    "checkpoint": "CP-0015",
+    "control_core_binary_sha256": "54553e21dd7551737596f3426090c0502d5703d358cae852a5bafe28a261011f",
+    "ev0037_sha256": "0deb4c503e6df33d37a7429ae7af84c91d876fa3a9a56fb77cf8e6b81ccb1fe1",
+    "ev0038_sha256": "06bfcaec333279484fdabb53df56f67d97d70a3ecf70f1637c75a1a522dd55dc",
+    "gem5_head": "5b2fe12adc22562997de20fa81b1155a65296a81",
+    "gem5_tree": "31e68951c82e21c0fcf769523e8e4d72a83e678f",
+    "goal_sha256": "8fbf94d58192542ee4d97257f187a6bf5653070cfb96958c65380b66446d5450",
+    "legacy_state_regressions": "8/8",
+    "next_action_id": "P3-HOST-NATIVE-03",
+    "plan_sha256": "e4d5e340158e3e7ac1a40571d86788a97bf451525593072161ffcbb0c32c6e87",
+    "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+    "readme_sha256": "4849bb706f5c28204edf5d26781cd410ab9d8c2ed0a72f4e2f364020aef86135",
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "transaction_phase": "prepare"
+  },
+  "exit_code": 0,
+  "external_artifacts": [],
+  "id": "EV-0039",
+  "includes": {
+    "EV-0038": "06bfcaec333279484fdabb53df56f67d97d70a3ecf70f1637c75a1a522dd55dc"
+  },
+  "limitations": [
+    "EV-0037 remains the CP-0014 architecture and ABI-boundary record; EV-0038 remains the detailed CP-0015 build/audit/self-test record.",
+    "The control core does not map PT_LOAD ranges, construct dynamic AQL or kernarg packets, submit a GPU queue, invoke the Vega decoder, or execute an ISA kernel.",
+    "The eight VEGA_X86 regressions are compatibility/oracle evidence and do not establish host-native GPU execution.",
+    "No Triton, HIP, OpenCL, PyTorch, vLLM, model, hardware, timing, or performance claim is made."
+  ],
+  "redactions": [],
+  "result": "EV-0037 and EV-0038 are hash-bound to the CP-0015 umbrella; child identities and clean status match the prepare journal, and the accepted scope remains the standalone no-VEGA_X86 control-plane boundary with no Triton E2E result.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T07:51:20+00:00",
+  "type": "cp15-umbrella-host-native-control"
+}

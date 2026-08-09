@@ -1,0 +1,27 @@
+{
+  "applies_to": [
+    "projects/gem5/build_opts/HOSTGPU_NATIVE_CONTROL",
+    "projects/gem5/src/dev/amdgpu/SConscript",
+    "projects/gem5/src/dev/amdgpu/host_gpu_control_main.cc",
+    "state/evidence/EV-0038.json",
+    "state/evidence/EV-0039.json"
+  ],
+  "checkpoint_id": "CP-0015",
+  "conclusion": "The reusable protocol, memory, queue, and signal state can be linked as an independent control core when the target is registered before the VEGA_X86-gated SimObject path and uses BUILD_ISA=n with USE_X86_ISA=n.",
+  "confidence": "high",
+  "decision": "Keep HOSTGPU_NATIVE_CONTROL as a small standalone control-plane target and reuse the same state sources; defer GPU SimObjects, PT_LOAD mapping, and decoder execution to the next adapter gate.",
+  "evidence_ids": [
+    "EV-0038",
+    "EV-0039"
+  ],
+  "id": "BL-0071",
+  "invalidated_assumptions": [
+    "A BUILD_GPU target necessarily requires a VEGA_X86 CPU/system build.",
+    "Removing one USE_X86_ISA setting proves the full GPU pipeline is host-native."
+  ],
+  "observation": "The mold/24 HOSTGPU_NATIVE_CONTROL build links and the ELF audit reports BUILD_ISA=n, USE_X86_ISA=n, allowed host libraries, and no forbidden x86 or GPU-pipeline undefined symbols.",
+  "question_or_symptom": "Can existing gem5 host state be reused without starting the x86 simulator?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

@@ -1,0 +1,252 @@
+{
+  "checkpoint_id": "CP-0015",
+  "claim": "EV-0038 binds the CP-0015 standalone HOSTGPU_NATIVE_CONTROL target build, no-x86/no-production-DSO ELF audit, direct control-core self-test, binary identity, and eight legacy host-state regressions. It proves a host-native control-plane/state-adapter boundary only; it does not claim PT_LOAD mapping, code-object or GPU-pipeline execution, Triton E2E, hardware, timing, or performance.",
+  "command_argv": [
+    [
+      "bash",
+      "-lc",
+      "scripts/build_gem5_mold24.sh build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_control_core.opt"
+    ],
+    [
+      "python3",
+      "projects/gem5/util/host_native/check_control_core.py",
+      "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_control_core.opt"
+    ],
+    [
+      "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_control_core.opt"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; root=projects/gem5/build/VEGA_X86/dev/amdgpu; for test in host_gpu_protocol.test.opt host_gpu_code_object_state.test.opt host_gpu_memory_state.test.opt host_gpu_dispatch_state.test.opt host_gpu_queue_state.test.opt host_gpu_signal_state.test.opt host_gpu_kmt_state.test.opt host_gpu_socket_utils.test.opt; do printf \"== %s ==\\\\n\" \"$test\"; \"$root/$test\" --gtest_color=no; done; printf \"legacy_state_regressions=8/8\\\\n\""
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; b=projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_control_core.opt; file \"$b\"; stat -c \"size=%s mtime=%y\" \"$b\"; sha256sum \"$b\"; sha1sum \"$b\""
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "scripts/build_gem5_mold24.sh build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_control_core.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T07:48:52+00:00",
+      "exit_code": 0,
+      "id": "native-control-build",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0015/gem5-native-control-build.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1998804dcb2b9d6e92e4127e786da89919957a5875879f4933bb501229634563",
+        "size": 693,
+        "tracked": false
+      },
+      "result": "Canonical mold/24 wrapper builds the standalone HOSTGPU_NATIVE_CONTROL control-core target; this is build evidence only.",
+      "started_at": "2026-08-09T07:48:49+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0015/gem5-native-control-build.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0015/gem5-native-control-build.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "41275bdbee9e4a5281824ddf3c542cfb12d1ff0ebd09bf76a2968649a2e877b7",
+        "size": 3980,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "projects/gem5/util/host_native/check_control_core.py",
+        "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_control_core.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T07:49:24+00:00",
+      "exit_code": 0,
+      "id": "native-control-audit",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0015/gem5-native-control-audit.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "37d01489fe366a58f1581a4a085b4218bf413e329327574d8a78dd5ed6e0a47e",
+        "size": 730,
+        "tracked": false
+      },
+      "result": "The control-core ELF audit passes with BUILD_ISA=n, USE_X86_ISA=n, BUILD_GPU=y, allowed host-only dynamic libraries, and no forbidden x86/Process/ThreadContext/GPU-pipeline symbols; its self-test flags are explicit.",
+      "started_at": "2026-08-09T07:49:24+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0015/gem5-native-control-audit.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0015/gem5-native-control-audit.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "136c6dc6b658935de90eca23a8900b5873566f1a0f4a1481f32b01544725193c",
+        "size": 1169,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_control_core.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T07:50:17+00:00",
+      "exit_code": 0,
+      "id": "native-control-self-test",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0015/gem5-native-control-self-test.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d7acc8bfc08a7b63a1d7008e2e1c97b416190fa932fac0f13ff33de7aa4f96a6",
+        "size": 662,
+        "tracked": false
+      },
+      "result": "The standalone control core emits its deterministic protocol, memory, queue, and signal self-test JSON with kernel_executed=false, cpu_fallback=false, and vega_x86=false.",
+      "started_at": "2026-08-09T07:50:17+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0015/gem5-native-control-self-test.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0015/gem5-native-control-self-test.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d4e1c6c12178edf366a87b78985f69b0817a183d647af3ef7505495fd16f6ee8",
+        "size": 205,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; root=projects/gem5/build/VEGA_X86/dev/amdgpu; for test in host_gpu_protocol.test.opt host_gpu_code_object_state.test.opt host_gpu_memory_state.test.opt host_gpu_dispatch_state.test.opt host_gpu_queue_state.test.opt host_gpu_signal_state.test.opt host_gpu_kmt_state.test.opt host_gpu_socket_utils.test.opt; do printf \"== %s ==\\\\n\" \"$test\"; \"$root/$test\" --gtest_color=no; done; printf \"legacy_state_regressions=8/8\\\\n\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T07:50:17+00:00",
+      "exit_code": 0,
+      "id": "legacy-state-regressions",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0015/gem5-legacy-state-regressions.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "12b3516f8796e8ac479b8ace2c5d9cb9e5698e29547a59677d3359fca27b159d",
+        "size": 1046,
+        "tracked": false
+      },
+      "result": "The eight existing VEGA_X86 host state regression binaries pass: protocol, code-object state, memory, dispatch, queue, signal, KMT, and socket state.",
+      "started_at": "2026-08-09T07:50:17+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0015/gem5-legacy-state-regressions.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0015/gem5-legacy-state-regressions.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "351346ba011f7968de99e3e30a6ea875d94fed95691004ddfec2b11509a9daae",
+        "size": 23137,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; b=projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_control_core.opt; file \"$b\"; stat -c \"size=%s mtime=%y\" \"$b\"; sha256sum \"$b\"; sha1sum \"$b\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T07:51:20+00:00",
+      "exit_code": 0,
+      "id": "native-control-artifact",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0015/gem5-native-control-artifact.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d8aac8e7fcba326278ef8c4f02acb381a570e24cab7f62e4467a03521a189e58",
+        "size": 778,
+        "tracked": false
+      },
+      "result": "The built control-core ELF identity is retained with file type, size, Build ID, SHA-256, and SHA-1.",
+      "started_at": "2026-08-09T07:51:20+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0015/gem5-native-control-artifact.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0015/gem5-native-control-artifact.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0014bab19a0c98da68cfaa6186a093aeeb856d555d08aa3529b2d72ea09f5ce6",
+        "size": 629,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T07:51:20+00:00",
+  "environment_fingerprint": {
+    "build_options": "BUILD_ISA=n; USE_X86_ISA=n; BUILD_GPU=y; VEGA_GPU_ISA=y",
+    "checkpoint": "CP-0015",
+    "control_core_binary_sha256": "54553e21dd7551737596f3426090c0502d5703d358cae852a5bafe28a261011f",
+    "control_core_build_id": "0890bba5e397359d246c058bebf1d6b8b5177065",
+    "gem5_head": "4c5d85c4189a46886d87e3a5313f19cdf62698f7",
+    "gem5_tree": "31e68951c82e21c0fcf769523e8e4d72a83e678f",
+    "goal_sha256": "8fbf94d58192542ee4d97257f187a6bf5653070cfb96958c65380b66446d5450",
+    "legacy_state_regressions": "8/8",
+    "plan_sha256": "e4d5e340158e3e7ac1a40571d86788a97bf451525593072161ffcbb0c32c6e87",
+    "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+    "readme_sha256": "4849bb706f5c28204edf5d26781cd410ab9d8c2ed0a72f4e2f364020aef86135",
+    "runtime_head": "5d65fd3370a4450f6fe1457a316a46d2db1870c4",
+    "runtime_tree": "5238d6f70592d3ccb11fd4056d5bc2b120b707b7",
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4"
+  },
+  "exit_code": 0,
+  "external_artifacts": [],
+  "id": "EV-0038",
+  "includes": {},
+  "limitations": [
+    "The standalone executable is a control-plane/self-test target; it does not instantiate gem5 System/CPU objects, map PT_LOAD ranges, build AQL/kernarg, submit a queue, or execute an ISA kernel.",
+    "The ELF audit establishes the configured no-x86/no-production-DSO boundary for this target, not a complete host-native GPU functional pipeline.",
+    "The eight legacy regressions exercise existing state machines under the VEGA_X86 build and are compatibility evidence, not host-native GPU execution evidence.",
+    "No Triton, HIP, OpenCL, hardware, timing, or performance claim is made."
+  ],
+  "redactions": [],
+  "result": "The standalone target builds and passes its no-x86/no-production-DSO audit, direct protocol/memory/queue/signal self-test, binary identity capture, and eight legacy host-state regression binaries.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T07:48:49+00:00",
+  "type": "cp15-host-native-control-core"
+}

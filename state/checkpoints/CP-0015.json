@@ -1,0 +1,191 @@
+{
+  "baseline_commit_marker": "N/A",
+  "bitlesson_ids": [
+    "BL-0071",
+    "BL-0072",
+    "BL-0073"
+  ],
+  "bitlesson_sha256": {
+    "BL-0071": "5f32e6784c6a539ba388254628db5cdcbbe9d2f15c27f6df3ceef8c18aab1427",
+    "BL-0072": "7afc9a31ed1ffb3cd098ec95d5a40c0cf9b5ae3c3d443c9a8280911cbbef55bf",
+    "BL-0073": "fef725f59047958aa5bd366b47ab4ea725e037b6f8f7ea88c02051a1dabc671a"
+  },
+  "blockers": [],
+  "change_kind": "code",
+  "changes": [
+    "Added a standalone HOSTGPU_NATIVE_CONTROL gem5 target registered before the VEGA_X86-gated simulator path, with BUILD_ISA=n, USE_X86_ISA=n, and BUILD_GPU=y.",
+    "Reused the existing host protocol, bounded page-memory state, queue state, and signal state in a deterministic control-core self-test without forking the CP8/CP13 wire.",
+    "Retained a no-x86/no-production-DSO ELF audit and the direct control-core JSON self-test, with explicit kernel_executed=false, cpu_fallback=false, and vega_x86=false flags.",
+    "Re-ran eight existing VEGA_X86 host-state regression binaries and bound the clean child identities to the CP-0015 prepare journal."
+  ],
+  "created_at": "2026-08-09T16:10:00+08:00",
+  "evidence_ids": [
+    "EV-0038",
+    "EV-0039"
+  ],
+  "evidence_manifest_id": "EV-0039",
+  "evidence_manifest_sha256": "b32952b562486998c7346ff2220556192f456d569ddc1f5c5dc3686d27d523d0",
+  "evidence_sha256": {
+    "EV-0038": "06bfcaec333279484fdabb53df56f67d97d70a3ecf70f1637c75a1a522dd55dc",
+    "EV-0039": "b32952b562486998c7346ff2220556192f456d569ddc1f5c5dc3686d27d523d0"
+  },
+  "goal_id": "GSIM-001",
+  "goal_sha256": "8fbf94d58192542ee4d97257f187a6bf5653070cfb96958c65380b66446d5450",
+  "id": "CP-0015",
+  "limitations": [
+    "CP-0015 proves a standalone no-VEGA_X86 control-plane/build boundary only. It does not map PT_LOAD ranges, apply relocations, construct dynamic AQL or kernarg, submit a GPU queue, invoke the Vega decoder, or execute simulator instructions.",
+    "The ELF audit is scoped to the HOSTGPU_NATIVE_CONTROL target; it is not proof that the full gem5 GPU pipeline is independent of x86 System, Process, ThreadContext, or translation objects.",
+    "The eight VEGA_X86 state regressions are compatibility/oracle evidence, not host-native GPU execution evidence.",
+    "No Triton, HIP, OpenCL, PyTorch, vLLM, model, hardware, timing, or performance claim is made. Triton end-to-end remains 0/1."
+  ],
+  "next_action": {
+    "argv": [
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0016",
+      "--intent",
+      "Connect the accepted CP13 loader and runtime protocol to the host-native target and prove pinned gfx950 loader/dispatch parity",
+      "--participant",
+      "gem5=projects/gem5",
+      "--participant",
+      "self-amdgpu-runtime=projects/self-amdgpu-runtime"
+    ],
+    "cwd": ".",
+    "expected": "The host-native target consumes the accepted CP13 transport and maps one pinned gfx950 image through the same loader/dispatch metadata as the VEGA_X86 oracle, with deterministic output/trace comparison and no Triton, hardware, timing, or performance claim.",
+    "id": "P3-HOST-NATIVE-03",
+    "prerequisites": [
+      "CP-0015 is accepted and scripts/resume.sh --verify passes offline.",
+      "The CP-0015 standalone target, no-x86 audit, direct self-test, legacy regressions, and child identities remain immutable.",
+      "SOURCE_LOCK.json and PROJECT_LANES.json remain byte-identical to their accepted anchors.",
+      "The adapter must consume the existing CP13 fixed-record transport and loader authority, must not fork a second code-object ABI, and must not open production GPU devices."
+    ],
+    "rollback_boundary": "Keep CP-0015 accepted and preserve the standalone control core, VEGA_X86 oracle, CP13 transport authority, and no-execution boundary if loader or dispatch parity fails."
+  },
+  "parent_checkpoint": "CP-0014",
+  "phase_id": "P3",
+  "plan_sha256": "e4d5e340158e3e7ac1a40571d86788a97bf451525593072161ffcbb0c32c6e87",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "administrative_git_dir": "modules/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "clean": true,
+      "head": "5b2fe12adc22562997de20fa81b1155a65296a81",
+      "id": "gem5",
+      "path": "projects/gem5",
+      "tree": "31e68951c82e21c0fcf769523e8e4d72a83e678f"
+    },
+    {
+      "administrative_git_dir": "modules/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "clean": true,
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58"
+    },
+    {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "clean": true,
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489"
+    },
+    {
+      "administrative_git_dir": "modules/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "clean": true,
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "id": "triton",
+      "path": "projects/triton",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1"
+    },
+    {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "clean": true,
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315"
+    },
+    {
+      "administrative_git_dir": "modules/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "clean": true,
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "id": "vllm",
+      "path": "projects/vllm",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb"
+    },
+    {
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "clean": true,
+      "head": "5d65fd3370a4450f6fe1457a316a46d2db1870c4",
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "tree": "5238d6f70592d3ccb11fd4056d5bc2b120b707b7"
+    }
+  ],
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "root_parent_commit": "ebf8230b0f0504462df9c1d3a344c66927648437",
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "sequence": 15,
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "status": "accepted",
+  "validation": [
+    {
+      "command": "standalone HOSTGPU_NATIVE_CONTROL build, ELF audit, and direct self-test",
+      "cwd": ".",
+      "evidence_id": "EV-0038",
+      "exit_code": 0,
+      "result": "The canonical mold/24 build exits 0; the no-x86/no-production-DSO audit passes; protocol, memory, queue, and signal self-test JSON reports explicit no-execution flags."
+    },
+    {
+      "command": "legacy VEGA_X86 host-state regression matrix",
+      "cwd": "projects/gem5",
+      "evidence_id": "EV-0038",
+      "exit_code": 0,
+      "result": "Protocol, code-object state, memory, dispatch, queue, signal, KMT, and socket state regressions pass 8/8 under the existing oracle build."
+    },
+    {
+      "command": "CP-0015 child identity, clean-state, evidence, and journal umbrella checks",
+      "cwd": ".",
+      "evidence_id": "EV-0039",
+      "exit_code": 0,
+      "result": "EV-0037 and EV-0038 hashes are bound; child HEAD/tree and clean status exactly match the CP-0015 prepare journal."
+    },
+    {
+      "command": "Triton end-to-end status boundary",
+      "cwd": ".",
+      "evidence_id": "EV-0039",
+      "exit_code": 0,
+      "result": "The checkpoint records Triton end-to-end as 0/1 and advances only to the loader/dispatch parity action P3-HOST-NATIVE-03."
+    }
+  ]
+}

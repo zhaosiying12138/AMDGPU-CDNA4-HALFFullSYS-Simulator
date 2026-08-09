@@ -1,0 +1,27 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_protocol.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_memory_state.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_queue_state.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_signal_state.cc",
+    "state/evidence/EV-0038.json"
+  ],
+  "checkpoint_id": "CP-0015",
+  "conclusion": "A host-native control core is safer when it reuses the accepted wire and state machines while retaining the VEGA_X86 build as a compatibility oracle.",
+  "confidence": "high",
+  "decision": "Require direct protocol/memory/queue/signal self-tests and the existing eight VEGA_X86 state regressions at every subsequent adapter checkpoint.",
+  "evidence_ids": [
+    "EV-0038",
+    "EV-0039"
+  ],
+  "id": "BL-0072",
+  "invalidated_assumptions": [
+    "A new host-native front-end can replace the old path before proving behavioral compatibility.",
+    "A successful standalone link makes the legacy state regressions redundant."
+  ],
+  "observation": "The standalone self-test passes protocol negotiation, bounded host-memory copy/CRC, queue readiness/completion, and signal wait/store behavior; all eight existing state regression binaries remain green.",
+  "question_or_symptom": "How can extraction avoid silently forking stable gem5 behavior?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0014-host-native-architecture-accepted; next-P3-HOST-NATIVE-02`
+**Current state:** `CP-0015-host-native-control-core-accepted; next-P3-HOST-NATIVE-03`
 
 **Current phase:** `P3`
 
@@ -81,7 +81,7 @@ advance a phase without a new checkpoint and root coordinator commit.
 继续执行 amdgpu-sim 计划。当前目录是 /home/zhaosiying/amdgpu-sim。
 先读取 PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、其引用的
 最新 checkpoint/bitlesson/evidence，运行 scripts/resume.sh --verify。
-CP-0014 host-native 架构/依赖 inventory 已 accepted；从唯一 next_action `P3-HOST-NATIVE-02` 继续，不要再次
+CP-0015 host-native control-core/build boundary 已 accepted；从唯一 next_action `P3-HOST-NATIVE-03` 继续，不要再次
 begin CP-0014，也不要重做 bootstrap、source freeze、authored runtime
 baseline 或已通过的 CP4-CP9 gates，也不要修改已冻结的 SOURCE_LOCK.json
 或已登记的 PROJECT_LANES baseline。CP-0010 只实现 18 个 typed KMT
@@ -92,8 +92,9 @@ KFD attach、HIP、OpenCL、Triton、PyTorch 或 vLLM 能力。CP-0011 已冻结
 gem5 gfx950 decoder、unsupported opcode、pinned device-libs/toolchain proof
 已完成；CP-0013 A1 仅完成 versioned HSACO fixed-record transport/staging，
 不包含 PT_LOAD mapping、动态 AQL/kernarg 或真实 code-object execution。
-当前还没有任何 Triton 端到端通过案例。下一步先完成 host-native 架构/依赖
-边界，再以未修改 Triton vecadd 作为第一用户可见验收；A2 loader 作为其前置子门。
+当前还没有任何 Triton 端到端通过案例。CP-0015 已完成 no-VEGA_X86
+control-core/build/audit 边界，但没有完成 code-object loader 或执行。下一步
+完成 host-native/gem5 loader parity，再以未修改 Triton vecadd 作为第一用户可见验收。
 在 Triton 用户命令 `tutorial/01-vecadd.py`（当前 pinned checkout 中对应未修改的
 `python/tutorials/01-vector-add.py`）首次透明通过后，先完成可复现的 gem5
 算子 profile、80/20 优化和 threadblock host-parallel 正确性/可行性门禁，再
@@ -120,7 +121,17 @@ makes `P3-HOST-NATIVE-02` the current unique action.
 dependency inventory. EV-0036 and EV-0037 bind reusable GPU/Vega/HSA and host
 bridge surfaces, x86/Process/TLB blockers, and the standalone runtime ABI;
 gem5 boundary tests (4/4), the runtime matrix (16/16), and a focused Clang
-ASAN boundary test pass. This checkpoint makes no host-native build, simulator
-execution, Triton end-to-end, hardware, timing, or performance claim. The next
-unique action is `P3-HOST-NATIVE-02`: add the no-VEGA_X86 standalone build and
-minimal host event/page-memory/queue/signal adapter.
+ASAN boundary test pass. This checkpoint makes no host-native execution,
+Triton end-to-end, hardware, timing, or performance claim. Its recorded
+`P3-HOST-NATIVE-02` action is completed by CP-0015 below; the standalone
+control core remains a control-plane self-test boundary rather than a
+code-object runner.
+
+`CP-0015` is accepted at the `P3-HOST-NATIVE-02` control-core/build boundary.
+The gem5 target builds with `BUILD_ISA=n`, `USE_X86_ISA=n`, and `BUILD_GPU=y`;
+the symbol/DSO audit passes, the protocol/memory/queue/signal self-tests pass,
+and the eight legacy host-state regression binaries remain green. It does not
+claim PT_LOAD mapping, code-object execution, Triton E2E, hardware, timing, or
+performance. The next unique action is `P3-HOST-NATIVE-03`: connect the
+existing runtime protocol and CP13 loader to this target and prove pinned
+gfx950 loader/dispatch parity.

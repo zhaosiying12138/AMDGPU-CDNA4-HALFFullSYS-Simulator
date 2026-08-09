@@ -113,9 +113,17 @@ EV-0036/EV-0037 record the reusable gem5 GPU/Vega/HSA and host-bridge surfaces,
 the current x86/Process/TLB blockers, and the runtime ABI boundary; gem5's
 boundary suite is 4/4, the runtime CTest matrix is 16/16, and the focused
 Clang ASAN boundary test is 1/1. The gem5 path remains the behavioral oracle.
-No host-native build, x86-free binary, simulator execution, Triton end-to-end,
-hardware, timing, or performance claim is made. The next action is
-`P3-HOST-NATIVE-02`: a standalone no-`VEGA_X86` build plus minimal host
-event/page-memory/queue/signal adapter.
+No host-native execution, Triton end-to-end, hardware, timing, or performance
+claim is made. Its historical `P3-HOST-NATIVE-02` action is completed by
+`CP-0015` below; the CP14 inventory remains the architectural record.
+
+`CP-0015` is accepted at the `P3-HOST-NATIVE-02` control-core/build boundary.
+The standalone gem5 target uses `BUILD_ISA=n`, `USE_X86_ISA=n`, and
+`BUILD_GPU=y`; its ELF/dependency audit and protocol/memory/queue/signal
+self-tests pass, and the existing eight legacy state regression binaries remain
+green. This is a control-plane boundary, not HSACO mapping or execution: no
+GPU pipeline, Triton E2E, hardware, timing, or performance claim is made. The
+next action is `P3-HOST-NATIVE-03`, the pinned gfx950 loader/dispatch parity
+gate between the host-native and gem5 front-ends.
 
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

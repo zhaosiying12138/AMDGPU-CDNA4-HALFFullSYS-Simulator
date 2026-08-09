@@ -1,9 +1,9 @@
 {
-  "checkpoint_id": "CP-0014",
-  "checkpoint_sha256": "851f7db68012156f328352fb9f163503da5cd2bd74d52e23b05f3ba52a500143",
+  "checkpoint_id": "CP-0015",
+  "checkpoint_sha256": "929184ae51c229be5ac3203678b0fef49167a57582444e4415e0faacffd5341c",
   "goal_id": "GSIM-001",
-  "next_action_id": "P3-HOST-NATIVE-02",
-  "next_action_summary": "Build the standalone no-VEGA_X86 host-native target and minimal host event, page-memory, queue, and signal adapter; defer code-object and Triton execution claims.",
+  "next_action_id": "P3-HOST-NATIVE-03",
+  "next_action_summary": "Connect the accepted CP13 loader and runtime protocol to the host-native target and prove pinned gfx950 loader/dispatch parity; defer Triton execution claims.",
   "phase_id": "P3",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,

@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-09`
 
-**State at this commit:** `P3-HOST-NATIVE-01 accepted; next-P3-HOST-NATIVE-02`
+**State at this commit:** `P3-HOST-NATIVE-02 accepted; next-P3-HOST-NATIVE-03`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -685,10 +685,19 @@ surfaces, while recording the current `VEGA_X86`, `Process`, `ThreadContext`,
 TLB, and SE translation blockers. EV-0037 retains the gem5 boundary inventory
 tests (4/4), runtime CTest matrix (16/16), focused Clang ASAN boundary test
 (1/1), clean child identities, and the CP14 prepare journal. It does not claim
-a host-native build, an x86-free binary, simulator execution, Triton E2E,
-hardware, timing, or performance. The next unique action is
-`P3-HOST-NATIVE-02`: build the standalone no-`VEGA_X86` target and add the
-minimal host event/page-memory/queue/signal adapter.
+a host-native execution, Triton E2E, hardware, timing, or performance result.
+Its recorded `P3-HOST-NATIVE-02` action is completed by CP-0015 below.
+
+`CP-0015` is accepted at `P3-HOST-NATIVE-02`, the standalone host-native
+control-core/build boundary. The gem5 target uses `BUILD_ISA=n`,
+`USE_X86_ISA=n`, and `BUILD_GPU=y`; the ELF audit finds only allowed host
+libraries and no forbidden x86/Process/ThreadContext/GPU-pipeline symbols. Its
+protocol, memory, queue, and signal self-tests pass, and the eight existing
+VEGA_X86 host-state regression binaries remain green. This proves a control
+plane and state-adapter boundary only: it does not map or execute HSACO, run a
+GPU pipeline, or pass Triton. The next unique action is
+`P3-HOST-NATIVE-03`: connect the accepted runtime protocol and CP13 loader to
+the target and prove pinned gfx950 loader/dispatch parity.
 
 ### P3H - host-native simulator and first Triton gate
 
@@ -708,10 +717,10 @@ The work is staged as follows:
    the dependency graph, reusable-core boundary, and compatibility matrix
    against the existing CP8/CP13 wire. It does not claim that the listed
    modules already compile as a host-native binary.
-2. `P3-HOST-NATIVE-02` adds a standalone build target and a minimal host event,
-   page/memory, queue, and signal adapter. The target must link without
-   `VEGA_X86`/X86 ISA objects and pass no-x86/no-production-DSO audits.
-3. `P3-HOST-NATIVE-03` connects the existing runtime protocol and CP13 code
+2. `P3-HOST-NATIVE-02` is accepted by CP-0015: its standalone control core
+   links without `VEGA_X86`/X86 ISA objects and passes no-x86/no-production-DSO
+   audits, with direct and legacy state regressions retained.
+3. `P3-HOST-NATIVE-03` is the current action: connect the existing runtime protocol and CP13 code
    object loader to that target. One pinned gfx950 image must load and produce
    the same deterministic vecadd output/trace as the gem5 reference before
    any broader API claim.
