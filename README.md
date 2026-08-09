@@ -205,6 +205,13 @@ The pinned Triton/LLVM overlay currently reaches gfx950 HSACO compilation only
 (vecadd SHA-256
 `ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e`); no
 Triton request has executed in GemSim yet, so the user-facing Triton count is
-still `0/1`.
+still `0/1`. CP-0021 now records that provenance boundary explicitly: the
+unmodified tutorial hash is
+`842430949e0ccde4fbce07606cce3ac4bac36bf21b2b12619a31b795ca4029b3`, the
+HSACO target is `amdgcn-amd-amdhsa-unknown-gfx950`, and its descriptor preload
+is 12 DWORD (48 bytes). Runtime CTest is 16/16 (focused code-object tests 4/4),
+but compiler/JIT invocation, normal launcher, transport, execution, and
+fallback are all false. The public A1 path still publishes zero VAs and remains
+fixture-only; CP-0022 is the next generic wire-v2 allocator/AQL/launcher gate.
 
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

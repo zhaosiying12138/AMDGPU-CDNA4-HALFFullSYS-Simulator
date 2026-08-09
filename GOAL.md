@@ -4,9 +4,9 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0020-host-native-gpuReadWrite-B2-accepted; next-P5-TRITON-VECADD-01`
+**Current state:** `CP-0021-triton-vecadd-compile-provenance-accepted; normal-launcher-blocked; next-CP-0022-generic-wire-v2`
 
-**Current phase:** `P3`
+**Current phase:** `P5`
 
 **Model correction:** the official target is `Qwen/Qwen3.5-0.8B`; there is no
 official `Qwen3.5-0.9B` checkpoint in this project.
@@ -213,5 +213,23 @@ connection, host read-index update, packet retirement, signal decrement,
 instruction fetch/retirement, ISA execution, and kernel output remain false.
 The CP15-CP18 checkers and eight VEGA_X86 regressions remain green. Triton E2E
 and Qwen inference remain 0/1; the downloaded model and static 15-contract gate
-remain ready. The next unique action is `P3-HOST-NATIVE-03-B2` for a no-x86
-GPUDispatcher/CU one-wave output/trace differential before Triton vecadd.
+remain ready. The historical next action was `P3-HOST-NATIVE-03-B2` for a
+no-x86 GPUDispatcher/CU output/trace differential; CP-0020 accepted that
+boundary and CP-0021 below records the separate Triton provenance prerequisite.
+
+`CP-0020` is accepted at the bounded no-x86 B2 execution boundary for one
+locked `gpuReadWrite` fixture. Its four workgroups, sixteen wave64 waves,
+instruction-start trace, output oracle, queue retirement, signal completion,
+and pin release do not establish generic gfx950 or arbitrary-HSACO support.
+
+`CP-0021` accepts only the child-side Triton vecadd compile/provenance
+boundary. The unmodified pinned tutorial and retained 5,408-byte HSACO hashes
+match; the runtime accepts the exact `amdgcn-amd-amdhsa-unknown-gfx950` target
+spelling and DEFAULT-visible `vecadd.kd` only in a metadata-only branch. The
+descriptor preload is 12 DWORD (48 bytes), runtime CTest is 16/16 with focused
+code-object tests 4/4, and caller-local code/kernarg preparation succeeds.
+`compiler_invoked`, `jit`, `launcher`, `transport`, `execution`, and `fallback`
+are all false; Triton E2E and Qwen inference remain `0/1`. Public A1 mapping,
+descriptor, code, and kernarg VAs remain zero and fixture-only. The next unique
+action is CP-0022 for generic versioned wire-v2 allocation, mapping,
+descriptor/kernarg/AQL linkage, and normal launcher handoff without fallback.

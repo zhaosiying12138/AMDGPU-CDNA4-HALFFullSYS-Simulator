@@ -1,0 +1,214 @@
+{
+  "baseline_commit_marker": "N/A",
+  "bitlesson_ids": [
+    "BL-0089",
+    "BL-0090",
+    "BL-0091"
+  ],
+  "bitlesson_sha256": {
+    "BL-0089": "30fd2299ac2fd11065fa2fb3e4cae6c00625ce58e706ccdaa728f1d472e63567",
+    "BL-0090": "c75a3b620cf0584b4bc4e7854015e5e2417f58c67bb2016f5285331d02d86d5c",
+    "BL-0091": "6f947fb11d39abb036354ffc651f848389f97654bef6249113a436f92a74d61d"
+  },
+  "blockers": [
+    {
+      "id": "TRITON-B001",
+      "severity": "blocking",
+      "statement": "The normal unmodified Triton launcher and compiler/JIT path were not invoked by CP-0021; Triton E2E remains 0/1."
+    },
+    {
+      "id": "TRITON-B002",
+      "severity": "blocking",
+      "statement": "The public A1 contract is fixture-only with zero VAs; generic wire-v2 allocation, PT_LOAD mapping, descriptor/kernarg/AQL linkage, and queue submission remain for CP-0022."
+    },
+    {
+      "id": "TRITON-B003",
+      "severity": "blocking",
+      "statement": "GemSim ISA support for the Triton HSACO remains false; metadata/provenance and caller-local materialization do not establish execution or correctness."
+    }
+  ],
+  "change_kind": "code",
+  "changes": [
+    "Accepted the self-amdgpu-runtime CP21 parser/test/probe boundary for one hash-bound unmodified Triton vecadd tutorial and retained 5,408-byte HSACO artifact.",
+    "Recognized the exact amdgcn-amd-amdhsa-unknown-gfx950 target spelling and GLOBAL DEFAULT vecadd.kd only in a target-scoped metadata-only branch; retained isa_supported_by_gemsim=false.",
+    "Validated caller-local vecadd code and zero-initialized 48-byte kernarg preparation, with descriptor preload recorded as 12 DWORD (48 bytes), runtime CTest 16/16, and focused code-object tests 4/4.",
+    "Published independent false compiler/JIT/launcher/transport/execution/fallback fields and bound the child identity, journal, and CP20 root anchor in EV-0051.",
+    "Kept public A1 mapping/descriptor/code/kernarg VAs at zero and generic wire-v2, allocator, AQL linkage, normal launcher, Triton E2E, Qwen execution, and fallback claims blocked."
+  ],
+  "created_at": "2026-08-09T20:54:47+00:00",
+  "evidence_ids": [
+    "EV-0050",
+    "EV-0051"
+  ],
+  "evidence_manifest_id": "EV-0051",
+  "evidence_manifest_sha256": "d3ca97990298b3ffc68194341495028d16b3ab981f5966d3a7e479614a0bb158",
+  "evidence_sha256": {
+    "EV-0050": "d29cb0f1f7ea505391b24083c428d832b704a2fb8642ad576a2e4fd94e026d39",
+    "EV-0051": "d3ca97990298b3ffc68194341495028d16b3ab981f5966d3a7e479614a0bb158"
+  },
+  "goal_id": "GSIM-001",
+  "goal_sha256": "5f4574ea56d183e23d8f29c82587eecfa0b6f376b6dcf0c414cb76202207a2b0",
+  "id": "CP-0021",
+  "limitations": [
+    "CP-0021 is compile/provenance-only: the tutorial and HSACO are hash inputs from the retained artifact; this run does not invoke Triton or LLVM compiler/JIT.",
+    "The parser target and DEFAULT descriptor exception are target-scoped metadata handling, not generic arbitrary-image acceptance; the CP21 test hash-binds one observed artifact and GemSim ISA support remains false.",
+    "The 12-DWORD descriptor preload is recorded as 48-byte coverage; no allocator, PT_LOAD permission/relocation path, GPU VA publication, AQL linkage, queue submission, or simulator output differential is present.",
+    "The public A1 fixture-only contract remains unchanged with all mapping, descriptor, code, and kernarg addresses zero. Generic wire-v2, normal launcher, timing/performance, Triton E2E, Qwen inference, and CPU/NVIDIA fallback remain unproven or false.",
+    "Qwen3.5-0.8B remains offline model/hash and static 15-contract preparation only; strict AMD inference remains 0/1."
+  ],
+  "next_action": {
+    "argv": [
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0022",
+      "--intent",
+      "Implement generic versioned code-object wire v2 allocation and mapping ownership, descriptor/kernarg/AQL linkage, and normal Triton launcher handoff without CPU or NVIDIA fallback",
+      "--participant",
+      "self-amdgpu-runtime=projects/self-amdgpu-runtime"
+    ],
+    "cwd": ".",
+    "expected": "CP-0022 must add a reviewed generic wire-v2 transaction with allocator/mapping ownership, descriptor/kernarg/AQL linkage, and a normal Triton launcher handoff while preserving source hashes and rejecting unsupported execution; no CPU/NVIDIA fallback may count.",
+    "id": "P5-TRITON-VECADD-02",
+    "prerequisites": [
+      "CP-0021 root checkpoint is accepted and scripts/resume.sh --verify passes offline.",
+      "Runtime child 386713738a9eb050394e74152fe5acaf16435abe/tree 0011ed99bc09baaa06f57887141217d56c24626d is clean and EV-0050/EV-0051 are hash-bound.",
+      "The public A1 fixture-only contract, zero VA fields, no-fallback policy, and CP20 locked functional fixture remain immutable.",
+      "CP-0022 must keep the parser target exception metadata-only and distinguish compile/provenance, launcher, transport, execution, correctness, and performance outcomes."
+    ],
+    "rollback_boundary": "Keep CP-0021 compile/provenance evidence, the clean runtime child, public A1 zero-VA semantics, CP20 B2 execution, Qwen preparation, and Triton E2E=0/1 if generic wire-v2 or normal launcher integration fails."
+  },
+  "parent_checkpoint": "CP-0020",
+  "phase_id": "P5",
+  "plan_sha256": "fd78aff18e1b7672f31d4651c0eda08720cca5240a95f2e75b4433809e0f78b2",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "administrative_git_dir": "modules/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "clean": true,
+      "head": "d4b96099040140369b9d55108f7bde21e0acfd59",
+      "id": "gem5",
+      "path": "projects/gem5",
+      "tree": "95acf2260a9a9a9c3b68761fa0695b1350321516"
+    },
+    {
+      "administrative_git_dir": "modules/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "clean": true,
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58"
+    },
+    {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "clean": true,
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489"
+    },
+    {
+      "administrative_git_dir": "modules/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "clean": true,
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "id": "triton",
+      "path": "projects/triton",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1"
+    },
+    {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "clean": true,
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315"
+    },
+    {
+      "administrative_git_dir": "modules/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "clean": true,
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "id": "vllm",
+      "path": "projects/vllm",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb"
+    },
+    {
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "clean": true,
+      "head": "386713738a9eb050394e74152fe5acaf16435abe",
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "tree": "0011ed99bc09baaa06f57887141217d56c24626d"
+    }
+  ],
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "root_parent_commit": "1deaf7c8b5cba68e17ce7de0299c7a4383e791f8",
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "sequence": 21,
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "status": "accepted",
+  "validation": [
+    {
+      "command": "CP21 runtime child identity, clean worktree, trailers, prepare journal, and CP20 root anchor",
+      "cwd": ".",
+      "evidence_id": "EV-0051",
+      "exit_code": 0,
+      "result": "EV-0051 verifies runtime child 386713738a9eb050394e74152fe5acaf16435abe/tree 0011ed99bc09baaa06f57887141217d56c24626d, clean state, exact CP21 child trailers, CP21 journal, and accepted CP20 root anchor."
+    },
+    {
+      "command": "CP21 hash-bound tutorial and HSACO metadata/provenance test",
+      "cwd": ".",
+      "evidence_id": "EV-0050",
+      "exit_code": 0,
+      "result": "The unmodified tutorial and retained 5,408-byte HSACO hashes match; target, symbol visibility, descriptor preload, code materialization, and zero-initialized kernarg preparation pass with compiler/JIT/launcher/transport/execution/fallback false."
+    },
+    {
+      "command": "CP21 runtime CTest full and focused code-object suites",
+      "cwd": "projects/self-amdgpu-runtime",
+      "evidence_id": "EV-0050",
+      "exit_code": 0,
+      "result": "The configured runtime CTest suite passes 16/16 and the focused code-object set passes 4/4."
+    },
+    {
+      "command": "CP21 public A1 and generic wire boundary audit",
+      "cwd": ".",
+      "evidence_id": "EV-0051",
+      "exit_code": 0,
+      "result": "The protocol addendum and umbrella retain A1 fixture-only zero mapping/descriptor/code/kernarg VAs and leave generic wire-v2, allocator, AQL linkage, normal launcher, execution, and fallback false."
+    },
+    {
+      "command": "CP21 evidence policy and external capture verification",
+      "cwd": ".",
+      "evidence_id": "EV-0051",
+      "exit_code": 0,
+      "result": "EV-0050 and EV-0051 pass the shared evidence policy with exact retained capture and external artifact hashes."
+    }
+  ]
+}

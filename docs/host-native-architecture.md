@@ -26,6 +26,9 @@ host-owned address, queue, and command-processor admission responsibilities;
 CP-0020-B2 now connects that admission to the reused GPUDispatcher, Shader,
 ComputeUnit, and Vega instruction path for one locked `gpuReadWrite` fixture.
 The legacy device/system front-end remains present as the reference path.
+CP-0021 adds only a child-side Triton vecadd metadata/provenance gate: the
+unknown-gfx950 target spelling and DEFAULT-visible descriptor exception are
+accepted for parsing, while GemSim ISA support remains false.
 
 The host-native process must preserve the CP8/CP13 fixed-width transport and
 the runtime ownership/generation rules. It must not introduce a second wire
@@ -79,8 +82,15 @@ A/B/C output coverage, packet retirement, MQD read-index update, direct-u64
 signal completion, and pin release. The runtime graph still has no CPU,
 Process, Ruby, TLB, HSAPP, or GPUCommandProcessor objects. This does not prove
 generic gfx950/arbitrary HSACO, timing accuracy, fences/barriers, atomics,
-LDS/scratch, GPU TLB/Ruby/coherence, HIP/OpenCL, or performance. The next gate
-is `P5-TRITON-VECADD-01`; Triton and Qwen end-to-end remain 0/1.
+LDS/scratch, GPU TLB/Ruby/coherence, HIP/OpenCL, or performance. The historical
+next gate was `P5-TRITON-VECADD-01`; CP-0021 now records its compile/provenance
+prerequisite, while Triton and Qwen end-to-end remain 0/1. The next runtime
+gate is CP-0022 for generic wire-v2 integration. CP-0021
+records the pinned unmodified tutorial and 5,408-byte HSACO identities,
+12-DWORD (48-byte) descriptor preload, runtime CTest 16/16, and explicit false
+compiler/JIT/launcher/transport/execution/fallback fields. It performs no
+normal launch and leaves public A1 mapping VAs at zero. CP-0022 is the next
+generic wire-v2 allocator/AQL/launcher boundary.
 
 ## Non-goals
 

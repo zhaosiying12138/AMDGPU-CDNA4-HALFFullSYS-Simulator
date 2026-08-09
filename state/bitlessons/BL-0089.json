@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/src/code_object.c",
+    "projects/self-amdgpu-runtime/tests/triton_vecadd_compile_test.c",
+    "protocol/host-transport-v1-codeobj.json",
+    "state/evidence/EV-0050.json",
+    "state/evidence/EV-0051.json"
+  ],
+  "checkpoint_id": "CP-0021",
+  "conclusion": "AMDGPU target spelling and ELF symbol visibility are producer/linker provenance details, not ISA-execution proof: the pinned Triton image uses amdgcn-amd-amdhsa-unknown-gfx950 and a DEFAULT-visible descriptor while the pinned RDC fixtures use the double-hyphen gfx950 spelling and PROTECTED descriptors.",
+  "confidence": "high",
+  "decision": "Accept the unknown-gfx950 spelling and DEFAULT descriptor only under the exact Triton metadata-only branch, keep the code symbol GLOBAL PROTECTED, preserve the stricter RDC checks, and leave isa_supported_by_gemsim=false.",
+  "evidence_ids": ["EV-0050", "EV-0051"],
+  "id": "BL-0089",
+  "invalidated_assumptions": [
+    "All conforming gfx950 producers emit one byte-identical amdhsa.target spelling.",
+    "Accepting a DEFAULT-visible descriptor implies that the image is executable in GemSim."
+  ],
+  "observation": "The exact 5,408-byte vecadd HSACO validates only after recognizing its unknown-gfx950 target and GLOBAL DEFAULT vecadd.kd; the same record remains metadata-only, requires code-object transport, and reports no GemSim ISA support.",
+  "question_or_symptom": "Why did a source-pinned Triton vecadd HSACO fail the existing RDC-oriented parser despite carrying gfx950 metadata?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

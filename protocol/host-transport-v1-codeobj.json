@@ -445,6 +445,74 @@
     "acceptance_boundary": "Only the locked gpuReadWrite functional fixture is accepted; the general source-authority ISA audit remains blocked.",
     "blocked_scope": ["binary-search fixture", "generic gfx950", "arbitrary HSACO", "timing accuracy", "fences/barriers", "atomics", "LDS/scratch", "GPU TLB", "Ruby/coherence", "HIP/OpenCL", "Triton", "Qwen", "performance"]
   },
+  "triton_compile_provenance_addendum": {
+    "checkpoint": "CP-0021",
+    "status": "compile-provenance-accepted-normal-launcher-blocked",
+    "evidence_manifest": "EV-0051",
+    "evidence_manifest_sha256": "d3ca97990298b3ffc68194341495028d16b3ab981f5966d3a7e479614a0bb158",
+    "detailed_evidence": "EV-0050",
+    "detailed_evidence_sha256": "d29cb0f1f7ea505391b24083c428d832b704a2fb8642ad576a2e4fd94e026d39",
+    "runtime_child_head": "386713738a9eb050394e74152fe5acaf16435abe",
+    "runtime_child_tree": "0011ed99bc09baaa06f57887141217d56c24626d",
+    "inputs": {
+      "tutorial": {
+        "path": "projects/triton/python/tutorials/01-vector-add.py",
+        "bytes": 5644,
+        "sha256": "842430949e0ccde4fbce07606cce3ac4bac36bf21b2b12619a31b795ca4029b3",
+        "upstream_worktree_clean": true
+      },
+      "hsaco": {
+        "path": "artifacts/evidence/CP-0017/triton-builds/vecadd-gfx950.hsaco",
+        "bytes": 5408,
+        "sha256": "ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e",
+        "provenance": "retained CP-0017 compile artifact; compiler and JIT were not invoked by CP-0021"
+      }
+    },
+    "metadata": {
+      "target": "amdgcn-amd-amdhsa-unknown-gfx950",
+      "target_policy": "The parser's unknown-gfx950 spelling exception is target-scoped and metadata-only; CP-0021 hash-binds one observed Triton artifact, while arbitrary images still require a separate authority and are not implicitly accepted. The RDC double-hyphen target remains the deterministic fixture authority.",
+      "code_object_version": 5,
+      "kernel": "vecadd",
+      "code_symbol": {"binding": "GLOBAL", "visibility": "PROTECTED"},
+      "descriptor_symbol": {"binding": "GLOBAL", "visibility": "DEFAULT", "metadata_only_exception": true},
+      "descriptor_bytes": 64,
+      "code_bytes": 400,
+      "kernarg_segment_bytes": 48,
+      "kernarg_segment_align": 8,
+      "descriptor_kernarg_preload_dwords": 12,
+      "descriptor_kernarg_preload_bytes": 48,
+      "descriptor_preload_unit": "DWORD count",
+      "wavefront_size": 64,
+      "max_flat_workgroup_size": 256,
+      "isa_supported_by_gemsim": false
+    },
+    "validation": {
+      "runtime_ctest": "16/16",
+      "focused_code_object_ctest": "4/4",
+      "compile_only": true,
+      "provenance_only": true,
+      "compiler_invoked": false,
+      "jit": false,
+      "launcher": false,
+      "transport": false,
+      "execution": false,
+      "fallback": false,
+      "triton_e2e_cases": "0/1"
+    },
+    "public_transport_boundary": {
+      "selected": false,
+      "a1_fixture_only": true,
+      "mapping_va": 0,
+      "descriptor_va": 0,
+      "code_va": 0,
+      "kernarg_va": 0,
+      "generic_wire_v2": false,
+      "allocator": false,
+      "aql_linkage": false,
+      "normal_launcher": false
+    },
+    "next_action": "CP-0022 implements a generic versioned code-object wire, allocator/mapping ownership, descriptor/kernarg/AQL linkage, and normal Triton launcher handoff without fallback."
+  },
   "isa_audit": {
     "method": "Disassemble each tracked file with the available LLVM 21 objdump configured for gfx950, normalize instruction suffixes, and compare names with the locked gem5 decoder source. This is an observation only because the executable toolchain is not in SOURCE_LOCK.",
     "pinned_toolchain": false,

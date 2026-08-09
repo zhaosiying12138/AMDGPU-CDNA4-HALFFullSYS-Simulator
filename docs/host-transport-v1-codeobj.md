@@ -171,6 +171,33 @@ the source bytes; this does not establish a generic V5/V6 metadata or hidden
 argument loader. Atomics are rejected; only the demonstrated plain global
 read/write path is in scope.
 
+## CP-0021 Triton provenance boundary
+
+CP-0021 records the first pinned Triton vecadd compile/provenance gate without
+promoting it to a launcher result. The unmodified source
+`projects/triton/python/tutorials/01-vector-add.py` is 5,644 bytes with SHA-256
+`842430949e0ccde4fbce07606cce3ac4bac36bf21b2b12619a31b795ca4029b3`; the
+retained 5,408-byte HSACO has SHA-256
+`ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e` and uses
+the producer spelling `amdgcn-amd-amdhsa-unknown-gfx950`. Its `vecadd.kd`
+descriptor is GLOBAL DEFAULT-visible while the code symbol remains GLOBAL
+PROTECTED; the parser exception is target-scoped and metadata-only. CP-0021
+hash-binds this one observed artifact; it does not make the parser a generic
+hash or arbitrary-image acceptance path, and `isa_supported_by_gemsim` remains
+false.
+
+The raw descriptor encodes a kernarg preload value of **12 DWORD** (48 bytes),
+not 12 bytes. Runtime CTest is 16/16 and the focused code-object set is 4/4;
+caller-local code and zero-initialized kernarg materialization pass, while
+`compiler_invoked`, `jit`, `launcher`, `transport`, `execution`, and `fallback`
+are all false. EV-0050 contains the detailed child result and EV-0051 binds it
+to the clean runtime child and CP-0021 transaction journal.
+
+This gate does not alter the public A1 contract: mapping, descriptor, code, and
+kernarg VAs remain zero and the transport remains fixture-only. CP-0022 is the
+next generic wire-v2/allocator/AQL-linkage/normal-launcher gate. Triton E2E
+remains 0/1.
+
 ## Verification
 
 tests/test_host_transport_codeobj_spec.py checks:
@@ -183,7 +210,8 @@ tests/test_host_transport_codeobj_spec.py checks:
 - metadata versions, targets, kernel resource values, hidden-argument offsets,
   alignment, and kernarg sizes;
 - the explicit blocked general ISA status, the bounded CP-0020 functional
-  addendum, and the absence of any wire message IDs.
+  addendum, the CP-0021 Triton provenance addendum, and the absence of any wire
+  message IDs.
 
 The test is a parser/authority check. Passing it records the one locked
 CP-0020 functional case but does not turn the binary-search fixture or generic

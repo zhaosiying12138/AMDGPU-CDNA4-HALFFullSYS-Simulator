@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-10`
 
-**State at this commit:** `P3-HOST-NATIVE-03-B2 locked gpuReadWrite execution accepted; next-P5-TRITON-VECADD-01`
+**State at this commit:** `CP-0021 Triton vecadd compile/provenance boundary accepted; normal launcher blocked; next-CP-0022 generic wire-v2`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -494,6 +494,8 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | P3-HOST-NATIVE-03-B2 | P3H | No-x86 GPUDispatcher/CU functional output/trace differential for the locked 4-WG/16-wave gfx950 dispatch |
 | P4-HIP-01 | P4 | Minimal transparent HIP/OpenCL launch surface |
 | P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
+| CP-0021 | P5 | Hash-bound Triton vecadd compile/provenance prerequisite; normal launcher remains blocked |
+| CP-0022 | P5 | Generic versioned wire-v2 allocation, mapping, descriptor/kernarg/AQL linkage, and launcher handoff |
 | P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
 | P5-PARALLEL-TB-01 | P5B | Safe serial-versus-parallel threadblock experiment |
 | P5-OPS-01 | P5C | Broader model-operator manifest and differential gates |
@@ -787,6 +789,18 @@ Qwen inference remain 0/1. The next unique action is
 `P5-TRITON-VECADD-01`, the unmodified Triton tutorial through the normal
 launcher with simulator device selection only.
 
+`CP-0021` accepts a narrower child-side prerequisite for that launcher gate.
+The pinned unmodified tutorial and retained vecadd HSACO identities match, the
+runtime parser accepts the Triton `amdgcn-amd-amdhsa-unknown-gfx950` spelling
+and its DEFAULT-visible descriptor only in a metadata-only branch, and the
+descriptor preload is 12 DWORD (48 bytes). Runtime CTest is 16/16 and the
+focused code-object set is 4/4; caller-local code/kernarg preparation passes,
+but compiler/JIT invocation, normal launcher, transport, simulator execution,
+output differential, and fallback are all false. Public A1 mapping remains
+zero-address and fixture-only. Triton E2E and Qwen inference remain 0/1. The
+next unique action is CP-0022 for generic versioned wire-v2 allocation,
+mapping, descriptor/kernarg/AQL linkage, and normal launcher handoff.
+
 ### P3H - host-native simulator and first Triton gate
 
 The physical machine is already the host; launching a full `VEGA_X86` gem5
@@ -825,11 +839,14 @@ The work is staged as follows:
 4. `P5-TRITON-VECADD-01` runs the pinned, unmodified Triton tutorial request
    (`python/tutorials/01-vector-add.py`) through the normal Triton launcher,
    with simulator device selection only. It retains compiler, HSACO digest,
-   transport, dispatch, output, and CPU-fallback evidence. As of CP-0020 no
-   Triton end-to-end case has passed (0/1). The exact LLVM/Triton pair now has
-   a temporary AMD-only overlay that builds `libtriton.so` and compile-only
-   gfx950 vecadd HSACO; the overlay is not yet a committed launcher or device
-   execution path.
+   transport, dispatch, output, and CPU-fallback evidence. CP-0021 accepts
+   only the compile/provenance prerequisite: the exact tutorial and HSACO
+   identities, metadata, and caller-local materialization pass, while
+   compiler/JIT, launcher, transport, execution, and fallback remain false.
+   Triton end-to-end is still 0/1. The exact LLVM/Triton pair has a temporary
+   AMD-only overlay that produced the retained compile artifact; it is not yet
+   a committed launcher or device execution path. CP-0022 is the next generic
+   wire-v2/allocator/AQL gate.
 
 This workstream is not a cycle-accurate replacement. Timing, wider operator
 coverage, host-parallel threadblocks, HIP/OpenCL CTS, PyTorch, vLLM, and Qwen

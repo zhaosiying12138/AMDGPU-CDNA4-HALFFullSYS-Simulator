@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/tests/triton_vecadd_compile_test.c",
+    "projects/self-amdgpu-runtime/tools/sagr-triton-hsaco-probe.c",
+    "projects/triton/python/tutorials/01-vector-add.py",
+    "state/evidence/EV-0050.json",
+    "state/evidence/EV-0051.json"
+  ],
+  "checkpoint_id": "CP-0021",
+  "conclusion": "A fixed tutorial hash, prebuilt HSACO hash, metadata parse, and caller-local code/kernarg materialization establish compile provenance and preparation only; they do not prove that the compiler, JIT, normal launcher, transport, or simulator execution ran in the acceptance command.",
+  "confidence": "high",
+  "decision": "Publish independent compiler_invoked, jit, launcher, transport, execution, and fallback fields, keep every one false for CP21, retain Triton E2E at 0/1, and make generic wire v2/allocator/AQL/launcher work the next gate.",
+  "evidence_ids": ["EV-0050", "EV-0051"],
+  "id": "BL-0090",
+  "invalidated_assumptions": [
+    "A test named compile gate proves that the Triton compiler or JIT ran during that test.",
+    "Caller-local materialization or a valid HSACO can satisfy the unmodified tutorial launcher gate."
+  ],
+  "observation": "The CP21 outputs bind the unmodified tutorial and HSACO, pass runtime CTest 16/16 and focused code-object tests 4/4, and explicitly report compiler_invoked=false, jit=false, launcher=false, transport=false, execution=false, and fallback=false.",
+  "question_or_symptom": "How should the first pinned Triton vecadd artifact gate be accepted without overstating it as transparent end-to-end execution?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": ["BL-0076"]
+}

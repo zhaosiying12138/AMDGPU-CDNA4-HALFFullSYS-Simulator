@@ -1,0 +1,374 @@
+{
+  "checkpoint_id": "CP-0021",
+  "claim": "EV-0050 records the bounded CP21 child-side Triton vecadd compile/provenance gate. It binds the unmodified tutorial and fixed HSACO identities, validates the AMDGPU metadata including the Triton unknown-gfx950 target spelling and descriptor preload DWORD count, and performs caller-local code/kernarg preparation. This gate does not invoke the Triton compiler or JIT, normal-launch the tutorial, upload or transport an image, execute ISA, or count CPU/NVIDIA fallback.",
+  "command_argv": [
+    [
+      "bash",
+      "-lc",
+      "set -eu\npython3 - <<\"PY\"\nimport hashlib\nimport json\nimport subprocess\nfrom pathlib import Path\n\nroot = Path(\"projects/self-amdgpu-runtime\")\nexpected = [\n    \"src/code_object.c\",\n    \"tests/CMakeLists.txt\",\n    \"tests/triton_vecadd_compile_test.c\",\n    \"tools/sagr-triton-hsaco-probe.c\",\n]\nstatus = subprocess.check_output(\n    [\"git\", \"-C\", str(root), \"status\", \"--porcelain=v1\", \"--untracked-files=all\"],\n    text=True,\n)\nstatus_paths = []\nfor line in status.splitlines():\n    if line:\n        status_paths.append(line[3:])\nassert sorted(status_paths) == sorted(expected), status_paths\ncheck = subprocess.run(\n    [\"git\", \"-C\", str(root), \"diff\", \"--check\"],\n    text=True,\n    stdout=subprocess.PIPE,\n    stderr=subprocess.STDOUT,\n)\nassert check.returncode == 0, check.stdout\ntracked_diff = subprocess.check_output(\n    [\"git\", \"-C\", str(root), \"diff\", \"--binary\", \"--full-index\", \"--\", *expected]\n)\nhasher = hashlib.sha256()\nhasher.update(tracked_diff)\nhasher.update(b\"\\\\0UNTRACKED:tests/triton_vecadd_compile_test.c\\\\0\")\nhasher.update((root / \"tests/triton_vecadd_compile_test.c\").read_bytes())\nfiles = {}\nfor relative in expected:\n    payload = (root / relative).read_bytes()\n    files[relative] = {\"bytes\": len(payload), \"sha256\": hashlib.sha256(payload).hexdigest()}\nprint(json.dumps({\n    \"child\": str(root),\n    \"base_head\": subprocess.check_output([\"git\", \"-C\", str(root), \"rev-parse\", \"HEAD\"], text=True).strip(),\n    \"base_tree\": subprocess.check_output([\"git\", \"-C\", str(root), \"rev-parse\", \"HEAD^{tree}\"], text=True).strip(),\n    \"status_paths\": sorted(status_paths),\n    \"diff_check\": \"pass\",\n    \"tracked_diff_bytes\": len(tracked_diff),\n    \"working_diff_sha256\": hasher.hexdigest(),\n    \"files\": files,\n    \"scope\": \"compile/provenance-only; no root/state/docs/transaction edits\"\n}, sort_keys=True))\nPY"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; cmake --build /tmp/cp21-runtime-build --parallel 16"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; ctest --test-dir /tmp/cp21-runtime-build --output-on-failure"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu; ctest --test-dir /tmp/cp21-runtime-build -R 'self_amdgpu_runtime\\.(triton_vecadd_compile|code_object|code_object_transport|code_object_upload)' --output-on-failure"
+    ],
+    [
+      "/tmp/cp21-runtime-build/tests/self_amdgpu_runtime_triton_vecadd_compile_test"
+    ],
+    [
+      "/tmp/cp21-runtime-build/sagr-triton-hsaco-probe",
+      "artifacts/evidence/CP-0017/triton-builds/vecadd-gfx950.hsaco",
+      "vecadd"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\npython3 - <<\"PY\"\nimport hashlib\nimport json\nimport subprocess\nfrom pathlib import Path\n\ndef digest(path):\n    payload = path.read_bytes()\n    return len(payload), hashlib.sha256(payload).hexdigest()\n\ntutorial = Path(\"projects/triton/python/tutorials/01-vector-add.py\")\nhsaco = Path(\"artifacts/evidence/CP-0017/triton-builds/vecadd-gfx950.hsaco\")\ntutorial_size, tutorial_sha = digest(tutorial)\nhsaco_size, hsaco_sha = digest(hsaco)\nhsaco_bytes = hsaco.read_bytes()\nassert tutorial_size > 0\nassert hsaco_size == 5408\nassert tutorial_sha == \"842430949e0ccde4fbce07606cce3ac4bac36bf21b2b12619a31b795ca4029b3\"\nassert hsaco_sha == \"ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e\"\ntriton_status = subprocess.check_output(\n    [\"git\", \"-C\", \"projects/triton\", \"status\", \"--porcelain=v1\", \"--untracked-files=all\"],\n    text=True,\n)\nassert triton_status == \"\"\nraw_target = b\"amdgcn-amd-amdhsa-unknown-gfx950\"\nassert hsaco_bytes.count(raw_target) >= 1\n# The pinned ELF places vecadd.kd at .rodata file offset 0x5c0.\ndescriptor = hsaco_bytes[0x5c0:0x5c0 + 64]\nassert len(descriptor) == 64\npreload_dwords = int.from_bytes(descriptor[58:60], \"little\")\nassert preload_dwords == 12\nsymbols = subprocess.check_output(\n    [\"readelf\", \"-Ws\", \"--wide\", str(hsaco)], text=True\n)\nvecadd_lines = [line.strip() for line in symbols.splitlines() if \" vecadd\" in line]\nassert any(\"FUNC    GLOBAL PROTECTED\" in line and line.endswith(\" vecadd\") for line in vecadd_lines)\nassert any(\"OBJECT  GLOBAL DEFAULT\" in line and line.endswith(\" vecadd.kd\") for line in vecadd_lines)\nprint(json.dumps({\n    \"tutorial\": {\"path\": str(tutorial), \"bytes\": tutorial_size, \"sha256\": tutorial_sha, \"unmodified_triton_status\": True},\n    \"hsaco\": {\"path\": str(hsaco), \"bytes\": hsaco_size, \"sha256\": hsaco_sha, \"target\": raw_target.decode(), \"descriptor_file_offset\": \"0x5c0\", \"descriptor_bytes\": 64, \"descriptor_kernarg_preload_dwords\": preload_dwords, \"descriptor_preload_semantics\": \"DWORD count; not bytes\", \"code_symbol_visibility\": \"GLOBAL PROTECTED\", \"descriptor_symbol_visibility\": \"GLOBAL DEFAULT\"},\n    \"compiler_invoked\": False,\n    \"jit\": False,\n    \"runtime_execution\": False,\n    \"fallback\": False\n}, sort_keys=True))\nPY"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\npython3 - <<\"PY\"\nimport hashlib\nimport json\nimport subprocess\nfrom pathlib import Path\n\nroot = Path(\"projects/self-amdgpu-runtime\")\nexpected = [\n    \"src/code_object.c\",\n    \"tests/CMakeLists.txt\",\n    \"tests/triton_vecadd_compile_test.c\",\n    \"tools/sagr-triton-hsaco-probe.c\",\n]\nstatus = subprocess.check_output(\n    [\"git\", \"-C\", str(root), \"status\", \"--porcelain=v1\", \"--untracked-files=all\"],\n    text=True,\n)\nstatus_paths = []\nfor line in status.splitlines():\n    if line:\n        status_paths.append(line[3:])\nassert sorted(status_paths) == sorted(expected), status_paths\ncheck = subprocess.run(\n    [\"git\", \"-C\", str(root), \"diff\", \"--check\"],\n    text=True,\n    stdout=subprocess.PIPE,\n    stderr=subprocess.STDOUT,\n)\nassert check.returncode == 0, check.stdout\ntracked_diff = subprocess.check_output(\n    [\"git\", \"-C\", str(root), \"diff\", \"--binary\", \"--full-index\", \"--\", *expected]\n)\nhasher = hashlib.sha256()\nhasher.update(tracked_diff)\nhasher.update(b\"\\\\0UNTRACKED:tests/triton_vecadd_compile_test.c\\\\0\")\nhasher.update((root / \"tests/triton_vecadd_compile_test.c\").read_bytes())\nfiles = {}\nfor relative in expected:\n    payload = (root / relative).read_bytes()\n    files[relative] = {\"bytes\": len(payload), \"sha256\": hashlib.sha256(payload).hexdigest()}\nprint(json.dumps({\n    \"child\": str(root),\n    \"base_head\": subprocess.check_output([\"git\", \"-C\", str(root), \"rev-parse\", \"HEAD\"], text=True).strip(),\n    \"base_tree\": subprocess.check_output([\"git\", \"-C\", str(root), \"rev-parse\", \"HEAD^{tree}\"], text=True).strip(),\n    \"status_paths\": sorted(status_paths),\n    \"diff_check\": \"pass\",\n    \"tracked_diff_bytes\": len(tracked_diff),\n    \"working_diff_sha256\": hasher.hexdigest(),\n    \"files\": files,\n    \"scope\": \"compile/provenance-only; no root/state/docs/transaction edits\"\n}, sort_keys=True))\nPY"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T20:41:47+00:00",
+      "exit_code": 0,
+      "id": "cp21-runtime-child-dirty-inventory",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0021/runtime-child-dirty-inventory.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2e840a7620371873aefb66b4e5289f940e12166a3cb289dff9c679ae2fed7862",
+        "size": 2570,
+        "tracked": false
+      },
+      "result": "The runtime child dirty inventory is limited to the four CP21 files, passes diff-check, and binds the working diff and per-file hashes against baseline 7797360e.",
+      "schema": "amdgpu-sim.command-evidence.v1",
+      "started_at": "2026-08-09T20:41:47+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0021/runtime-child-dirty-inventory.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0021/runtime-child-dirty-inventory.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3b0add76c9bb0cbcaea67c08427aeceabdd900ce26ebff065dfcae24c2cba967",
+        "size": 1018,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; cmake --build /tmp/cp21-runtime-build --parallel 16"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T20:41:08+00:00",
+      "exit_code": 0,
+      "id": "cp21-runtime-build",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0021/runtime-build.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d44f759798b3efa86970ce5fb26d60515c61908fec03315017e778e1f72bfe4e",
+        "size": 633,
+        "tracked": false
+      },
+      "result": "The configured static runtime rebuild exits zero after the CP21 parser, probe, CMake, and test changes.",
+      "schema": "amdgpu-sim.command-evidence.v1",
+      "started_at": "2026-08-09T20:41:08+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0021/runtime-build.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0021/runtime-build.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8c35b1682f73592d30612d7b0fabdb384fcfff35cb5a076cb48b85b1368aa794",
+        "size": 22,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; ctest --test-dir /tmp/cp21-runtime-build --output-on-failure"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T20:41:19+00:00",
+      "exit_code": 0,
+      "id": "cp21-runtime-ctest-full",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0021/runtime-ctest-full.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "be37c1b6804c912370adcd3124346c8de5387d532123a1aeb6cb42cc5b34dd97",
+        "size": 654,
+        "tracked": false
+      },
+      "result": "The complete configured runtime CTest suite passes 16/16, including the new Triton compile gate and all legacy state/transport tests.",
+      "schema": "amdgpu-sim.command-evidence.v1",
+      "started_at": "2026-08-09T20:41:16+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0021/runtime-ctest-full.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0021/runtime-ctest-full.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "cc4ecad30ee677a10a0134840171c2661cbe41fb2656361dfcc6fc810d8cbb99",
+        "size": 2272,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu; ctest --test-dir /tmp/cp21-runtime-build -R 'self_amdgpu_runtime\\.(triton_vecadd_compile|code_object|code_object_transport|code_object_upload)' --output-on-failure"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T20:41:26+00:00",
+      "exit_code": 0,
+      "id": "cp21-runtime-ctest-focused",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0021/runtime-ctest-focused.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9edd7ceb5ded06c7aebc3ae2f8d180b9c5ac3de783dfad55cb9a78df58ebcdc6",
+        "size": 763,
+        "tracked": false
+      },
+      "result": "The focused code-object regression set passes 4/4: legacy validation, Triton compile provenance, transport, and upload.",
+      "schema": "amdgpu-sim.command-evidence.v1",
+      "started_at": "2026-08-09T20:41:26+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0021/runtime-ctest-focused.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0021/runtime-ctest-focused.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6069eeb891ff9e8046bbaf5b15b7b53d2a792744be1345d8124d8647ab489d33",
+        "size": 709,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/tmp/cp21-runtime-build/tests/self_amdgpu_runtime_triton_vecadd_compile_test"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T20:41:00+00:00",
+      "exit_code": 0,
+      "id": "cp21-triton-vecadd-compile",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0021/triton-vecadd-compile.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e0bcce72e8a793ae77efff1541651f32ffc88376b1da283ffbd5468dc2522ce1",
+        "size": 643,
+        "tracked": false
+      },
+      "result": "The fixed tutorial/HSACO gate validates hashes and metadata, materializes caller-local code, and emits compile/provenance-only flags; compiler and JIT invocation are false.",
+      "schema": "amdgpu-sim.command-evidence.v1",
+      "started_at": "2026-08-09T20:41:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0021/triton-vecadd-compile.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0021/triton-vecadd-compile.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ac1d40c11d807f7642984f9f0e4ed25a73e49931fa6e66fb92b34868f25ea336",
+        "size": 456,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/tmp/cp21-runtime-build/sagr-triton-hsaco-probe",
+        "artifacts/evidence/CP-0017/triton-builds/vecadd-gfx950.hsaco",
+        "vecadd"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T20:41:00+00:00",
+      "exit_code": 0,
+      "id": "cp21-triton-hsaco-probe",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0021/triton-hsaco-probe.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ee2cb6ecbf23585f1e0c62819014752c58779f6557f78ff1b514171c8de386f6",
+        "size": 690,
+        "tracked": false
+      },
+      "result": "The standalone HSACO probe validates the pinned vecadd metadata and reports metadata-only with launcher, transport, execution, and fallback all false.",
+      "schema": "amdgpu-sim.command-evidence.v1",
+      "started_at": "2026-08-09T20:41:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0021/triton-hsaco-probe.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0021/triton-hsaco-probe.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0b97f3f81fbcfb09cf2c5bc90f8ef3fa3987a93e04f8e2a901edc424bc8e115c",
+        "size": 408,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\npython3 - <<\"PY\"\nimport hashlib\nimport json\nimport subprocess\nfrom pathlib import Path\n\ndef digest(path):\n    payload = path.read_bytes()\n    return len(payload), hashlib.sha256(payload).hexdigest()\n\ntutorial = Path(\"projects/triton/python/tutorials/01-vector-add.py\")\nhsaco = Path(\"artifacts/evidence/CP-0017/triton-builds/vecadd-gfx950.hsaco\")\ntutorial_size, tutorial_sha = digest(tutorial)\nhsaco_size, hsaco_sha = digest(hsaco)\nhsaco_bytes = hsaco.read_bytes()\nassert tutorial_size > 0\nassert hsaco_size == 5408\nassert tutorial_sha == \"842430949e0ccde4fbce07606cce3ac4bac36bf21b2b12619a31b795ca4029b3\"\nassert hsaco_sha == \"ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e\"\ntriton_status = subprocess.check_output(\n    [\"git\", \"-C\", \"projects/triton\", \"status\", \"--porcelain=v1\", \"--untracked-files=all\"],\n    text=True,\n)\nassert triton_status == \"\"\nraw_target = b\"amdgcn-amd-amdhsa-unknown-gfx950\"\nassert hsaco_bytes.count(raw_target) >= 1\n# The pinned ELF places vecadd.kd at .rodata file offset 0x5c0.\ndescriptor = hsaco_bytes[0x5c0:0x5c0 + 64]\nassert len(descriptor) == 64\npreload_dwords = int.from_bytes(descriptor[58:60], \"little\")\nassert preload_dwords == 12\nsymbols = subprocess.check_output(\n    [\"readelf\", \"-Ws\", \"--wide\", str(hsaco)], text=True\n)\nvecadd_lines = [line.strip() for line in symbols.splitlines() if \" vecadd\" in line]\nassert any(\"FUNC    GLOBAL PROTECTED\" in line and line.endswith(\" vecadd\") for line in vecadd_lines)\nassert any(\"OBJECT  GLOBAL DEFAULT\" in line and line.endswith(\" vecadd.kd\") for line in vecadd_lines)\nprint(json.dumps({\n    \"tutorial\": {\"path\": str(tutorial), \"bytes\": tutorial_size, \"sha256\": tutorial_sha, \"unmodified_triton_status\": True},\n    \"hsaco\": {\"path\": str(hsaco), \"bytes\": hsaco_size, \"sha256\": hsaco_sha, \"target\": raw_target.decode(), \"descriptor_file_offset\": \"0x5c0\", \"descriptor_bytes\": 64, \"descriptor_kernarg_preload_dwords\": preload_dwords, \"descriptor_preload_semantics\": \"DWORD count; not bytes\", \"code_symbol_visibility\": \"GLOBAL PROTECTED\", \"descriptor_symbol_visibility\": \"GLOBAL DEFAULT\"},\n    \"compiler_invoked\": False,\n    \"jit\": False,\n    \"runtime_execution\": False,\n    \"fallback\": False\n}, sort_keys=True))\nPY"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T20:43:13+00:00",
+      "exit_code": 0,
+      "id": "cp21-triton-input-identities",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0021/triton-input-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "313478af097a5c44d0d0c03a372bc98a7d8aa72a932a7100566d9b6a1ca516b6",
+        "size": 2945,
+        "tracked": false
+      },
+      "result": "The unmodified tutorial and pinned HSACO identities, exact target spelling, symbol visibility, and descriptor preload DWORD count are independently checked.",
+      "schema": "amdgpu-sim.command-evidence.v1",
+      "started_at": "2026-08-09T20:43:13+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0021/triton-input-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0021/triton-input-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "30cd23298cfe95be2b5c8cc2bfdc81abde1d9c9cf81096f0b7004f4050c2180e",
+        "size": 767,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T20:43:13+00:00",
+  "environment_fingerprint": {
+    "code_bytes": 400,
+    "code_object_version": 5,
+    "compile_only": true,
+    "compiler_invoked": false,
+    "descriptor_bytes": 64,
+    "descriptor_kernarg_preload_dwords": 12,
+    "descriptor_preload_semantics": "DWORD count; not bytes",
+    "execution": false,
+    "fallback": false,
+    "gfx_target": 950,
+    "hsaco_bytes": 5408,
+    "hsaco_sha256": "ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e",
+    "isa_supported_by_gemsim": false,
+    "jit": false,
+    "kernarg_segment_align": 8,
+    "kernarg_segment_bytes": 48,
+    "kernel": "vecadd",
+    "launcher": false,
+    "legacy_and_triton_ctest": "4/4",
+    "max_flat_workgroup_size": 256,
+    "normal_launcher_claim": false,
+    "provenance_only": true,
+    "root_state_docs_transaction_edited": false,
+    "runtime_child_base_head": "7797360ea04e9c3576c5cc16cf829427e96d3d70",
+    "runtime_child_base_tree": "64602386f81d7d27a555f1473b01f051b30c2276",
+    "runtime_child_dirty_paths": 4,
+    "runtime_child_working_diff_sha256": "778bdb7ed3caf12706827ccf832d26e30646a8e446877440302c74bf670c2f7e",
+    "runtime_ctest": "16/16",
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "target": "amdgcn-amd-amdhsa-unknown-gfx950",
+    "transport": false,
+    "tutorial_bytes": 5644,
+    "tutorial_sha256": "842430949e0ccde4fbce07606cce3ac4bac36bf21b2b12619a31b795ca4029b3",
+    "wavefront_size": 64
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0017/triton-builds/vecadd-gfx950.hsaco",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e",
+      "size": 5408,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0050",
+  "includes": {},
+  "limitations": [
+    "This is a child-only metadata/provenance gate; it does not invoke Triton or LLVM in this run. The tutorial source and HSACO are hash inputs from the prior pinned compile artifact.",
+    "The parser accepts the exact amdgcn-amd-amdhsa-unknown-gfx950 spelling and DEFAULT-visible vecadd.kd only for this metadata-only Triton boundary; the kernel code symbol remains GLOBAL PROTECTED and ISA support remains false.",
+    "Materialization and zero-initialized 48-byte kernarg packing are caller-local preparation. No PT_LOAD mapping, GPU virtual address assignment, AQL launch, wire upload, queue submission, simulator execution, output differential, or performance evidence is present.",
+    "The descriptor preload field is recorded as a 16-bit DWORD count of 12 (48 bytes), not as a byte count. Normal Triton launcher and transport remain blocked and no fallback path is enabled."
+  ],
+  "redactions": [],
+  "result": "CP21 child compile/provenance gate passed: fixed tutorial and HSACO hashes match, Triton vecadd metadata validates, legacy runtime regressions remain green (16/16 overall; focused 4/4), and both executable outputs explicitly set compiler_invoked/jit/launcher/transport/execution/fallback to false. Normal launcher and end-to-end execution remain unclaimed.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T20:41:00+00:00",
+  "type": "cp21-triton-vecadd-compile-provenance-boundary"
+}

@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/src/code_object.c",
+    "projects/self-amdgpu-runtime/tests/triton_vecadd_compile_test.c",
+    "protocol/host-transport-v1-codeobj.json",
+    "state/evidence/EV-0050.json",
+    "state/evidence/EV-0051.json"
+  ],
+  "checkpoint_id": "CP-0021",
+  "conclusion": "kernel_code_prefetch/preload metadata must retain its encoded unit: the 16-bit vecadd descriptor field is a DWORD count of 12, which covers the 48-byte kernarg segment; treating 12 as bytes changes the launch ABI.",
+  "confidence": "high",
+  "decision": "Record both descriptor_kernarg_preload_dwords=12 and the derived 48-byte coverage, check the raw descriptor offset and HSACO hash, and do not reinterpret the field as a byte count in a future allocator/AQL implementation.",
+  "evidence_ids": ["EV-0050", "EV-0051"],
+  "id": "BL-0091",
+  "invalidated_assumptions": [
+    "The descriptor kernarg preload field is measured in bytes.",
+    "A numerically matching preload field can be interpreted without binding the raw descriptor and kernarg size."
+  ],
+  "observation": "The pinned descriptor bytes at file offset 0x5c0 encode preload value 12, while metadata reports a 48-byte kernarg segment; the independent identity capture binds both to HSACO SHA-256 ee8b0f89...a11826e.",
+  "question_or_symptom": "Why does the vecadd descriptor contain preload value 12 when its kernarg segment is 48 bytes?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}
