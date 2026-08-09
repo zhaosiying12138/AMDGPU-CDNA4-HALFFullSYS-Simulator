@@ -166,6 +166,35 @@ add_test(
   COMMAND self_amdgpu_runtime_code_object_transport_test)
 set_tests_properties(self_amdgpu_runtime.code_object_transport PROPERTIES TIMEOUT 30)
 
+# CP-0022 generic payload-v2 codec/admission gate.  The test exercises only
+# fixed-record validation and identity linkage; it does not open a daemon or
+# claim mapping, launcher, or gem5 execution.
+add_executable(
+  self_amdgpu_runtime_generic_dispatch_v2_transport_test
+  generic_dispatch_v2_transport_test.c
+  ../src/transport_codec.c)
+target_compile_features(
+  self_amdgpu_runtime_generic_dispatch_v2_transport_test PRIVATE c_std_11)
+target_include_directories(
+  self_amdgpu_runtime_generic_dispatch_v2_transport_test
+  PRIVATE ../src ../include)
+target_link_libraries(
+  self_amdgpu_runtime_generic_dispatch_v2_transport_test
+  PRIVATE SelfAmdgpuRuntime::runtime)
+if(MSVC)
+  target_compile_options(
+    self_amdgpu_runtime_generic_dispatch_v2_transport_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    self_amdgpu_runtime_generic_dispatch_v2_transport_test
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(
+  NAME self_amdgpu_runtime.generic_dispatch_v2_transport
+  COMMAND self_amdgpu_runtime_generic_dispatch_v2_transport_test)
+set_tests_properties(
+  self_amdgpu_runtime.generic_dispatch_v2_transport PROPERTIES TIMEOUT 30)
+
 add_executable(
   self_amdgpu_runtime_code_object_upload_test
   code_object_upload_test.c

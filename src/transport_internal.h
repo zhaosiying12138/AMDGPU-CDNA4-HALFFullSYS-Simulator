@@ -44,7 +44,17 @@ enum {
   SAGR_WIRE_CODE_OBJECT_MAX_SEGMENTS = 16,
   SAGR_WIRE_CODE_OBJECT_NAME_BYTES = 128,
   SAGR_WIRE_CODE_OBJECT_DESCRIPTOR_BYTES = 64,
-  SAGR_WIRE_CODE_OBJECT_MAX_IMAGE_BYTES = 67108864
+  SAGR_WIRE_CODE_OBJECT_MAX_IMAGE_BYTES = 67108864,
+  SAGR_WIRE_GENERIC_PAYLOAD_BYTES = 4016,
+  SAGR_WIRE_GENERIC_FRAME_BYTES =
+      SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_GENERIC_PAYLOAD_BYTES,
+  SAGR_WIRE_GENERIC_COMMON_BYTES = 232,
+  SAGR_WIRE_GENERIC_KERNEL_NAME_BYTES = 128,
+  SAGR_WIRE_GENERIC_MAX_KERNARG_BYTES = 16777216,
+  SAGR_WIRE_GENERIC_MAX_SHARED_BYTES = 65536,
+  SAGR_WIRE_GENERIC_MAX_WORKGROUP_DIMENSION = 1024,
+  SAGR_WIRE_GENERIC_MAX_WARPS = 32,
+  SAGR_WIRE_GENERIC_MAX_CTAS = 8
 };
 
 enum {
@@ -109,6 +119,16 @@ enum {
   SAGR_WIRE_CODE_OBJECT_OPCODE_BEGIN = 1,
   SAGR_WIRE_CODE_OBJECT_OPCODE_CHUNK = 2,
   SAGR_WIRE_CODE_OBJECT_OPCODE_COMMIT = 3
+};
+
+enum {
+  SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_REQUEST = 18,
+  SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_ACK = 19,
+  SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_COMPLETION = 20,
+  SAGR_WIRE_GENERIC_OPCODE_MAP_OBJECT = 1,
+  SAGR_WIRE_GENERIC_OPCODE_ALLOC_KERNARG = 2,
+  SAGR_WIRE_GENERIC_OPCODE_SUBMIT_AQL = 3,
+  SAGR_WIRE_GENERIC_OPCODE_UNMAP_OBJECT = 4
 };
 
 typedef struct sagr_wire_queue_request {
@@ -332,6 +352,116 @@ typedef struct sagr_wire_code_object_response {
   uint64_t request_id;
 } sagr_wire_code_object_response_t;
 
+typedef struct sagr_wire_generic_map_body {
+  uint32_t gfx_target;
+  uint32_t relocation_count;
+  uint32_t kernarg_segment_size;
+  uint32_t kernarg_segment_align;
+  uint32_t descriptor_preload_dwords;
+  uint32_t page_size;
+} sagr_wire_generic_map_body_t;
+
+typedef struct sagr_wire_generic_alloc_kernarg_body {
+  uint64_t size_bytes;
+  uint64_t alignment_bytes;
+  uint32_t allocation_flags;
+  uint32_t reserved0;
+} sagr_wire_generic_alloc_kernarg_body_t;
+
+typedef struct sagr_wire_generic_submit_body {
+  uint64_t kernarg_allocation_id;
+  uint64_t kernarg_generation;
+  uint64_t kernarg_offset;
+  uint64_t kernarg_size;
+  uint64_t signal_id;
+  uint64_t signal_generation;
+  uint64_t expected_signal_value_bits;
+  uint32_t grid_x;
+  uint32_t grid_y;
+  uint32_t grid_z;
+  uint32_t workgroup_x;
+  uint32_t workgroup_y;
+  uint32_t workgroup_z;
+  uint32_t num_warps;
+  uint32_t num_ctas;
+  uint32_t shared_memory_bytes;
+  uint32_t wavefront_size;
+  uint32_t launch_flags;
+  uint32_t reserved0;
+} sagr_wire_generic_submit_body_t;
+
+/* V2 payloads carry identities and scalar launch metadata only.  C struct
+ * padding is never serialized; the codec writes each field explicitly. */
+typedef struct sagr_wire_generic_request {
+  uint16_t major;
+  uint16_t minor;
+  uint16_t opcode;
+  uint16_t flags;
+  uint64_t object_id;
+  uint64_t object_generation;
+  uint64_t mapping_id;
+  uint64_t mapping_generation;
+  uint64_t queue_id;
+  uint64_t queue_generation;
+  uint64_t queue_sequence;
+  uint32_t kernel_index;
+  uint32_t reserved0;
+  uint8_t image_sha256[32];
+  char kernel_name[SAGR_WIRE_GENERIC_KERNEL_NAME_BYTES];
+  union {
+    sagr_wire_generic_map_body_t map;
+    sagr_wire_generic_alloc_kernarg_body_t alloc_kernarg;
+    sagr_wire_generic_submit_body_t submit;
+  } body;
+} sagr_wire_generic_request_t;
+
+typedef struct sagr_wire_generic_response {
+  uint16_t major;
+  uint16_t minor;
+  uint32_t status;
+  uint16_t opcode;
+  uint16_t flags;
+  uint32_t error_code;
+  uint64_t object_id;
+  uint64_t object_generation;
+  uint64_t mapping_id;
+  uint64_t mapping_generation;
+  uint64_t mapped_base_va;
+  uint64_t mapped_end_va;
+  uint64_t descriptor_va;
+  uint64_t code_va;
+  uint64_t entry_va;
+  uint64_t mapped_bytes;
+  uint64_t kernarg_allocation_id;
+  uint64_t kernarg_generation;
+  uint64_t kernarg_va;
+  uint64_t kernarg_size;
+  uint64_t kernarg_alignment;
+  uint32_t kernel_index;
+  uint32_t segment_count;
+  uint32_t descriptor_preload_dwords;
+  uint32_t reserved0;
+  uint64_t ticket_id;
+  uint64_t trace_id;
+  uint64_t queue_id;
+  uint64_t queue_generation;
+  uint64_t queue_sequence;
+  uint64_t signal_id;
+  uint64_t signal_generation;
+  uint64_t signal_value_bits;
+  uint64_t packet_va;
+  uint32_t packet_crc32c;
+  uint32_t output_crc32c;
+  uint64_t sim_tick;
+  uint64_t admission_tick;
+  uint64_t start_tick;
+  uint64_t end_tick;
+  uint64_t retire_tick;
+  uint8_t image_sha256[32];
+  uint64_t request_id;
+  uint16_t message_type;
+} sagr_wire_generic_response_t;
+
 extern const uint8_t sagr_dispatch_fixture_manifest_sha256[32];
 
 typedef struct sagr_wire_ack_fields {
@@ -500,6 +630,31 @@ sagr_status_t sagr_protocol_decode_code_object_response(
     const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
     uint64_t expected_request_id, sagr_wire_code_object_response_t *response,
     int32_t *wire_status, const char **reason);
+
+sagr_status_t sagr_protocol_encode_generic_dispatch_request(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_wire_generic_request_t *request, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size);
+
+sagr_status_t sagr_protocol_decode_generic_dispatch_request(
+    const uint8_t *frame, size_t frame_size,
+    const sagr_instance_info_t *info, sagr_wire_generic_request_t *request,
+    uint64_t *request_id, const char **reason);
+
+sagr_status_t sagr_protocol_encode_generic_dispatch_response(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    uint16_t message_type, const sagr_wire_generic_response_t *response,
+    uint8_t *frame, size_t frame_capacity, size_t *frame_size);
+
+sagr_status_t sagr_protocol_decode_generic_dispatch_response(
+    const uint8_t *frame, size_t frame_size,
+    const sagr_instance_info_t *info, uint64_t expected_request_id,
+    uint16_t expected_message_type, sagr_wire_generic_response_t *response,
+    int32_t *wire_status, const char **reason);
+
+sagr_status_t sagr_protocol_validate_failed_generic_dispatch_ack(
+    const sagr_wire_generic_request_t *request,
+    const sagr_wire_generic_response_t *response);
 
 sagr_status_t sagr_protocol_map_wire_status(uint32_t status);
 

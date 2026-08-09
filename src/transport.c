@@ -223,6 +223,12 @@ static sagr_status_t validate_options(
   const int code_object_required =
       (options->required_capabilities[SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_WORD] &
        SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK) != 0;
+  const int generic_dispatch_offered =
+      (options->offered_capabilities[SAGR_CAPABILITY_GENERIC_DISPATCH_WORD] &
+       SAGR_CAPABILITY_GENERIC_DISPATCH_MASK) != 0;
+  const int generic_dispatch_required =
+      (options->required_capabilities[SAGR_CAPABILITY_GENERIC_DISPATCH_WORD] &
+       SAGR_CAPABILITY_GENERIC_DISPATCH_MASK) != 0;
   if (options->struct_size < sizeof(*options) || options->flags != 0 ||
       options->cancel_fd < -1 || options->reserved0 != 0 ||
       !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
@@ -244,9 +250,13 @@ static sagr_status_t validate_options(
       dispatch_offered != dispatch_required ||
       kmt_offered != kmt_required ||
       code_object_offered != code_object_required ||
+      generic_dispatch_offered != generic_dispatch_required ||
       (dispatch_required != 0 &&
        (queue_required == 0 || memory_required == 0 ||
-        signal_required == 0))) {
+        signal_required == 0)) ||
+      (generic_dispatch_required != 0 &&
+       (queue_required == 0 || memory_required == 0 ||
+        signal_required == 0 || code_object_required == 0))) {
     return SAGR_STATUS_INVALID_ARGUMENT;
   }
   return SAGR_STATUS_SUCCESS;

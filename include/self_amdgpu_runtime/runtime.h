@@ -57,6 +57,8 @@ enum {
 #define SAGR_CAPABILITY_KMT_MASK (UINT64_C(1) << 5)
 #define SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_WORD UINT32_C(0)
 #define SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK (UINT64_C(1) << 7)
+#define SAGR_CAPABILITY_GENERIC_DISPATCH_WORD UINT32_C(0)
+#define SAGR_CAPABILITY_GENERIC_DISPATCH_MASK (UINT64_C(1) << 8)
 
 #define SAGR_QUEUE_PROTOCOL_MAJOR UINT16_C(1)
 #define SAGR_QUEUE_PROTOCOL_MINOR UINT16_C(0)
@@ -93,6 +95,12 @@ enum {
 #define SAGR_DISPATCH_OUTPUT_CRC32C UINT32_C(0x796671ec)
 #define SAGR_DISPATCH_FIXTURE_MANIFEST_SHA256_HEX \
   "7500741873f9d39848e57f0aa9ffc6454df7db87b93e1c046501f54db1b7543c"
+
+/* CP-0022 generic object/dispatch payload version.  The enclosing transport
+ * framing remains protocol 1.0; this version is selected only when the
+ * GENERIC_DISPATCH_V2 capability is negotiated. */
+#define SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR UINT16_C(2)
+#define SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR UINT16_C(0)
 
 typedef struct sagr_instance *sagr_instance_t;
 typedef struct sagr_queue *sagr_queue_t;

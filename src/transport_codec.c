@@ -109,7 +109,8 @@ static int capabilities_are_valid_selection(const uint64_t *capabilities) {
                            SAGR_CAPABILITY_SIGNAL_MASK |
                            SAGR_CAPABILITY_DISPATCH_MASK |
                            SAGR_CAPABILITY_KMT_MASK |
-                           SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK;
+                           SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK |
+                           SAGR_CAPABILITY_GENERIC_DISPATCH_MASK;
   if ((capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] &
        SAGR_CAPABILITY_TOPOLOGY_MASK) == 0 ||
       (capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] & ~allowed) != 0) {
@@ -131,6 +132,18 @@ static int capabilities_are_valid_selection(const uint64_t *capabilities) {
        SAGR_CAPABILITY_DISPATCH_MASK) != 0 &&
       (capabilities[SAGR_CAPABILITY_SIGNAL_WORD] &
            SAGR_CAPABILITY_SIGNAL_MASK) == 0) {
+    return 0;
+  }
+  if ((capabilities[SAGR_CAPABILITY_GENERIC_DISPATCH_WORD] &
+       SAGR_CAPABILITY_GENERIC_DISPATCH_MASK) != 0 &&
+      ((capabilities[SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_WORD] &
+        SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK) == 0 ||
+       (capabilities[SAGR_CAPABILITY_QUEUE_WORD] &
+        SAGR_CAPABILITY_QUEUE_MASK) == 0 ||
+       (capabilities[SAGR_CAPABILITY_MEMORY_WORD] &
+        SAGR_CAPABILITY_MEMORY_MASK) == 0 ||
+       (capabilities[SAGR_CAPABILITY_SIGNAL_WORD] &
+        SAGR_CAPABILITY_SIGNAL_MASK) == 0)) {
     return 0;
   }
   for (index = 1; index < SAGR_CAPABILITY_WORD_COUNT; ++index) {
@@ -649,6 +662,13 @@ sagr_status_t sagr_protocol_decode_ack(
       ((options->required_capabilities[SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_WORD] &
         SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK) != 0)) {
     *reason = "ACK code-object transport capability was not both offered and required";
+    return SAGR_STATUS_CAPABILITY_MISMATCH;
+  }
+  if (((selected[SAGR_CAPABILITY_GENERIC_DISPATCH_WORD] &
+        SAGR_CAPABILITY_GENERIC_DISPATCH_MASK) != 0) !=
+      ((options->required_capabilities[SAGR_CAPABILITY_GENERIC_DISPATCH_WORD] &
+        SAGR_CAPABILITY_GENERIC_DISPATCH_MASK) != 0)) {
+    *reason = "ACK generic dispatch capability was not both offered and required";
     return SAGR_STATUS_CAPABILITY_MISMATCH;
   }
   if (!bytes_are_zero(options->expected_daemon_uuid, 16) &&
@@ -2544,5 +2564,763 @@ sagr_protocol_decode_code_object_response(
     return sagr_protocol_map_wire_status(response->status);
   }
   *reason = "code-object operation succeeded";
+  return SAGR_STATUS_SUCCESS;
+}
+
+/* CP-0022 generic object/dispatch records.  This section deliberately uses
+ * the v1 framing helpers but has an independent payload version and state
+ * validator.  No host pointer, FD, or client-owned AQL bytes are serialized. */
+
+static int
+generic_opcode_valid(uint16_t opcode)
+{
+  return opcode == SAGR_WIRE_GENERIC_OPCODE_MAP_OBJECT ||
+         opcode == SAGR_WIRE_GENERIC_OPCODE_ALLOC_KERNARG ||
+         opcode == SAGR_WIRE_GENERIC_OPCODE_SUBMIT_AQL ||
+         opcode == SAGR_WIRE_GENERIC_OPCODE_UNMAP_OBJECT;
+}
+
+static int
+generic_capability_selected(const sagr_instance_info_t *info)
+{
+  const uint64_t selected = info->negotiated_capabilities[
+      SAGR_CAPABILITY_GENERIC_DISPATCH_WORD];
+  return (selected & SAGR_CAPABILITY_GENERIC_DISPATCH_MASK) != 0 &&
+         (selected & SAGR_CAPABILITY_TOPOLOGY_MASK) != 0 &&
+         (selected & SAGR_CAPABILITY_QUEUE_MASK) != 0 &&
+         (selected & SAGR_CAPABILITY_MEMORY_MASK) != 0 &&
+         (selected & SAGR_CAPABILITY_SIGNAL_MASK) != 0 &&
+         (selected & SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK) != 0;
+}
+
+static int
+generic_power_of_two(uint64_t value)
+{
+  return value != 0U && (value & (value - UINT64_C(1))) == 0U;
+}
+
+static int
+generic_request_common_valid(const sagr_wire_generic_request_t *request)
+{
+  return request != NULL &&
+         request->major == SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR &&
+         request->minor == SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR &&
+         request->flags == 0U && request->reserved0 == 0U &&
+         generic_opcode_valid(request->opcode);
+}
+
+static int
+generic_common_hash_and_name_valid(
+    const sagr_wire_generic_request_t *request)
+{
+  return !bytes_are_zero(request->image_sha256, sizeof(request->image_sha256)) &&
+         code_object_nul_padded(request->kernel_name,
+                                SAGR_WIRE_GENERIC_KERNEL_NAME_BYTES);
+}
+
+static int
+generic_common_hash_and_name_zero(
+    const sagr_wire_generic_request_t *request)
+{
+  return bytes_are_zero(request->image_sha256, sizeof(request->image_sha256)) &&
+         bytes_are_zero((const uint8_t *)request->kernel_name,
+                        SAGR_WIRE_GENERIC_KERNEL_NAME_BYTES);
+}
+
+static sagr_status_t
+generic_request_validate(const sagr_wire_generic_request_t *request)
+{
+  if (!generic_request_common_valid(request)) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+
+  switch (request->opcode) {
+    case SAGR_WIRE_GENERIC_OPCODE_MAP_OBJECT: {
+      const sagr_wire_generic_map_body_t *body = &request->body.map;
+      if (request->object_id == 0U || request->object_generation == 0U ||
+          request->mapping_id != 0U || request->mapping_generation != 0U ||
+          request->queue_id != 0U || request->queue_generation != 0U ||
+          request->queue_sequence != 0U ||
+          request->kernel_index >= SAGR_CODE_OBJECT_MAX_KERNELS ||
+          !generic_common_hash_and_name_valid(request) ||
+          body->kernarg_segment_size == 0U ||
+          body->kernarg_segment_size > SAGR_WIRE_GENERIC_MAX_KERNARG_BYTES ||
+          body->kernarg_segment_align < 8U ||
+          body->kernarg_segment_align > SAGR_MEMORY_ALIGNMENT_64K ||
+          !generic_power_of_two(body->kernarg_segment_align) ||
+          (body->page_size != SAGR_MEMORY_ALIGNMENT_4K &&
+           body->page_size != SAGR_MEMORY_ALIGNMENT_64K)) {
+        return SAGR_STATUS_INVALID_ARGUMENT;
+      }
+      if (body->gfx_target != SAGR_CODE_OBJECT_TARGET_GFX950 ||
+          body->relocation_count != 0U ||
+          body->descriptor_preload_dwords != 0U) {
+        /* Triton gfx950 currently carries a 12-dword preload.  The generic
+         * gate reports this boundary explicitly until CP preload semantics
+         * are implemented; it must not silently strip the preload. */
+        return SAGR_STATUS_NOT_SUPPORTED;
+      }
+      return SAGR_STATUS_SUCCESS;
+    }
+    case SAGR_WIRE_GENERIC_OPCODE_ALLOC_KERNARG: {
+      const sagr_wire_generic_alloc_kernarg_body_t *body =
+          &request->body.alloc_kernarg;
+      if (request->object_id == 0U || request->object_generation == 0U ||
+          request->mapping_id == 0U || request->mapping_generation == 0U ||
+          request->queue_id != 0U || request->queue_generation != 0U ||
+          request->queue_sequence != 0U || request->kernel_index != 0U ||
+          !generic_common_hash_and_name_zero(request) || body->size_bytes == 0U ||
+          body->size_bytes > SAGR_WIRE_GENERIC_MAX_KERNARG_BYTES ||
+          body->alignment_bytes < 8U ||
+          body->alignment_bytes > SAGR_MEMORY_ALIGNMENT_64K ||
+          !generic_power_of_two(body->alignment_bytes) ||
+          body->allocation_flags != 0U || body->reserved0 != 0U) {
+        return SAGR_STATUS_INVALID_ARGUMENT;
+      }
+      return SAGR_STATUS_SUCCESS;
+    }
+    case SAGR_WIRE_GENERIC_OPCODE_SUBMIT_AQL: {
+      const sagr_wire_generic_submit_body_t *body = &request->body.submit;
+      const uint64_t workgroup_size =
+          (uint64_t)body->workgroup_x * (uint64_t)body->workgroup_y *
+          (uint64_t)body->workgroup_z;
+      const uint64_t expected_workgroup_size =
+          (uint64_t)body->num_warps * (uint64_t)body->wavefront_size;
+      if (request->object_id == 0U || request->object_generation == 0U ||
+          request->mapping_id == 0U || request->mapping_generation == 0U ||
+          request->queue_id == 0U || request->queue_generation == 0U ||
+          request->queue_sequence == 0U ||
+          request->kernel_index >= SAGR_CODE_OBJECT_MAX_KERNELS ||
+          !generic_common_hash_and_name_valid(request) ||
+          body->kernarg_allocation_id == 0U ||
+          body->kernarg_generation == 0U || body->kernarg_size == 0U ||
+          body->kernarg_size > SAGR_WIRE_GENERIC_MAX_KERNARG_BYTES ||
+          body->kernarg_offset >
+              SAGR_WIRE_GENERIC_MAX_KERNARG_BYTES - body->kernarg_size ||
+          body->signal_id == 0U || body->signal_generation == 0U ||
+          body->expected_signal_value_bits != UINT64_C(1) ||
+          body->grid_x == 0U || body->grid_y == 0U || body->grid_z == 0U ||
+          body->workgroup_x == 0U || body->workgroup_y == 0U ||
+          body->workgroup_z == 0U ||
+          body->workgroup_x > SAGR_WIRE_GENERIC_MAX_WORKGROUP_DIMENSION ||
+          body->workgroup_y > SAGR_WIRE_GENERIC_MAX_WORKGROUP_DIMENSION ||
+          body->workgroup_z > SAGR_WIRE_GENERIC_MAX_WORKGROUP_DIMENSION ||
+          workgroup_size > SAGR_WIRE_GENERIC_MAX_WORKGROUP_DIMENSION ||
+          body->grid_x < body->workgroup_x ||
+          body->grid_y < body->workgroup_y ||
+          body->grid_z < body->workgroup_z ||
+          body->num_warps == 0U || body->num_warps > SAGR_WIRE_GENERIC_MAX_WARPS ||
+          body->num_ctas == 0U || body->num_ctas > SAGR_WIRE_GENERIC_MAX_CTAS ||
+          body->shared_memory_bytes > SAGR_WIRE_GENERIC_MAX_SHARED_BYTES ||
+          body->wavefront_size != 64U ||
+          expected_workgroup_size != workgroup_size ||
+          body->launch_flags != 0U ||
+          body->reserved0 != 0U) {
+        return SAGR_STATUS_INVALID_ARGUMENT;
+      }
+      return SAGR_STATUS_SUCCESS;
+    }
+    case SAGR_WIRE_GENERIC_OPCODE_UNMAP_OBJECT:
+      if (request->object_id == 0U || request->object_generation == 0U ||
+          request->mapping_id == 0U || request->mapping_generation == 0U ||
+          request->queue_id != 0U || request->queue_generation != 0U ||
+          request->queue_sequence != 0U || request->kernel_index != 0U ||
+          !generic_common_hash_and_name_zero(request) ||
+          !bytes_are_zero((const uint8_t *)&request->body,
+                          sizeof(request->body))) {
+        return SAGR_STATUS_INVALID_ARGUMENT;
+      }
+      return SAGR_STATUS_SUCCESS;
+    default:
+      return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+}
+
+static sagr_status_t
+decode_generic_header(const uint8_t *frame, size_t frame_size,
+                      const sagr_instance_info_t *info, uint16_t expected_type,
+                      const uint8_t **payload, const char **reason)
+{
+  if (frame == NULL || info == NULL || payload == NULL || reason == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (frame_size != SAGR_WIRE_GENERIC_FRAME_BYTES ||
+      memcmp(frame, k_magic, sizeof(k_magic)) != 0 || get_u16(frame + 8U) != 1U ||
+      get_u16(frame + 10U) != 0U ||
+      get_u16(frame + 12U) != SAGR_WIRE_HEADER_BYTES ||
+      get_u16(frame + 14U) != expected_type || get_u32(frame + 16U) != 0U ||
+      get_u32(frame + 20U) != SAGR_WIRE_GENERIC_PAYLOAD_BYTES ||
+      get_u64(frame + 24U) == 0U || get_u32(frame + 68U) != 0U ||
+      !bytes_are_zero(frame + 72U, 8U) || bytes_are_zero(info->daemon_uuid, 16U) ||
+      info->connection_id == 0U || info->epoch == 0U ||
+      memcmp(frame + 32U, info->daemon_uuid, 16U) != 0 ||
+      get_u64(frame + 48U) != info->connection_id ||
+      get_u64(frame + 56U) != info->epoch) {
+    *reason = "invalid generic dispatch frame header";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (get_u32(frame + 64U) != frame_crc32c(frame, frame_size)) {
+    *reason = "generic dispatch CRC32C mismatch";
+    return SAGR_STATUS_CHECKSUM_ERROR;
+  }
+  if (!generic_capability_selected(info)) {
+    *reason = "generic dispatch capability was not negotiated";
+    return SAGR_STATUS_CAPABILITY_MISMATCH;
+  }
+  *payload = frame + SAGR_WIRE_HEADER_BYTES;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t
+sagr_protocol_encode_generic_dispatch_request(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_wire_generic_request_t *request, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size)
+{
+  uint8_t *payload;
+  sagr_status_t status;
+  if (info == NULL || request == NULL || frame == NULL || frame_size == NULL ||
+      frame_capacity < SAGR_WIRE_GENERIC_FRAME_BYTES || request_id == 0U ||
+      bytes_are_zero(info->daemon_uuid, 16U) || info->connection_id == 0U ||
+      info->epoch == 0U) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (!generic_capability_selected(info)) {
+    return SAGR_STATUS_CAPABILITY_MISMATCH;
+  }
+  status = generic_request_validate(request);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+
+  memset(frame, 0, SAGR_WIRE_GENERIC_FRAME_BYTES);
+  encode_header(frame, SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_REQUEST,
+                SAGR_WIRE_GENERIC_PAYLOAD_BYTES, request_id, info->daemon_uuid,
+                info->connection_id, info->epoch);
+  payload = frame + SAGR_WIRE_HEADER_BYTES;
+  put_u16(payload, request->major);
+  put_u16(payload + 2U, request->minor);
+  put_u16(payload + 4U, request->opcode);
+  put_u16(payload + 6U, request->flags);
+  put_u64(payload + 8U, request->object_id);
+  put_u64(payload + 16U, request->object_generation);
+  put_u64(payload + 24U, request->mapping_id);
+  put_u64(payload + 32U, request->mapping_generation);
+  put_u64(payload + 40U, request->queue_id);
+  put_u64(payload + 48U, request->queue_generation);
+  put_u64(payload + 56U, request->queue_sequence);
+  put_u32(payload + 64U, request->kernel_index);
+  memcpy(payload + 72U, request->image_sha256, 32U);
+  memcpy(payload + 104U, request->kernel_name,
+         SAGR_WIRE_GENERIC_KERNEL_NAME_BYTES);
+  if (request->opcode == SAGR_WIRE_GENERIC_OPCODE_MAP_OBJECT) {
+    const sagr_wire_generic_map_body_t *body = &request->body.map;
+    put_u32(payload + 232U, body->gfx_target);
+    put_u32(payload + 236U, body->relocation_count);
+    put_u32(payload + 240U, body->kernarg_segment_size);
+    put_u32(payload + 244U, body->kernarg_segment_align);
+    put_u32(payload + 248U, body->descriptor_preload_dwords);
+    put_u32(payload + 252U, body->page_size);
+  } else if (request->opcode == SAGR_WIRE_GENERIC_OPCODE_ALLOC_KERNARG) {
+    const sagr_wire_generic_alloc_kernarg_body_t *body =
+        &request->body.alloc_kernarg;
+    put_u64(payload + 232U, body->size_bytes);
+    put_u64(payload + 240U, body->alignment_bytes);
+    put_u32(payload + 248U, body->allocation_flags);
+    put_u32(payload + 252U, body->reserved0);
+  } else if (request->opcode == SAGR_WIRE_GENERIC_OPCODE_SUBMIT_AQL) {
+    const sagr_wire_generic_submit_body_t *body = &request->body.submit;
+    put_u64(payload + 232U, body->kernarg_allocation_id);
+    put_u64(payload + 240U, body->kernarg_generation);
+    put_u64(payload + 248U, body->kernarg_offset);
+    put_u64(payload + 256U, body->kernarg_size);
+    put_u64(payload + 264U, body->signal_id);
+    put_u64(payload + 272U, body->signal_generation);
+    put_u64(payload + 280U, body->expected_signal_value_bits);
+    put_u32(payload + 288U, body->grid_x);
+    put_u32(payload + 292U, body->grid_y);
+    put_u32(payload + 296U, body->grid_z);
+    put_u32(payload + 300U, body->workgroup_x);
+    put_u32(payload + 304U, body->workgroup_y);
+    put_u32(payload + 308U, body->workgroup_z);
+    put_u32(payload + 312U, body->num_warps);
+    put_u32(payload + 316U, body->num_ctas);
+    put_u32(payload + 320U, body->shared_memory_bytes);
+    put_u32(payload + 324U, body->wavefront_size);
+    put_u32(payload + 328U, body->launch_flags);
+    put_u32(payload + 332U, body->reserved0);
+  }
+  sagr_protocol_recompute_frame_crc(frame, SAGR_WIRE_GENERIC_FRAME_BYTES);
+  *frame_size = SAGR_WIRE_GENERIC_FRAME_BYTES;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t
+sagr_protocol_decode_generic_dispatch_request(
+    const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
+    sagr_wire_generic_request_t *request, uint64_t *request_id,
+    const char **reason)
+{
+  const uint8_t *payload = NULL;
+  sagr_status_t status;
+  uint32_t active_end = SAGR_WIRE_GENERIC_COMMON_BYTES;
+  if (reason != NULL) {
+    *reason = "malformed generic dispatch request";
+  }
+  if (request == NULL || request_id == NULL || reason == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  status = decode_generic_header(frame, frame_size, info,
+                                 SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_REQUEST,
+                                 &payload, reason);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  memset(request, 0, sizeof(*request));
+  request->major = get_u16(payload);
+  request->minor = get_u16(payload + 2U);
+  request->opcode = get_u16(payload + 4U);
+  request->flags = get_u16(payload + 6U);
+  request->object_id = get_u64(payload + 8U);
+  request->object_generation = get_u64(payload + 16U);
+  request->mapping_id = get_u64(payload + 24U);
+  request->mapping_generation = get_u64(payload + 32U);
+  request->queue_id = get_u64(payload + 40U);
+  request->queue_generation = get_u64(payload + 48U);
+  request->queue_sequence = get_u64(payload + 56U);
+  request->kernel_index = get_u32(payload + 64U);
+  request->reserved0 = get_u32(payload + 68U);
+  memcpy(request->image_sha256, payload + 72U, 32U);
+  memcpy(request->kernel_name, payload + 104U,
+         SAGR_WIRE_GENERIC_KERNEL_NAME_BYTES);
+  if (request->opcode == SAGR_WIRE_GENERIC_OPCODE_MAP_OBJECT) {
+    sagr_wire_generic_map_body_t *body = &request->body.map;
+    body->gfx_target = get_u32(payload + 232U);
+    body->relocation_count = get_u32(payload + 236U);
+    body->kernarg_segment_size = get_u32(payload + 240U);
+    body->kernarg_segment_align = get_u32(payload + 244U);
+    body->descriptor_preload_dwords = get_u32(payload + 248U);
+    body->page_size = get_u32(payload + 252U);
+    active_end = 256U;
+  } else if (request->opcode == SAGR_WIRE_GENERIC_OPCODE_ALLOC_KERNARG) {
+    sagr_wire_generic_alloc_kernarg_body_t *body =
+        &request->body.alloc_kernarg;
+    body->size_bytes = get_u64(payload + 232U);
+    body->alignment_bytes = get_u64(payload + 240U);
+    body->allocation_flags = get_u32(payload + 248U);
+    body->reserved0 = get_u32(payload + 252U);
+    active_end = 256U;
+  } else if (request->opcode == SAGR_WIRE_GENERIC_OPCODE_SUBMIT_AQL) {
+    sagr_wire_generic_submit_body_t *body = &request->body.submit;
+    body->kernarg_allocation_id = get_u64(payload + 232U);
+    body->kernarg_generation = get_u64(payload + 240U);
+    body->kernarg_offset = get_u64(payload + 248U);
+    body->kernarg_size = get_u64(payload + 256U);
+    body->signal_id = get_u64(payload + 264U);
+    body->signal_generation = get_u64(payload + 272U);
+    body->expected_signal_value_bits = get_u64(payload + 280U);
+    body->grid_x = get_u32(payload + 288U);
+    body->grid_y = get_u32(payload + 292U);
+    body->grid_z = get_u32(payload + 296U);
+    body->workgroup_x = get_u32(payload + 300U);
+    body->workgroup_y = get_u32(payload + 304U);
+    body->workgroup_z = get_u32(payload + 308U);
+    body->num_warps = get_u32(payload + 312U);
+    body->num_ctas = get_u32(payload + 316U);
+    body->shared_memory_bytes = get_u32(payload + 320U);
+    body->wavefront_size = get_u32(payload + 324U);
+    body->launch_flags = get_u32(payload + 328U);
+    body->reserved0 = get_u32(payload + 332U);
+    active_end = 336U;
+  } else if (request->opcode != SAGR_WIRE_GENERIC_OPCODE_UNMAP_OBJECT) {
+    *reason = "unknown generic dispatch opcode";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (get_u32(payload + 68U) != 0U ||
+      !bytes_are_zero(payload + active_end,
+                      SAGR_WIRE_GENERIC_PAYLOAD_BYTES - active_end)) {
+    *reason = "noncanonical generic dispatch request padding";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  status = generic_request_validate(request);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = status == SAGR_STATUS_NOT_SUPPORTED
+                  ? "generic dispatch request uses unsupported loader semantics"
+                  : "invalid generic dispatch request fields";
+    return status == SAGR_STATUS_NOT_SUPPORTED ? status
+                                                : SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  *request_id = get_u64(frame + 24U);
+  *reason = "generic dispatch request decoded";
+  return SAGR_STATUS_SUCCESS;
+}
+
+enum {
+  GENERIC_RESPONSE_TAIL = 304,
+  GENERIC_RESPONSE_MAJOR = 0,
+  GENERIC_RESPONSE_MINOR = 2,
+  GENERIC_RESPONSE_STATUS = 4,
+  GENERIC_RESPONSE_OPCODE = 8,
+  GENERIC_RESPONSE_FLAGS = 10,
+  GENERIC_RESPONSE_ERROR = 12,
+  GENERIC_RESPONSE_OBJECT = 16,
+  GENERIC_RESPONSE_OBJECT_GEN = 24,
+  GENERIC_RESPONSE_MAPPING = 32,
+  GENERIC_RESPONSE_MAPPING_GEN = 40,
+  GENERIC_RESPONSE_MAPPED_BASE = 48,
+  GENERIC_RESPONSE_MAPPED_END = 56,
+  GENERIC_RESPONSE_DESCRIPTOR = 64,
+  GENERIC_RESPONSE_CODE = 72,
+  GENERIC_RESPONSE_ENTRY = 80,
+  GENERIC_RESPONSE_MAPPED_BYTES = 88,
+  GENERIC_RESPONSE_KERNARG = 96,
+  GENERIC_RESPONSE_KERNARG_GEN = 104,
+  GENERIC_RESPONSE_KERNARG_VA = 112,
+  GENERIC_RESPONSE_KERNARG_SIZE = 120,
+  GENERIC_RESPONSE_KERNARG_ALIGN = 128,
+  GENERIC_RESPONSE_KERNEL_INDEX = 136,
+  GENERIC_RESPONSE_SEGMENTS = 140,
+  GENERIC_RESPONSE_PRELOAD = 144,
+  GENERIC_RESPONSE_RESERVED = 148,
+  GENERIC_RESPONSE_TICKET = 152,
+  GENERIC_RESPONSE_TRACE = 160,
+  GENERIC_RESPONSE_QUEUE = 168,
+  GENERIC_RESPONSE_QUEUE_GEN = 176,
+  GENERIC_RESPONSE_QUEUE_SEQ = 184,
+  GENERIC_RESPONSE_SIGNAL = 192,
+  GENERIC_RESPONSE_SIGNAL_GEN = 200,
+  GENERIC_RESPONSE_SIGNAL_VALUE = 208,
+  GENERIC_RESPONSE_PACKET_VA = 216,
+  GENERIC_RESPONSE_PACKET_CRC = 224,
+  GENERIC_RESPONSE_OUTPUT_CRC = 228,
+  GENERIC_RESPONSE_SIM_TICK = 232,
+  GENERIC_RESPONSE_ADMISSION_TICK = 240,
+  GENERIC_RESPONSE_START_TICK = 248,
+  GENERIC_RESPONSE_END_TICK = 256,
+  GENERIC_RESPONSE_RETIRE_TICK = 264,
+  GENERIC_RESPONSE_DIGEST = 272
+};
+
+static int
+generic_response_fields_zero(const sagr_wire_generic_response_t *response)
+{
+  return response->object_id == 0U && response->object_generation == 0U &&
+         response->mapping_id == 0U && response->mapping_generation == 0U &&
+         response->mapped_base_va == 0U && response->mapped_end_va == 0U &&
+         response->descriptor_va == 0U && response->code_va == 0U &&
+         response->entry_va == 0U && response->mapped_bytes == 0U &&
+         response->kernarg_allocation_id == 0U &&
+         response->kernarg_generation == 0U && response->kernarg_va == 0U &&
+         response->kernarg_size == 0U && response->kernarg_alignment == 0U &&
+         response->kernel_index == 0U && response->segment_count == 0U &&
+         response->descriptor_preload_dwords == 0U && response->reserved0 == 0U &&
+         response->ticket_id == 0U && response->trace_id == 0U &&
+         response->queue_id == 0U && response->queue_generation == 0U &&
+         response->queue_sequence == 0U && response->signal_id == 0U &&
+         response->signal_generation == 0U && response->signal_value_bits == 0U &&
+         response->packet_va == 0U && response->packet_crc32c == 0U &&
+         response->output_crc32c == 0U && response->sim_tick == 0U &&
+         response->admission_tick == 0U && response->start_tick == 0U &&
+         response->end_tick == 0U && response->retire_tick == 0U &&
+         bytes_are_zero(response->image_sha256, sizeof(response->image_sha256));
+}
+
+static int
+generic_response_success_valid(const sagr_wire_generic_response_t *response,
+                               uint16_t message_type)
+{
+  if (response->error_code != 0U || response->flags != 0U ||
+      response->reserved0 != 0U || response->object_id == 0U ||
+      response->object_generation == 0U || response->mapping_id == 0U ||
+      response->mapping_generation == 0U ||
+      bytes_are_zero(response->image_sha256, sizeof(response->image_sha256))) {
+    return 0;
+  }
+  switch (response->opcode) {
+    case SAGR_WIRE_GENERIC_OPCODE_MAP_OBJECT:
+      return message_type == SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_ACK &&
+             response->mapped_base_va != 0U &&
+             response->mapped_end_va > response->mapped_base_va &&
+             response->mapped_end_va - response->mapped_base_va >=
+                 response->mapped_bytes &&
+             response->descriptor_va != 0U && response->code_va != 0U &&
+             response->entry_va != 0U && response->mapped_bytes != 0U &&
+             response->segment_count != 0U &&
+             response->kernarg_allocation_id == 0U &&
+             response->kernarg_generation == 0U && response->kernarg_va == 0U &&
+             response->kernarg_size == 0U && response->kernarg_alignment == 0U &&
+             response->ticket_id == 0U && response->trace_id == 0U &&
+             response->queue_id == 0U && response->queue_generation == 0U &&
+             response->queue_sequence == 0U && response->signal_id == 0U &&
+             response->signal_generation == 0U &&
+             response->signal_value_bits == 0U && response->packet_va == 0U &&
+             response->packet_crc32c == 0U && response->output_crc32c == 0U &&
+             response->sim_tick == 0U && response->admission_tick == 0U &&
+             response->start_tick == 0U && response->end_tick == 0U &&
+             response->retire_tick == 0U;
+    case SAGR_WIRE_GENERIC_OPCODE_ALLOC_KERNARG:
+      return message_type == SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_ACK &&
+             response->mapped_base_va == 0U && response->mapped_end_va == 0U &&
+             response->descriptor_va == 0U && response->code_va == 0U &&
+             response->entry_va == 0U && response->mapped_bytes == 0U &&
+             response->kernarg_allocation_id != 0U &&
+             response->kernarg_generation != 0U && response->kernarg_va != 0U &&
+             response->kernarg_size != 0U &&
+             response->kernarg_size <= SAGR_WIRE_GENERIC_MAX_KERNARG_BYTES &&
+             generic_power_of_two(response->kernarg_alignment) &&
+             response->kernarg_alignment >= 8U &&
+             response->kernarg_alignment <= SAGR_MEMORY_ALIGNMENT_64K &&
+             response->ticket_id == 0U && response->trace_id == 0U &&
+             response->queue_id == 0U && response->queue_generation == 0U &&
+             response->queue_sequence == 0U && response->signal_id == 0U &&
+             response->signal_generation == 0U &&
+             response->signal_value_bits == 0U && response->packet_va == 0U &&
+             response->packet_crc32c == 0U && response->output_crc32c == 0U &&
+             response->sim_tick == 0U && response->admission_tick == 0U &&
+             response->start_tick == 0U && response->end_tick == 0U &&
+             response->retire_tick == 0U && response->kernel_index == 0U &&
+             response->segment_count == 0U &&
+             response->descriptor_preload_dwords == 0U;
+    case SAGR_WIRE_GENERIC_OPCODE_UNMAP_OBJECT:
+      return message_type == SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_ACK &&
+             response->mapped_base_va == 0U && response->mapped_end_va == 0U &&
+             response->descriptor_va == 0U && response->code_va == 0U &&
+             response->entry_va == 0U && response->mapped_bytes == 0U &&
+             response->kernarg_allocation_id == 0U &&
+             response->kernarg_generation == 0U && response->kernarg_va == 0U &&
+             response->kernarg_size == 0U && response->kernarg_alignment == 0U &&
+             response->ticket_id == 0U && response->trace_id == 0U &&
+             response->queue_id == 0U && response->queue_generation == 0U &&
+             response->queue_sequence == 0U && response->signal_id == 0U &&
+             response->signal_generation == 0U && response->signal_value_bits == 0U &&
+             response->packet_va == 0U && response->packet_crc32c == 0U &&
+             response->output_crc32c == 0U && response->sim_tick == 0U &&
+             response->admission_tick == 0U && response->start_tick == 0U &&
+             response->end_tick == 0U && response->retire_tick == 0U &&
+             response->kernel_index == 0U && response->segment_count == 0U &&
+             response->descriptor_preload_dwords == 0U;
+    case SAGR_WIRE_GENERIC_OPCODE_SUBMIT_AQL:
+      return (message_type == SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_ACK ||
+              message_type == SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_COMPLETION) &&
+             response->queue_id != 0U && response->queue_generation != 0U &&
+             response->queue_sequence != 0U && response->signal_id != 0U &&
+             response->signal_generation != 0U && response->ticket_id != 0U &&
+             response->trace_id != 0U && response->packet_va != 0U &&
+             response->kernarg_allocation_id != 0U &&
+             response->kernarg_generation != 0U && response->kernarg_va != 0U &&
+             response->kernarg_size != 0U &&
+             response->kernarg_size <= SAGR_WIRE_GENERIC_MAX_KERNARG_BYTES &&
+             generic_power_of_two(response->kernarg_alignment) &&
+             response->kernarg_alignment >= 8U &&
+             response->kernarg_alignment <= SAGR_MEMORY_ALIGNMENT_64K;
+    default:
+      return 0;
+  }
+}
+
+static void
+generic_response_encode_payload(uint8_t *payload,
+                                const sagr_wire_generic_response_t *response)
+{
+  put_u16(payload + GENERIC_RESPONSE_MAJOR, response->major);
+  put_u16(payload + GENERIC_RESPONSE_MINOR, response->minor);
+  put_u32(payload + GENERIC_RESPONSE_STATUS, response->status);
+  put_u16(payload + GENERIC_RESPONSE_OPCODE, response->opcode);
+  put_u16(payload + GENERIC_RESPONSE_FLAGS, response->flags);
+  put_u32(payload + GENERIC_RESPONSE_ERROR, response->error_code);
+  put_u64(payload + GENERIC_RESPONSE_OBJECT, response->object_id);
+  put_u64(payload + GENERIC_RESPONSE_OBJECT_GEN, response->object_generation);
+  put_u64(payload + GENERIC_RESPONSE_MAPPING, response->mapping_id);
+  put_u64(payload + GENERIC_RESPONSE_MAPPING_GEN, response->mapping_generation);
+  put_u64(payload + GENERIC_RESPONSE_MAPPED_BASE, response->mapped_base_va);
+  put_u64(payload + GENERIC_RESPONSE_MAPPED_END, response->mapped_end_va);
+  put_u64(payload + GENERIC_RESPONSE_DESCRIPTOR, response->descriptor_va);
+  put_u64(payload + GENERIC_RESPONSE_CODE, response->code_va);
+  put_u64(payload + GENERIC_RESPONSE_ENTRY, response->entry_va);
+  put_u64(payload + GENERIC_RESPONSE_MAPPED_BYTES, response->mapped_bytes);
+  put_u64(payload + GENERIC_RESPONSE_KERNARG, response->kernarg_allocation_id);
+  put_u64(payload + GENERIC_RESPONSE_KERNARG_GEN, response->kernarg_generation);
+  put_u64(payload + GENERIC_RESPONSE_KERNARG_VA, response->kernarg_va);
+  put_u64(payload + GENERIC_RESPONSE_KERNARG_SIZE, response->kernarg_size);
+  put_u64(payload + GENERIC_RESPONSE_KERNARG_ALIGN, response->kernarg_alignment);
+  put_u32(payload + GENERIC_RESPONSE_KERNEL_INDEX, response->kernel_index);
+  put_u32(payload + GENERIC_RESPONSE_SEGMENTS, response->segment_count);
+  put_u32(payload + GENERIC_RESPONSE_PRELOAD,
+          response->descriptor_preload_dwords);
+  put_u32(payload + GENERIC_RESPONSE_RESERVED, response->reserved0);
+  put_u64(payload + GENERIC_RESPONSE_TICKET, response->ticket_id);
+  put_u64(payload + GENERIC_RESPONSE_TRACE, response->trace_id);
+  put_u64(payload + GENERIC_RESPONSE_QUEUE, response->queue_id);
+  put_u64(payload + GENERIC_RESPONSE_QUEUE_GEN, response->queue_generation);
+  put_u64(payload + GENERIC_RESPONSE_QUEUE_SEQ, response->queue_sequence);
+  put_u64(payload + GENERIC_RESPONSE_SIGNAL, response->signal_id);
+  put_u64(payload + GENERIC_RESPONSE_SIGNAL_GEN, response->signal_generation);
+  put_u64(payload + GENERIC_RESPONSE_SIGNAL_VALUE,
+          response->signal_value_bits);
+  put_u64(payload + GENERIC_RESPONSE_PACKET_VA, response->packet_va);
+  put_u32(payload + GENERIC_RESPONSE_PACKET_CRC, response->packet_crc32c);
+  put_u32(payload + GENERIC_RESPONSE_OUTPUT_CRC, response->output_crc32c);
+  put_u64(payload + GENERIC_RESPONSE_SIM_TICK, response->sim_tick);
+  put_u64(payload + GENERIC_RESPONSE_ADMISSION_TICK,
+          response->admission_tick);
+  put_u64(payload + GENERIC_RESPONSE_START_TICK, response->start_tick);
+  put_u64(payload + GENERIC_RESPONSE_END_TICK, response->end_tick);
+  put_u64(payload + GENERIC_RESPONSE_RETIRE_TICK, response->retire_tick);
+  memcpy(payload + GENERIC_RESPONSE_DIGEST, response->image_sha256, 32U);
+}
+
+static void
+generic_response_decode_payload(const uint8_t *payload,
+                                sagr_wire_generic_response_t *response)
+{
+  memset(response, 0, sizeof(*response));
+  response->major = get_u16(payload + GENERIC_RESPONSE_MAJOR);
+  response->minor = get_u16(payload + GENERIC_RESPONSE_MINOR);
+  response->status = get_u32(payload + GENERIC_RESPONSE_STATUS);
+  response->opcode = get_u16(payload + GENERIC_RESPONSE_OPCODE);
+  response->flags = get_u16(payload + GENERIC_RESPONSE_FLAGS);
+  response->error_code = get_u32(payload + GENERIC_RESPONSE_ERROR);
+  response->object_id = get_u64(payload + GENERIC_RESPONSE_OBJECT);
+  response->object_generation = get_u64(payload + GENERIC_RESPONSE_OBJECT_GEN);
+  response->mapping_id = get_u64(payload + GENERIC_RESPONSE_MAPPING);
+  response->mapping_generation = get_u64(payload + GENERIC_RESPONSE_MAPPING_GEN);
+  response->mapped_base_va = get_u64(payload + GENERIC_RESPONSE_MAPPED_BASE);
+  response->mapped_end_va = get_u64(payload + GENERIC_RESPONSE_MAPPED_END);
+  response->descriptor_va = get_u64(payload + GENERIC_RESPONSE_DESCRIPTOR);
+  response->code_va = get_u64(payload + GENERIC_RESPONSE_CODE);
+  response->entry_va = get_u64(payload + GENERIC_RESPONSE_ENTRY);
+  response->mapped_bytes = get_u64(payload + GENERIC_RESPONSE_MAPPED_BYTES);
+  response->kernarg_allocation_id = get_u64(payload + GENERIC_RESPONSE_KERNARG);
+  response->kernarg_generation = get_u64(payload + GENERIC_RESPONSE_KERNARG_GEN);
+  response->kernarg_va = get_u64(payload + GENERIC_RESPONSE_KERNARG_VA);
+  response->kernarg_size = get_u64(payload + GENERIC_RESPONSE_KERNARG_SIZE);
+  response->kernarg_alignment = get_u64(payload + GENERIC_RESPONSE_KERNARG_ALIGN);
+  response->kernel_index = get_u32(payload + GENERIC_RESPONSE_KERNEL_INDEX);
+  response->segment_count = get_u32(payload + GENERIC_RESPONSE_SEGMENTS);
+  response->descriptor_preload_dwords = get_u32(payload + GENERIC_RESPONSE_PRELOAD);
+  response->reserved0 = get_u32(payload + GENERIC_RESPONSE_RESERVED);
+  response->ticket_id = get_u64(payload + GENERIC_RESPONSE_TICKET);
+  response->trace_id = get_u64(payload + GENERIC_RESPONSE_TRACE);
+  response->queue_id = get_u64(payload + GENERIC_RESPONSE_QUEUE);
+  response->queue_generation = get_u64(payload + GENERIC_RESPONSE_QUEUE_GEN);
+  response->queue_sequence = get_u64(payload + GENERIC_RESPONSE_QUEUE_SEQ);
+  response->signal_id = get_u64(payload + GENERIC_RESPONSE_SIGNAL);
+  response->signal_generation = get_u64(payload + GENERIC_RESPONSE_SIGNAL_GEN);
+  response->signal_value_bits = get_u64(payload + GENERIC_RESPONSE_SIGNAL_VALUE);
+  response->packet_va = get_u64(payload + GENERIC_RESPONSE_PACKET_VA);
+  response->packet_crc32c = get_u32(payload + GENERIC_RESPONSE_PACKET_CRC);
+  response->output_crc32c = get_u32(payload + GENERIC_RESPONSE_OUTPUT_CRC);
+  response->sim_tick = get_u64(payload + GENERIC_RESPONSE_SIM_TICK);
+  response->admission_tick = get_u64(payload + GENERIC_RESPONSE_ADMISSION_TICK);
+  response->start_tick = get_u64(payload + GENERIC_RESPONSE_START_TICK);
+  response->end_tick = get_u64(payload + GENERIC_RESPONSE_END_TICK);
+  response->retire_tick = get_u64(payload + GENERIC_RESPONSE_RETIRE_TICK);
+  memcpy(response->image_sha256, payload + GENERIC_RESPONSE_DIGEST, 32U);
+}
+
+sagr_status_t
+sagr_protocol_encode_generic_dispatch_response(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    uint16_t message_type, const sagr_wire_generic_response_t *response,
+    uint8_t *frame, size_t frame_capacity, size_t *frame_size)
+{
+  if (info == NULL || response == NULL || frame == NULL || frame_size == NULL ||
+      request_id == 0U || frame_capacity < SAGR_WIRE_GENERIC_FRAME_BYTES ||
+      (message_type != SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_ACK &&
+       message_type != SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_COMPLETION) ||
+      bytes_are_zero(info->daemon_uuid, 16U) || info->connection_id == 0U ||
+      info->epoch == 0U) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (!generic_capability_selected(info)) {
+    return SAGR_STATUS_CAPABILITY_MISMATCH;
+  }
+  if (response->major != SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR ||
+      response->minor != SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR ||
+      response->flags != 0U || !generic_opcode_valid(response->opcode) ||
+      response->status > SAGR_WIRE_STATUS_INTERNAL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (response->status == SAGR_WIRE_STATUS_OK) {
+    if (!generic_response_success_valid(response, message_type)) {
+      return SAGR_STATUS_INVALID_ARGUMENT;
+    }
+  } else if (response->error_code == 0U ||
+             !generic_response_fields_zero(response)) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  memset(frame, 0, SAGR_WIRE_GENERIC_FRAME_BYTES);
+  encode_header(frame, message_type, SAGR_WIRE_GENERIC_PAYLOAD_BYTES,
+                request_id, info->daemon_uuid, info->connection_id,
+                info->epoch);
+  generic_response_encode_payload(frame + SAGR_WIRE_HEADER_BYTES, response);
+  sagr_protocol_recompute_frame_crc(frame, SAGR_WIRE_GENERIC_FRAME_BYTES);
+  *frame_size = SAGR_WIRE_GENERIC_FRAME_BYTES;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t
+sagr_protocol_decode_generic_dispatch_response(
+    const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
+    uint64_t expected_request_id, uint16_t expected_message_type,
+    sagr_wire_generic_response_t *response, int32_t *wire_status,
+    const char **reason)
+{
+  const uint8_t *payload = NULL;
+  uint64_t request_id = 0U;
+  sagr_status_t status;
+  if (reason != NULL) *reason = "malformed generic dispatch response";
+  if (response == NULL || wire_status == NULL || reason == NULL ||
+      (expected_message_type != SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_ACK &&
+       expected_message_type != SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_COMPLETION)) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  status = decode_generic_header(frame, frame_size, info, expected_message_type,
+                                 &payload, reason);
+  if (status != SAGR_STATUS_SUCCESS) return status;
+  request_id = get_u64(frame + 24U);
+  if (expected_request_id != 0U && expected_request_id != request_id) {
+    *reason = "generic dispatch request ID mismatch";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  generic_response_decode_payload(payload, response);
+  response->request_id = request_id;
+  response->message_type = expected_message_type;
+  *wire_status = response->status <= INT32_MAX ? (int32_t)response->status : -1;
+  if (response->major != SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR ||
+      response->minor != SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR ||
+      response->flags != 0U || !generic_opcode_valid(response->opcode) ||
+      response->status > SAGR_WIRE_STATUS_INTERNAL ||
+      !bytes_are_zero(payload + GENERIC_RESPONSE_TAIL,
+                      SAGR_WIRE_GENERIC_PAYLOAD_BYTES - GENERIC_RESPONSE_TAIL)) {
+    *reason = "invalid generic dispatch response fields";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (response->status == SAGR_WIRE_STATUS_OK) {
+    if (!generic_response_success_valid(response, expected_message_type)) {
+      *reason = "invalid successful generic dispatch response";
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+    *reason = "generic dispatch response decoded";
+    return SAGR_STATUS_SUCCESS;
+  }
+  if (response->error_code == 0U || !generic_response_fields_zero(response)) {
+    *reason = "noncanonical failed generic dispatch response";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  *reason = "generic dispatch stage rejected";
+  return sagr_protocol_map_wire_status(response->status);
+}
+
+sagr_status_t
+sagr_protocol_validate_failed_generic_dispatch_ack(
+    const sagr_wire_generic_request_t *request,
+    const sagr_wire_generic_response_t *response)
+{
+  if (request == NULL || response == NULL || response->status == 0U ||
+      response->opcode != request->opcode || response->error_code == 0U ||
+      !generic_response_fields_zero(response)) {
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
   return SAGR_STATUS_SUCCESS;
 }
