@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/tests/host_native_boundary_test.c",
+    "projects/self-amdgpu-runtime/tests/host_native_boundary_audit.cmake",
+    "state/evidence/EV-0037.json"
+  ],
+  "checkpoint_id": "CP-0014",
+  "conclusion": "The standalone runtime remains a usable host-native boundary only when a public-header consumer can link without simulator front-end or production GPU DSO dependencies.",
+  "confidence": "high",
+  "decision": "Retain the public ABI consumer and dependency audit as required regressions while P3-HOST-NATIVE-02 adds a separate simulator adapter behind the accepted wire.",
+  "evidence_ids": [
+    "EV-0036",
+    "EV-0037"
+  ],
+  "id": "BL-0069",
+  "invalidated_assumptions": [
+    "A runtime ABI stays host-native automatically after simulator-facing build or linkage dependencies are added."
+  ],
+  "observation": "The runtime shared matrix passes 16/16 and the focused Clang ASAN host-native boundary passes 1/1 while auditing forbidden gem5, VEGA_X86, ROCr, KMT, DRM, and management-library dependencies.",
+  "question_or_symptom": "How can the runtime ABI remain independent while a new host-native simulator front-end is introduced?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

@@ -1,0 +1,25 @@
+{
+  "applies_to": [
+    "GOAL.md",
+    "PLAN.md",
+    "docs/host-native-architecture.md",
+    "state/evidence/EV-0037.json"
+  ],
+  "checkpoint_id": "CP-0014",
+  "conclusion": "A source inventory, clean child commits, and boundary tests do not establish a host-native simulator build or an end-to-end Triton execution path.",
+  "confidence": "high",
+  "decision": "Advance only to P3-HOST-NATIVE-02 and require a standalone no-VEGA_X86 build plus host event/page-memory/queue/signal adapter evidence before any loader, execution, or Triton claim.",
+  "evidence_ids": [
+    "EV-0036",
+    "EV-0037"
+  ],
+  "id": "BL-0070",
+  "invalidated_assumptions": [
+    "Passing architecture and ABI boundary checks means that an x86-free simulator binary or unmodified Triton vecadd already works."
+  ],
+  "observation": "EV-0036 and EV-0037 explicitly retain the source-inventory-only boundary: no host-native executable, code-object execution, Triton E2E result, hardware result, timing, or performance evidence exists at CP-0014.",
+  "question_or_symptom": "Why must CP-0014 stop at architecture acceptance even though both child boundary suites pass?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

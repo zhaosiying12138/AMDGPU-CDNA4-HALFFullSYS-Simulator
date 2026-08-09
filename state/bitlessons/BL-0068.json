@@ -1,0 +1,24 @@
+{
+  "applies_to": [
+    "docs/host-native-architecture.md",
+    "projects/gem5/util/host_native/check_boundary.py",
+    "state/evidence/EV-0036.json"
+  ],
+  "checkpoint_id": "CP-0014",
+  "conclusion": "A host-native extraction needs an explicit reusable-versus-x86-blocked source inventory before build glue can be treated as an architectural boundary.",
+  "confidence": "high",
+  "decision": "Keep the existing gem5 path as the behavioral oracle, retain source-marker checks for both sides of the boundary, and move only the listed adapter responsibilities in P3-HOST-NATIVE-02.",
+  "evidence_ids": [
+    "EV-0036",
+    "EV-0037"
+  ],
+  "id": "BL-0068",
+  "invalidated_assumptions": [
+    "Removing VEGA_X86 from one build flag is sufficient to separate the GPU functional core from Process, ThreadContext, SE translation, and x86 TLB dependencies."
+  ],
+  "observation": "The source inventory separates reusable GPU/Vega, HSA queue, and host-state surfaces from explicit VEGA_X86, Process, ThreadContext, CPU-port, and translation blockers, and its gem5 suite passes 4/4.",
+  "question_or_symptom": "What must be known before introducing a standalone host-native gem5 GPU target?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-09`
 
-**State at this commit:** `P3-CODEOBJ-03-A1 accepted; next-P3-CODEOBJ-03-A2`
+**State at this commit:** `P3-HOST-NATIVE-01 accepted; next-P3-HOST-NATIVE-02`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -468,6 +468,9 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | P3-CODEOBJ-01 | P3 | Pinned gfx950 code-object and kernarg ABI fixtures |
 | P3-CODEOBJ-02 | P3 | Pinned toolchain/device-libs build and gfx950 decoder/execution proof |
 | P3-CODEOBJ-03 | P3 | Versioned HSACO transport, PT_LOAD mapping, dynamic AQL/kernarg, and gem5 execution |
+| P3-HOST-NATIVE-01 | P3H | GPU/x86 dependency inventory, reusable-core boundary, and host-native compatibility contract |
+| P3-HOST-NATIVE-02 | P3H | Standalone no-VEGA_X86 build plus host event/memory/queue/signal adapter |
+| P3-HOST-NATIVE-03 | P3H | Pinned gfx950 loader/dispatch parity between host-native and gem5 front-ends |
 | P4-HIP-01 | P4 | Minimal transparent HIP/OpenCL launch surface |
 | P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
 | P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
@@ -669,11 +672,60 @@ fields, CRC-32C/SHA-256 rules, manifest/PT_LOAD metadata validation, owner and
 generation scope, contiguous ordering, atomic failure cleanup, and the
 zero-address A1 boundary. It proves copied bytes and digest-bound staging only;
 PT_LOAD mapping, relocation application, dynamic AQL/kernarg, queue submission,
-and gem5 execution remain separate gates. The next unique action is
-`P3-CODEOBJ-03-A2`: independently validate and atomically map one image before
-any AQL or execution claim.
+and gem5 execution remain separate gates. At CP-0013 acceptance, its recorded
+next action was `P3-CODEOBJ-03-A2`; that loader gate remains an unproven later
+prerequisite and is not the active CP-0014 next action.
 `SOURCE_LOCK.json` remains byte-immutable, and existing `PROJECT_LANES`
 declarations remain historically anchored and append-only.
+
+`CP-0014` is accepted at `P3-HOST-NATIVE-01`, the source-grounded
+architecture/dependency inventory boundary. It binds the reusable GPU/Vega,
+HSA queue, host bridge, Triton AMD compiler/launcher, and runtime C ABI
+surfaces, while recording the current `VEGA_X86`, `Process`, `ThreadContext`,
+TLB, and SE translation blockers. EV-0037 retains the gem5 boundary inventory
+tests (4/4), runtime CTest matrix (16/16), focused Clang ASAN boundary test
+(1/1), clean child identities, and the CP14 prepare journal. It does not claim
+a host-native build, an x86-free binary, simulator execution, Triton E2E,
+hardware, timing, or performance. The next unique action is
+`P3-HOST-NATIVE-02`: build the standalone no-`VEGA_X86` target and add the
+minimal host event/page-memory/queue/signal adapter.
+
+### P3H - host-native simulator and first Triton gate
+
+The physical machine is already the host; launching a full `VEGA_X86` gem5
+target to obtain the GPU model adds an avoidable x86 CPU/system cost. This
+workstream creates a second front-end over the existing GPU functional core.
+The gem5 front-end remains the behavioral reference and is not deleted. The
+host-native front-end must reuse the existing GPU packet/queue path,
+Vega ISA decoder and instruction classes, `GPUDispatcher`/`ComputeUnit`, and
+the sparse memory/queue/signal state covered by CP8-CP13. New code is limited
+to an event loop, host memory/page adapter, daemon lifecycle, and build/link
+glue; it must not fork a second code-object ABI or silently use a CPU fallback.
+
+The work is staged as follows:
+
+1. `P3-HOST-NATIVE-01` is accepted by CP-0014: its source inventory freezes
+   the dependency graph, reusable-core boundary, and compatibility matrix
+   against the existing CP8/CP13 wire. It does not claim that the listed
+   modules already compile as a host-native binary.
+2. `P3-HOST-NATIVE-02` adds a standalone build target and a minimal host event,
+   page/memory, queue, and signal adapter. The target must link without
+   `VEGA_X86`/X86 ISA objects and pass no-x86/no-production-DSO audits.
+3. `P3-HOST-NATIVE-03` connects the existing runtime protocol and CP13 code
+   object loader to that target. One pinned gfx950 image must load and produce
+   the same deterministic vecadd output/trace as the gem5 reference before
+   any broader API claim.
+4. `P3-TRITON-VECADD-01` runs the pinned, unmodified Triton tutorial request
+   (`python/tutorials/01-vector-add.py`) through the normal Triton launcher,
+   with simulator device selection only. It retains compiler, HSACO digest,
+   transport, dispatch, output, and CPU-fallback evidence. As of CP-0014 no
+   Triton end-to-end case has passed.
+
+This workstream is not a cycle-accurate replacement. Timing, wider operator
+coverage, host-parallel threadblocks, HIP/OpenCL, PyTorch, vLLM, and Qwen
+remain later gates after the first vecadd differential result. If a reused
+gem5 module cannot be separated without changing semantics, keep the adapter
+explicit and retain the gem5 path as the oracle.
 
 The exact blank-context continuation contract remains in `GOAL.md`; the
 machine-executable argv, prerequisites, expected gate, and rollback boundary

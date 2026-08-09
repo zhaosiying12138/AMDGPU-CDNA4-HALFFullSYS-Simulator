@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0013-A1-code-object-staging-accepted; next-P3-CODEOBJ-03-A2`
+**Current state:** `CP-0014-host-native-architecture-accepted; next-P3-HOST-NATIVE-02`
 
 **Current phase:** `P3`
 
@@ -17,6 +17,10 @@ official `Qwen3.5-0.9B` checkpoint in this project.
   on the same Linux ABI/architecture without network access after preparation.
 - Host HIP/OpenCL/Triton/PyTorch/vLLM workloads use the standalone
   `self-amdgpu-runtime` ABI and submit real code objects to gem5.
+- A host-native simulator daemon/library runs on the physical host without
+  `VEGA_X86`, the gem5 x86 CPU model, or x86 system/CPU ports, while reusing
+  the existing GPU packet, Vega ISA, memory, queue, signal, and CU functional
+  modules and preserving their accepted behavior.
 - No production AMD UMD/KMD library is loaded; no `/dev/kfd` or `/dev/dri` is
   opened; no CPU arithmetic fallback occurs in acceptance mode.
 - Two independent gem5 daemons and vLLM TP=2 execute the official Qwen3.5-0.8B
@@ -77,8 +81,8 @@ advance a phase without a new checkpoint and root coordinator commit.
 继续执行 amdgpu-sim 计划。当前目录是 /home/zhaosiying/amdgpu-sim。
 先读取 PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、其引用的
 最新 checkpoint/bitlesson/evidence，运行 scripts/resume.sh --verify。
-CP-0013 A1 已 accepted；从唯一 next_action `P3-CODEOBJ-03-A2` 继续，不要再次
-begin CP-0013，也不要重做 bootstrap、source freeze、authored runtime
+CP-0014 host-native 架构/依赖 inventory 已 accepted；从唯一 next_action `P3-HOST-NATIVE-02` 继续，不要再次
+begin CP-0014，也不要重做 bootstrap、source freeze、authored runtime
 baseline 或已通过的 CP4-CP9 gates，也不要修改已冻结的 SOURCE_LOCK.json
 或已登记的 PROJECT_LANES baseline。CP-0010 只实现 18 个 typed KMT
 操作的固定宽度 shim、版本化 daemon envelope、模拟资源生命周期和
@@ -88,7 +92,8 @@ KFD attach、HIP、OpenCL、Triton、PyTorch 或 vLLM 能力。CP-0011 已冻结
 gem5 gfx950 decoder、unsupported opcode、pinned device-libs/toolchain proof
 已完成；CP-0013 A1 仅完成 versioned HSACO fixed-record transport/staging，
 不包含 PT_LOAD mapping、动态 AQL/kernarg 或真实 code-object execution。
-下一步 A2 先独立完成 loader/PT_LOAD mapping，再推进更高层 API。
+当前还没有任何 Triton 端到端通过案例。下一步先完成 host-native 架构/依赖
+边界，再以未修改 Triton vecadd 作为第一用户可见验收；A2 loader 作为其前置子门。
 在 Triton 用户命令 `tutorial/01-vecadd.py`（当前 pinned checkout 中对应未修改的
 `python/tutorials/01-vector-add.py`）首次透明通过后，先完成可复现的 gem5
 算子 profile、80/20 优化和 threadblock host-parallel 正确性/可行性门禁，再
@@ -106,6 +111,16 @@ per-chunk CRC-32C, whole-image SHA-256, owner/generation/order checks, and
 atomic staging cleanup in both children. Every successful A1 ACK keeps mapping,
 descriptor, code, and kernarg addresses zero. It does not claim PT_LOAD mapping,
 relocation application, dynamic AQL/kernarg construction, queue submission,
-gem5 code-object execution, hardware presence, timing, or performance. The
-next unique action is `P3-CODEOBJ-03-A2`: independently validate and map one
-authority-conforming image while retaining the A1 boundary.
+gem5 code-object execution, hardware presence, timing, or performance. Its
+historical next action was the scoped `P3-CODEOBJ-03-A2` loader gate; that gate
+remains an unproven prerequisite for later code-object execution, while CP-0014
+makes `P3-HOST-NATIVE-02` the current unique action.
+
+`CP-0014` is accepted as the source-grounded host-native architecture and
+dependency inventory. EV-0036 and EV-0037 bind reusable GPU/Vega/HSA and host
+bridge surfaces, x86/Process/TLB blockers, and the standalone runtime ABI;
+gem5 boundary tests (4/4), the runtime matrix (16/16), and a focused Clang
+ASAN boundary test pass. This checkpoint makes no host-native build, simulator
+execution, Triton end-to-end, hardware, timing, or performance claim. The next
+unique action is `P3-HOST-NATIVE-02`: add the no-VEGA_X86 standalone build and
+minimal host event/page-memory/queue/signal adapter.

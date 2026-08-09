@@ -1,0 +1,283 @@
+{
+  "checkpoint_id": "CP-0014",
+  "claim": "CP-0014 architecture inventory records the reusable gem5 GPU/Vega build surfaces, hidden x86/Process/TLB boundaries, host bridge extraction points, Triton AMD compiler/launcher boundary, and runtime C ABI. It proves source inventory only; it does not claim a host-native build, execution, Triton E2E, or x86-free binary.",
+  "command_argv": [
+    [
+      "bash",
+      "-lc",
+      "set -euo pipefail; printf \"%s\\n\" \"== src/dev/amdgpu/SConscript ==\"; nl -ba projects/gem5/src/dev/amdgpu/SConscript | sed -n \"30,92p\"; printf \"%s\\n\" \"== src/gpu-compute/SConscript ==\"; nl -ba projects/gem5/src/gpu-compute/SConscript | sed -n \"32,85p\"; printf \"%s\\n\" \"== src/arch/amdgpu/vega/SConscript ==\"; nl -ba projects/gem5/src/arch/amdgpu/vega/SConscript | sed -n \"34,86p\"; printf \"%s\\n\" \"== src/arch/SConscript ==\"; nl -ba projects/gem5/src/arch/SConscript | sed -n \"59,84p\""
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -euo pipefail; printf \"%s\\n\" \"== direct x86/process/thread coupling ==\"; rg -n \"X86ISA::|arch/x86|USE_X86_ISA|BaseCPU|ThreadContext|SimpleThread|Process|SETranslatingPortProxy|sys->threads|system->threads|cpu_pointer|X86Timing|X86O3|X86GPUTLB\" projects/gem5/src/dev/amdgpu projects/gem5/src/dev/hsa projects/gem5/src/gpu-compute projects/gem5/src/arch/amdgpu projects/gem5/configs/common/GPUTLBConfig.py projects/gem5/configs/example/apu_se.py projects/gem5/configs/example/gemsim/host_dispatch.py"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -euo pipefail; printf \"%s\\n\" \"== pure host state/bridge hooks ==\"; rg -n \"class HostGPU(Connection|Memory|Queue|Signal|Kmt|Dispatch|CodeObject)|process(Memory|Dispatch|CodeObject)Record|prepareDispatchEnvironment|ensurePacketVisible|publishDispatchPacket|completeOutbound\" projects/gem5/src/dev/amdgpu; printf \"%s\\n\" \"== HSA queue event hooks ==\"; rg -n \"registerHostQueue|ringHostQueue|unregisterHostQueue|QueueProcessEvent::process|processPkt|schedAQLProcessing\" projects/gem5/src/dev/hsa/hw_scheduler.hh projects/gem5/src/dev/hsa/hw_scheduler.cc projects/gem5/src/dev/hsa/hsa_packet_processor.hh projects/gem5/src/dev/hsa/hsa_packet_processor.cc; printf \"%s\\n\" \"== GPU pipeline registration ==\"; rg -n \"SimObject\\(|Source\\(|class (ComputeUnit|Shader|GPUDispatcher|GPUCommandProcessor|Wavefront)\" projects/gem5/src/gpu-compute/SConscript projects/gem5/src/gpu-compute/GPU.py projects/gem5/src/gpu-compute/*.hh"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -euo pipefail; printf \"%s\\n\" \"== Triton AMD compiler/driver ==\"; rg -n \"class HIPBackend|def make_(ttir|ttgir|llir|amdgcn|hsaco)|def add_stages|class HIPUtils|class HIPLauncher|class HIPDriver|def is_active|def get_current_target|utils\\\\.launch\" projects/triton/third_party/amd/backend/compiler.py projects/triton/third_party/amd/backend/driver.py; printf \"%s\\n\" \"== Triton tutorial ==\"; nl -ba projects/triton/python/tutorials/01-vector-add.py | sed -n \"1,180p\"; printf \"%s\\n\" \"== runtime ABI ==\"; rg -n \"sagr_(instance_open|queue_create|queue_submit_pinned_dispatch|queue_wait_pinned_dispatch|memory_allocate|memory_copy_from_host|memory_copy_to_host|signal_create|signal_wait|code_object_validate|code_object_describe_dispatch|code_object_upload|code_object_pack_kernarg)\" projects/self-amdgpu-runtime/include/self_amdgpu_runtime/*.h projects/self-amdgpu-runtime/src/*.c"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -euo pipefail; git -C projects/gem5 rev-parse HEAD HEAD^{tree}; git -C projects/self-amdgpu-runtime rev-parse HEAD HEAD^{tree}; git -C projects/triton rev-parse HEAD HEAD^{tree}; test -z \"$(git -C projects/gem5 status --porcelain)\"; test -z \"$(git -C projects/self-amdgpu-runtime status --porcelain)\"; test -z \"$(git -C projects/triton status --porcelain)\"; printf \"%s\\n\" \"gem5=clean runtime=clean triton=clean\""
+    ],
+    [
+      "python3",
+      "-c",
+      "from pathlib import Path; root=Path(\".\"); candidates=[p.as_posix() for p in root.rglob(\"*\") if p.is_file() and any(k in p.name.lower() for k in (\"host-native\",\"host_native\",\"vega-native\",\"vega_native\"))]; triton_launchers=[p.as_posix() for p in root.rglob(\"*\") if p.is_file() and \"triton\" in p.as_posix().lower() and any(k in p.name.lower() for k in (\"launcher\",\"driver\",\"e2e\",\"vecadd\"))]; print(\"host_native_named_entrypoints=%s\" % candidates); print(\"triton_launcher_or_e2e_candidates=%s\" % triton_launchers); print(\"triton_e2e_execution_claim=NOT_ESTABLISHED\"); print(\"scope=architecture_inventory_only\")"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -euo pipefail; printf \"%s\\n\" \"== src/dev/amdgpu/SConscript ==\"; nl -ba projects/gem5/src/dev/amdgpu/SConscript | sed -n \"30,92p\"; printf \"%s\\n\" \"== src/gpu-compute/SConscript ==\"; nl -ba projects/gem5/src/gpu-compute/SConscript | sed -n \"32,85p\"; printf \"%s\\n\" \"== src/arch/amdgpu/vega/SConscript ==\"; nl -ba projects/gem5/src/arch/amdgpu/vega/SConscript | sed -n \"34,86p\"; printf \"%s\\n\" \"== src/arch/SConscript ==\"; nl -ba projects/gem5/src/arch/SConscript | sed -n \"59,84p\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T06:17:29+00:00",
+      "exit_code": 0,
+      "id": "host-build-gates",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/audit/host-build-gates.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "275856aeb6afd5bf4df39604c26fe7a798ca5b9af438e763b70b7fb07b39148d",
+        "size": 1100,
+        "tracked": false
+      },
+      "result": "Captured gem5 BUILD_GPU/USE_X86_ISA gates and Vega/gpu-compute source registration.",
+      "started_at": "2026-08-09T06:17:29+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/audit/host-build-gates.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/audit/host-build-gates.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "43f8ea2963082b22853f26b11d77b751ee7e8daa7312b82c23b9fbd6a9c0fb48",
+        "size": 8238,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -euo pipefail; printf \"%s\\n\" \"== direct x86/process/thread coupling ==\"; rg -n \"X86ISA::|arch/x86|USE_X86_ISA|BaseCPU|ThreadContext|SimpleThread|Process|SETranslatingPortProxy|sys->threads|system->threads|cpu_pointer|X86Timing|X86O3|X86GPUTLB\" projects/gem5/src/dev/amdgpu projects/gem5/src/dev/hsa projects/gem5/src/gpu-compute projects/gem5/src/arch/amdgpu projects/gem5/configs/common/GPUTLBConfig.py projects/gem5/configs/example/apu_se.py projects/gem5/configs/example/gemsim/host_dispatch.py"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T06:17:29+00:00",
+      "exit_code": 0,
+      "id": "x86-boundaries",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/audit/x86-boundaries.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e6779d1504b83972dc3cb6490af7fd1cf2c05093f986f14e843e810f306f70b6",
+        "size": 1098,
+        "tracked": false
+      },
+      "result": "Captured direct x86, ThreadContext, Process, SE proxy, and CPU-model coupling sites.",
+      "started_at": "2026-08-09T06:17:29+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/audit/x86-boundaries.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/audit/x86-boundaries.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ec1bcbcf73736cf2c017cbc1da3157090543176371a1d69973786d611a1d8f75",
+        "size": 59092,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -euo pipefail; printf \"%s\\n\" \"== pure host state/bridge hooks ==\"; rg -n \"class HostGPU(Connection|Memory|Queue|Signal|Kmt|Dispatch|CodeObject)|process(Memory|Dispatch|CodeObject)Record|prepareDispatchEnvironment|ensurePacketVisible|publishDispatchPacket|completeOutbound\" projects/gem5/src/dev/amdgpu; printf \"%s\\n\" \"== HSA queue event hooks ==\"; rg -n \"registerHostQueue|ringHostQueue|unregisterHostQueue|QueueProcessEvent::process|processPkt|schedAQLProcessing\" projects/gem5/src/dev/hsa/hw_scheduler.hh projects/gem5/src/dev/hsa/hw_scheduler.cc projects/gem5/src/dev/hsa/hsa_packet_processor.hh projects/gem5/src/dev/hsa/hsa_packet_processor.cc; printf \"%s\\n\" \"== GPU pipeline registration ==\"; rg -n \"SimObject\\(|Source\\(|class (ComputeUnit|Shader|GPUDispatcher|GPUCommandProcessor|Wavefront)\" projects/gem5/src/gpu-compute/SConscript projects/gem5/src/gpu-compute/GPU.py projects/gem5/src/gpu-compute/*.hh"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T06:17:29+00:00",
+      "exit_code": 0,
+      "id": "reusable-modules",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/audit/reusable-modules.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a20edebcff3ea6edce5984f484b605d417821ecb37b3748deb0496d52bbc96fd",
+        "size": 1532,
+        "tracked": false
+      },
+      "result": "Captured reusable host bridge state, HSA scheduler, queue, and GPU pipeline hooks.",
+      "started_at": "2026-08-09T06:17:29+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/audit/reusable-modules.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/audit/reusable-modules.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8b9cd21650f5f9aadd1941514845630b4f8c3642b1faedf23da8cfc88925b197",
+        "size": 12127,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -euo pipefail; printf \"%s\\n\" \"== Triton AMD compiler/driver ==\"; rg -n \"class HIPBackend|def make_(ttir|ttgir|llir|amdgcn|hsaco)|def add_stages|class HIPUtils|class HIPLauncher|class HIPDriver|def is_active|def get_current_target|utils\\\\.launch\" projects/triton/third_party/amd/backend/compiler.py projects/triton/third_party/amd/backend/driver.py; printf \"%s\\n\" \"== Triton tutorial ==\"; nl -ba projects/triton/python/tutorials/01-vector-add.py | sed -n \"1,180p\"; printf \"%s\\n\" \"== runtime ABI ==\"; rg -n \"sagr_(instance_open|queue_create|queue_submit_pinned_dispatch|queue_wait_pinned_dispatch|memory_allocate|memory_copy_from_host|memory_copy_to_host|signal_create|signal_wait|code_object_validate|code_object_describe_dispatch|code_object_upload|code_object_pack_kernarg)\" projects/self-amdgpu-runtime/include/self_amdgpu_runtime/*.h projects/self-amdgpu-runtime/src/*.c"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T06:17:29+00:00",
+      "exit_code": 0,
+      "id": "triton-runtime-boundary",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/audit/triton-runtime-boundary.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f8fc7d60cbfba9e9049052d55da4abf28bde976147d0b70d7d3d1e0045ebfd0c",
+        "size": 1508,
+        "tracked": false
+      },
+      "result": "Captured Triton AMD compiler/launcher and self-amdgpu-runtime C ABI boundaries.",
+      "started_at": "2026-08-09T06:17:29+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/audit/triton-runtime-boundary.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/audit/triton-runtime-boundary.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a6d2e2f4ea24ae1f3f0489937bfdda03289179d3c23d7099e23218b5796f71c5",
+        "size": 17308,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -euo pipefail; git -C projects/gem5 rev-parse HEAD HEAD^{tree}; git -C projects/self-amdgpu-runtime rev-parse HEAD HEAD^{tree}; git -C projects/triton rev-parse HEAD HEAD^{tree}; test -z \"$(git -C projects/gem5 status --porcelain)\"; test -z \"$(git -C projects/self-amdgpu-runtime status --porcelain)\"; test -z \"$(git -C projects/triton status --porcelain)\"; printf \"%s\\n\" \"gem5=clean runtime=clean triton=clean\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T06:17:29+00:00",
+      "exit_code": 0,
+      "id": "child-identities",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/audit/child-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6d77d843f32ed87c69e998ad8d8a08b55a264f59c6eafb8fd311f25989bf7246",
+        "size": 1018,
+        "tracked": false
+      },
+      "result": "Captured locked clean gem5, runtime, and Triton child HEAD/tree identities.",
+      "started_at": "2026-08-09T06:17:29+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/audit/child-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/audit/child-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2c1aacbae06c06b92cef98da15bbf9a32fb11fae738009ea02fb3f84e63d0f13",
+        "size": 284,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "from pathlib import Path; root=Path(\".\"); candidates=[p.as_posix() for p in root.rglob(\"*\") if p.is_file() and any(k in p.name.lower() for k in (\"host-native\",\"host_native\",\"vega-native\",\"vega_native\"))]; triton_launchers=[p.as_posix() for p in root.rglob(\"*\") if p.is_file() and \"triton\" in p.as_posix().lower() and any(k in p.name.lower() for k in (\"launcher\",\"driver\",\"e2e\",\"vecadd\"))]; print(\"host_native_named_entrypoints=%s\" % candidates); print(\"triton_launcher_or_e2e_candidates=%s\" % triton_launchers); print(\"triton_e2e_execution_claim=NOT_ESTABLISHED\"); print(\"scope=architecture_inventory_only\")"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T06:17:32+00:00",
+      "exit_code": 0,
+      "id": "e2e-limit",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/audit/e2e-limit.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "38de3e0e93c2f94b63fbf8dc442134659a6048da21d1da068c681c803df80005",
+        "size": 1220,
+        "tracked": false
+      },
+      "result": "Captured the explicit architecture-inventory-only and no Triton E2E execution limitation.",
+      "started_at": "2026-08-09T06:17:29+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/audit/e2e-limit.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/audit/e2e-limit.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ba915281df1c5b8d43fe5f377a9f1ac3cdb6f2c435bee66d7da2d21a9a491710",
+        "size": 2293,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T06:17:32+00:00",
+  "exit_code": 0,
+  "external_artifacts": [],
+  "id": "EV-0036",
+  "includes": {},
+  "limitations": [
+    "This is an architecture/source inventory at the locked child identities; no gem5 or runtime build was run.",
+    "The existing gem5 VEGA_X86 execution path remains unchanged and is the only previously validated path.",
+    "No repo-owned host-native simulator binary or unmodified Triton vecadd end-to-end execution has been established; e2e-limit.stdout records triton_e2e_execution_claim=NOT_ESTABLISHED.",
+    "Removing the x86 CPU model alone is insufficient: full_system=False selects X86GPUTLB/TLBCoalescer and several Shader/CP/HSAPP/bridge paths still require Process/ThreadContext/SE translation."
+  ],
+  "redactions": [],
+  "result": "Six retained command captures bind the CP-0014 source inventory and its explicit no-E2E boundary.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T06:17:29+00:00",
+  "type": "cp14-host-native-architecture-inventory"
+}

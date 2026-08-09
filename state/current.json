@@ -1,9 +1,9 @@
 {
-  "checkpoint_id": "CP-0013",
-  "checkpoint_sha256": "ca7c52d6d4f18ec9dca0db87446dfb7dbcf6eea0aedbd2813cffddc1c065272b",
+  "checkpoint_id": "CP-0014",
+  "checkpoint_sha256": "851f7db68012156f328352fb9f163503da5cd2bd74d52e23b05f3ba52a500143",
   "goal_id": "GSIM-001",
-  "next_action_id": "P3-CODEOBJ-03-A2",
-  "next_action_summary": "Independently validate and atomically map one authority-conforming gfx950 image in the scoped A2 loader gate; defer AQL and execution claims.",
+  "next_action_id": "P3-HOST-NATIVE-02",
+  "next_action_summary": "Build the standalone no-VEGA_X86 host-native target and minimal host event, page-memory, queue, and signal adapter; defer code-object and Triton execution claims.",
   "phase_id": "P3",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,

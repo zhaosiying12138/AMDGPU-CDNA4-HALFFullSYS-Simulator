@@ -1,0 +1,434 @@
+{
+  "checkpoint_id": "CP-0014",
+  "claim": "The CP-0014 umbrella binds the canonical source-inventory EV-0036 to final clean gem5 and self-amdgpu-runtime child identities, gem5 boundary tests, the runtime 16-test matrix, and a focused Clang ASAN boundary test. It proves only the host-native architecture and ABI boundary; it does not claim a host-native build, an x86-free simulator binary, Triton end-to-end execution, kernel execution, hardware, timing, or performance.",
+  "command_argv": [
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "-q",
+      "util/host_native/test_check_boundary.py"
+    ],
+    [
+      "python3",
+      "util/host_native/check_boundary.py",
+      "--check"
+    ],
+    [
+      "ctest",
+      "--output-on-failure"
+    ],
+    [
+      "ctest",
+      "-R",
+      "host_native\\.boundary",
+      "--output-on-failure"
+    ],
+    [
+      "bash",
+      "-c",
+      "git -C projects/gem5 rev-parse HEAD HEAD^{tree}; git -C projects/self-amdgpu-runtime rev-parse HEAD HEAD^{tree}"
+    ],
+    [
+      "bash",
+      "-c",
+      "set -eu; test -z \"$(git -C projects/gem5 status --porcelain=v1 --untracked-files=all)\"; test -z \"$(git -C projects/self-amdgpu-runtime status --porcelain=v1 --untracked-files=all)\"; printf \"gem5=clean\\\\nruntime=clean\\\\n\""
+    ],
+    [
+      "python3",
+      "-c",
+      "import json,subprocess; j=json.load(open(\".git/amdgpu-sim/txn/CP-0014.json\")); assert j[\"phase\"]==\"prepare\"; e=j[\"expected_children\"]; rows=[]; expected={\"gem5\":(\"825af7d660170fec7c236daefc4e6590967f404c\",\"eb3a510430092cd161ff9799c984569edc81b285\"),\"self-amdgpu-runtime\":(\"5d65fd3370a4450f6fe1457a316a46d2db1870c4\",\"5238d6f70592d3ccb11fd4056d5bc2b120b707b7\")};\nfor n,(h,t) in expected.items(): assert e[n][\"head\"]==h and e[n][\"tree\"]==t; p=e[n][\"path\"]; head=subprocess.check_output([\"git\",\"-C\",p,\"rev-parse\",\"HEAD\"],text=True).strip(); tree=subprocess.check_output([\"git\",\"-C\",p,\"rev-parse\",\"HEAD^{tree}\"],text=True).strip(); status=subprocess.check_output([\"git\",\"-C\",p,\"status\",\"--porcelain=v1\",\"--untracked-files=all\"],text=True); assert (head,tree,status)==(h,t,\"\"); rows.append(f\"{n} head={head} tree={tree} clean\"); print(\"phase=prepare expected_children exact; \"+\"; \".join(rows))"
+    ],
+    [
+      "python3",
+      "scripts/transaction.py",
+      "status"
+    ],
+    [
+      "python3",
+      "-c",
+      "import hashlib; p=\"state/evidence/EV-0036.json\"; h=hashlib.sha256(open(p,\"rb\").read()).hexdigest(); assert h==\"7e68f3c3f5731923ef3d9ebbbc7b3d5636870a27a61d8bcb13d49e6d9a97ae82\"; print(f\"EV-0036={h}\")"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "-q",
+        "util/host_native/test_check_boundary.py"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T06:53:36+00:00",
+      "exit_code": 0,
+      "id": "gem5-boundary-tests",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/gem5-boundary-tests.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "730434ad596d5f2d7d4ea9db3074f188f34a2130f9f20425125ca3cc35dfa61c",
+        "size": 664,
+        "tracked": false
+      },
+      "result": "Gem5 host-native boundary unittest suite passes 4/4; this is a source-only inventory test and does not build or execute gem5.",
+      "started_at": "2026-08-09T06:53:36+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/gem5-boundary-tests.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3b16d42942d6d2f64427efbd0ab7d17d9a5f3699902ca1a21f5bdcffd4e491d6",
+        "size": 97,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/gem5-boundary-tests.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "util/host_native/check_boundary.py",
+        "--check"
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T06:53:36+00:00",
+      "exit_code": 0,
+      "id": "gem5-boundary-check",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/gem5-boundary-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "44a416012c1c1765dddc3e9668196440cc24a1da8a6a1e6366b49ec20b98c2e7",
+        "size": 641,
+        "tracked": false
+      },
+      "result": "Gem5 host-native boundary manifest --check exits 0 with all declared reusable and x86-blocked markers present; no build or execution claim.",
+      "started_at": "2026-08-09T06:53:36+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/gem5-boundary-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/gem5-boundary-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "489c56fda6387ac5c325dd2c7d991f44da75d33b2a9aeba1bfda0da87946768f",
+        "size": 10719,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ctest",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime/build-cp14-shared",
+      "ended_at": "2026-08-09T06:52:34+00:00",
+      "exit_code": 0,
+      "id": "runtime-tests-16",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/runtime-tests-16.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "fdc560d143d8b0df992bdeedd06f9b28be29798d012f73a65c53bf5a0a466a83",
+        "size": 635,
+        "tracked": false
+      },
+      "result": "The CP-0014 shared runtime CTest matrix passes 16/16, including the public host-native boundary audit; it opens no production GPU device.",
+      "started_at": "2026-08-09T06:52:31+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/runtime-tests-16.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/runtime-tests-16.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "afec5107a233c232fa7bc2d036cd58b0892dd9f7f6ed637afd2030483e5f83bc",
+        "size": 2245,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "ctest",
+        "-R",
+        "host_native\\.boundary",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime/build-cp14-clang-asan",
+      "ended_at": "2026-08-09T06:53:17+00:00",
+      "exit_code": 0,
+      "id": "runtime-asan-focused",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/runtime-asan-focused.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8775d1d63278f1b4854dfd26136a40b3b2219035d76b8b581cb8f4c5e6aef06f",
+        "size": 686,
+        "tracked": false
+      },
+      "result": "The available Clang ASAN build passes the focused host-native boundary test 1/1; this is ABI/dependency coverage only.",
+      "started_at": "2026-08-09T06:53:16+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/runtime-asan-focused.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/runtime-asan-focused.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a754371bded726ba73b12d1f436473ba9878880c8aa62729d593bd12a04c9f74",
+        "size": 306,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "git -C projects/gem5 rev-parse HEAD HEAD^{tree}; git -C projects/self-amdgpu-runtime rev-parse HEAD HEAD^{tree}"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T06:54:13+00:00",
+      "exit_code": 0,
+      "id": "child-identities",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/gem5-boundary-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ab2bf03b256b8a775805ce307d1341742602f2e9e9ab2330715039d2e9e8341a",
+        "size": 706,
+        "tracked": false
+      },
+      "result": "Exact clean child identities are captured: gem5 825af7d660170fec7c236daefc4e6590967f404c/tree eb3a510430092cd161ff9799c984569edc81b285 and runtime 5d65fd3370a4450f6fe1457a316a46d2db1870c4/tree 5238d6f70592d3ccb11fd4056d5bc2b120b707b7.",
+      "started_at": "2026-08-09T06:54:13+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/gem5-boundary-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/gem5-boundary-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "de0a247fbeeff22ba9b82427ca325dd984ad05d1b50f395607597256408e6803",
+        "size": 164,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "set -eu; test -z \"$(git -C projects/gem5 status --porcelain=v1 --untracked-files=all)\"; test -z \"$(git -C projects/self-amdgpu-runtime status --porcelain=v1 --untracked-files=all)\"; printf \"gem5=clean\\\\nruntime=clean\\\\n\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T06:54:13+00:00",
+      "exit_code": 0,
+      "id": "child-clean",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/child-clean-status.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7ff72206755618db09c465c2dda744615207b1d5a5cb16627d5134da3623a120",
+        "size": 812,
+        "tracked": false
+      },
+      "result": "Gem5 and self-amdgpu-runtime child worktrees have no tracked or untracked changes.",
+      "started_at": "2026-08-09T06:54:13+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/child-clean-status.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/child-clean-status.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4c1551f530b35f7254ce8141e98702e0adbe3a3df53ab039c1fedf6f5b4c5259",
+        "size": 25,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import json,subprocess; j=json.load(open(\".git/amdgpu-sim/txn/CP-0014.json\")); assert j[\"phase\"]==\"prepare\"; e=j[\"expected_children\"]; rows=[]; expected={\"gem5\":(\"825af7d660170fec7c236daefc4e6590967f404c\",\"eb3a510430092cd161ff9799c984569edc81b285\"),\"self-amdgpu-runtime\":(\"5d65fd3370a4450f6fe1457a316a46d2db1870c4\",\"5238d6f70592d3ccb11fd4056d5bc2b120b707b7\")};\nfor n,(h,t) in expected.items(): assert e[n][\"head\"]==h and e[n][\"tree\"]==t; p=e[n][\"path\"]; head=subprocess.check_output([\"git\",\"-C\",p,\"rev-parse\",\"HEAD\"],text=True).strip(); tree=subprocess.check_output([\"git\",\"-C\",p,\"rev-parse\",\"HEAD^{tree}\"],text=True).strip(); status=subprocess.check_output([\"git\",\"-C\",p,\"status\",\"--porcelain=v1\",\"--untracked-files=all\"],text=True); assert (head,tree,status)==(h,t,\"\"); rows.append(f\"{n} head={head} tree={tree} clean\"); print(\"phase=prepare expected_children exact; \"+\"; \".join(rows))"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T06:54:13+00:00",
+      "exit_code": 0,
+      "id": "journal-children",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/journal-children-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a928cd3361553ee379c05e243fe7e7d5499e91f91cc9ef956f00f7c06656c2b1",
+        "size": 1542,
+        "tracked": false
+      },
+      "result": "CP-0014 journal remains in prepare and its expected child heads/trees exactly match both clean child worktrees.",
+      "started_at": "2026-08-09T06:54:13+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/journal-children-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/journal-children-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d9aadb9ed151c8c58895d00d215cd2a5db1ca7120b974d1006017a8b848de4b0",
+        "size": 403,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "scripts/transaction.py",
+        "status"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T06:54:13+00:00",
+      "exit_code": 0,
+      "id": "transaction-status",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/transaction-status.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "39734ce86b4aeefd9c6ceec43b3e49d715d466f993458b694ef36ec280260d40",
+        "size": 611,
+        "tracked": false
+      },
+      "result": "Transaction status reports CP-0014 phase=prepare with previous root 68db096726efa71fec5be0b59b6b4e0a8effe25e; root finalization remains pending.",
+      "started_at": "2026-08-09T06:54:13+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/transaction-status.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/transaction-status.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "42440c8075d01835987ed23e3d48e6e4c3f03be416ea40ae7028c9298eefb427",
+        "size": 77,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import hashlib; p=\"state/evidence/EV-0036.json\"; h=hashlib.sha256(open(p,\"rb\").read()).hexdigest(); assert h==\"7e68f3c3f5731923ef3d9ebbbc7b3d5636870a27a61d8bcb13d49e6d9a97ae82\"; print(f\"EV-0036={h}\")"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T06:54:25+00:00",
+      "exit_code": 0,
+      "id": "included-evidence",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0014/included-evidence-sha256.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8b48c16b175d38ef9ba6b335331fdb548b9336e049f561d23c90f6c46ce6a211",
+        "size": 804,
+        "tracked": false
+      },
+      "result": "The canonical EV-0036 file hash is exactly 7e68f3c3f5731923ef3d9ebbbc7b3d5636870a27a61d8bcb13d49e6d9a97ae82.",
+      "started_at": "2026-08-09T06:54:25+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0014/included-evidence-sha256.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0014/included-evidence-sha256.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "33da372b79206beb28ef25e5216aa291d41cb1f607053cef3f8d156f3078a1df",
+        "size": 73,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T06:54:25+00:00",
+  "environment_fingerprint": {
+    "checkpoint": "CP-0014",
+    "gem5_boundary_tests": "4/4",
+    "gem5_head": "825af7d660170fec7c236daefc4e6590967f404c",
+    "gem5_tree": "eb3a510430092cd161ff9799c984569edc81b285",
+    "goal_sha256": "2acea1705a179d548d1a6dec96a42eb1ba3b5089fdfe9da8b75537349a67c778",
+    "plan_sha256": "bcfe1f71a378f7fb3eeb159e391ec07fb67d2e8c5a64400c11988738fa5514f9",
+    "previous_root": "68db096726efa71fec5be0b59b6b4e0a8effe25e",
+    "readme_sha256": "46639d0d2ca98bf8f1fa43bd262fdc290c39f59322c7a438a0ce5d083e8f873c",
+    "runtime_clang_asan_boundary": "1/1",
+    "runtime_ctest": "16/16",
+    "runtime_head": "5d65fd3370a4450f6fe1457a316a46d2db1870c4",
+    "runtime_tree": "5238d6f70592d3ccb11fd4056d5bc2b120b707b7",
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "transaction_phase": "prepare"
+  },
+  "exit_code": 0,
+  "external_artifacts": [],
+  "id": "EV-0037",
+  "includes": {
+    "EV-0036": "7e68f3c3f5731923ef3d9ebbbc7b3d5636870a27a61d8bcb13d49e6d9a97ae82"
+  },
+  "limitations": [
+    "EV-0036 remains a source inventory; neither child build proves that the existing VEGA_X86 path has been removed or that a host-native simulator binary exists.",
+    "The runtime 16/16 and ASAN focused results validate the standalone runtime ABI/dependency boundary only; they do not map or execute a code object.",
+    "No unmodified Triton vecadd, simulator execution, GPU hardware, timing, or performance result is established.",
+    "The CP-0014 transaction journal is still in prepare until the root coordinator stages and finalizes the checkpoint."
+  ],
+  "redactions": [],
+  "result": "EV-0036 is hash-bound; gem5 boundary tests pass 4/4 plus --check, runtime tests pass 16/16 plus a focused Clang ASAN 1/1, and the clean child identities exactly match the CP-0014 prepare journal without establishing a host-native build or Triton E2E result.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T06:52:31+00:00",
+  "type": "cp14-umbrella-host-native"
+}
