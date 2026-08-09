@@ -1,0 +1,352 @@
+{
+  "checkpoint_id": "CP-0019",
+  "claim": "EV-0047 binds the detailed EV-0046 B1 native queue/command-processor-core evidence to the final clean gem5 child, the exact locked CP19 prepare journal identity, required audit trailers, the accepted CP18 root anchor, and the current Qwen static-only boundary. It proves a coordinated B1 checkpoint at the extracted native CP-core admission boundary only: it does not prove legacy GPU-pipeline submission, CU or ISA execution, retirement, completion-signal update, Triton E2E, or Qwen inference.",
+  "command_argv": [
+    [
+      "python3",
+      "-c",
+      "import subprocess; head=subprocess.check_output([\"git\",\"-C\",\"projects/gem5\",\"rev-parse\",\"HEAD\"],text=True).strip(); tree=subprocess.check_output([\"git\",\"-C\",\"projects/gem5\",\"rev-parse\",\"HEAD^{tree}\"],text=True).strip(); assert head==\"bf40bf3bf560018fb62fecb144f3077b05b93b0f\"; assert tree==\"e26548be4038375be5a0efaf0ebc418126878ad0\"; print(f\"gem5 head={head} tree={tree}\")"
+    ],
+    [
+      "python3",
+      "-c",
+      "import subprocess; status=subprocess.check_output([\"git\",\"-C\",\"projects/gem5\",\"status\",\"--porcelain=v1\",\"--untracked-files=all\"],text=True); assert status==\"\",repr(status); print(\"gem5=clean tracked_and_untracked=true\")"
+    ],
+    [
+      "python3",
+      "-c",
+      "import json; from pathlib import Path; j=json.loads(Path(\".git/amdgpu-sim/txn/CP-0019.json\").read_text()); expected={\"gem5\":{\"head\":\"bf40bf3bf560018fb62fecb144f3077b05b93b0f\",\"path\":\"projects/gem5\",\"tree\":\"e26548be4038375be5a0efaf0ebc418126878ad0\"}}; assert j[\"schema\"]==\"amdgpu-sim.transaction.v1\"; assert j[\"checkpoint_id\"]==\"CP-0019\"; assert j[\"previous_checkpoint\"]==\"CP-0018\"; assert j[\"previous_root\"]==\"e43ae8e3e25353a3edb24c9b807efcf4c6207530\"; assert j[\"phase\"]==\"prepare\"; assert j[\"participants_locked\"] is True; assert j[\"expected_children\"]==expected; assert j[\"expected_root_tree\"] is None; assert j[\"root_allowlist\"]==[]; assert j[\"root_coordinator_commit\"] is None; print(\"checkpoint=CP-0019 phase=prepare expected_children=gem5 exact participants_locked=true\")"
+    ],
+    [
+      "python3",
+      "-c",
+      "import subprocess; message=subprocess.check_output([\"git\",\"-C\",\"projects/gem5\",\"log\",\"-1\",\"--format=%B\"],text=True); expected=[\"Checkpoint-ID: CP-0019\",\"Goal-ID: GSIM-001\",\"Plan-Revision: 2\",\"Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4\",\"Evidence-Manifest-SHA256: 13e4dddb3b541696d8b289145d562abfa86316c7b24db736870d131d5f01f892\",\"Change-Kind: code\",\"Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe\"]; lines=message.strip().splitlines(); assert lines[-7:]==expected,(lines[-7:],expected); assert all(lines.count(item)==1 for item in expected); print(\"child trailers=CP-0019/GSIM-001/plan2/source-lock/EV-0046/code/baseline exact\")"
+    ],
+    [
+      "python3",
+      "-c",
+      "import hashlib,json; from pathlib import Path; p=Path(\"artifacts/evidence/CP-0019/EV-0046-draft.json\"); payload=p.read_bytes(); h=hashlib.sha256(payload).hexdigest(); e=json.loads(payload); assert h==\"13e4dddb3b541696d8b289145d562abfa86316c7b24db736870d131d5f01f892\"; assert e[\"schema\"]==\"amdgpu-sim.evidence.v1\"; assert e[\"id\"]==\"EV-0046\"; assert e[\"checkpoint_id\"]==\"CP-0019\"; assert e[\"includes\"]=={}; assert len(e[\"command_results\"])==14; assert all(r[\"exit_code\"]==0 for r in e[\"command_results\"]); assert e[\"environment_fingerprint\"][\"kernel_executed\"] is False; assert e[\"environment_fingerprint\"][\"triton_e2e_cases\"]==\"0/1\"; assert e[\"environment_fingerprint\"][\"qwen_inference_cases\"]==\"0/1\"; print(f\"EV-0046={h} results=14 all_exit0=true kernel_executed=false triton_e2e=0/1 qwen_inference=0/1\")"
+    ],
+    [
+      "python3",
+      "-c",
+      "import hashlib,json,subprocess; from pathlib import Path; files={\"tools/qwen35_operator_manifest.py\":\"cfe0b65166f3fd7412855dfaf28f8274381cfbb75d139b8e68781d5d8f4a76a9\",\"tools/qwen35_operator_manifest.json\":\"123ee0b2a0f9ea7559d2282da5b375297f5cf52589b2faa82fef75d9346d600b\",\"tools/qwen35_operator_smoke.py\":\"5e367ec9672805b1c0d51799a4068fc9730f1a8201cd94b071e2a021192265a1\",\"tests/test_qwen35_operator_manifest.py\":\"3a2a6f412efa5705df904b741f91c34752a8f5c4183a031fa20f033f225dfa0d\"}; assert all(hashlib.sha256(Path(p).read_bytes()).hexdigest()==h for p,h in files.items()); test=subprocess.run([\"python3\",\"-m\",\"pytest\",\"-q\",\"tests/test_qwen35_operator_manifest.py\"],text=True,capture_output=True); assert test.returncode==0,(test.stdout,test.stderr); assert test.stderr==\"\"; smoke=subprocess.run([\"python3\",\"tools/qwen35_operator_smoke.py\"],text=True,capture_output=True); assert smoke.returncode==0,(smoke.stdout,smoke.stderr); assert smoke.stderr==\"\"; s=json.loads(smoke.stdout); m=json.loads(Path(\"tools/qwen35_operator_manifest.json\").read_text()); assert m[\"model\"][\"revision\"]==\"2fc06364715b967f1860aea9cf38778875588b17\"; assert m[\"summary\"][\"contract_count\"]==15; assert m[\"summary\"][\"static_source_ok\"] is True; assert m[\"summary\"][\"runtime_status\"]==\"blocked\"; assert m[\"runtime_probe\"][\"amd_ready\"] is False; assert s[\"static_contract\"][\"passed\"] is True; assert s[\"passed\"] is False; assert s[\"runtime\"][\"status\"]==\"blocked\"; assert s[\"fallback_audit\"][\"cpu_fallback_counted_as_pass\"] is False; assert s[\"fallback_audit\"][\"nvidia_fallback_counted_as_pass\"] is False; print(test.stdout.strip()); print(\"qwen_static=15/15 runtime=blocked amd_execution=false passed=false cpu_or_nvidia_fallback_pass=false\")"
+    ],
+    [
+      "python3",
+      "-c",
+      "import json,subprocess; from pathlib import Path; head=subprocess.check_output([\"git\",\"rev-parse\",\"HEAD\"],text=True).strip(); tree=subprocess.check_output([\"git\",\"rev-parse\",\"HEAD^{tree}\"],text=True).strip(); base_child=subprocess.check_output([\"git\",\"ls-tree\",\"HEAD\",\"projects/gem5\"],text=True).split()[2]; work_child=subprocess.check_output([\"git\",\"-C\",\"projects/gem5\",\"rev-parse\",\"HEAD\"],text=True).strip(); j=json.loads(Path(\".git/amdgpu-sim/txn/CP-0019.json\").read_text()); assert head==\"e43ae8e3e25353a3edb24c9b807efcf4c6207530\"; assert tree==\"ee478a5a69a86afb5682bd0e2e291a20e9f92d80\"; assert j[\"previous_root\"]==head; assert base_child==\"3af4ab5cc9e7f9174d88a95abb84f7ae5ab16d37\"; assert work_child==\"bf40bf3bf560018fb62fecb144f3077b05b93b0f\"; print(f\"previous_root={head} root_tree={tree} base_child={base_child} prepared_child={work_child}\")"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import subprocess; head=subprocess.check_output([\"git\",\"-C\",\"projects/gem5\",\"rev-parse\",\"HEAD\"],text=True).strip(); tree=subprocess.check_output([\"git\",\"-C\",\"projects/gem5\",\"rev-parse\",\"HEAD^{tree}\"],text=True).strip(); assert head==\"bf40bf3bf560018fb62fecb144f3077b05b93b0f\"; assert tree==\"e26548be4038375be5a0efaf0ebc418126878ad0\"; print(f\"gem5 head={head} tree={tree}\")"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T17:03:32+00:00",
+      "exit_code": 0,
+      "id": "cp19-child-identity",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/cp19-child-identity.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "828bd01168a0ce0a3e3d4f107d0fd958c5f03c1ecd5ff49e0ae340b73d431b1e",
+        "size": 985,
+        "tracked": false
+      },
+      "result": "The final gem5 child commit and tree exactly match the CP19 participant identity.",
+      "started_at": "2026-08-09T17:03:32+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/cp19-child-identity.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/cp19-child-identity.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6a05637eeb15a198aab2d6f9c8c6be86c10f4ec0d5e99a56b00b26f48666c6a6",
+        "size": 97,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import subprocess; status=subprocess.check_output([\"git\",\"-C\",\"projects/gem5\",\"status\",\"--porcelain=v1\",\"--untracked-files=all\"],text=True); assert status==\"\",repr(status); print(\"gem5=clean tracked_and_untracked=true\")"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T17:03:33+00:00",
+      "exit_code": 0,
+      "id": "cp19-child-clean",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/cp19-child-clean.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "665dff4dd7c03fd09db9b8f9e5d5f2b66ee2f5e45d8692c48dd99a7ce40ca1f8",
+        "size": 816,
+        "tracked": false
+      },
+      "result": "The CP19 gem5 participant is clean, including tracked and untracked files.",
+      "started_at": "2026-08-09T17:03:32+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/cp19-child-clean.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/cp19-child-clean.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ca57f36af78b80b50f1e92e9ea7897d17513faa86c591c9c41007781787075a8",
+        "size": 38,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import json; from pathlib import Path; j=json.loads(Path(\".git/amdgpu-sim/txn/CP-0019.json\").read_text()); expected={\"gem5\":{\"head\":\"bf40bf3bf560018fb62fecb144f3077b05b93b0f\",\"path\":\"projects/gem5\",\"tree\":\"e26548be4038375be5a0efaf0ebc418126878ad0\"}}; assert j[\"schema\"]==\"amdgpu-sim.transaction.v1\"; assert j[\"checkpoint_id\"]==\"CP-0019\"; assert j[\"previous_checkpoint\"]==\"CP-0018\"; assert j[\"previous_root\"]==\"e43ae8e3e25353a3edb24c9b807efcf4c6207530\"; assert j[\"phase\"]==\"prepare\"; assert j[\"participants_locked\"] is True; assert j[\"expected_children\"]==expected; assert j[\"expected_root_tree\"] is None; assert j[\"root_allowlist\"]==[]; assert j[\"root_coordinator_commit\"] is None; print(\"checkpoint=CP-0019 phase=prepare expected_children=gem5 exact participants_locked=true\")"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T17:03:32+00:00",
+      "exit_code": 0,
+      "id": "cp19-journal-expected-child",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/cp19-journal-expected-child.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a80457c83e73236efca1d2359ff83ccc318d56db5e5dbf7a2329a28a09e3ec55",
+        "size": 1428,
+        "tracked": false
+      },
+      "result": "The locked CP19 prepare journal records the exact final gem5 child and the CP18 root anchor.",
+      "started_at": "2026-08-09T17:03:32+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/cp19-journal-expected-child.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/cp19-journal-expected-child.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "73275fc8ad8404b98f9e0d4e7bfd242c6fe68168a787c3d5736c26e79343a08f",
+        "size": 87,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import subprocess; message=subprocess.check_output([\"git\",\"-C\",\"projects/gem5\",\"log\",\"-1\",\"--format=%B\"],text=True); expected=[\"Checkpoint-ID: CP-0019\",\"Goal-ID: GSIM-001\",\"Plan-Revision: 2\",\"Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4\",\"Evidence-Manifest-SHA256: 13e4dddb3b541696d8b289145d562abfa86316c7b24db736870d131d5f01f892\",\"Change-Kind: code\",\"Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe\"]; lines=message.strip().splitlines(); assert lines[-7:]==expected,(lines[-7:],expected); assert all(lines.count(item)==1 for item in expected); print(\"child trailers=CP-0019/GSIM-001/plan2/source-lock/EV-0046/code/baseline exact\")"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T17:03:32+00:00",
+      "exit_code": 0,
+      "id": "cp19-child-trailers",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/cp19-child-trailers.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b89dd18c1ba92aafbf5542fc54d53ec8bad509e32159b43ad2123aa1491a6bfa",
+        "size": 1296,
+        "tracked": false
+      },
+      "result": "The CP19 gem5 child carries the exact checkpoint, source-lock, EV-0046, change-kind, and baseline trailers.",
+      "started_at": "2026-08-09T17:03:32+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/cp19-child-trailers.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/cp19-child-trailers.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "02d82c2cb775139a8c9dc7159cff95815dc0c498ff8c3bd27f2194188d4188f1",
+        "size": 78,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import hashlib,json; from pathlib import Path; p=Path(\"artifacts/evidence/CP-0019/EV-0046-draft.json\"); payload=p.read_bytes(); h=hashlib.sha256(payload).hexdigest(); e=json.loads(payload); assert h==\"13e4dddb3b541696d8b289145d562abfa86316c7b24db736870d131d5f01f892\"; assert e[\"schema\"]==\"amdgpu-sim.evidence.v1\"; assert e[\"id\"]==\"EV-0046\"; assert e[\"checkpoint_id\"]==\"CP-0019\"; assert e[\"includes\"]=={}; assert len(e[\"command_results\"])==14; assert all(r[\"exit_code\"]==0 for r in e[\"command_results\"]); assert e[\"environment_fingerprint\"][\"kernel_executed\"] is False; assert e[\"environment_fingerprint\"][\"triton_e2e_cases\"]==\"0/1\"; assert e[\"environment_fingerprint\"][\"qwen_inference_cases\"]==\"0/1\"; print(f\"EV-0046={h} results=14 all_exit0=true kernel_executed=false triton_e2e=0/1 qwen_inference=0/1\")"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T17:03:32+00:00",
+      "exit_code": 0,
+      "id": "cp19-included-ev0046",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/cp19-included-ev0046.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d87b687db9a2584f3e48397722c94662fcb1f67141b7055307cbdab96bc6cb42",
+        "size": 1436,
+        "tracked": false
+      },
+      "result": "The detailed EV-0046 hash, result count, zero exit codes, and no-execution boundary are exact.",
+      "started_at": "2026-08-09T17:03:32+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/cp19-included-ev0046.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/cp19-included-ev0046.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d7b2f80cd774f54429d06b11178fa2b402fe5bd417156d4428057564c4f8e3a3",
+        "size": 155,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import hashlib,json,subprocess; from pathlib import Path; files={\"tools/qwen35_operator_manifest.py\":\"cfe0b65166f3fd7412855dfaf28f8274381cfbb75d139b8e68781d5d8f4a76a9\",\"tools/qwen35_operator_manifest.json\":\"123ee0b2a0f9ea7559d2282da5b375297f5cf52589b2faa82fef75d9346d600b\",\"tools/qwen35_operator_smoke.py\":\"5e367ec9672805b1c0d51799a4068fc9730f1a8201cd94b071e2a021192265a1\",\"tests/test_qwen35_operator_manifest.py\":\"3a2a6f412efa5705df904b741f91c34752a8f5c4183a031fa20f033f225dfa0d\"}; assert all(hashlib.sha256(Path(p).read_bytes()).hexdigest()==h for p,h in files.items()); test=subprocess.run([\"python3\",\"-m\",\"pytest\",\"-q\",\"tests/test_qwen35_operator_manifest.py\"],text=True,capture_output=True); assert test.returncode==0,(test.stdout,test.stderr); assert test.stderr==\"\"; smoke=subprocess.run([\"python3\",\"tools/qwen35_operator_smoke.py\"],text=True,capture_output=True); assert smoke.returncode==0,(smoke.stdout,smoke.stderr); assert smoke.stderr==\"\"; s=json.loads(smoke.stdout); m=json.loads(Path(\"tools/qwen35_operator_manifest.json\").read_text()); assert m[\"model\"][\"revision\"]==\"2fc06364715b967f1860aea9cf38778875588b17\"; assert m[\"summary\"][\"contract_count\"]==15; assert m[\"summary\"][\"static_source_ok\"] is True; assert m[\"summary\"][\"runtime_status\"]==\"blocked\"; assert m[\"runtime_probe\"][\"amd_ready\"] is False; assert s[\"static_contract\"][\"passed\"] is True; assert s[\"passed\"] is False; assert s[\"runtime\"][\"status\"]==\"blocked\"; assert s[\"fallback_audit\"][\"cpu_fallback_counted_as_pass\"] is False; assert s[\"fallback_audit\"][\"nvidia_fallback_counted_as_pass\"] is False; print(test.stdout.strip()); print(\"qwen_static=15/15 runtime=blocked amd_execution=false passed=false cpu_or_nvidia_fallback_pass=false\")"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T17:03:37+00:00",
+      "exit_code": 0,
+      "id": "cp19-qwen-static-boundary",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/cp19-qwen-static-boundary.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5a9e7af2cc59259f909394b4ecd6bc359b5922030a27252c10ec21dc4dbc7456",
+        "size": 2396,
+        "tracked": false
+      },
+      "result": "The Qwen3.5-0.8B 15-contract static gate and five tests pass while AMD runtime, Triton E2E, and inference remain unproven; fallback is not counted.",
+      "started_at": "2026-08-09T17:03:33+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/cp19-qwen-static-boundary.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/cp19-qwen-static-boundary.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "76f319dc62ef8c3665dcf0ae567600b822837730919dc2d980b7db30611c651d",
+        "size": 199,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import json,subprocess; from pathlib import Path; head=subprocess.check_output([\"git\",\"rev-parse\",\"HEAD\"],text=True).strip(); tree=subprocess.check_output([\"git\",\"rev-parse\",\"HEAD^{tree}\"],text=True).strip(); base_child=subprocess.check_output([\"git\",\"ls-tree\",\"HEAD\",\"projects/gem5\"],text=True).split()[2]; work_child=subprocess.check_output([\"git\",\"-C\",\"projects/gem5\",\"rev-parse\",\"HEAD\"],text=True).strip(); j=json.loads(Path(\".git/amdgpu-sim/txn/CP-0019.json\").read_text()); assert head==\"e43ae8e3e25353a3edb24c9b807efcf4c6207530\"; assert tree==\"ee478a5a69a86afb5682bd0e2e291a20e9f92d80\"; assert j[\"previous_root\"]==head; assert base_child==\"3af4ab5cc9e7f9174d88a95abb84f7ae5ab16d37\"; assert work_child==\"bf40bf3bf560018fb62fecb144f3077b05b93b0f\"; print(f\"previous_root={head} root_tree={tree} base_child={base_child} prepared_child={work_child}\")"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T17:03:32+00:00",
+      "exit_code": 0,
+      "id": "cp19-root-anchor",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/cp19-root-anchor.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "036c8d331cb18ce1e03b861f0acc03afe1d0375caacbf864aa70d1cdc2183916",
+        "size": 1477,
+        "tracked": false
+      },
+      "result": "The root coordinator remains at accepted CP18 while its gem5 gitlink advances only in the CP19 prepare worktree.",
+      "started_at": "2026-08-09T17:03:32+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/cp19-root-anchor.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/cp19-root-anchor.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "fb54d75dd58d558a30e02a2f9c4d30210690e7dec9a2f30b14f1cf9e5fb42046",
+        "size": 214,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T17:03:37+00:00",
+  "environment_fingerprint": {
+    "checkpoint": "CP-0019",
+    "transaction_phase": "prepare",
+    "previous_root": "e43ae8e3e25353a3edb24c9b807efcf4c6207530",
+    "previous_root_tree": "ee478a5a69a86afb5682bd0e2e291a20e9f92d80",
+    "previous_root_gem5_gitlink": "3af4ab5cc9e7f9174d88a95abb84f7ae5ab16d37",
+    "gem5_head": "bf40bf3bf560018fb62fecb144f3077b05b93b0f",
+    "gem5_tree": "e26548be4038375be5a0efaf0ebc418126878ad0",
+    "gem5_clean": true,
+    "ev0046_sha256": "13e4dddb3b541696d8b289145d562abfa86316c7b24db736870d131d5f01f892",
+    "ev0046_command_results": 14,
+    "ev0046_external_descriptors": 43,
+    "qwen_operator_manifest_sha256": "123ee0b2a0f9ea7559d2282da5b375297f5cf52589b2faa82fef75d9346d600b",
+    "qwen_smoke_sha256": "5e367ec9672805b1c0d51799a4068fc9730f1a8201cd94b071e2a021192265a1",
+    "qwen_static_contracts": "15/15",
+    "qwen_runtime_status": "blocked",
+    "triton_e2e_cases": "0/1",
+    "qwen_inference_cases": "0/1",
+    "kernel_executed": false,
+    "cpu_fallback": false,
+    "nvidia_fallback_counted_as_pass": false,
+    "next_action": "P3-HOST-NATIVE-03-B2"
+  },
+  "exit_code": 0,
+  "external_artifacts": [],
+  "id": "EV-0047",
+  "includes": {
+    "EV-0046": "13e4dddb3b541696d8b289145d562abfa86316c7b24db736870d131d5f01f892"
+  },
+  "limitations": [
+    "The transaction remains in prepare until the root allowlist, coordinator commit, and finalize transition are completed.",
+    "EV-0046 B1 aql_submitted means acceptance by the extracted HostNativeCommandProcessorCore only. It is not submission to the legacy HSAPP/GPUCommandProcessor SimObjects or gem5 GPU pipeline.",
+    "No GPUDispatcher or ComputeUnit is instantiated; no AQL retirement, MQD read-index update, completion-signal decrement, wave start, instruction fetch, gfx950 ISA execution, or kernel-output differential is claimed.",
+    "The Qwen3.5-0.8B gate is static 15/15 only. AMD runtime is blocked, CPU/NVIDIA fallback is not a pass, Triton E2E remains 0/1, and Qwen inference remains 0/1.",
+    "No full ROCm/OpenCL CTS, performance, timing, throughput, power, or hardware claim is made."
+  ],
+  "redactions": [],
+  "result": "The CP19 child identity, clean state, locked prepare journal, audit trailers, exact EV-0046 inclusion, CP18 root anchor, and Qwen static boundary are mutually consistent. The coordinator can stage B1 with B2 as the next host-native execution boundary.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T17:03:32+00:00",
+  "type": "cp19-b1-root-child-umbrella"
+}

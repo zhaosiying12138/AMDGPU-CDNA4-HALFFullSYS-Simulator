@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_queue_core.hh",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_command_processor_core.hh",
+    "projects/gem5/src/dev/amdgpu/SConscript",
+    "state/evidence/EV-0046.json"
+  ],
+  "checkpoint_id": "CP-0019",
+  "conclusion": "Extracted native queue and command-processor cores can reuse the established packet, MQD, descriptor, kernarg, and HSAQueueEntry contracts without linking the legacy SimObjects, but that reuse is a functional admission subset rather than proof that the legacy GPU pipeline ran.",
+  "confidence": "high",
+  "decision": "Name the extracted cores explicitly in every B1 claim and retain independent flags for native-core admission, legacy SimObject instantiation, GPU-pipeline connection, and CU execution.",
+  "evidence_ids": ["EV-0046"],
+  "id": "BL-0083",
+  "invalidated_assumptions": [
+    "Reusing HSAQueueEntry means GPUCommandProcessor or GPUDispatcher was instantiated.",
+    "AQL accepted by a host-native functional core is equivalent to submission through the legacy gem5 GPU pipeline."
+  ],
+  "observation": "The B1 executable links HostNativeQueueCore and HostNativeCommandProcessorCore, publishes/fetches one AQL packet, and constructs a valid HSAQueueEntry while the source and symbol audit excludes legacy HSAPP, GPUCommandProcessor, GPUDispatcher, ComputeUnit, Shader, and AMDGPUDevice objects.",
+  "question_or_symptom": "How can the no-x86 front-end maximize reuse without overstating which legacy gem5 objects were actually exercised?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

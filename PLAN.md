@@ -4,9 +4,9 @@
 
 **Revision:** `2`
 
-**Revision date:** `2026-08-09`
+**Revision date:** `2026-08-10`
 
-**State at this commit:** `P3-HOST-NATIVE-03-B0 dispatch admission accepted; next-P3-HOST-NATIVE-03-B1`
+**State at this commit:** `P3-HOST-NATIVE-03-B1 native queue/CP-core admission accepted; next-P3-HOST-NATIVE-03-B2`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -490,8 +490,8 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | P3-HOST-NATIVE-03 | P3H | Pinned gfx950 loader/dispatch parity between host-native and gem5 front-ends |
 | P3-HOST-NATIVE-03-A | P3H | Fixture-scoped PT_LOAD staging, descriptor/entry binding, and lifetime checks |
 | P3-HOST-NATIVE-03-B0 | P3H | No-x86 descriptor/kernarg/AQL admission and queue/lifecycle contract smoke |
-| P3-HOST-NATIVE-03-B1 | P3H | Native address translation and real HSAPP/command-processor packet publication, without CU execution |
-| P3-HOST-NATIVE-03-B2 | P3H | One pinned gfx950 CU output/trace differential through the reused GPU pipeline |
+| P3-HOST-NATIVE-03-B1 | P3H | No-x86 native queue/CP-core address resolution, AQL publication/fetch, and admission without legacy SimObjects or CU execution |
+| P3-HOST-NATIVE-03-B2 | P3H | No-x86 GPUDispatcher/CU one-wave output/trace differential for the pinned gfx950 dispatch |
 | P4-HIP-01 | P4 | Minimal transparent HIP/OpenCL launch surface |
 | P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
 | P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
@@ -757,6 +757,21 @@ action is `P3-HOST-NATIVE-03-B1`, native address translation plus real
 HSAPP/command-processor packet publication with no CU claim; B2 reserves the
 one-wave CU differential.
 
+`CP-0019` is accepted at the `P3-HOST-NATIVE-03-B1` native queue and
+command-processor-core sub-gate. The no-x86 `host_gpu_native_b1_core` resolves
+host-owned GPU VAs, registers and validates the 64-slot queue, publishes/rings
+one 64-byte AQL packet, fetches it in order, reads the locked descriptor, MQD,
+kernarg, and completion-signal object, and reuses `HSAQueueEntry` for one
+extracted command-processor-core admission. `aql_submitted=true` is local to
+that native core; neither legacy HSAPP nor the GPUCommandProcessor SimObject is
+linked or instantiated. The host read index is unchanged, and packet retire,
+signal decrement, GPUDispatcher/CU connection, wave start, instruction fetch,
+ISA execution, and output differential all remain false. The Qwen model is
+offline-ready and its 15-contract static gate remains valid, but Triton E2E and
+Qwen inference remain 0/1. The next unique action is
+`P3-HOST-NATIVE-03-B2`: connect the no-x86 GPUDispatcher/CU path and prove one
+pinned gfx950 wave's output/trace differential before Triton vecadd.
+
 ### P3H - host-native simulator and first Triton gate
 
 The physical machine is already the host; launching a full `VEGA_X86` gem5
@@ -783,15 +798,17 @@ The work is staged as follows:
    CP-0016 proves only functional memory/dispatch parity. CP-0017-A connects
    the CP13 staged image to fixture-scoped PT_LOAD materialization and
    descriptor/entry validation. CP-0018-B0 adds only descriptor-derived
-   kernarg/AQL admission and queue/lifecycle contract smoke. `P3-HOST-NATIVE-03-B1`
-   must add native address translation and real HSAPP/command-processor packet
-   publication without a CU claim; `P3-HOST-NATIVE-03-B2` then adds the pinned
-   gfx950 output/trace differential through the reused GPU pipeline before any
+   kernarg/AQL admission and queue/lifecycle contract smoke. CP-0019-B1 adds
+   no-x86 native address resolution plus extracted queue/command-processor-core
+   publication, fetch, and admission. It deliberately does not instantiate the
+   legacy HSAPP/GPUCommandProcessor SimObjects or claim CU execution.
+   `P3-HOST-NATIVE-03-B2` next connects the no-x86 GPUDispatcher/CU path and
+   proves the pinned gfx950 one-wave output/trace differential before any
    Triton launch claim.
 4. `P3-TRITON-VECADD-01` runs the pinned, unmodified Triton tutorial request
    (`python/tutorials/01-vector-add.py`) through the normal Triton launcher,
    with simulator device selection only. It retains compiler, HSACO digest,
-   transport, dispatch, output, and CPU-fallback evidence. As of CP-0017 no
+   transport, dispatch, output, and CPU-fallback evidence. As of CP-0019 no
    Triton end-to-end case has passed (0/1). The exact LLVM/Triton pair now has
    a temporary AMD-only overlay that builds `libtriton.so` and compile-only
    gfx950 vecadd HSACO; the overlay is not yet a committed launcher or device

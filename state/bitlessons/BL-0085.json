@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_command_processor_core.cc",
+    "projects/gem5/src/dev/amdgpu/host_native_memory_context.hh",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_b1_main.cc",
+    "state/evidence/EV-0046.json"
+  ],
+  "checkpoint_id": "CP-0019",
+  "conclusion": "Resolving a GPU virtual address through the host-owned allocation ledger proves bounded ownership and readable object ranges, not legacy GPU VM/TLB translation or the semantic consumption of those objects by a CU.",
+  "confidence": "high",
+  "decision": "Use HostNativeMemoryContext as the B1 address authority, reject malformed MQD offsets and out-of-range descriptor/kernarg/signal objects before admission, and reserve GPU-side translation, memory access, and signal semantics for the B2 differential.",
+  "evidence_ids": ["EV-0046"],
+  "id": "BL-0085",
+  "invalidated_assumptions": [
+    "A readable completion-signal object proves that a GPU completion signal was decremented.",
+    "Host-owned functional GPU-VA resolution is already equivalent to the legacy Vega GPU TLB and memory-port path."
+  ],
+  "observation": "B1 reads the descriptor, MQD, kernarg, and completion-signal object through HostNativeMemoryContext and validates their ownership/ranges, while completion_signal_object_read=true coexists with signal_decremented=false and gpu_pipeline_connected=false.",
+  "question_or_symptom": "What exactly does native address translation prove before GPUDispatcher/CU memory traffic is connected?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

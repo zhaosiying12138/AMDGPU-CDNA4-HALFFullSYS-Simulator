@@ -1,9 +1,9 @@
 {
-  "checkpoint_id": "CP-0018",
-  "checkpoint_sha256": "61812e9ee613309698585ffe2de0de886735acd1b2c5313fcd43c8cf118be591",
+  "checkpoint_id": "CP-0019",
+  "checkpoint_sha256": "53b2ec6455d646163503ca6779dfc9fe675c99ed6b72cf364a72c6207cea1927",
   "goal_id": "GSIM-001",
-  "next_action_id": "P3-HOST-NATIVE-03-B1",
-  "next_action_summary": "Connect B0 admission to native address translation and real HSAPP/command-processor packet publication; keep CU, Triton, and Qwen execution claims deferred.",
+  "next_action_id": "P3-HOST-NATIVE-03-B2",
+  "next_action_summary": "Connect B1 native queue/CP-core admission to the no-x86 GPUDispatcher/ComputeUnit path and prove one pinned gfx950 wave output/trace differential; then advance to Triton vecadd.",
   "phase_id": "P3",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,

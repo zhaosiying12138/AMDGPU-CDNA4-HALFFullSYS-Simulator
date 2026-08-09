@@ -1,0 +1,712 @@
+{
+  "checkpoint_id": "CP-0019",
+  "claim": "EV-0046 records the bounded CP19-B1 no-x86 native queue and command-processor-core increment. It proves that the standalone HOSTGPU_NATIVE_CONTROL target resolves host-owned GPU virtual addresses, publishes and rings one 64-byte AQL packet, fetches it in order, reads the locked descriptor/MQD/kernarg/completion-signal object, reuses HSAQueueEntry, and emits one native-core command-processor submission. Here aql_submitted means accepted by the extracted native CP core only: the legacy HSAPP/command-processor SimObjects, GPUDispatcher, GPU pipeline, CU, instruction execution, retirement, signal decrement, Triton E2E, and Qwen inference all remain explicitly unproven.",
+  "command_argv": [
+    [
+      "bash",
+      "-lc",
+      "set -eu\ngit -C projects/gem5 diff --cached --check\ngit -C projects/gem5 diff --check\nprintf \"%s\\n\" \"== status ==\"\ngit -C projects/gem5 status --porcelain=v1 --untracked-files=all\nprintf \"%s\\n\" \"== source identities ==\"\nfor p in src/dev/amdgpu/SConscript src/dev/amdgpu/host_gpu_native_b1_main.cc src/dev/amdgpu/host_gpu_native_queue_core.cc src/dev/amdgpu/host_gpu_native_queue_core.hh src/dev/amdgpu/host_gpu_native_command_processor_core.cc src/dev/amdgpu/host_gpu_native_command_processor_core.hh src/dev/amdgpu/host_gpu_native_dispatch_admission.cc src/dev/amdgpu/host_gpu_native_dispatch_admission.hh src/gpu-compute/hsa_queue_entry.hh util/host_native/check_control_core.py; do sha256sum \"projects/gem5/$p\"; stat -c \"%n size=%s mtime=%y\" \"projects/gem5/$p\"; done\nprintf \"%s\\n\" \"== frozen build options ==\"\ncat projects/gem5/build_opts/HOSTGPU_NATIVE_CONTROL\nfor p in host_gpu_native_b1_main.cc host_gpu_native_queue_core.cc host_gpu_native_command_processor_core.cc host_gpu_native_dispatch_admission.cc host_native_code_object_mapper.cc host_native_memory_context.cc host_gpu_code_object_image.cc host_gpu_code_object_state.cc host_gpu_protocol.cc host_gpu_memory_state.cc; do sed -n \"/host_gpu_native_b1_core/,/host_gpu_memory_state.cc/p\" projects/gem5/src/dev/amdgpu/SConscript | rg -Fq \"$p\"; done\nfor p in hsa_packet_processor.cc gpu_command_processor.cc dispatcher.cc compute_unit.cc shader.cc amdgpu_device.cc; do if sed -n \"/host_gpu_native_b1_core/,/host_gpu_memory_state.cc/p\" projects/gem5/src/dev/amdgpu/SConscript | rg -Fq \"$p\"; then exit 1; fi; done\nprintf \"%s\\n\" \"b1_link_sources=10 legacy_hsapp_cp_dispatcher_cu_device_sources=false\"\nprintf \"%s\\n\" \"source_boundary=dispatch_b1_native_queue_cp_core_only no_root_state_write=true\""
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\nb=projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_b1_core.opt\npre=artifacts/evidence/CP-0019/gem5-builds/host_gpu_native_b1_core.pre-relink.opt\nmkdir -p \"$(dirname \"$pre\")\"\ntest -x \"$b\"\ntest ! -e \"$pre\"\nmv \"$b\" \"$pre\"\nGEM5_JOBS=24 scripts/build_gem5_mold24.sh build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_b1_core.opt\ntest -x \"$b\"\ncmp -s \"$pre\" \"$b\"\nfor s in projects/gem5/src/dev/amdgpu/SConscript projects/gem5/src/dev/amdgpu/host_gpu_native_b1_main.cc projects/gem5/src/dev/amdgpu/host_gpu_native_queue_core.cc projects/gem5/src/dev/amdgpu/host_gpu_native_queue_core.hh projects/gem5/src/dev/amdgpu/host_gpu_native_command_processor_core.cc projects/gem5/src/dev/amdgpu/host_gpu_native_command_processor_core.hh projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_admission.cc projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_admission.hh projects/gem5/src/gpu-compute/hsa_queue_entry.hh; do test \"$b\" -nt \"$s\"; done\nprintf \"%s\\n\" \"fresh_relink=true content_identical_to_pre_relink=true\"\nsha256sum \"$pre\" \"$b\""
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\nb=projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_b1_core.opt\nout=artifacts/evidence/CP-0019/gem5-builds/host_gpu_native_b1_core.opt\ntest -x \"$b\"\nfor s in projects/gem5/src/dev/amdgpu/SConscript projects/gem5/src/dev/amdgpu/host_gpu_native_b1_main.cc projects/gem5/src/dev/amdgpu/host_gpu_native_queue_core.cc projects/gem5/src/dev/amdgpu/host_gpu_native_queue_core.hh projects/gem5/src/dev/amdgpu/host_gpu_native_command_processor_core.cc projects/gem5/src/dev/amdgpu/host_gpu_native_command_processor_core.hh projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_admission.cc projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_admission.hh projects/gem5/src/gpu-compute/hsa_queue_entry.hh; do test \"$b\" -nt \"$s\"; done\ninstall -m 755 \"$b\" \"$out\"\ncmp -s \"$b\" \"$out\"\nfile \"$b\"\nstat -c \"source_binary_size=%s mode=%A mtime=%y\" \"$b\"\nreadelf -n \"$b\" | rg \"Build ID\"\nsha256sum \"$b\" \"$out\"\nsha1sum \"$b\"\nldd \"$b\"\nprintf \"%s\\n\" \"fresh_vs_declared_sources=true retained_copy_exact=true\""
+    ],
+    [
+      "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_b1_core.opt",
+      "projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco"
+    ],
+    [
+      "python3",
+      "projects/gem5/util/host_native/check_control_core.py",
+      "--profile",
+      "dispatch-b1",
+      "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_b1_core.opt"
+    ],
+    [
+      "python3",
+      "projects/gem5/util/host_native/check_control_core.py",
+      "--profile",
+      "dispatch-admission",
+      "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_dispatch_admission_core.opt"
+    ],
+    [
+      "python3",
+      "projects/gem5/util/host_native/check_control_core.py",
+      "--profile",
+      "ptload",
+      "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt"
+    ],
+    [
+      "python3",
+      "projects/gem5/util/host_native/check_control_core.py",
+      "--profile",
+      "fixture",
+      "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_fixture_core.opt"
+    ],
+    [
+      "python3",
+      "projects/gem5/util/host_native/check_control_core.py",
+      "--profile",
+      "control",
+      "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_control_core.opt"
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\nroot=build/VEGA_X86/dev/amdgpu\nfor spec in host_gpu_protocol.test.opt:43 host_gpu_code_object_state.test.opt:14 host_gpu_memory_state.test.opt:8 host_gpu_dispatch_state.test.opt:12 host_gpu_queue_state.test.opt:12 host_gpu_signal_state.test.opt:12 host_gpu_kmt_state.test.opt:5 host_gpu_socket_utils.test.opt:24; do name=${spec%:*}; count=${spec##*:}; printf \"== %s ==\\n\" \"$name\"; output=$(\"$root/$name\" --gtest_color=no 2>&1); printf \"%s\\n\" \"$output\"; printf \"%s\\n\" \"$output\" | grep -Fq \"[  PASSED  ] $count tests.\"; done\nprintf \"%s\\n\" \"vega_x86_legacy_gtests=8/8 protocol=43 code_object=14 memory=8 dispatch=12 queue=12 signal=12 kmt=5 socket=24\""
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\ngit -C projects/gem5 diff --cached --check\ngit -C projects/gem5 diff --check\npython3 -m py_compile projects/gem5/util/host_native/check_control_core.py\n(cd projects/gem5 && python3 -m unittest -q util/host_native/test_check_boundary.py)\nprintf \"%s\\n\" \"diff_check=pass checker_py_compile=pass boundary_tests=4/4\""
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\np=projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco\nactual=$(sha256sum \"$p\" | awk \"{print \\$1}\")\ntest \"$actual\" = 7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56\ntest \"$(stat -c %s \"$p\")\" -eq 5528\nfile \"$p\"\nstat -c \"size=%s mtime=%y\" \"$p\"\nreadelf -h \"$p\"\nsha256sum \"$p\"\nprintf \"%s\\n\" \"locked_fixture=true gfx_target=950 kernel=gpuReadWrite bytes=5528\""
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\nprintf \"%s  %s\\n\" cfe0b65166f3fd7412855dfaf28f8274381cfbb75d139b8e68781d5d8f4a76a9 tools/qwen35_operator_manifest.py 123ee0b2a0f9ea7559d2282da5b375297f5cf52589b2faa82fef75d9346d600b tools/qwen35_operator_manifest.json 5e367ec9672805b1c0d51799a4068fc9730f1a8201cd94b071e2a021192265a1 tools/qwen35_operator_smoke.py 3a2a6f412efa5705df904b741f91c34752a8f5c4183a031fa20f033f225dfa0d tests/test_qwen35_operator_manifest.py | sha256sum -c -\npython3 -m pytest -q tests/test_qwen35_operator_manifest.py\npython3 tools/qwen35_operator_manifest.py --output /tmp/qwen35-operator-manifest-cp19.json\ncmp -s /tmp/qwen35-operator-manifest-cp19.json tools/qwen35_operator_manifest.json\npython3 tools/qwen35_operator_smoke.py > /tmp/qwen35-operator-smoke-cp19.json\npython3 -c \"import json; m=json.load(open(\\\"tools/qwen35_operator_manifest.json\\\")); s=json.load(open(\\\"/tmp/qwen35-operator-smoke-cp19.json\\\")); assert m[\\\"summary\\\"][\\\"static_source_ok\\\"] is True; assert m[\\\"summary\\\"][\\\"contract_count\\\"]==15; assert m[\\\"counts\\\"][\\\"configured_layer_count\\\"]==24; assert m[\\\"counts\\\"][\\\"configured_layer_type_counts\\\"]=={\\\"full_attention\\\":6,\\\"linear_attention\\\":18}; assert m[\\\"counts\\\"][\\\"contract_static_source_ok_count\\\"]==15; assert m[\\\"counts\\\"][\\\"triton_source_symbol_count\\\"]==50; assert m[\\\"counts\\\"][\\\"custom_registration_count\\\"]==33; assert m[\\\"runtime_probe\\\"][\\\"amd_ready\\\"] is False; assert m[\\\"summary\\\"][\\\"runtime_status\\\"]==\\\"blocked\\\"; assert s[\\\"static_contract\\\"][\\\"passed\\\"] is True; assert s[\\\"passed\\\"] is False; assert s[\\\"runtime\\\"][\\\"status\\\"]==\\\"blocked\\\"; assert s[\\\"fallback_audit\\\"][\\\"cpu_fallback_counted_as_pass\\\"] is False; assert s[\\\"fallback_audit\\\"][\\\"nvidia_fallback_counted_as_pass\\\"] is False; print(\\\"qwen35_text_only=true layers=24 linear=18 full=6 contracts=15 static_source_ok=15/15 runtime=blocked cpu_or_nvidia_fallback_pass=false\\\"); print(\\\"blocker=\\\"+m[\\\"summary\\\"][\\\"blocker\\\"])\"\nset +e\npython3 tools/qwen35_operator_manifest.py --strict-runtime --output /tmp/qwen35-operator-manifest-strict-cp19.json\nstrict_rc=$?\nset -e\ntest \"$strict_rc\" -eq 2\ncmp -s /tmp/qwen35-operator-manifest-strict-cp19.json tools/qwen35_operator_manifest.json\nprintf \"strict_runtime_rc=%s static_gate=true amd_execution=false\\n\" \"$strict_rc\""
+    ],
+    [
+      "bash",
+      "-lc",
+      "set -eu\npython3 - <<\"PY\"\nimport hashlib\nimport json\nfrom pathlib import Path\nroot = Path(\"models/Qwen3.5-0.8B\")\nmanifest_bytes = (root / \"manifest.json\").read_bytes()\nmanifest = json.loads(manifest_bytes)\nassert manifest[\"model_id\"] == \"Qwen/Qwen3.5-0.8B\"\nassert manifest[\"revision\"] == \"2fc06364715b967f1860aea9cf38778875588b17\"\nassert manifest[\"download_status\"] == \"complete\"\nassert len(manifest[\"files\"]) == 4\nprint(\"manifest_sha256=\" + hashlib.sha256(manifest_bytes).hexdigest())\ntotal = 0\nfor name, expected in sorted(manifest[\"files\"].items()):\n    path = root / name\n    actual = hashlib.sha256(path.read_bytes()).hexdigest()\n    assert path.stat().st_size == expected[\"bytes\"], name\n    assert actual == expected[\"sha256\"], name\n    total += path.stat().st_size\n    print(f\"{name} bytes={path.stat().st_size} sha256={actual}\")\nassert total == 1759804389\nprint(\"model=Qwen/Qwen3.5-0.8B revision=\" + manifest[\"revision\"] + f\" files=4 bytes={total} text_only_first_gate=true vision_deferred=true full_rocm_opencl_cts_required=false\")\nPY"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\ngit -C projects/gem5 diff --cached --check\ngit -C projects/gem5 diff --check\nprintf \"%s\\n\" \"== status ==\"\ngit -C projects/gem5 status --porcelain=v1 --untracked-files=all\nprintf \"%s\\n\" \"== source identities ==\"\nfor p in src/dev/amdgpu/SConscript src/dev/amdgpu/host_gpu_native_b1_main.cc src/dev/amdgpu/host_gpu_native_queue_core.cc src/dev/amdgpu/host_gpu_native_queue_core.hh src/dev/amdgpu/host_gpu_native_command_processor_core.cc src/dev/amdgpu/host_gpu_native_command_processor_core.hh src/dev/amdgpu/host_gpu_native_dispatch_admission.cc src/dev/amdgpu/host_gpu_native_dispatch_admission.hh src/gpu-compute/hsa_queue_entry.hh util/host_native/check_control_core.py; do sha256sum \"projects/gem5/$p\"; stat -c \"%n size=%s mtime=%y\" \"projects/gem5/$p\"; done\nprintf \"%s\\n\" \"== frozen build options ==\"\ncat projects/gem5/build_opts/HOSTGPU_NATIVE_CONTROL\nfor p in host_gpu_native_b1_main.cc host_gpu_native_queue_core.cc host_gpu_native_command_processor_core.cc host_gpu_native_dispatch_admission.cc host_native_code_object_mapper.cc host_native_memory_context.cc host_gpu_code_object_image.cc host_gpu_code_object_state.cc host_gpu_protocol.cc host_gpu_memory_state.cc; do sed -n \"/host_gpu_native_b1_core/,/host_gpu_memory_state.cc/p\" projects/gem5/src/dev/amdgpu/SConscript | rg -Fq \"$p\"; done\nfor p in hsa_packet_processor.cc gpu_command_processor.cc dispatcher.cc compute_unit.cc shader.cc amdgpu_device.cc; do if sed -n \"/host_gpu_native_b1_core/,/host_gpu_memory_state.cc/p\" projects/gem5/src/dev/amdgpu/SConscript | rg -Fq \"$p\"; then exit 1; fi; done\nprintf \"%s\\n\" \"b1_link_sources=10 legacy_hsapp_cp_dispatcher_cu_device_sources=false\"\nprintf \"%s\\n\" \"source_boundary=dispatch_b1_native_queue_cp_core_only no_root_state_write=true\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T16:54:13+00:00",
+      "exit_code": 0,
+      "id": "gem5-b1-source-inventory",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-source-inventory.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "65221fbf8da335c178d8097e153f000548ec61c2e035dd270ce63041334f6124",
+        "size": 2397,
+        "tracked": false
+      },
+      "result": "The frozen B1 source set, hashes, no-x86 build options, diff checks, and explicit ten-source link closure are retained.",
+      "started_at": "2026-08-09T16:54:12+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-source-inventory.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-source-inventory.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "bca02ea027a7d168d93523b72c18513c54d6ab015532d392f72c1ab1d62f2cb7",
+        "size": 3118,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\nb=projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_b1_core.opt\npre=artifacts/evidence/CP-0019/gem5-builds/host_gpu_native_b1_core.pre-relink.opt\nmkdir -p \"$(dirname \"$pre\")\"\ntest -x \"$b\"\ntest ! -e \"$pre\"\nmv \"$b\" \"$pre\"\nGEM5_JOBS=24 scripts/build_gem5_mold24.sh build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_b1_core.opt\ntest -x \"$b\"\ncmp -s \"$pre\" \"$b\"\nfor s in projects/gem5/src/dev/amdgpu/SConscript projects/gem5/src/dev/amdgpu/host_gpu_native_b1_main.cc projects/gem5/src/dev/amdgpu/host_gpu_native_queue_core.cc projects/gem5/src/dev/amdgpu/host_gpu_native_queue_core.hh projects/gem5/src/dev/amdgpu/host_gpu_native_command_processor_core.cc projects/gem5/src/dev/amdgpu/host_gpu_native_command_processor_core.hh projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_admission.cc projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_admission.hh projects/gem5/src/gpu-compute/hsa_queue_entry.hh; do test \"$b\" -nt \"$s\"; done\nprintf \"%s\\n\" \"fresh_relink=true content_identical_to_pre_relink=true\"\nsha256sum \"$pre\" \"$b\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T16:53:42+00:00",
+      "exit_code": 0,
+      "id": "gem5-b1-build",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-build.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f70aa8a3f0e457d2bdd43e2e6ed1e4f9f0914ff18fc91f6fd4e4caaa8862090a",
+        "size": 1677,
+        "tracked": false
+      },
+      "result": "The canonical mold/24 HOSTGPU_NATIVE_CONTROL B1 target is freshly relinked after the frozen source set and is byte-identical to the prior content-signature build.",
+      "started_at": "2026-08-09T16:53:39+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-build.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-build.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5f19e759f40a131403705e0bde25364d65b194ea990438165d43372916850770",
+        "size": 4315,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\nb=projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_b1_core.opt\nout=artifacts/evidence/CP-0019/gem5-builds/host_gpu_native_b1_core.opt\ntest -x \"$b\"\nfor s in projects/gem5/src/dev/amdgpu/SConscript projects/gem5/src/dev/amdgpu/host_gpu_native_b1_main.cc projects/gem5/src/dev/amdgpu/host_gpu_native_queue_core.cc projects/gem5/src/dev/amdgpu/host_gpu_native_queue_core.hh projects/gem5/src/dev/amdgpu/host_gpu_native_command_processor_core.cc projects/gem5/src/dev/amdgpu/host_gpu_native_command_processor_core.hh projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_admission.cc projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_admission.hh projects/gem5/src/gpu-compute/hsa_queue_entry.hh; do test \"$b\" -nt \"$s\"; done\ninstall -m 755 \"$b\" \"$out\"\ncmp -s \"$b\" \"$out\"\nfile \"$b\"\nstat -c \"source_binary_size=%s mode=%A mtime=%y\" \"$b\"\nreadelf -n \"$b\" | rg \"Build ID\"\nsha256sum \"$b\" \"$out\"\nsha1sum \"$b\"\nldd \"$b\"\nprintf \"%s\\n\" \"fresh_vs_declared_sources=true retained_copy_exact=true\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T16:54:12+00:00",
+      "exit_code": 0,
+      "id": "gem5-b1-artifact",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-artifact.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0dd3f02fa1d635e5b330078c6bdf24d205ba98863e9bd124e0830e48c17f96ad",
+        "size": 1641,
+        "tracked": false
+      },
+      "result": "The fresh B1 ELF and retained copy have the exact SHA-256, Build ID, size, dynamic dependency set, and source-newer identity recorded.",
+      "started_at": "2026-08-09T16:54:12+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-artifact.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-artifact.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "89e60824695fcfc9e8511e18cb2d12f07fbc0902073825e471c92f26a5a60689",
+        "size": 1299,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_b1_core.opt",
+        "projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T16:51:53+00:00",
+      "exit_code": 0,
+      "id": "gem5-b1-self-test",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-self-test.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7d3a7b44c3add40d0ebe0fefbd07b81bfad2200df23e48e6ec1b0a1a93452762",
+        "size": 752,
+        "tracked": false
+      },
+      "result": "The B1 standalone self-test publishes, rings, fetches, and admits one 64-byte AQL packet to the native queue/CP core while all legacy-pipeline, CU, retirement, signal, and execution flags remain false.",
+      "started_at": "2026-08-09T16:51:53+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-self-test.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-self-test.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f68237ff0034e0ca84449b3bc40088ee4e4439bd72919a5ce7a6580bc2f1e392",
+        "size": 1493,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "projects/gem5/util/host_native/check_control_core.py",
+        "--profile",
+        "dispatch-b1",
+        "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_b1_core.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T16:51:53+00:00",
+      "exit_code": 0,
+      "id": "gem5-b1-checker",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-checker.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "bb7959b297b74313c2b2ffc30a81569a36f9334fe61aaeec77283c266f04b10d",
+        "size": 748,
+        "tracked": false
+      },
+      "result": "The dispatch-b1 checker validates the no-x86 DSO/symbol boundary, required extracted-core symbols, exact queue/dispatch counts, and explicit B2 blocker.",
+      "started_at": "2026-08-09T16:51:53+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-checker.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-checker.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5e78d252026cd1ebbaeadcc8affd8ecd18c29cf489186c23f8a32429b0ab0a91",
+        "size": 2755,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "projects/gem5/util/host_native/check_control_core.py",
+        "--profile",
+        "dispatch-admission",
+        "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_dispatch_admission_core.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T16:55:19+00:00",
+      "exit_code": 0,
+      "id": "gem5-b0-admission-checker",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/gem5-b0-admission-checker.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "88dbfc33a5b1d86edd60eb6bd2ba22cc4a5c31a8d93aeaecd50eb08a07a287aa",
+        "size": 791,
+        "tracked": false
+      },
+      "result": "The CP18/B0 dispatch-admission checker remains green with its pre-publication and no-execution boundary explicit.",
+      "started_at": "2026-08-09T16:55:19+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/gem5-b0-admission-checker.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/gem5-b0-admission-checker.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "795756806db3509ee6ef6235ece5a2e6b457bbd7c3688fc935423debef96654a",
+        "size": 1931,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "projects/gem5/util/host_native/check_control_core.py",
+        "--profile",
+        "ptload",
+        "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_ptload_core.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T16:55:19+00:00",
+      "exit_code": 0,
+      "id": "gem5-cp17-ptload-checker",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/gem5-cp17-ptload-checker.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d5178a46b3ce59f0c15798fdc6fc1cac675f47b3adfe12770a1fe78fc24c2193",
+        "size": 765,
+        "tracked": false
+      },
+      "result": "The CP17 PT_LOAD checker remains green with no-AQL and no-execution flags explicit.",
+      "started_at": "2026-08-09T16:55:19+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/gem5-cp17-ptload-checker.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/gem5-cp17-ptload-checker.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6e55f6bb312fade49c57917f28471db057398d0649ba11403eb31cadcd860da4",
+        "size": 1817,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "projects/gem5/util/host_native/check_control_core.py",
+        "--profile",
+        "fixture",
+        "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_native_fixture_core.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T16:55:19+00:00",
+      "exit_code": 0,
+      "id": "gem5-cp16-fixture-checker",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/gem5-cp16-fixture-checker.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "44ff2e5db88f3230b6fc0f22a82ba7616fb2d9e4c0e02498326577349ffaa227",
+        "size": 769,
+        "tracked": false
+      },
+      "result": "The CP16 fixture-parity checker remains green with the x86/GPU-pipeline blocker explicit.",
+      "started_at": "2026-08-09T16:55:19+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/gem5-cp16-fixture-checker.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/gem5-cp16-fixture-checker.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6678b274ff34a6db02308b407063f2f1ccf6b4c40bd6ffc13a74fade6c801d13",
+        "size": 1472,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "python3",
+        "projects/gem5/util/host_native/check_control_core.py",
+        "--profile",
+        "control",
+        "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_control_core.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T16:55:19+00:00",
+      "exit_code": 0,
+      "id": "gem5-cp15-control-checker",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/gem5-cp15-control-checker.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ed99c897ee75aa1e3e82036482dfbbd3dde826adc8c6b0fc7c2b9a91c62cf885",
+        "size": 762,
+        "tracked": false
+      },
+      "result": "The CP15 control-core checker remains green under the no-x86 build profile.",
+      "started_at": "2026-08-09T16:55:18+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/gem5-cp15-control-checker.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/gem5-cp15-control-checker.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "67f686b7eb2595f1dbf9b618c818ff165693f16c046c3784ee8a7b1576497ed1",
+        "size": 1223,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\nroot=build/VEGA_X86/dev/amdgpu\nfor spec in host_gpu_protocol.test.opt:43 host_gpu_code_object_state.test.opt:14 host_gpu_memory_state.test.opt:8 host_gpu_dispatch_state.test.opt:12 host_gpu_queue_state.test.opt:12 host_gpu_signal_state.test.opt:12 host_gpu_kmt_state.test.opt:5 host_gpu_socket_utils.test.opt:24; do name=${spec%:*}; count=${spec##*:}; printf \"== %s ==\\n\" \"$name\"; output=$(\"$root/$name\" --gtest_color=no 2>&1); printf \"%s\\n\" \"$output\"; printf \"%s\\n\" \"$output\" | grep -Fq \"[  PASSED  ] $count tests.\"; done\nprintf \"%s\\n\" \"vega_x86_legacy_gtests=8/8 protocol=43 code_object=14 memory=8 dispatch=12 queue=12 signal=12 kmt=5 socket=24\""
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-09T16:55:19+00:00",
+      "exit_code": 0,
+      "id": "gem5-vega-x86-legacy-gtests",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/gem5-vega-x86-legacy-gtests.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e8a90bd096b157979bc892650ba379af0a33b17f9897bbbcb01f81530a4f48b7",
+        "size": 1299,
+        "tracked": false
+      },
+      "result": "All eight VEGA_X86 compatibility binaries pass with exact counts 43/14/8/12/12/12/5/24.",
+      "started_at": "2026-08-09T16:55:19+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/gem5-vega-x86-legacy-gtests.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/gem5-vega-x86-legacy-gtests.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "996b5ad42e415e4459d7e70318053c7d2fab0664ee6282d22150098b77c8ac3c",
+        "size": 23159,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\ngit -C projects/gem5 diff --cached --check\ngit -C projects/gem5 diff --check\npython3 -m py_compile projects/gem5/util/host_native/check_control_core.py\n(cd projects/gem5 && python3 -m unittest -q util/host_native/test_check_boundary.py)\nprintf \"%s\\n\" \"diff_check=pass checker_py_compile=pass boundary_tests=4/4\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T16:55:19+00:00",
+      "exit_code": 0,
+      "id": "gem5-b1-style-diff",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-style-diff.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "45fcc6cc9570d9c893e1f14ddb2c02ff1d0bc1597380e9d854e40ec8ce4d1e8e",
+        "size": 913,
+        "tracked": false
+      },
+      "result": "The child staged/unstaged diff checks, checker syntax check, and four host-native boundary tests pass.",
+      "started_at": "2026-08-09T16:55:19+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-style-diff.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9cfa580b8a2cf2a904b95fbad0a82a2c24b432f3e8ff4669cbb238ba43aa5071",
+        "size": 97,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/gem5-b1-style-diff.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c4eb5f8476e5ab9710a10448bf39670f622479090a41e30a72acd695e5968ac5",
+        "size": 59,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\np=projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco\nactual=$(sha256sum \"$p\" | awk \"{print \\$1}\")\ntest \"$actual\" = 7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56\ntest \"$(stat -c %s \"$p\")\" -eq 5528\nfile \"$p\"\nstat -c \"size=%s mtime=%y\" \"$p\"\nreadelf -h \"$p\"\nsha256sum \"$p\"\nprintf \"%s\\n\" \"locked_fixture=true gfx_target=950 kernel=gpuReadWrite bytes=5528\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T16:55:19+00:00",
+      "exit_code": 0,
+      "id": "locked-gfx950-hsaco",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/locked-gfx950-hsaco.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ef8eee5bb16c1a22f80f6692e12a92bb3e6e7c07b3fb9a5d6020a604d8b3b2de",
+        "size": 1052,
+        "tracked": false
+      },
+      "result": "The source-locked 5,528-byte gfx950 gpuReadWrite HSACO has the exact pinned SHA-256 and ELF identity.",
+      "started_at": "2026-08-09T16:55:19+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/locked-gfx950-hsaco.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/locked-gfx950-hsaco.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ea0a1bdcd24bb949aa5e167393755eaf10512ae8e6b7876d18d1e47da4de3788",
+        "size": 1473,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\nprintf \"%s  %s\\n\" cfe0b65166f3fd7412855dfaf28f8274381cfbb75d139b8e68781d5d8f4a76a9 tools/qwen35_operator_manifest.py 123ee0b2a0f9ea7559d2282da5b375297f5cf52589b2faa82fef75d9346d600b tools/qwen35_operator_manifest.json 5e367ec9672805b1c0d51799a4068fc9730f1a8201cd94b071e2a021192265a1 tools/qwen35_operator_smoke.py 3a2a6f412efa5705df904b741f91c34752a8f5c4183a031fa20f033f225dfa0d tests/test_qwen35_operator_manifest.py | sha256sum -c -\npython3 -m pytest -q tests/test_qwen35_operator_manifest.py\npython3 tools/qwen35_operator_manifest.py --output /tmp/qwen35-operator-manifest-cp19.json\ncmp -s /tmp/qwen35-operator-manifest-cp19.json tools/qwen35_operator_manifest.json\npython3 tools/qwen35_operator_smoke.py > /tmp/qwen35-operator-smoke-cp19.json\npython3 -c \"import json; m=json.load(open(\\\"tools/qwen35_operator_manifest.json\\\")); s=json.load(open(\\\"/tmp/qwen35-operator-smoke-cp19.json\\\")); assert m[\\\"summary\\\"][\\\"static_source_ok\\\"] is True; assert m[\\\"summary\\\"][\\\"contract_count\\\"]==15; assert m[\\\"counts\\\"][\\\"configured_layer_count\\\"]==24; assert m[\\\"counts\\\"][\\\"configured_layer_type_counts\\\"]=={\\\"full_attention\\\":6,\\\"linear_attention\\\":18}; assert m[\\\"counts\\\"][\\\"contract_static_source_ok_count\\\"]==15; assert m[\\\"counts\\\"][\\\"triton_source_symbol_count\\\"]==50; assert m[\\\"counts\\\"][\\\"custom_registration_count\\\"]==33; assert m[\\\"runtime_probe\\\"][\\\"amd_ready\\\"] is False; assert m[\\\"summary\\\"][\\\"runtime_status\\\"]==\\\"blocked\\\"; assert s[\\\"static_contract\\\"][\\\"passed\\\"] is True; assert s[\\\"passed\\\"] is False; assert s[\\\"runtime\\\"][\\\"status\\\"]==\\\"blocked\\\"; assert s[\\\"fallback_audit\\\"][\\\"cpu_fallback_counted_as_pass\\\"] is False; assert s[\\\"fallback_audit\\\"][\\\"nvidia_fallback_counted_as_pass\\\"] is False; print(\\\"qwen35_text_only=true layers=24 linear=18 full=6 contracts=15 static_source_ok=15/15 runtime=blocked cpu_or_nvidia_fallback_pass=false\\\"); print(\\\"blocker=\\\"+m[\\\"summary\\\"][\\\"blocker\\\"])\"\nset +e\npython3 tools/qwen35_operator_manifest.py --strict-runtime --output /tmp/qwen35-operator-manifest-strict-cp19.json\nstrict_rc=$?\nset -e\ntest \"$strict_rc\" -eq 2\ncmp -s /tmp/qwen35-operator-manifest-strict-cp19.json tools/qwen35_operator_manifest.json\nprintf \"strict_runtime_rc=%s static_gate=true amd_execution=false\\n\" \"$strict_rc\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T16:55:25+00:00",
+      "exit_code": 0,
+      "id": "qwen35-static-runtime-blocked",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/qwen35-static-runtime-blocked.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "74b381be97288f9a1f22c7a3090f37410cda4af739e343a6c9ace295e02385fc",
+        "size": 3037,
+        "tracked": false
+      },
+      "result": "The Qwen3.5-0.8B 15-contract text-only static gate and five tests pass; strict AMD runtime remains blocked and CPU/NVIDIA fallback is not a pass.",
+      "started_at": "2026-08-09T16:55:19+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/qwen35-static-runtime-blocked.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/qwen35-static-runtime-blocked.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "559efc57a11ca944a950582e5ce4e05aa2668ca4f75d9ed6ff8af89d75800e71",
+        "size": 940,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "bash",
+        "-lc",
+        "set -eu\npython3 - <<\"PY\"\nimport hashlib\nimport json\nfrom pathlib import Path\nroot = Path(\"models/Qwen3.5-0.8B\")\nmanifest_bytes = (root / \"manifest.json\").read_bytes()\nmanifest = json.loads(manifest_bytes)\nassert manifest[\"model_id\"] == \"Qwen/Qwen3.5-0.8B\"\nassert manifest[\"revision\"] == \"2fc06364715b967f1860aea9cf38778875588b17\"\nassert manifest[\"download_status\"] == \"complete\"\nassert len(manifest[\"files\"]) == 4\nprint(\"manifest_sha256=\" + hashlib.sha256(manifest_bytes).hexdigest())\ntotal = 0\nfor name, expected in sorted(manifest[\"files\"].items()):\n    path = root / name\n    actual = hashlib.sha256(path.read_bytes()).hexdigest()\n    assert path.stat().st_size == expected[\"bytes\"], name\n    assert actual == expected[\"sha256\"], name\n    total += path.stat().st_size\n    print(f\"{name} bytes={path.stat().st_size} sha256={actual}\")\nassert total == 1759804389\nprint(\"model=Qwen/Qwen3.5-0.8B revision=\" + manifest[\"revision\"] + f\" files=4 bytes={total} text_only_first_gate=true vision_deferred=true full_rocm_opencl_cts_required=false\")\nPY"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-09T16:55:56+00:00",
+      "exit_code": 0,
+      "id": "qwen35-model-hashes",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0019/qwen35-model-hashes.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d755b0d666909d3141e0ed97e1322eddb7aa7607db701bf04695ee5aa0117106",
+        "size": 1687,
+        "tracked": false
+      },
+      "result": "The pinned Qwen3.5-0.8B model manifest and four offline model files hash-verify at the locked revision.",
+      "started_at": "2026-08-09T16:55:54+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0019/qwen35-model-hashes.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0019/qwen35-model-hashes.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7cf8df928a6a041fa22462d588dd58c77af71e06a55300c9d0584c920a46a2e0",
+        "size": 707,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-09T16:55:56+00:00",
+  "environment_fingerprint": {
+    "checkpoint": "CP-0019",
+    "participant": "gem5",
+    "gem5_base_head": "3af4ab5cc9e7f9174d88a95abb84f7ae5ab16d37",
+    "gem5_base_tree": "e2ab3913ff2d86aaaf70c6f1826b3898f0c0eec4",
+    "gem5_identity_scope": "frozen B1 working tree; final child commit identity intentionally deferred",
+    "gem5_build_options": "BUILD_ISA=n; USE_X86_ISA=n; BUILD_GPU=y; VEGA_GPU_ISA=y",
+    "gem5_linker": "mold",
+    "gem5_link_jobs": 24,
+    "b1_binary_sha256": "d65cd57b496d1044f7e56faa458e9f2ebab81f0fbcfb0ac8afeb0adbdb5a5112",
+    "b1_binary_size": 1816192,
+    "b1_build_id": "7cc98875b6962a065bc2bf7c52340b61aa5023c2",
+    "fresh_relink": true,
+    "fresh_relink_content_identical_to_prior": true,
+    "b1_link_sources": 10,
+    "legacy_hsapp_cp_dispatcher_cu_device_sources_linked": false,
+    "cp18_b0_checker": "pass",
+    "cp17_ptload_checker": "pass",
+    "cp16_fixture_checker": "pass",
+    "cp15_control_checker": "pass",
+    "host_native_boundary_tests": "4/4",
+    "legacy_state_regressions": "8/8",
+    "legacy_gtest_counts": "43/14/8/12/12/12/5/24",
+    "locked_hsaco_sha256": "7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56",
+    "locked_hsaco_size": 5528,
+    "native_address_space_resolved": true,
+    "aql_packet_bytes": 64,
+    "aql_published_to_native_queue_core": true,
+    "aql_submitted_to_native_cp_core": true,
+    "hsa_packet_fetched_count": 1,
+    "command_processor_submitted_count": 1,
+    "aql_retire_count": 0,
+    "host_read_index_updated": false,
+    "legacy_hsapp_simobject_instantiated": false,
+    "legacy_command_processor_simobject_instantiated": false,
+    "legacy_gpu_pipeline_submitted": false,
+    "gpu_dispatcher_instantiated": false,
+    "gpu_dispatcher_started_count": 0,
+    "gpu_pipeline_connected": false,
+    "cu_wave_started": false,
+    "instruction_fetched": false,
+    "signal_decremented": false,
+    "kernel_executed": false,
+    "cpu_fallback": false,
+    "vega_x86": false,
+    "qwen_model_revision": "2fc06364715b967f1860aea9cf38778875588b17",
+    "qwen_model_manifest_sha256": "de2281cc73a1329d13245cb9658be910cf435e72c4ea0277c4f8811a24edf762",
+    "qwen_contract_count": 15,
+    "qwen_static_contracts": "15/15",
+    "qwen_runtime_status": "blocked",
+    "qwen_strict_runtime_exit_code": 2,
+    "triton_e2e_cases": "0/1",
+    "qwen_inference_cases": "0/1",
+    "full_rocm_opencl_cts_required": false
+  },
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0019/gem5-builds/host_gpu_native_b1_core.opt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d65cd57b496d1044f7e56faa458e9f2ebab81f0fbcfb0ac8afeb0adbdb5a5112",
+      "size": 1816192,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0046",
+  "includes": {},
+  "limitations": [
+    "B1 aql_submitted is a deliberately local contract: the extracted HostNativeQueueCore fetched the packet and HostNativeCommandProcessorCore accepted it. It is not submission to the legacy gem5 GPU pipeline.",
+    "The standalone target neither links nor instantiates legacy HSAPP, GPUCommandProcessor SimObject, GPUDispatcher, ComputeUnit, Shader, AMDGPUDevice, System, Process, ThreadContext, x86 ISA, or x86 CPU objects.",
+    "B1 does not update the MQD host read index, retire the AQL packet, decrement its completion signal, start a CU wave, fetch an instruction, execute gfx950 ISA, or compare kernel output. Those are B2 boundaries.",
+    "The CP15/16/17/B0 checkers and eight VEGA_X86 gtest binaries are compatibility evidence for reused components, not evidence that B1 executed a GPU kernel.",
+    "Qwen3.5-0.8B evidence is offline model integrity and 15/15 static operator-contract coverage. The strict AMD runtime gate is blocked by the detected CUDA/NVIDIA environment; CPU/NVIDIA fallback is not a pass, Triton E2E remains 0/1, and Qwen inference remains 0/1.",
+    "No hardware, timing, throughput, latency, power, or performance claim is made, and the full ROCm/OpenCL CTS is outside the requested acceptance scope.",
+    "This detailed evidence intentionally contains the frozen dirty-tree base identity rather than a final gem5 child commit/tree; the coordinator must bind the final clean child identity separately."
+  ],
+  "redactions": [],
+  "result": "CP19-B1 is reproducible at the native queue/CP-core boundary: the fresh no-x86 ELF publishes, fetches, and admits one locked gfx950 dispatch, all earlier host-native and VEGA_X86 regressions stay green, and every post-admission execution flag remains false. B2 must connect retirement, signal completion, one CU wave, ISA execution, and an output differential.",
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-09T16:51:53+00:00",
+  "type": "cp19-b1-host-native-queue-command-processor-core"
+}

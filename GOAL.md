@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0018-host-native-dispatch-admission-B0-accepted; next-P3-HOST-NATIVE-03-B1`
+**Current state:** `CP-0019-host-native-queue-CP-core-B1-accepted; next-P3-HOST-NATIVE-03-B2`
 
 **Current phase:** `P3`
 
@@ -89,7 +89,8 @@ advance a phase without a new checkpoint and root coordinator commit.
 继续执行 amdgpu-sim 计划。当前目录是 /home/zhaosiying/amdgpu-sim。
 先读取 PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、其引用的
 最新 checkpoint/bitlesson/evidence，运行 scripts/resume.sh --verify。
-CP-0018 host-native dispatch-admission B0 boundary 已 accepted；从唯一 next_action `P3-HOST-NATIVE-03-B1` 继续，不要再次
+CP-0019 host-native queue/command-processor-core B1 boundary 已 accepted；从唯一
+next_action `P3-HOST-NATIVE-03-B2` 继续，不要再次
 begin CP-0014，也不要重做 bootstrap、source freeze、authored runtime
 baseline 或已通过的 CP4-CP9 gates，也不要修改已冻结的 SOURCE_LOCK.json
 或已登记的 PROJECT_LANES baseline。CP-0010 只实现 18 个 typed KMT
@@ -107,11 +108,16 @@ CP13 staging、PT_LOAD 文件复制/BSS 清零、descriptor/entry 绑定和 page
 测试，但没有完成动态 AQL/kernarg、GPU instruction execution 或 Triton。CP-0018
 B0 又完成了 no-x86 dispatch admission：descriptor/entry 关系、280-byte
 hidden kernarg、64-byte AQL materialization、queue-control 和 listener-contract
-smoke；这些字段仍只经过 host functional memory，未发布 HSA queue、未提交 AQL、
-未连接 HSAPP/GPUDispatcher/ComputeUnit。下一步先完成
-`P3-HOST-NATIVE-03-B1` 的 native address/translation 与 HSAPP/command-processor
-packet publication，再以独立 B2 gate 证明 CU differential，最后才尝试未修改
-Triton vecadd。
+smoke；这些字段仍只经过 host functional memory，未发布 native queue。CP-0019
+B1 新增了提取出的 `HostNativeQueueCore` 和
+`HostNativeCommandProcessorCore`：在 no-x86 target 中解析 host-owned GPU VA，
+发布、ring、顺序 fetch 一个 64-byte AQL packet，读取 descriptor/MQD/kernarg/
+completion-signal object，并复用 `HSAQueueEntry` 完成 native CP-core admission。
+这里 `aql_submitted=true` 只表示提取出的 native CP core 已接受 packet；legacy
+HSAPP/GPUCommandProcessor SimObject 没有 link 或 instantiate，GPUDispatcher/CU
+也未连接，read index、retire、signal decrement、instruction fetch 和 kernel output
+仍为 false。下一步用独立 B2 gate 连接 no-x86 GPUDispatcher/CU，证明一个锁定
+gfx950 one-wave output/trace differential，然后才尝试未修改 Triton vecadd。
 在 Triton 用户命令 `tutorial/01-vecadd.py`（当前 pinned checkout 中对应未修改的
 `python/tutorials/01-vector-add.py`）首次透明通过后，先完成可复现的 gem5
 算子 profile、80/20 优化和 threadblock host-parallel 正确性/可行性门禁，再
@@ -190,3 +196,18 @@ differential is claimed. Triton remains 0/1 and Qwen inference remains 0/1; the
 static 15-contract Qwen gate is valid but strict AMD execution remains blocked.
 The next unique action is `P3-HOST-NATIVE-03-B1` for native address translation
 and real HSAPP/command-processor packet publication, retaining the no-CU boundary.
+
+`CP-0019` is accepted at the host-native queue/command-processor-core B1
+boundary. The no-x86 `host_gpu_native_b1_core` resolves the CP17/CP18
+host-owned GPU virtual addresses, registers a 64-slot queue, publishes and
+rings one 64-byte AQL packet, fetches it in order, reads the locked descriptor,
+MQD, kernarg, and completion-signal object, and reuses `HSAQueueEntry` for one
+native command-processor-core admission. Its `aql_submitted=true` flag is
+scoped to the extracted native core: legacy HSAPP and GPUCommandProcessor
+SimObjects are neither linked nor instantiated. GPUDispatcher/ComputeUnit
+connection, host read-index update, packet retirement, signal decrement,
+instruction fetch/retirement, ISA execution, and kernel output remain false.
+The CP15-CP18 checkers and eight VEGA_X86 regressions remain green. Triton E2E
+and Qwen inference remain 0/1; the downloaded model and static 15-contract gate
+remain ready. The next unique action is `P3-HOST-NATIVE-03-B2` for a no-x86
+GPUDispatcher/CU one-wave output/trace differential before Triton vecadd.

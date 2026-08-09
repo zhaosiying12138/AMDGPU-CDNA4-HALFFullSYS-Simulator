@@ -17,13 +17,13 @@ boundary needed by those modules.
 
 ## Current boundary
 
-The AMDGPU device SConscript currently returns unless `BUILD_GPU` and
-`USE_X86_ISA` are enabled. In contrast, the generic `gpu-compute` and
-`arch/amdgpu/vega` SConscripts are guarded by `BUILD_GPU`; the x86 dependency
-is concentrated in the AMDGPU device/system front-end and in configurations
-that construct an x86 `System`, CPU ports, and Ruby/SE memory context. This
-gives us a measurable first gate: compile and link the reusable GPU set with
-the x86 front-end excluded, then audit symbols and dynamic dependencies.
+The CP14 inventory found that the legacy AMDGPU device front-end depends on
+`USE_X86_ISA`, `System`, CPU ports, and Ruby/SE memory context even though the
+generic GPU/Vega layers are primarily guarded by `BUILD_GPU`. CP15-CP19 now
+build standalone `HOSTGPU_NATIVE_CONTROL` executables with `BUILD_ISA=n`,
+`USE_X86_ISA=n`, `BUILD_GPU=y`, and `VEGA_GPU_ISA=y`. B1 extracts the
+host-owned address, queue, and command-processor admission responsibilities;
+the legacy device/system front-end remains present as the reference path.
 
 The host-native process must preserve the CP8/CP13 fixed-width transport and
 the runtime ownership/generation rules. It must not introduce a second wire
@@ -61,12 +61,18 @@ execute kernels on the CPU.
 The first three gates are prerequisites for the Triton gate. CP-0017-A passes
 the bounded PT_LOAD staging sub-gate only. CP-0018-B0 adds host-native
 dispatch admission and listener-contract smoke: descriptor/entry validation,
-280-byte hidden kernarg, 64-byte AQL materialization, and queue-control state,
-without HSA queue publication or GPU-pipeline execution. No current checkpoint
-claims a B0 GPU instruction differential or Triton end-to-end (currently 0/1).
-The next gate is `P3-HOST-NATIVE-03-B1`, native address translation and real
-HSAPP/command-processor packet publication; `B2` reserves the first CU
-differential.
+280-byte hidden kernarg, 64-byte AQL materialization, and queue-control state.
+CP-0019-B1 adds `HostNativeQueueCore` and
+`HostNativeCommandProcessorCore`: host-owned GPU-VA resolution, queue
+registration, AQL publish/ring/fetch, descriptor/MQD/kernarg/signal-object
+reads, and `HSAQueueEntry` admission. It reuses the existing packet and queue
+ABIs but does not link or instantiate legacy HSAPP/GPUCommandProcessor
+SimObjects. Its `aql_submitted=true` flag is scoped to the extracted native CP
+core. The MQD host read index is unchanged, and GPUDispatcher/CU connection,
+packet retirement, signal decrement, instruction fetch/retirement, ISA
+execution, and output differential remain false. The next gate is
+`P3-HOST-NATIVE-03-B2`, the no-x86 GPUDispatcher/CU one-wave output/trace
+differential. Triton end-to-end remains 0/1.
 
 ## Non-goals
 

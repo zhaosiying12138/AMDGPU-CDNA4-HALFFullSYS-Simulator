@@ -163,10 +163,22 @@ and control-state evidence only: no HSA queue publication, HSAPP/
 GPUCommandProcessor/GPUDispatcher/ComputeUnit instantiation, AQL submission,
 instruction execution, or GPU output/trace differential is claimed. The static
 Qwen 15-contract gate and offline model hashes remain valid, but strict AMD
-execution is blocked; Triton E2E and Qwen inference remain `0/1`. The next action
-is `P3-HOST-NATIVE-03-B1` for native address translation and real
-HSAPP/command-processor packet publication, with B2 reserved for the first CU
-differential.
+execution is blocked; Triton E2E and Qwen inference remain `0/1`. Its historical
+next action was `P3-HOST-NATIVE-03-B1`, now accepted by CP-0019 below.
+
+`CP-0019` is accepted at the host-native queue/command-processor-core B1
+boundary. The no-x86 target resolves host-owned GPU virtual addresses,
+registers a 64-slot queue, publishes and rings one 64-byte AQL packet, fetches
+it in order, reads the locked descriptor/MQD/kernarg/completion-signal object,
+and reuses `HSAQueueEntry` for one native CP-core admission. Here
+`aql_submitted=true` means accepted by the extracted native core only: legacy
+HSAPP and GPUCommandProcessor SimObjects are neither linked nor instantiated.
+GPUDispatcher/CU connection, host read-index update, packet retirement, signal
+decrement, instruction fetch/retirement, ISA execution, and kernel output all
+remain false. The next action is `P3-HOST-NATIVE-03-B2` for the no-x86
+GPUDispatcher/CU one-wave output/trace differential, followed by Triton vecadd.
+The Qwen model and static 15-contract gate remain ready, but strict AMD
+execution is still blocked and Qwen inference remains `0/1`.
 
 The Qwen smoke now also supports importlib-loaded source-contract tests by
 explicitly adding the repository and `tools/` roots; this fixes test loading only

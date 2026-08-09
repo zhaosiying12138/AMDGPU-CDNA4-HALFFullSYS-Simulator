@@ -1,0 +1,23 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_queue_core.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_b1_main.cc",
+    "projects/gem5/util/host_native/check_control_core.py",
+    "state/evidence/EV-0046.json"
+  ],
+  "checkpoint_id": "CP-0019",
+  "conclusion": "AQL publication, fetch, dispatch admission, retirement, MQD read-index update, and completion signaling are distinct commit points and must not share one success flag.",
+  "confidence": "high",
+  "decision": "Keep B1 stopped with fetch_index=1 and dispatch_index=1 while read_index=0, retire_index=0, host_read_index_updated=false, and signal_decremented=false; make B2 prove the later commit points causally through the CU trace and output oracle.",
+  "evidence_ids": ["EV-0046"],
+  "id": "BL-0084",
+  "invalidated_assumptions": [
+    "Fetching and admitting a packet permits advancing the host-visible read index.",
+    "A native command-processor submission implies packet retirement or completion-signal decrement."
+  ],
+  "observation": "The B1 queue accepts one publish/ring/fetch/admit sequence and rejects skipped-ring, malformed MQD, malformed packet, and in-flight unregister cases, but deliberately synthesizes no retirement and leaves the host-visible read index unchanged.",
+  "question_or_symptom": "Which state transition is safe to accept before a real no-x86 CU consumer exists?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}
