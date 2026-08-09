@@ -35,7 +35,16 @@ enum {
   SAGR_WIRE_DISPATCH_RESULT_FRAME_BYTES =
       SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_DISPATCH_RESULT_PAYLOAD_BYTES,
   SAGR_WIRE_KMT_FRAME_BYTES =
-      SAGR_WIRE_HEADER_BYTES + SAGR_KMT_PAYLOAD_BYTES
+      SAGR_WIRE_HEADER_BYTES + SAGR_KMT_PAYLOAD_BYTES,
+  SAGR_WIRE_CODE_OBJECT_PAYLOAD_BYTES = 4016,
+  SAGR_WIRE_CODE_OBJECT_FRAME_BYTES =
+      SAGR_WIRE_HEADER_BYTES + SAGR_WIRE_CODE_OBJECT_PAYLOAD_BYTES,
+  SAGR_WIRE_CODE_OBJECT_PREFIX_BYTES = 48,
+  SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES = 3968,
+  SAGR_WIRE_CODE_OBJECT_MAX_SEGMENTS = 16,
+  SAGR_WIRE_CODE_OBJECT_NAME_BYTES = 128,
+  SAGR_WIRE_CODE_OBJECT_DESCRIPTOR_BYTES = 64,
+  SAGR_WIRE_CODE_OBJECT_MAX_IMAGE_BYTES = 67108864
 };
 
 enum {
@@ -92,6 +101,14 @@ enum {
   SAGR_WIRE_MESSAGE_KMT_REQUEST = SAGR_KMT_MESSAGE_REQUEST,
   SAGR_WIRE_MESSAGE_KMT_RESULT = SAGR_KMT_MESSAGE_RESULT,
   SAGR_WIRE_MESSAGE_KMT_ACK = SAGR_KMT_MESSAGE_ACK
+};
+
+enum {
+  SAGR_WIRE_MESSAGE_CODE_OBJECT_REQUEST = 16,
+  SAGR_WIRE_MESSAGE_CODE_OBJECT_ACK = 17,
+  SAGR_WIRE_CODE_OBJECT_OPCODE_BEGIN = 1,
+  SAGR_WIRE_CODE_OBJECT_OPCODE_CHUNK = 2,
+  SAGR_WIRE_CODE_OBJECT_OPCODE_COMMIT = 3
 };
 
 typedef struct sagr_wire_queue_request {
@@ -220,6 +237,100 @@ typedef struct sagr_wire_dispatch_response {
   uint64_t request_id;
   uint16_t message_type;
 } sagr_wire_dispatch_response_t;
+
+typedef struct sagr_wire_code_object_segment {
+  uint32_t type;
+  uint32_t flags;
+  uint64_t file_offset;
+  uint64_t virtual_address;
+  uint64_t file_size;
+  uint64_t memory_size;
+  uint64_t alignment;
+} sagr_wire_code_object_segment_t;
+
+typedef struct sagr_wire_code_object_begin {
+  uint64_t image_size;
+  uint32_t chunk_data_bytes;
+  uint32_t chunk_count;
+  uint32_t segment_count;
+  uint32_t kernel_index;
+  uint8_t image_sha256[32];
+  uint16_t elf_machine;
+  uint16_t elf_type;
+  uint8_t elf_osabi;
+  uint8_t elf_abi_version;
+  uint16_t reserved0;
+  uint32_t elf_flags;
+  uint32_t gfx_target;
+  uint32_t code_object_version;
+  uint32_t metadata_major;
+  uint32_t metadata_minor;
+  uint32_t relocation_count;
+  uint32_t kernarg_segment_size;
+  uint32_t kernarg_segment_align;
+  uint32_t group_segment_fixed_size;
+  uint32_t private_segment_fixed_size;
+  uint32_t max_flat_workgroup_size;
+  uint32_t wavefront_size;
+  uint32_t sgpr_count;
+  uint32_t vgpr_count;
+  uint32_t uses_dynamic_stack;
+  uint32_t descriptor_size;
+  int64_t descriptor_kernel_code_entry_byte_offset;
+  uint64_t code_address;
+  uint64_t code_file_offset;
+  uint64_t code_size;
+  uint64_t descriptor_address;
+  uint64_t descriptor_file_offset;
+  char kernel_name[SAGR_WIRE_CODE_OBJECT_NAME_BYTES];
+  char symbol[SAGR_WIRE_CODE_OBJECT_NAME_BYTES];
+  uint8_t descriptor[SAGR_WIRE_CODE_OBJECT_DESCRIPTOR_BYTES];
+  sagr_wire_code_object_segment_t
+      segments[SAGR_WIRE_CODE_OBJECT_MAX_SEGMENTS];
+} sagr_wire_code_object_begin_t;
+
+typedef struct sagr_wire_code_object_request {
+  uint16_t major;
+  uint16_t minor;
+  uint16_t opcode;
+  uint16_t flags;
+  uint64_t object_id;
+  uint64_t generation;
+  uint64_t image_offset;
+  uint32_t byte_count;
+  uint32_t chunk_index;
+  uint32_t chunk_crc32c;
+  union {
+    sagr_wire_code_object_begin_t begin;
+    uint8_t chunk[SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES];
+    uint8_t commit_sha256[32];
+  } body;
+} sagr_wire_code_object_request_t;
+
+typedef struct sagr_wire_code_object_response {
+  uint16_t major;
+  uint16_t minor;
+  uint32_t status;
+  uint16_t opcode;
+  uint16_t flags;
+  uint64_t object_id;
+  uint64_t generation;
+  uint64_t accepted_offset;
+  uint32_t accepted_count;
+  uint32_t chunk_index;
+  uint64_t mapped_base_va;
+  uint64_t descriptor_va;
+  uint64_t code_va;
+  uint64_t kernarg_va;
+  uint64_t image_size;
+  uint32_t kernel_index;
+  uint32_t segment_count;
+  uint64_t sim_tick;
+  uint8_t image_sha256[32];
+  uint32_t error_code;
+  uint32_t reserved0;
+  uint64_t request_id;
+} sagr_wire_code_object_response_t;
 
 extern const uint8_t sagr_dispatch_fixture_manifest_sha256[32];
 
@@ -368,6 +479,26 @@ sagr_status_t sagr_protocol_encode_kmt_result(
 sagr_status_t sagr_protocol_decode_kmt_result(
     const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
     uint64_t expected_request_id, sagr_kmt_envelope_result_t *result,
+    int32_t *wire_status, const char **reason);
+
+sagr_status_t sagr_protocol_encode_code_object_request(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_wire_code_object_request_t *request, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size);
+
+sagr_status_t sagr_protocol_decode_code_object_request(
+    const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
+    sagr_wire_code_object_request_t *request, uint64_t *request_id,
+    const char **reason);
+
+sagr_status_t sagr_protocol_encode_code_object_response(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_wire_code_object_response_t *response, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size);
+
+sagr_status_t sagr_protocol_decode_code_object_response(
+    const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
+    uint64_t expected_request_id, sagr_wire_code_object_response_t *response,
     int32_t *wire_status, const char **reason);
 
 sagr_status_t sagr_protocol_map_wire_status(uint32_t status);

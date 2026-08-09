@@ -3,8 +3,10 @@
 #define _GNU_SOURCE
 
 #include <self_amdgpu_runtime/runtime.h>
+#include <self_amdgpu_runtime/code_object.h>
 
 #include "transport_internal.h"
+#include "sha256_internal.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -215,6 +217,12 @@ static sagr_status_t validate_options(
   const int kmt_required =
       (options->required_capabilities[SAGR_CAPABILITY_KMT_WORD] &
        SAGR_CAPABILITY_KMT_MASK) != 0;
+  const int code_object_offered =
+      (options->offered_capabilities[SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_WORD] &
+       SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK) != 0;
+  const int code_object_required =
+      (options->required_capabilities[SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_WORD] &
+       SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK) != 0;
   if (options->struct_size < sizeof(*options) || options->flags != 0 ||
       options->cancel_fd < -1 || options->reserved0 != 0 ||
       !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
@@ -235,6 +243,7 @@ static sagr_status_t validate_options(
       signal_offered != signal_required ||
       dispatch_offered != dispatch_required ||
       kmt_offered != kmt_required ||
+      code_object_offered != code_object_required ||
       (dispatch_required != 0 &&
        (queue_required == 0 || memory_required == 0 ||
         signal_required == 0))) {
@@ -981,6 +990,13 @@ static int kmt_capability_selected(const struct sagr_instance *instance) {
           SAGR_KMT_CAPABILITY_MASK) != 0;
 }
 
+static int code_object_capability_selected(
+    const struct sagr_instance *instance) {
+  return (instance->info.negotiated_capabilities[
+              SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_WORD] &
+          SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK) != 0;
+}
+
 static void poison_queue_transport(struct sagr_instance *instance) {
   instance->transport_poisoned = 1;
   if (instance->socket_fd >= 0) {
@@ -1027,6 +1043,26 @@ static sagr_status_t require_dispatch_transport(
                      "dispatch transport is no longer reusable");
   }
   return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t require_code_object_transport(
+    const struct sagr_instance *instance, sagr_error_info_t *error,
+    uint32_t error_size) {
+  if (instance->transport_poisoned != 0 || instance->socket_fd < 0) {
+    return fail_open(error, error_size, SAGR_STATUS_CONNECTION_LOST, -1, 0,
+                     "code-object transport is no longer reusable");
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static int code_object_commit_matches_manifest(
+    const sagr_wire_code_object_request_t *request, uint64_t image_size,
+    uint32_t chunk_count) {
+  return request != NULL && request->opcode ==
+                                SAGR_WIRE_CODE_OBJECT_OPCODE_COMMIT &&
+         request->image_offset == 0U &&
+         request->byte_count == image_size &&
+         request->chunk_index == chunk_count && request->chunk_crc32c == 0U;
 }
 
 static int memory_id_is_active(const struct sagr_instance *instance,
@@ -2291,6 +2327,77 @@ static sagr_status_t receive_signal_completion(
   }
 }
 
+static sagr_status_t receive_code_object_ack(
+    struct sagr_instance *instance,
+    const sagr_wire_code_object_request_t *request, uint64_t request_id,
+    const monotonic_deadline_t *deadline, int cancel_fd,
+    sagr_wire_code_object_response_t *response, int32_t *wire_status,
+    int *native_errno, const char **reason, int *poison) {
+  uint8_t frame[SAGR_WIRE_CODE_OBJECT_FRAME_BYTES];
+  for (;;) {
+    size_t frame_size = 0U;
+    uint16_t message_type;
+    int32_t decoded_wire_status = -1;
+    sagr_status_t status = receive_record(
+        instance->socket_fd, frame, sizeof(frame), &frame_size, deadline,
+        cancel_fd, native_errno);
+    if (status != SAGR_STATUS_SUCCESS) {
+      *reason = "code-object ACK receive failed";
+      *poison = 1;
+      return status;
+    }
+    message_type = queue_frame_type(frame, frame_size);
+    if (message_type == SAGR_WIRE_MESSAGE_QUEUE_COMPLETION) {
+      sagr_wire_queue_response_t completion;
+      status = sagr_protocol_decode_queue_response(
+          frame, frame_size, &instance->info, 0,
+          SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &completion,
+          &decoded_wire_status, reason);
+      if ((status != SAGR_STATUS_SUCCESS && decoded_wire_status < 0) ||
+          completion.request_id == request_id ||
+          buffer_completion(instance, &completion) != SAGR_STATUS_SUCCESS) {
+        *reason =
+            "invalid queue completion while waiting for code-object ACK";
+        *poison = 1;
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      continue;
+    }
+    if (message_type == SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION) {
+      status = decode_and_buffer_signal_completion(
+          instance, frame, frame_size, request_id, 0, 0, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        *poison = 1;
+        return status;
+      }
+      continue;
+    }
+    if (message_type == SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION) {
+      status = decode_and_buffer_dispatch_completion(
+          instance, frame, frame_size, request_id, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        *poison = 1;
+        return status;
+      }
+      continue;
+    }
+    status = sagr_protocol_decode_code_object_response(
+        frame, frame_size, &instance->info, request_id, response,
+        &decoded_wire_status, reason);
+    *wire_status = decoded_wire_status;
+    if (status != SAGR_STATUS_SUCCESS && decoded_wire_status < 0) {
+      *poison = 1;
+      return status;
+    }
+    if (response->opcode != request->opcode) {
+      *reason = "code-object ACK opcode mismatch";
+      *poison = 1;
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+    return status;
+  }
+}
+
 sagr_status_t sagr_transport_kmt_exchange(
     sagr_instance_t opaque_instance, const sagr_kmt_envelope_request_t *request,
     const sagr_kmt_call_options_t *options,
@@ -2432,6 +2539,397 @@ sagr_status_t sagr_transport_kmt_exchange(
     (void)snprintf(error->message, sizeof(error->message), "%s", reason);
   }
   return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t
+sagr_code_object_upload(
+    sagr_instance_t opaque_instance, const void *image, size_t image_size,
+    const char *kernel_name,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_code_object_remote_info_t *remote, uint32_t remote_size,
+    sagr_error_info_t *error, uint32_t error_size)
+{
+  struct sagr_instance *instance = (struct sagr_instance *)opaque_instance;
+  sagr_queue_operation_options_t local_options;
+  monotonic_deadline_t deadline;
+  sagr_code_object_info_t parsed;
+  sagr_code_object_kernel_info_t kernel;
+  sagr_code_object_dispatch_binding_t binding;
+  sagr_wire_code_object_request_t request;
+  sagr_wire_code_object_response_t response;
+  uint8_t digest[32];
+  uint8_t request_frame[SAGR_WIRE_CODE_OBJECT_FRAME_BYTES];
+  size_t request_size = 0U;
+  uint64_t request_id = 0U;
+  uint64_t object_id = 0U;
+  uint64_t generation = 0U;
+  uint32_t chunk_count;
+  uint32_t chunk_index;
+  uint64_t image_offset;
+  int native_errno = 0;
+  int record_sent = 0;
+  int poison = 0;
+  int transaction_started = 0;
+  int32_t decoded_wire_status = -1;
+  sagr_status_t status = SAGR_STATUS_SUCCESS;
+  const char *reason = "code-object upload failed";
+
+  initialize_error(error, error_size);
+  if (remote != NULL && remote_size >= sizeof(*remote)) {
+    memset(remote, 0, sizeof(*remote));
+    remote->struct_size = (uint32_t)sizeof(*remote);
+  }
+  if (instance == NULL || instance->magic != SAGR_INSTANCE_MAGIC ||
+      image == NULL || image_size == 0U ||
+      image_size > SAGR_CODE_OBJECT_TRANSPORT_MAX_IMAGE_BYTES ||
+      kernel_name == NULL || kernel_name[0] == '\0' || remote == NULL ||
+      (error == NULL && error_size != 0U)) {
+    return fail_open(error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                     "invalid code-object upload arguments");
+  }
+  if (remote_size < sizeof(*remote)) {
+    if (remote_size >= sizeof(remote->struct_size)) {
+      remote->struct_size = (uint32_t)sizeof(*remote);
+    }
+    return fail_open(error, error_size, SAGR_STATUS_BUFFER_TOO_SMALL, -1, 0,
+                     "code-object remote result is too small");
+  }
+  memset(&parsed, 0, sizeof(parsed));
+  status = sagr_code_object_validate(image, image_size, &parsed,
+                                     (uint32_t)sizeof(parsed));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(error, error_size, status, -1, 0,
+                     "HSACO image failed local validation");
+  }
+  memset(&kernel, 0, sizeof(kernel));
+  status = sagr_code_object_get_kernel(&parsed, kernel_name, &kernel,
+                                       (uint32_t)sizeof(kernel));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(error, error_size, status, -1, 0,
+                     "requested HSACO kernel was not found");
+  }
+  memset(&binding, 0, sizeof(binding));
+  status = sagr_code_object_describe_dispatch(
+      &parsed, kernel_name, image_size, &binding, (uint32_t)sizeof(binding));
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(error, error_size, status, -1, 0,
+                     "requested HSACO kernel could not be bound");
+  }
+  if (!code_object_capability_selected(instance)) {
+    return fail_open(error, error_size, SAGR_STATUS_NOT_SUPPORTED,
+                     SAGR_WIRE_STATUS_UNSUPPORTED_CAPABILITY, 0,
+                     "code-object transport capability was not negotiated");
+  }
+  status = require_code_object_transport(instance, error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (operation_options == NULL) {
+    status = sagr_queue_operation_options_init(
+        &local_options, (uint32_t)sizeof(local_options));
+    if (status != SAGR_STATUS_SUCCESS) {
+      return fail_open(error, error_size, status, -1, 0,
+                       "could not initialize code-object operation options");
+    }
+  } else {
+    if (operation_options->struct_size < sizeof(*operation_options)) {
+      return fail_open(error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                       "code-object operation options are too small");
+    }
+    memcpy(&local_options, operation_options, sizeof(local_options));
+  }
+  status = validate_queue_operation_options(&local_options);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(error, error_size, status, -1, 0,
+                     "invalid code-object operation options");
+  }
+  if (local_options.cancel_fd >= 0) {
+    const int fd_flags = fcntl(local_options.cancel_fd, F_GETFD);
+    if (fd_flags < 0 || (fd_flags & FD_CLOEXEC) == 0) {
+      return fail_open(error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1,
+                       fd_flags < 0 ? errno : EINVAL,
+                       "code-object cancellation fd must be CLOEXEC");
+    }
+  }
+  if (make_deadline(local_options.timeout_ns, local_options.absolute_deadline_ns,
+                    &deadline) != 0) {
+    return fail_open(error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, errno,
+                     "invalid code-object deadline");
+  }
+  if (instance->operation_active != 0) {
+    return fail_open(error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "another transport operation is active");
+  }
+  sagr_sha256(image, image_size, digest);
+  chunk_count = (uint32_t)((image_size +
+                            SAGR_CODE_OBJECT_TRANSPORT_CHUNK_BYTES - 1U) /
+                           SAGR_CODE_OBJECT_TRANSPORT_CHUNK_BYTES);
+  memset(&request, 0, sizeof(request));
+  request.major = SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MAJOR;
+  request.minor = SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MINOR;
+  request.opcode = SAGR_WIRE_CODE_OBJECT_OPCODE_BEGIN;
+  request.body.begin.image_size = (uint64_t)image_size;
+  request.body.begin.chunk_data_bytes =
+      SAGR_CODE_OBJECT_TRANSPORT_CHUNK_BYTES;
+  request.body.begin.chunk_count = chunk_count;
+  request.body.begin.segment_count = parsed.segment_count;
+  request.body.begin.kernel_index = kernel.index;
+  memcpy(request.body.begin.image_sha256, digest, sizeof(digest));
+  request.body.begin.elf_machine = parsed.elf_machine;
+  request.body.begin.elf_type = parsed.elf_type;
+  request.body.begin.elf_osabi = parsed.elf_osabi;
+  request.body.begin.elf_abi_version = parsed.elf_abi_version;
+  request.body.begin.elf_flags = parsed.elf_flags;
+  request.body.begin.gfx_target = parsed.gfx_target;
+  request.body.begin.code_object_version = parsed.code_object_version;
+  request.body.begin.metadata_major = parsed.metadata_major;
+  request.body.begin.metadata_minor = parsed.metadata_minor;
+  request.body.begin.relocation_count = parsed.relocation_count;
+  request.body.begin.kernarg_segment_size = kernel.kernarg_segment_size;
+  request.body.begin.kernarg_segment_align = kernel.kernarg_segment_align;
+  request.body.begin.group_segment_fixed_size =
+      kernel.group_segment_fixed_size;
+  request.body.begin.private_segment_fixed_size =
+      kernel.private_segment_fixed_size;
+  request.body.begin.max_flat_workgroup_size = kernel.max_flat_workgroup_size;
+  request.body.begin.wavefront_size = kernel.wavefront_size;
+  request.body.begin.sgpr_count = kernel.sgpr_count;
+  request.body.begin.vgpr_count = kernel.vgpr_count;
+  request.body.begin.uses_dynamic_stack = kernel.uses_dynamic_stack;
+  request.body.begin.descriptor_size = binding.descriptor_size;
+  request.body.begin.descriptor_kernel_code_entry_byte_offset =
+      binding.descriptor_kernel_code_entry_byte_offset;
+  request.body.begin.code_address = binding.code_address;
+  request.body.begin.code_file_offset = binding.code_file_offset;
+  request.body.begin.code_size = binding.code_size;
+  request.body.begin.descriptor_address = binding.descriptor_address;
+  request.body.begin.descriptor_file_offset = binding.descriptor_file_offset;
+  memcpy(request.body.begin.kernel_name, kernel.name,
+         SAGR_CODE_OBJECT_NAME_BYTES);
+  memcpy(request.body.begin.symbol, kernel.symbol,
+         SAGR_CODE_OBJECT_NAME_BYTES);
+  memcpy(request.body.begin.descriptor, kernel.descriptor,
+         SAGR_CODE_OBJECT_DESCRIPTOR_BYTES);
+  for (chunk_index = 0; chunk_index < parsed.segment_count; ++chunk_index) {
+    request.body.begin.segments[chunk_index].type =
+        parsed.segments[chunk_index].type;
+    request.body.begin.segments[chunk_index].flags =
+        parsed.segments[chunk_index].flags;
+    request.body.begin.segments[chunk_index].file_offset =
+        parsed.segments[chunk_index].file_offset;
+    request.body.begin.segments[chunk_index].virtual_address =
+        parsed.segments[chunk_index].virtual_address;
+    request.body.begin.segments[chunk_index].file_size =
+        parsed.segments[chunk_index].file_size;
+    request.body.begin.segments[chunk_index].memory_size =
+        parsed.segments[chunk_index].memory_size;
+    request.body.begin.segments[chunk_index].alignment =
+        parsed.segments[chunk_index].alignment;
+  }
+
+  instance->operation_active = 1;
+  for (;;) {
+    sagr_wire_code_object_response_t decoded;
+    status = sagr_protocol_allocate_request_id(&instance->next_request_id,
+                                               &request_id);
+    if (status != SAGR_STATUS_SUCCESS) {
+      reason = "code-object request ID space exhausted";
+      goto upload_fail;
+    }
+    status = sagr_protocol_encode_code_object_request(
+        &instance->info, request_id, &request, request_frame,
+        sizeof(request_frame), &request_size);
+    if (status != SAGR_STATUS_SUCCESS) {
+      reason = "could not encode code-object BEGIN";
+      goto upload_fail;
+    }
+    status = send_record(instance->socket_fd, request_frame, request_size,
+                         &deadline, local_options.cancel_fd, &native_errno,
+                         &record_sent);
+    if (status != SAGR_STATUS_SUCCESS) {
+      reason = "code-object BEGIN send failed";
+      poison = record_sent != 0;
+      goto upload_fail;
+    }
+    decoded_wire_status = -1;
+    status = receive_code_object_ack(
+        instance, &request, request_id, &deadline, local_options.cancel_fd,
+        &decoded, &decoded_wire_status, &native_errno, &reason, &poison);
+    if (status != SAGR_STATUS_SUCCESS) {
+      goto upload_fail;
+    }
+    if (decoded.opcode != SAGR_WIRE_CODE_OBJECT_OPCODE_BEGIN ||
+        decoded.object_id == 0U || decoded.generation == 0U ||
+        decoded.accepted_offset != 0U || decoded.accepted_count != 0U ||
+        decoded.chunk_index != 0U || decoded.image_size != image_size ||
+        decoded.kernel_index != kernel.index ||
+        decoded.segment_count != parsed.segment_count ||
+        memcmp(decoded.image_sha256, digest, sizeof(digest)) != 0) {
+      status = SAGR_STATUS_PROTOCOL_ERROR;
+      reason = "code-object BEGIN ACK identity mismatch";
+      poison = 1;
+      goto upload_fail;
+    }
+    object_id = decoded.object_id;
+    generation = decoded.generation;
+    transaction_started = 1;
+    break;
+  }
+
+  for (chunk_index = 0, image_offset = 0U; chunk_index < chunk_count;
+       ++chunk_index) {
+    const size_t remaining = image_size - (size_t)image_offset;
+    const uint32_t chunk_bytes = (uint32_t)(remaining >
+                                                    SAGR_CODE_OBJECT_TRANSPORT_CHUNK_BYTES
+                                                ? SAGR_CODE_OBJECT_TRANSPORT_CHUNK_BYTES
+                                                : remaining);
+    memset(&request, 0, sizeof(request));
+    request.major = SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MAJOR;
+    request.minor = SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MINOR;
+    request.opcode = SAGR_WIRE_CODE_OBJECT_OPCODE_CHUNK;
+    request.object_id = object_id;
+    request.generation = generation;
+    request.image_offset = image_offset;
+    request.byte_count = chunk_bytes;
+    request.chunk_index = chunk_index;
+    memcpy(request.body.chunk, (const uint8_t *)image + image_offset,
+           chunk_bytes);
+    request.chunk_crc32c = sagr_crc32c(request.body.chunk, chunk_bytes);
+    status = sagr_protocol_allocate_request_id(&instance->next_request_id,
+                                               &request_id);
+    if (status != SAGR_STATUS_SUCCESS) {
+      reason = "code-object chunk request ID space exhausted";
+      goto upload_fail;
+    }
+    status = sagr_protocol_encode_code_object_request(
+        &instance->info, request_id, &request, request_frame,
+        sizeof(request_frame), &request_size);
+    if (status != SAGR_STATUS_SUCCESS) {
+      reason = "could not encode code-object CHUNK";
+      goto upload_fail;
+    }
+    record_sent = 0;
+    status = send_record(instance->socket_fd, request_frame, request_size,
+                         &deadline, local_options.cancel_fd, &native_errno,
+                         &record_sent);
+    if (status != SAGR_STATUS_SUCCESS) {
+      reason = "code-object CHUNK send failed";
+      poison = record_sent != 0;
+      goto upload_fail;
+    }
+    decoded_wire_status = -1;
+    status = receive_code_object_ack(
+        instance, &request, request_id, &deadline, local_options.cancel_fd,
+        &response, &decoded_wire_status, &native_errno, &reason, &poison);
+    if (status != SAGR_STATUS_SUCCESS) {
+      if (decoded_wire_status >= 0 && poison == 0) {
+        transaction_started = 0;
+      }
+      goto upload_fail;
+    }
+    if (response.opcode != SAGR_WIRE_CODE_OBJECT_OPCODE_CHUNK ||
+        response.object_id != object_id || response.generation != generation ||
+        response.accepted_offset != image_offset ||
+        response.accepted_count != chunk_bytes ||
+        response.chunk_index != chunk_index) {
+      status = SAGR_STATUS_PROTOCOL_ERROR;
+      reason = "code-object CHUNK ACK progress mismatch";
+      poison = 1;
+      goto upload_fail;
+    }
+    image_offset += chunk_bytes;
+  }
+
+  memset(&request, 0, sizeof(request));
+  request.major = SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MAJOR;
+  request.minor = SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MINOR;
+  request.opcode = SAGR_WIRE_CODE_OBJECT_OPCODE_COMMIT;
+  request.object_id = object_id;
+  request.generation = generation;
+  request.byte_count = (uint32_t)image_size;
+  request.chunk_index = chunk_count;
+  memcpy(request.body.commit_sha256, digest, sizeof(digest));
+  if (!code_object_commit_matches_manifest(&request, image_size,
+                                           chunk_count)) {
+    status = SAGR_STATUS_PROTOCOL_ERROR;
+    reason = "code-object COMMIT manifest mismatch";
+    poison = 1;
+    goto upload_fail;
+  }
+  status = sagr_protocol_allocate_request_id(&instance->next_request_id,
+                                             &request_id);
+  if (status != SAGR_STATUS_SUCCESS) {
+    reason = "code-object COMMIT request ID space exhausted";
+    goto upload_fail;
+  }
+  status = sagr_protocol_encode_code_object_request(
+      &instance->info, request_id, &request, request_frame,
+      sizeof(request_frame), &request_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    reason = "could not encode code-object COMMIT";
+    goto upload_fail;
+  }
+  record_sent = 0;
+  status = send_record(instance->socket_fd, request_frame, request_size,
+                       &deadline, local_options.cancel_fd, &native_errno,
+                       &record_sent);
+  if (status != SAGR_STATUS_SUCCESS) {
+    reason = "code-object COMMIT send failed";
+    poison = record_sent != 0;
+    goto upload_fail;
+  }
+  decoded_wire_status = -1;
+  status = receive_code_object_ack(
+      instance, &request, request_id, &deadline, local_options.cancel_fd,
+      &response, &decoded_wire_status, &native_errno, &reason, &poison);
+  if (status != SAGR_STATUS_SUCCESS) {
+    if (decoded_wire_status >= 0 && poison == 0) {
+      transaction_started = 0;
+    }
+    goto upload_fail;
+  }
+  if (response.opcode != SAGR_WIRE_CODE_OBJECT_OPCODE_COMMIT ||
+      response.object_id != object_id || response.generation != generation ||
+      response.accepted_offset != image_size ||
+      response.accepted_count != (uint32_t)image_size ||
+      response.chunk_index != chunk_count || response.image_size != image_size ||
+      response.kernel_index != kernel.index ||
+      response.segment_count != parsed.segment_count ||
+      memcmp(response.image_sha256, digest, sizeof(digest)) != 0 ||
+      response.mapped_base_va != 0U || response.descriptor_va != 0U ||
+      response.code_va != 0U || response.kernarg_va != 0U) {
+    status = SAGR_STATUS_PROTOCOL_ERROR;
+    reason = "code-object COMMIT ACK identity or mapping boundary mismatch";
+    poison = 1;
+    goto upload_fail;
+  }
+  memcpy(remote->image_sha256, digest, sizeof(digest));
+  remote->flags = SAGR_CODE_OBJECT_REMOTE_FLAG_STAGED_IDENTITY_ONLY;
+  remote->object_id = object_id;
+  remote->generation = generation;
+  remote->image_size = image_size;
+  remote->kernel_index = kernel.index;
+  remote->segment_count = parsed.segment_count;
+  transaction_started = 0;
+  instance->operation_active = 0;
+  if (error != NULL && error_size >= sizeof(*error)) {
+    error->status = SAGR_STATUS_SUCCESS;
+    error->wire_status = SAGR_WIRE_STATUS_OK;
+    (void)snprintf(error->message, sizeof(error->message),
+                   "%s", "code-object image staged and committed");
+  }
+  return SAGR_STATUS_SUCCESS;
+
+upload_fail:
+  if (transaction_started != 0) {
+    poison = 1;
+  }
+  if (poison != 0) {
+    poison_queue_transport(instance);
+  }
+  instance->operation_active = 0;
+  return fail_open(error, error_size, status, decoded_wire_status,
+                   native_errno, reason);
 }
 
 sagr_status_t sagr_instance_open(

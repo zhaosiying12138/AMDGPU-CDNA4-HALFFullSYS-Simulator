@@ -35,6 +35,11 @@ extern "C" {
 #define SAGR_CODE_OBJECT_VALUE_KIND_BYTES UINT32_C(64)
 #define SAGR_CODE_OBJECT_DISPATCH_FLAG_METADATA_ONLY UINT32_C(1)
 #define SAGR_CODE_OBJECT_DISPATCH_FLAG_REQUIRES_CODE_OBJECT_TRANSPORT UINT32_C(2)
+#define SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MAJOR UINT16_C(1)
+#define SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MINOR UINT16_C(0)
+#define SAGR_CODE_OBJECT_TRANSPORT_CHUNK_BYTES UINT32_C(3968)
+#define SAGR_CODE_OBJECT_TRANSPORT_MAX_IMAGE_BYTES UINT64_C(67108864)
+#define SAGR_CODE_OBJECT_REMOTE_FLAG_STAGED_IDENTITY_ONLY UINT32_C(1)
 
 typedef enum sagr_code_object_arg_kind {
   SAGR_CODE_OBJECT_ARG_VISIBLE = 0,
@@ -169,6 +174,28 @@ typedef struct sagr_code_object_dispatch_binding {
   uint8_t descriptor[SAGR_CODE_OBJECT_DESCRIPTOR_BYTES];
 } sagr_code_object_dispatch_binding_t;
 
+/*
+ * The A1 transport result proves bounded byte reassembly and image identity.
+ * It deliberately contains no executable mapping: mapped_base_va,
+ * descriptor_va, code_va, and kernarg_va must all remain zero until a later
+ * loader checkpoint introduces PT_LOAD mapping and dispatch admission.
+ */
+typedef struct sagr_code_object_remote_info {
+  uint32_t struct_size;
+  uint32_t flags;
+  uint64_t object_id;
+  uint64_t generation;
+  uint64_t image_size;
+  uint64_t mapped_base_va;
+  uint64_t descriptor_va;
+  uint64_t code_va;
+  uint64_t kernarg_va;
+  uint32_t kernel_index;
+  uint32_t segment_count;
+  uint8_t image_sha256[32];
+  uint8_t reserved[32];
+} sagr_code_object_remote_info_t;
+
 /* Validate the complete ELF/AMDHSA metadata and fill a caller-sized result. */
 SAGR_API sagr_status_t sagr_code_object_validate(
     const void *image, size_t image_size, sagr_code_object_info_t *info,
@@ -193,6 +220,19 @@ SAGR_API sagr_status_t sagr_code_object_materialize_kernel_code(
     const void *image, size_t image_size,
     const sagr_code_object_dispatch_binding_t *binding,
     uint8_t *destination, size_t destination_size, size_t *written_size);
+
+/*
+ * Upload one validated HSACO through the negotiated copied-byte transport.
+ * The image and kernel name are host-local inputs; neither pointer is placed
+ * on the wire. The current A1 endpoint accepts exactly one BEGIN, contiguous
+ * CHUNK sequence, and COMMIT digest and returns identity-only remote metadata.
+ */
+SAGR_API sagr_status_t sagr_code_object_upload(
+    sagr_instance_t instance, const void *image, size_t image_size,
+    const char *kernel_name,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_code_object_remote_info_t *remote, uint32_t remote_size,
+    sagr_error_info_t *error, uint32_t error_size);
 
 /* Pack values in metadata order.  Values are little-endian byte scalars. */
 typedef struct sagr_code_object_arg_value {

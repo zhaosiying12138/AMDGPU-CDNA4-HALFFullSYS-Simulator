@@ -2,6 +2,8 @@
 
 #include "transport_internal.h"
 
+#include <self_amdgpu_runtime/code_object.h>
+
 #include <limits.h>
 #include <string.h>
 
@@ -106,7 +108,8 @@ static int capabilities_are_valid_selection(const uint64_t *capabilities) {
                            SAGR_CAPABILITY_MEMORY_MASK |
                            SAGR_CAPABILITY_SIGNAL_MASK |
                            SAGR_CAPABILITY_DISPATCH_MASK |
-                           SAGR_CAPABILITY_KMT_MASK;
+                           SAGR_CAPABILITY_KMT_MASK |
+                           SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK;
   if ((capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] &
        SAGR_CAPABILITY_TOPOLOGY_MASK) == 0 ||
       (capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] & ~allowed) != 0) {
@@ -639,6 +642,13 @@ sagr_status_t sagr_protocol_decode_ack(
       ((options->required_capabilities[SAGR_CAPABILITY_KMT_WORD] &
         SAGR_CAPABILITY_KMT_MASK) != 0)) {
     *reason = "ACK KMT capability was not both offered and required";
+    return SAGR_STATUS_CAPABILITY_MISMATCH;
+  }
+  if (((selected[SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_WORD] &
+        SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK) != 0) !=
+      ((options->required_capabilities[SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_WORD] &
+        SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK) != 0)) {
+    *reason = "ACK code-object transport capability was not both offered and required";
     return SAGR_STATUS_CAPABILITY_MISMATCH;
   }
   if (!bytes_are_zero(options->expected_daemon_uuid, 16) &&
@@ -1824,5 +1834,715 @@ sagr_status_t sagr_protocol_decode_kmt_result(
                   ? "KMT operation succeeded"
                   : "KMT operation rejected";
   }
+  return SAGR_STATUS_SUCCESS;
+}
+
+/* CP-0013 A1: the code-object envelope is deliberately isolated from the
+ * older fixed-size operation codecs above.  Every field is written explicitly
+ * in network byte order; C struct padding never becomes wire state. */
+
+static int
+code_object_opcode_valid(uint16_t opcode)
+{
+  return opcode == SAGR_WIRE_CODE_OBJECT_OPCODE_BEGIN ||
+         opcode == SAGR_WIRE_CODE_OBJECT_OPCODE_CHUNK ||
+         opcode == SAGR_WIRE_CODE_OBJECT_OPCODE_COMMIT;
+}
+
+static int
+code_object_digest_nonzero(const uint8_t digest[32])
+{
+  return !bytes_are_zero(digest, 32);
+}
+
+static uint32_t
+code_object_expected_chunk_count(uint64_t image_size)
+{
+  if (image_size == 0U ||
+      image_size > SAGR_WIRE_CODE_OBJECT_MAX_IMAGE_BYTES) {
+    return 0U;
+  }
+  return (uint32_t)((image_size +
+                     (uint64_t)SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES - 1U) /
+                    (uint64_t)SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES);
+}
+
+static int
+code_object_nul_padded(const char *bytes, size_t size)
+{
+  size_t index;
+  int terminated = 0;
+  if (bytes == NULL || size == 0U || bytes[0] == '\0') {
+    return 0;
+  }
+  for (index = 0; index < size; ++index) {
+    if (terminated != 0 && bytes[index] != '\0') {
+      return 0;
+    }
+    if (terminated == 0 && (unsigned char)bytes[index] >= 0x80U) {
+      return 0;
+    }
+    if (bytes[index] == '\0') {
+      terminated = 1;
+    }
+  }
+  return terminated;
+}
+
+static int
+code_object_range_within(uint64_t start, uint64_t length,
+                         uint64_t container_start,
+                         uint64_t container_length)
+{
+  uint64_t end;
+  uint64_t container_end;
+  if (start < container_start || start > UINT64_MAX - length ||
+      container_start > UINT64_MAX - container_length) {
+    return 0;
+  }
+  end = start + length;
+  container_end = container_start + container_length;
+  return end <= container_end;
+}
+
+static int
+code_object_ranges_overlap(uint64_t left_start, uint64_t left_length,
+                           uint64_t right_start, uint64_t right_length)
+{
+  uint64_t left_end;
+  uint64_t right_end;
+  if (left_start > UINT64_MAX - left_length ||
+      right_start > UINT64_MAX - right_length) {
+    return 1;
+  }
+  left_end = left_start + left_length;
+  right_end = right_start + right_length;
+  return left_start < right_end && right_start < left_end;
+}
+
+static int
+code_object_segment_valid(const sagr_wire_code_object_segment_t *segment)
+{
+  if (segment == NULL || segment->type != 1U ||
+      segment->memory_size < segment->file_size ||
+      (segment->alignment != 0U &&
+       (segment->alignment & (segment->alignment - UINT64_C(1))) != 0U) ||
+      segment->file_offset > UINT64_MAX - segment->file_size ||
+      segment->virtual_address > UINT64_MAX - segment->memory_size) {
+    return 0;
+  }
+  if (segment->flags != 4U && segment->flags != 5U && segment->flags != 6U) {
+    return 0;
+  }
+  return 1;
+}
+
+static int
+code_object_begin_valid(const sagr_wire_code_object_begin_t *begin)
+{
+  uint32_t index;
+  uint32_t expected_chunks;
+  int executable_code_range = 0;
+  int read_only_descriptor_range = 0;
+  if (begin == NULL || begin->image_size == 0U ||
+      begin->image_size > SAGR_WIRE_CODE_OBJECT_MAX_IMAGE_BYTES ||
+      begin->chunk_data_bytes != SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES ||
+      begin->chunk_count == 0U || begin->segment_count == 0U ||
+      begin->segment_count > SAGR_WIRE_CODE_OBJECT_MAX_SEGMENTS ||
+      begin->kernel_index >= SAGR_CODE_OBJECT_MAX_KERNELS ||
+      !code_object_digest_nonzero(begin->image_sha256) ||
+      begin->elf_machine != SAGR_CODE_OBJECT_ELF_MACHINE_AMDGPU ||
+      begin->elf_type != SAGR_CODE_OBJECT_ELF_TYPE_DYN ||
+      begin->elf_osabi != SAGR_CODE_OBJECT_ELF_OSABI_AMDGPU_HSA ||
+      begin->elf_abi_version < 2U || begin->elf_abi_version > 4U ||
+      begin->reserved0 != 0U || (begin->elf_flags & UINT32_C(0xff)) != 0x4fU ||
+      begin->gfx_target != SAGR_CODE_OBJECT_TARGET_GFX950 ||
+      begin->code_object_version < 4U || begin->code_object_version > 6U ||
+      begin->metadata_major != 1U ||
+      (begin->metadata_minor != 1U && begin->metadata_minor != 2U) ||
+      begin->relocation_count != 0U || begin->kernarg_segment_size == 0U ||
+      begin->kernarg_segment_align == 0U ||
+      (begin->kernarg_segment_align &
+       (begin->kernarg_segment_align - 1U)) != 0U ||
+      begin->max_flat_workgroup_size == 0U ||
+      begin->wavefront_size != 64U || begin->uses_dynamic_stack != 0U ||
+      begin->descriptor_size != SAGR_WIRE_CODE_OBJECT_DESCRIPTOR_BYTES ||
+      (begin->descriptor_address & UINT64_C(63)) != 0U ||
+      begin->code_size == 0U || begin->code_file_offset > begin->image_size ||
+      begin->code_size > begin->image_size - begin->code_file_offset ||
+      begin->descriptor_file_offset > begin->image_size ||
+      begin->descriptor_size >
+          begin->image_size - begin->descriptor_file_offset ||
+      !code_object_nul_padded(begin->kernel_name,
+                              SAGR_WIRE_CODE_OBJECT_NAME_BYTES) ||
+      !code_object_nul_padded(begin->symbol,
+                              SAGR_WIRE_CODE_OBJECT_NAME_BYTES)) {
+    return 0;
+  }
+  expected_chunks = (uint32_t)((begin->image_size +
+                                SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES - 1U) /
+                               SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES);
+  if (begin->chunk_count != expected_chunks) {
+    return 0;
+  }
+  if (!bytes_are_zero((const uint8_t *)begin->segments +
+                          begin->segment_count *
+                              sizeof(sagr_wire_code_object_segment_t),
+                      (SAGR_WIRE_CODE_OBJECT_MAX_SEGMENTS -
+                       begin->segment_count) *
+                          sizeof(sagr_wire_code_object_segment_t))) {
+    return 0;
+  }
+  for (index = 0; index < begin->segment_count; ++index) {
+    const sagr_wire_code_object_segment_t *segment = &begin->segments[index];
+    if (!code_object_segment_valid(&begin->segments[index]) ||
+        segment->file_offset > begin->image_size ||
+        segment->file_size > begin->image_size - segment->file_offset) {
+      return 0;
+    }
+    if (segment->flags == 5U &&
+        code_object_range_within(begin->code_file_offset, begin->code_size,
+                                 segment->file_offset, segment->file_size) &&
+        code_object_range_within(begin->code_address, begin->code_size,
+                                 segment->virtual_address,
+                                 segment->memory_size)) {
+      executable_code_range = 1;
+    }
+    if (segment->flags == 4U &&
+        code_object_range_within(begin->descriptor_file_offset,
+                                 SAGR_WIRE_CODE_OBJECT_DESCRIPTOR_BYTES,
+                                 segment->file_offset, segment->file_size) &&
+        code_object_range_within(begin->descriptor_address,
+                                 SAGR_WIRE_CODE_OBJECT_DESCRIPTOR_BYTES,
+                                 segment->virtual_address,
+                                 segment->memory_size)) {
+      read_only_descriptor_range = 1;
+    }
+    for (uint32_t other = index + 1U;
+         other < begin->segment_count; ++other) {
+      const sagr_wire_code_object_segment_t *right = &begin->segments[other];
+      if (code_object_ranges_overlap(segment->file_offset, segment->file_size,
+                                     right->file_offset, right->file_size) ||
+          code_object_ranges_overlap(segment->virtual_address,
+                                     segment->memory_size,
+                                     right->virtual_address,
+                                     right->memory_size)) {
+        return 0;
+      }
+    }
+  }
+  if (executable_code_range == 0 || read_only_descriptor_range == 0) {
+    return 0;
+  }
+  if (begin->descriptor_kernel_code_entry_byte_offset >= 0) {
+    const uint64_t offset =
+        (uint64_t)begin->descriptor_kernel_code_entry_byte_offset;
+    if (begin->descriptor_address > UINT64_MAX - offset ||
+        begin->descriptor_address + offset != begin->code_address) {
+      return 0;
+    }
+  } else {
+    const uint64_t offset =
+        (uint64_t)(-(begin->descriptor_kernel_code_entry_byte_offset + 1)) +
+        UINT64_C(1);
+    if (offset > begin->descriptor_address ||
+        begin->descriptor_address - offset != begin->code_address) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int
+code_object_success_response_valid(
+    const sagr_wire_code_object_response_t *response)
+{
+  uint32_t expected_count;
+  if (response->object_id == 0U || response->generation == 0U ||
+      response->image_size == 0U ||
+      response->image_size > SAGR_WIRE_CODE_OBJECT_MAX_IMAGE_BYTES ||
+      response->kernel_index >= SAGR_CODE_OBJECT_MAX_KERNELS ||
+      response->segment_count == 0U ||
+      response->segment_count > SAGR_WIRE_CODE_OBJECT_MAX_SEGMENTS ||
+      !code_object_digest_nonzero(response->image_sha256) ||
+      response->error_code != 0U) {
+    return 0;
+  }
+  if (response->opcode == SAGR_WIRE_CODE_OBJECT_OPCODE_BEGIN) {
+    return response->accepted_offset == 0U && response->accepted_count == 0U &&
+           response->chunk_index == 0U;
+  }
+  if (response->opcode == SAGR_WIRE_CODE_OBJECT_OPCODE_COMMIT) {
+    return response->accepted_offset == response->image_size &&
+           response->accepted_count == response->image_size &&
+           response->chunk_index ==
+               code_object_expected_chunk_count(response->image_size);
+  }
+  if (response->accepted_offset > response->image_size ||
+      response->accepted_count == 0U ||
+      response->accepted_count > SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES ||
+      response->accepted_count >
+          response->image_size - response->accepted_offset ||
+      response->accepted_offset !=
+          (uint64_t)response->chunk_index *
+              (uint64_t)SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES) {
+    return 0;
+  }
+  expected_count =
+      response->image_size - response->accepted_offset >
+              SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES
+          ? SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES
+          : (uint32_t)(response->image_size - response->accepted_offset);
+  return response->accepted_count == expected_count;
+}
+
+static int
+code_object_failed_response_valid(
+    const sagr_wire_code_object_response_t *response)
+{
+  return response->object_id == 0U && response->generation == 0U &&
+         response->accepted_offset == 0U && response->accepted_count == 0U &&
+         response->chunk_index == 0U && response->mapped_base_va == 0U &&
+         response->descriptor_va == 0U && response->code_va == 0U &&
+         response->kernarg_va == 0U && response->image_size == 0U &&
+         response->kernel_index == 0U && response->segment_count == 0U &&
+         !code_object_digest_nonzero(response->image_sha256);
+}
+
+static sagr_status_t
+decode_code_object_header(const uint8_t *frame, size_t frame_size,
+                          const sagr_instance_info_t *info,
+                          uint16_t expected_type, const uint8_t **payload,
+                          const char **reason)
+{
+  if (frame == NULL || info == NULL || payload == NULL || reason == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (frame_size != SAGR_WIRE_CODE_OBJECT_FRAME_BYTES ||
+      memcmp(frame, k_magic, sizeof(k_magic)) != 0 || get_u16(frame + 8) != 1U ||
+      get_u16(frame + 10) != 0U ||
+      get_u16(frame + 12) != SAGR_WIRE_HEADER_BYTES ||
+      get_u16(frame + 14) != expected_type || get_u32(frame + 16) != 0U ||
+      get_u32(frame + 20) != SAGR_WIRE_CODE_OBJECT_PAYLOAD_BYTES ||
+      get_u64(frame + 24) == 0U || get_u32(frame + 68) != 0U ||
+      !bytes_are_zero(frame + 72, 8U) || bytes_are_zero(info->daemon_uuid, 16) ||
+      info->connection_id == 0U || info->epoch == 0U ||
+      memcmp(frame + 32, info->daemon_uuid, 16) != 0 ||
+      get_u64(frame + 48) != info->connection_id ||
+      get_u64(frame + 56) != info->epoch ||
+      get_u32(frame + 64) != frame_crc32c(frame, frame_size)) {
+    *reason = "invalid code-object frame header";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  *payload = frame + SAGR_WIRE_HEADER_BYTES;
+  return SAGR_STATUS_SUCCESS;
+}
+
+static void
+encode_code_object_segment(uint8_t *payload, size_t offset,
+                           const sagr_wire_code_object_segment_t *segment)
+{
+  put_u32(payload + offset, segment->type);
+  put_u32(payload + offset + 4U, segment->flags);
+  put_u64(payload + offset + 8U, segment->file_offset);
+  put_u64(payload + offset + 16U, segment->virtual_address);
+  put_u64(payload + offset + 24U, segment->file_size);
+  put_u64(payload + offset + 32U, segment->memory_size);
+  put_u64(payload + offset + 40U, segment->alignment);
+}
+
+static void
+decode_code_object_segment(const uint8_t *payload, size_t offset,
+                           sagr_wire_code_object_segment_t *segment)
+{
+  segment->type = get_u32(payload + offset);
+  segment->flags = get_u32(payload + offset + 4U);
+  segment->file_offset = get_u64(payload + offset + 8U);
+  segment->virtual_address = get_u64(payload + offset + 16U);
+  segment->file_size = get_u64(payload + offset + 24U);
+  segment->memory_size = get_u64(payload + offset + 32U);
+  segment->alignment = get_u64(payload + offset + 40U);
+}
+
+sagr_status_t
+sagr_protocol_encode_code_object_request(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_wire_code_object_request_t *request, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size)
+{
+  uint8_t *payload;
+  uint32_t index;
+  if (info == NULL || request == NULL || frame == NULL || frame_size == NULL ||
+      frame_capacity < SAGR_WIRE_CODE_OBJECT_FRAME_BYTES || request_id == 0U ||
+      bytes_are_zero(info->daemon_uuid, 16) || info->connection_id == 0U ||
+      info->epoch == 0U || request->major != SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MAJOR ||
+      request->minor != SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MINOR ||
+      request->flags != 0U || !code_object_opcode_valid(request->opcode)) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (request->opcode == SAGR_WIRE_CODE_OBJECT_OPCODE_BEGIN) {
+    if (request->object_id != 0U || request->generation != 0U ||
+        request->image_offset != 0U || request->byte_count != 0U ||
+        request->chunk_index != 0U || request->chunk_crc32c != 0U ||
+        !code_object_begin_valid(&request->body.begin) ||
+        !bytes_are_zero(request->body.begin.descriptor +
+                            SAGR_WIRE_CODE_OBJECT_DESCRIPTOR_BYTES,
+                        0U)) {
+      return SAGR_STATUS_INVALID_ARGUMENT;
+    }
+  } else if (request->opcode == SAGR_WIRE_CODE_OBJECT_OPCODE_CHUNK) {
+    const uint32_t count = request->byte_count;
+    if (request->object_id == 0U || request->generation == 0U || count == 0U ||
+        count > SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES ||
+        request->image_offset > SAGR_WIRE_CODE_OBJECT_MAX_IMAGE_BYTES ||
+        request->image_offset + count > SAGR_WIRE_CODE_OBJECT_MAX_IMAGE_BYTES ||
+        request->chunk_crc32c !=
+            sagr_crc32c(request->body.chunk, count) ||
+        !bytes_are_zero(request->body.chunk + count,
+                        SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES - count)) {
+      return SAGR_STATUS_INVALID_ARGUMENT;
+    }
+  } else {
+    if (request->object_id == 0U || request->generation == 0U ||
+        request->image_offset != 0U || request->byte_count == 0U ||
+        request->byte_count > SAGR_WIRE_CODE_OBJECT_MAX_IMAGE_BYTES ||
+        request->chunk_index !=
+            code_object_expected_chunk_count(request->byte_count) ||
+        request->chunk_crc32c != 0U ||
+        !code_object_digest_nonzero(request->body.commit_sha256)) {
+      return SAGR_STATUS_INVALID_ARGUMENT;
+    }
+  }
+
+  memset(frame, 0, SAGR_WIRE_CODE_OBJECT_FRAME_BYTES);
+  encode_header(frame, SAGR_WIRE_MESSAGE_CODE_OBJECT_REQUEST,
+                SAGR_WIRE_CODE_OBJECT_PAYLOAD_BYTES, request_id,
+                info->daemon_uuid, info->connection_id, info->epoch);
+  payload = frame + SAGR_WIRE_HEADER_BYTES;
+  put_u16(payload, request->major);
+  put_u16(payload + 2U, request->minor);
+  put_u16(payload + 4U, request->opcode);
+  put_u16(payload + 6U, request->flags);
+  put_u64(payload + 8U, request->object_id);
+  put_u64(payload + 16U, request->generation);
+  put_u64(payload + 24U, request->image_offset);
+  put_u32(payload + 32U, request->byte_count);
+  put_u32(payload + 36U, request->chunk_index);
+  put_u32(payload + 40U, request->chunk_crc32c);
+  if (request->opcode == SAGR_WIRE_CODE_OBJECT_OPCODE_BEGIN) {
+    const sagr_wire_code_object_begin_t *begin = &request->body.begin;
+    put_u64(payload + 48U, begin->image_size);
+    put_u32(payload + 56U, begin->chunk_data_bytes);
+    put_u32(payload + 60U, begin->chunk_count);
+    put_u32(payload + 64U, begin->segment_count);
+    put_u32(payload + 68U, begin->kernel_index);
+    memcpy(payload + 72U, begin->image_sha256, 32U);
+    put_u16(payload + 104U, begin->elf_machine);
+    put_u16(payload + 106U, begin->elf_type);
+    payload[108U] = begin->elf_osabi;
+    payload[109U] = begin->elf_abi_version;
+    put_u16(payload + 110U, begin->reserved0);
+    put_u32(payload + 112U, begin->elf_flags);
+    put_u32(payload + 116U, begin->gfx_target);
+    put_u32(payload + 120U, begin->code_object_version);
+    put_u32(payload + 124U, begin->metadata_major);
+    put_u32(payload + 128U, begin->metadata_minor);
+    put_u32(payload + 132U, begin->relocation_count);
+    put_u32(payload + 136U, begin->kernarg_segment_size);
+    put_u32(payload + 140U, begin->kernarg_segment_align);
+    put_u32(payload + 144U, begin->group_segment_fixed_size);
+    put_u32(payload + 148U, begin->private_segment_fixed_size);
+    put_u32(payload + 152U, begin->max_flat_workgroup_size);
+    put_u32(payload + 156U, begin->wavefront_size);
+    put_u32(payload + 160U, begin->sgpr_count);
+    put_u32(payload + 164U, begin->vgpr_count);
+    put_u32(payload + 168U, begin->uses_dynamic_stack);
+    put_u32(payload + 172U, begin->descriptor_size);
+    put_u64(payload + 176U,
+            (uint64_t)begin->descriptor_kernel_code_entry_byte_offset);
+    put_u64(payload + 184U, begin->code_address);
+    put_u64(payload + 192U, begin->code_file_offset);
+    put_u64(payload + 200U, begin->code_size);
+    put_u64(payload + 208U, begin->descriptor_address);
+    put_u64(payload + 216U, begin->descriptor_file_offset);
+    memcpy(payload + 224U, begin->kernel_name,
+           SAGR_WIRE_CODE_OBJECT_NAME_BYTES);
+    memcpy(payload + 352U, begin->symbol, SAGR_WIRE_CODE_OBJECT_NAME_BYTES);
+    memcpy(payload + 480U, begin->descriptor,
+           SAGR_WIRE_CODE_OBJECT_DESCRIPTOR_BYTES);
+    for (index = 0; index < SAGR_WIRE_CODE_OBJECT_MAX_SEGMENTS; ++index) {
+      encode_code_object_segment(payload, 544U + (size_t)index * 48U,
+                                 &begin->segments[index]);
+    }
+  } else if (request->opcode == SAGR_WIRE_CODE_OBJECT_OPCODE_CHUNK) {
+    memcpy(payload + 48U, request->body.chunk,
+           SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES);
+  } else {
+    memcpy(payload + 48U, request->body.commit_sha256, 32U);
+  }
+  sagr_protocol_recompute_frame_crc(frame, SAGR_WIRE_CODE_OBJECT_FRAME_BYTES);
+  *frame_size = SAGR_WIRE_CODE_OBJECT_FRAME_BYTES;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t
+sagr_protocol_decode_code_object_request(
+    const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
+    sagr_wire_code_object_request_t *request, uint64_t *request_id,
+    const char **reason)
+{
+  const uint8_t *payload;
+  uint32_t index;
+  sagr_status_t status;
+  if (reason != NULL) {
+    *reason = "malformed code-object request";
+  }
+  if (request == NULL || request_id == NULL || reason == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  status = decode_code_object_header(frame, frame_size, info,
+                                     SAGR_WIRE_MESSAGE_CODE_OBJECT_REQUEST,
+                                     &payload, reason);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  memset(request, 0, sizeof(*request));
+  request->major = get_u16(payload);
+  request->minor = get_u16(payload + 2U);
+  request->opcode = get_u16(payload + 4U);
+  request->flags = get_u16(payload + 6U);
+  request->object_id = get_u64(payload + 8U);
+  request->generation = get_u64(payload + 16U);
+  request->image_offset = get_u64(payload + 24U);
+  request->byte_count = get_u32(payload + 32U);
+  request->chunk_index = get_u32(payload + 36U);
+  request->chunk_crc32c = get_u32(payload + 40U);
+  if (get_u32(payload + 44U) != 0U ||
+      request->major != SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MAJOR ||
+      request->minor != SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MINOR ||
+      request->flags != 0U || !code_object_opcode_valid(request->opcode)) {
+    *reason = "invalid code-object request prefix";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (request->opcode == SAGR_WIRE_CODE_OBJECT_OPCODE_BEGIN) {
+    sagr_wire_code_object_begin_t *begin = &request->body.begin;
+    begin->image_size = get_u64(payload + 48U);
+    begin->chunk_data_bytes = get_u32(payload + 56U);
+    begin->chunk_count = get_u32(payload + 60U);
+    begin->segment_count = get_u32(payload + 64U);
+    begin->kernel_index = get_u32(payload + 68U);
+    memcpy(begin->image_sha256, payload + 72U, 32U);
+    begin->elf_machine = get_u16(payload + 104U);
+    begin->elf_type = get_u16(payload + 106U);
+    begin->elf_osabi = payload[108U];
+    begin->elf_abi_version = payload[109U];
+    begin->reserved0 = get_u16(payload + 110U);
+    begin->elf_flags = get_u32(payload + 112U);
+    begin->gfx_target = get_u32(payload + 116U);
+    begin->code_object_version = get_u32(payload + 120U);
+    begin->metadata_major = get_u32(payload + 124U);
+    begin->metadata_minor = get_u32(payload + 128U);
+    begin->relocation_count = get_u32(payload + 132U);
+    begin->kernarg_segment_size = get_u32(payload + 136U);
+    begin->kernarg_segment_align = get_u32(payload + 140U);
+    begin->group_segment_fixed_size = get_u32(payload + 144U);
+    begin->private_segment_fixed_size = get_u32(payload + 148U);
+    begin->max_flat_workgroup_size = get_u32(payload + 152U);
+    begin->wavefront_size = get_u32(payload + 156U);
+    begin->sgpr_count = get_u32(payload + 160U);
+    begin->vgpr_count = get_u32(payload + 164U);
+    begin->uses_dynamic_stack = get_u32(payload + 168U);
+    begin->descriptor_size = get_u32(payload + 172U);
+    begin->descriptor_kernel_code_entry_byte_offset =
+        (int64_t)get_u64(payload + 176U);
+    begin->code_address = get_u64(payload + 184U);
+    begin->code_file_offset = get_u64(payload + 192U);
+    begin->code_size = get_u64(payload + 200U);
+    begin->descriptor_address = get_u64(payload + 208U);
+    begin->descriptor_file_offset = get_u64(payload + 216U);
+    memcpy(begin->kernel_name, payload + 224U,
+           SAGR_WIRE_CODE_OBJECT_NAME_BYTES);
+    memcpy(begin->symbol, payload + 352U, SAGR_WIRE_CODE_OBJECT_NAME_BYTES);
+    memcpy(begin->descriptor, payload + 480U,
+           SAGR_WIRE_CODE_OBJECT_DESCRIPTOR_BYTES);
+    for (index = 0; index < SAGR_WIRE_CODE_OBJECT_MAX_SEGMENTS; ++index) {
+      decode_code_object_segment(payload, 544U + (size_t)index * 48U,
+                                 &begin->segments[index]);
+    }
+    if (request->object_id != 0U || request->generation != 0U ||
+        request->image_offset != 0U || request->byte_count != 0U ||
+        request->chunk_index != 0U || request->chunk_crc32c != 0U ||
+        !code_object_begin_valid(begin) ||
+        !bytes_are_zero(payload + 1312U,
+                        SAGR_WIRE_CODE_OBJECT_PAYLOAD_BYTES - 1312U)) {
+      *reason = "invalid code-object BEGIN manifest";
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+  } else if (request->opcode == SAGR_WIRE_CODE_OBJECT_OPCODE_CHUNK) {
+    memcpy(request->body.chunk, payload + 48U,
+           SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES);
+    if (request->object_id == 0U || request->generation == 0U ||
+        request->byte_count == 0U ||
+        request->byte_count > SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES ||
+        request->image_offset > SAGR_WIRE_CODE_OBJECT_MAX_IMAGE_BYTES ||
+        request->image_offset + request->byte_count >
+            SAGR_WIRE_CODE_OBJECT_MAX_IMAGE_BYTES ||
+        request->chunk_crc32c !=
+            sagr_crc32c(request->body.chunk, request->byte_count) ||
+        !bytes_are_zero(request->body.chunk + request->byte_count,
+                        SAGR_WIRE_CODE_OBJECT_CHUNK_BYTES -
+                            request->byte_count) ||
+        !bytes_are_zero(payload + 4016U, 0U)) {
+      *reason = "invalid code-object CHUNK";
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+  } else {
+    memcpy(request->body.commit_sha256, payload + 48U, 32U);
+    if (request->object_id == 0U || request->generation == 0U ||
+        request->image_offset != 0U || request->byte_count == 0U ||
+        request->byte_count > SAGR_WIRE_CODE_OBJECT_MAX_IMAGE_BYTES ||
+        request->chunk_index !=
+            code_object_expected_chunk_count(request->byte_count) ||
+        request->chunk_crc32c != 0U ||
+        !code_object_digest_nonzero(request->body.commit_sha256) ||
+        !bytes_are_zero(payload + 80U,
+                        SAGR_WIRE_CODE_OBJECT_PAYLOAD_BYTES - 80U)) {
+      *reason = "invalid code-object COMMIT";
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+  }
+  *request_id = get_u64(frame + 24U);
+  *reason = "code-object request decoded";
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t
+sagr_protocol_encode_code_object_response(
+    const sagr_instance_info_t *info, uint64_t request_id,
+    const sagr_wire_code_object_response_t *response, uint8_t *frame,
+    size_t frame_capacity, size_t *frame_size)
+{
+  uint8_t *payload;
+  if (info == NULL || response == NULL || frame == NULL || frame_size == NULL ||
+      frame_capacity < SAGR_WIRE_CODE_OBJECT_FRAME_BYTES || request_id == 0U ||
+      bytes_are_zero(info->daemon_uuid, 16) || info->connection_id == 0U ||
+      info->epoch == 0U || response->major != SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MAJOR ||
+      response->minor != SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MINOR ||
+      response->flags != 0U || response->status > SAGR_WIRE_STATUS_INTERNAL ||
+      !code_object_opcode_valid(response->opcode) || response->reserved0 != 0U ||
+      response->mapped_base_va != 0U || response->descriptor_va != 0U ||
+      response->code_va != 0U || response->kernarg_va != 0U) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if ((response->status == SAGR_WIRE_STATUS_OK &&
+       !code_object_success_response_valid(response)) ||
+      (response->status != SAGR_WIRE_STATUS_OK &&
+       !code_object_failed_response_valid(response))) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  memset(frame, 0, SAGR_WIRE_CODE_OBJECT_FRAME_BYTES);
+  encode_header(frame, SAGR_WIRE_MESSAGE_CODE_OBJECT_ACK,
+                SAGR_WIRE_CODE_OBJECT_PAYLOAD_BYTES, request_id,
+                info->daemon_uuid, info->connection_id, info->epoch);
+  payload = frame + SAGR_WIRE_HEADER_BYTES;
+  put_u16(payload, response->major);
+  put_u16(payload + 2U, response->minor);
+  put_u32(payload + 4U, response->status);
+  put_u16(payload + 8U, response->opcode);
+  put_u16(payload + 10U, response->flags);
+  put_u64(payload + 16U, response->object_id);
+  put_u64(payload + 24U, response->generation);
+  put_u64(payload + 32U, response->accepted_offset);
+  put_u32(payload + 40U, response->accepted_count);
+  put_u32(payload + 44U, response->chunk_index);
+  put_u64(payload + 48U, response->mapped_base_va);
+  put_u64(payload + 56U, response->descriptor_va);
+  put_u64(payload + 64U, response->code_va);
+  put_u64(payload + 72U, response->kernarg_va);
+  put_u64(payload + 80U, response->image_size);
+  put_u32(payload + 88U, response->kernel_index);
+  put_u32(payload + 92U, response->segment_count);
+  put_u64(payload + 96U, response->sim_tick);
+  memcpy(payload + 104U, response->image_sha256, 32U);
+  put_u32(payload + 136U, response->error_code);
+  sagr_protocol_recompute_frame_crc(frame, SAGR_WIRE_CODE_OBJECT_FRAME_BYTES);
+  *frame_size = SAGR_WIRE_CODE_OBJECT_FRAME_BYTES;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t
+sagr_protocol_decode_code_object_response(
+    const uint8_t *frame, size_t frame_size, const sagr_instance_info_t *info,
+    uint64_t expected_request_id, sagr_wire_code_object_response_t *response,
+    int32_t *wire_status, const char **reason)
+{
+  const uint8_t *payload;
+  sagr_status_t status;
+  if (wire_status != NULL) {
+    *wire_status = -1;
+  }
+  if (reason != NULL) {
+    *reason = "malformed code-object ACK";
+  }
+  if (response == NULL || wire_status == NULL || reason == NULL ||
+      expected_request_id == 0U) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  status = decode_code_object_header(frame, frame_size, info,
+                                     SAGR_WIRE_MESSAGE_CODE_OBJECT_ACK,
+                                     &payload, reason);
+  if (status != SAGR_STATUS_SUCCESS || get_u64(frame + 24U) != expected_request_id) {
+    if (status == SAGR_STATUS_SUCCESS) {
+      *reason = "code-object ACK request identity mismatch";
+      status = SAGR_STATUS_PROTOCOL_ERROR;
+    }
+    return status;
+  }
+  memset(response, 0, sizeof(*response));
+  response->major = get_u16(payload);
+  response->minor = get_u16(payload + 2U);
+  response->status = get_u32(payload + 4U);
+  response->opcode = get_u16(payload + 8U);
+  response->flags = get_u16(payload + 10U);
+  response->object_id = get_u64(payload + 16U);
+  response->generation = get_u64(payload + 24U);
+  response->accepted_offset = get_u64(payload + 32U);
+  response->accepted_count = get_u32(payload + 40U);
+  response->chunk_index = get_u32(payload + 44U);
+  response->mapped_base_va = get_u64(payload + 48U);
+  response->descriptor_va = get_u64(payload + 56U);
+  response->code_va = get_u64(payload + 64U);
+  response->kernarg_va = get_u64(payload + 72U);
+  response->image_size = get_u64(payload + 80U);
+  response->kernel_index = get_u32(payload + 88U);
+  response->segment_count = get_u32(payload + 92U);
+  response->sim_tick = get_u64(payload + 96U);
+  memcpy(response->image_sha256, payload + 104U, 32U);
+  response->error_code = get_u32(payload + 136U);
+  response->reserved0 = get_u32(payload + 140U);
+  response->request_id = get_u64(frame + 24U);
+  if (get_u32(payload + 12U) != 0U ||
+      response->reserved0 != 0U ||
+      !bytes_are_zero(payload + 144U,
+                      SAGR_WIRE_CODE_OBJECT_PAYLOAD_BYTES - 144U) ||
+      response->major != SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MAJOR ||
+      response->minor != SAGR_CODE_OBJECT_TRANSPORT_PROTOCOL_MINOR ||
+      response->flags != 0U || !code_object_opcode_valid(response->opcode) ||
+      response->status > SAGR_WIRE_STATUS_INTERNAL ||
+      response->mapped_base_va != 0U || response->descriptor_va != 0U ||
+      response->code_va != 0U || response->kernarg_va != 0U ||
+      (response->status == SAGR_WIRE_STATUS_OK &&
+       !code_object_success_response_valid(response)) ||
+      (response->status != SAGR_WIRE_STATUS_OK &&
+       !code_object_failed_response_valid(response))) {
+    *reason = "invalid code-object ACK fields";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  *wire_status = (int32_t)response->status;
+  if (response->status != SAGR_WIRE_STATUS_OK) {
+    *reason = "daemon rejected code-object operation";
+    return sagr_protocol_map_wire_status(response->status);
+  }
+  *reason = "code-object operation succeeded";
   return SAGR_STATUS_SUCCESS;
 }
