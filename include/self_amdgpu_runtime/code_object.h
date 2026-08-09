@@ -33,6 +33,8 @@ extern "C" {
 #define SAGR_CODE_OBJECT_MAX_ARGS UINT32_C(64)
 #define SAGR_CODE_OBJECT_NAME_BYTES UINT32_C(128)
 #define SAGR_CODE_OBJECT_VALUE_KIND_BYTES UINT32_C(64)
+#define SAGR_CODE_OBJECT_DISPATCH_FLAG_METADATA_ONLY UINT32_C(1)
+#define SAGR_CODE_OBJECT_DISPATCH_FLAG_REQUIRES_CODE_OBJECT_TRANSPORT UINT32_C(2)
 
 typedef enum sagr_code_object_arg_kind {
   SAGR_CODE_OBJECT_ARG_VISIBLE = 0,
@@ -132,6 +134,41 @@ typedef struct sagr_code_object_info {
   sagr_code_object_kernel_info_t kernels[SAGR_CODE_OBJECT_MAX_KERNELS];
 } sagr_code_object_info_t;
 
+/*
+ * A fixed-width, pointer-free binding for a selected parsed kernel.  This is
+ * intentionally a metadata adapter: the current CP-0008 wire path carries a
+ * handwritten fixture and cannot consume an HSACO image.  Consumers must
+ * check flags and isa_supported_by_gemsim before attempting execution.
+ */
+typedef struct sagr_code_object_dispatch_binding {
+  uint32_t struct_size;
+  uint32_t flags;
+  uint32_t gfx_target;
+  uint32_t code_object_version;
+  uint32_t metadata_major;
+  uint32_t metadata_minor;
+  uint32_t kernel_index;
+  uint32_t wavefront_size;
+  uint32_t max_flat_workgroup_size;
+  uint32_t kernarg_segment_size;
+  uint32_t kernarg_segment_align;
+  uint32_t descriptor_size;
+  uint32_t relocation_count;
+  uint32_t isa_supported_by_gemsim;
+  uint32_t requires_explicit_code_object_transport;
+  uint32_t reserved0;
+  uint64_t image_size;
+  uint64_t code_address;
+  uint64_t code_file_offset;
+  uint64_t code_size;
+  uint64_t descriptor_address;
+  uint64_t descriptor_file_offset;
+  int64_t descriptor_kernel_code_entry_byte_offset;
+  char kernel_name[SAGR_CODE_OBJECT_NAME_BYTES];
+  char symbol[SAGR_CODE_OBJECT_NAME_BYTES];
+  uint8_t descriptor[SAGR_CODE_OBJECT_DESCRIPTOR_BYTES];
+} sagr_code_object_dispatch_binding_t;
+
 /* Validate the complete ELF/AMDHSA metadata and fill a caller-sized result. */
 SAGR_API sagr_status_t sagr_code_object_validate(
     const void *image, size_t image_size, sagr_code_object_info_t *info,
@@ -140,6 +177,22 @@ SAGR_API sagr_status_t sagr_code_object_validate(
 SAGR_API sagr_status_t sagr_code_object_get_kernel(
     const sagr_code_object_info_t *info, const char *name,
     sagr_code_object_kernel_info_t *kernel, uint32_t kernel_size);
+
+/* Bind one parsed kernel to a future code-object dispatch request. */
+SAGR_API sagr_status_t sagr_code_object_describe_dispatch(
+    const sagr_code_object_info_t *info, const char *kernel_name,
+    size_t image_size, sagr_code_object_dispatch_binding_t *binding,
+    uint32_t binding_size);
+
+/*
+ * Copy the selected kernel's validated code range from the source HSACO.
+ * This is caller-local materialization only; it does not map ELF segments,
+ * construct AQL, or upload bytes through the CP-0008 transport.
+ */
+SAGR_API sagr_status_t sagr_code_object_materialize_kernel_code(
+    const void *image, size_t image_size,
+    const sagr_code_object_dispatch_binding_t *binding,
+    uint8_t *destination, size_t destination_size, size_t *written_size);
 
 /* Pack values in metadata order.  Values are little-endian byte scalars. */
 typedef struct sagr_code_object_arg_value {

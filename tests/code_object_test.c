@@ -59,7 +59,10 @@ static int check_fixture(const char *path, const char *kernel_name,
   size_t size = 0U;
   sagr_code_object_info_t info;
   sagr_code_object_kernel_info_t kernel;
+  sagr_code_object_dispatch_binding_t binding;
   sagr_code_object_arg_value_t value;
+  uint8_t *materialized_code;
+  size_t materialized_size = 0U;
   uint8_t *kernarg;
   uint32_t written = 0U;
   int failures = 0;
@@ -93,6 +96,65 @@ static int check_fixture(const char *path, const char *kernel_name,
                          kernel.descriptor_size == SAGR_CODE_OBJECT_DESCRIPTOR_BYTES &&
                          kernel.visible_arg_count > 0U && kernel.hidden_arg_count > 0U,
                      "kernarg and descriptor metadata");
+  memset(&binding, 0, sizeof(binding));
+  failures += expect(sagr_code_object_describe_dispatch(
+                         &info, kernel_name, size, &binding,
+                         (uint32_t)sizeof(binding)) == SAGR_STATUS_SUCCESS,
+                     "parsed kernel binds to dispatch metadata");
+  failures += expect(binding.struct_size == sizeof(binding) &&
+                         binding.gfx_target == SAGR_CODE_OBJECT_TARGET_GFX950 &&
+                         binding.kernel_index == kernel.index &&
+                         binding.image_size == (uint64_t)size &&
+                         binding.kernarg_segment_size == expected_kernarg &&
+                         binding.descriptor_size == SAGR_CODE_OBJECT_DESCRIPTOR_BYTES,
+                     "dispatch binding preserves parsed offsets and sizes");
+  failures += expect((binding.flags & SAGR_CODE_OBJECT_DISPATCH_FLAG_METADATA_ONLY) != 0U &&
+                         (binding.flags & SAGR_CODE_OBJECT_DISPATCH_FLAG_REQUIRES_CODE_OBJECT_TRANSPORT) != 0U &&
+                         binding.isa_supported_by_gemsim == 0U &&
+                         binding.requires_explicit_code_object_transport != 0U,
+                     "unsupported gem5 execution remains explicit");
+  failures += expect(sagr_code_object_describe_dispatch(
+                         &info, "missing-kernel", size, &binding,
+                         (uint32_t)sizeof(binding)) == SAGR_STATUS_INVALID_ARGUMENT,
+                     "unknown kernel binding rejected");
+  materialized_code = (uint8_t *)malloc((size_t)binding.code_size);
+  if (materialized_code == NULL) {
+    free(bytes);
+    return failures + 1;
+  }
+  memset(materialized_code, 0xa5, (size_t)binding.code_size);
+  failures += expect(sagr_code_object_materialize_kernel_code(
+                         bytes, size, &binding, materialized_code,
+                         (size_t)binding.code_size, &materialized_size) ==
+                         SAGR_STATUS_SUCCESS &&
+                         materialized_size == (size_t)binding.code_size &&
+                         memcmp(materialized_code,
+                                bytes + (size_t)binding.code_file_offset,
+                                materialized_size) == 0,
+                     "real HSACO kernel code materializes exactly");
+  materialized_code[0] = 0xa5U;
+  materialized_size = 0U;
+  failures += expect(sagr_code_object_materialize_kernel_code(
+                         bytes, size, &binding, materialized_code,
+                         (size_t)binding.code_size - 1U, &materialized_size) ==
+                         SAGR_STATUS_BUFFER_TOO_SMALL &&
+                         materialized_size == 0U && materialized_code[0] == 0xa5U,
+                     "undersized code destination is atomic");
+  {
+    const uint64_t saved_offset = binding.code_file_offset;
+    const uint64_t saved_code_size = binding.code_size;
+    binding.code_file_offset = (uint64_t)size;
+    binding.code_size = 2U;
+    failures += expect(sagr_code_object_materialize_kernel_code(
+                           bytes, size, &binding, materialized_code,
+                           (size_t)saved_code_size, &materialized_size) ==
+                           SAGR_STATUS_PROTOCOL_ERROR &&
+                           materialized_size == 0U && materialized_code[0] == 0xa5U,
+                       "out-of-image code range is atomic");
+    binding.code_file_offset = saved_offset;
+    binding.code_size = saved_code_size;
+  }
+  free(materialized_code);
   kernarg = (uint8_t *)malloc(kernel.kernarg_segment_size);
   if (kernarg == NULL) {
     free(bytes);

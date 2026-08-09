@@ -865,6 +865,76 @@ sagr_status_t sagr_code_object_get_kernel(
   return SAGR_STATUS_INVALID_ARGUMENT;
 }
 
+sagr_status_t sagr_code_object_describe_dispatch(
+    const sagr_code_object_info_t *info, const char *kernel_name,
+    size_t image_size, sagr_code_object_dispatch_binding_t *binding,
+    uint32_t binding_size) {
+  sagr_code_object_kernel_info_t kernel;
+  if (info == NULL || kernel_name == NULL || binding == NULL || image_size == 0U)
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  if (binding_size < (uint32_t)sizeof(*binding)) return SAGR_STATUS_BUFFER_TOO_SMALL;
+  if (sagr_code_object_get_kernel(info, kernel_name, &kernel,
+                                  (uint32_t)sizeof(kernel)) != SAGR_STATUS_SUCCESS)
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  memset(binding, 0, sizeof(*binding));
+  binding->struct_size = (uint32_t)sizeof(*binding);
+  binding->flags = SAGR_CODE_OBJECT_DISPATCH_FLAG_METADATA_ONLY |
+                   SAGR_CODE_OBJECT_DISPATCH_FLAG_REQUIRES_CODE_OBJECT_TRANSPORT;
+  binding->gfx_target = info->gfx_target;
+  binding->code_object_version = info->code_object_version;
+  binding->metadata_major = info->metadata_major;
+  binding->metadata_minor = info->metadata_minor;
+  binding->kernel_index = kernel.index;
+  binding->wavefront_size = kernel.wavefront_size;
+  binding->max_flat_workgroup_size = kernel.max_flat_workgroup_size;
+  binding->kernarg_segment_size = kernel.kernarg_segment_size;
+  binding->kernarg_segment_align = kernel.kernarg_segment_align;
+  binding->descriptor_size = kernel.descriptor_size;
+  binding->relocation_count = kernel.relocation_count;
+  binding->isa_supported_by_gemsim = kernel.isa_supported_by_gemsim;
+  binding->requires_explicit_code_object_transport = 1U;
+  binding->image_size = (uint64_t)image_size;
+  binding->code_address = kernel.code_address;
+  binding->code_file_offset = kernel.code_file_offset;
+  binding->code_size = kernel.code_size;
+  binding->descriptor_address = kernel.descriptor_address;
+  binding->descriptor_file_offset = kernel.descriptor_file_offset;
+  binding->descriptor_kernel_code_entry_byte_offset =
+      kernel.descriptor_kernel_code_entry_byte_offset;
+  memcpy(binding->kernel_name, kernel.name, sizeof(binding->kernel_name));
+  memcpy(binding->symbol, kernel.symbol, sizeof(binding->symbol));
+  memcpy(binding->descriptor, kernel.descriptor, sizeof(binding->descriptor));
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_code_object_materialize_kernel_code(
+    const void *image, size_t image_size,
+    const sagr_code_object_dispatch_binding_t *binding,
+    uint8_t *destination, size_t destination_size, size_t *written_size) {
+  const uint8_t *bytes = (const uint8_t *)image;
+  size_t code_offset;
+  size_t code_size;
+  if (image == NULL || binding == NULL || destination == NULL ||
+      written_size == NULL || image_size == 0U ||
+      binding->struct_size != (uint32_t)sizeof(*binding) ||
+      binding->flags != (SAGR_CODE_OBJECT_DISPATCH_FLAG_METADATA_ONLY |
+                         SAGR_CODE_OBJECT_DISPATCH_FLAG_REQUIRES_CODE_OBJECT_TRANSPORT) ||
+      binding->requires_explicit_code_object_transport != 1U ||
+      binding->reserved0 != 0U ||
+      binding->image_size != (uint64_t)image_size ||
+      binding->code_size == 0U || binding->code_file_offset > (uint64_t)SIZE_MAX ||
+      binding->code_size > (uint64_t)SIZE_MAX)
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  code_offset = (size_t)binding->code_file_offset;
+  code_size = (size_t)binding->code_size;
+  if (code_offset > image_size || code_size > image_size - code_offset)
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  if (destination_size < code_size) return SAGR_STATUS_BUFFER_TOO_SMALL;
+  memcpy(destination, bytes + code_offset, code_size);
+  *written_size = code_size;
+  return SAGR_STATUS_SUCCESS;
+}
+
 sagr_status_t sagr_code_object_pack_kernarg(
     const sagr_code_object_kernel_info_t *kernel,
     const sagr_code_object_arg_value_t *values, uint32_t value_count,
