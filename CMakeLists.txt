@@ -72,6 +72,22 @@ if(SELF_AMDGPU_RUNTIME_BUILD_TOOLS)
       PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
   endif()
   install(TARGETS sagr-handshake RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+  add_executable(sagr-triton-hsaco-probe tools/sagr-triton-hsaco-probe.c)
+  set_target_properties(
+    sagr-triton-hsaco-probe
+    PROPERTIES INSTALL_RPATH
+               "$ORIGIN/${SELF_AMDGPU_RUNTIME_INSTALL_LIBDIR_FROM_BINDIR}")
+  target_compile_features(sagr-triton-hsaco-probe PRIVATE c_std_11)
+  target_link_libraries(sagr-triton-hsaco-probe PRIVATE SelfAmdgpuRuntime::runtime)
+  if(MSVC)
+    target_compile_options(sagr-triton-hsaco-probe PRIVATE /W4 /WX)
+  else()
+    target_compile_options(
+      sagr-triton-hsaco-probe
+      PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+  endif()
+  install(TARGETS sagr-triton-hsaco-probe RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
 
 if(MSVC)

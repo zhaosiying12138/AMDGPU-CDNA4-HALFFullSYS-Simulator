@@ -149,6 +149,15 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
+The `sagr-triton-hsaco-probe` tool checks the compiler-to-runtime boundary for
+one HSACO image and kernel name. It validates AMDHSA metadata and reports the
+kernel and kernarg layout, but deliberately reports `execution_supported` as
+false until PT_LOAD mapping, AQL construction, and GPU dispatch are implemented.
+
+```sh
+sagr-triton-hsaco-probe /path/to/kernel.hsaco vecadd
+```
+
 The build directory is ignored by Git. Both static and shared builds are
 supported through CMake's standard `BUILD_SHARED_LIBS` option. Normal test
 builds also install the package and compile an independent consumer with the
