@@ -1,0 +1,26 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh",
+    "projects/gem5/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc",
+    "projects/self-amdgpu-runtime/tests/generic_dispatch_v2_endpoint_test.c",
+    "protocol/host-transport-v2.json"
+  ],
+  "checkpoint_id": "CP-0024",
+  "conclusion": "A committed MessageType 18 branch and passing policy harness prove that the handler and fail-closed rules exist, but they do not prove a positive Unix-socket type-18 route. The retained live probe proves only canonical unsupported-capability negotiation and baseline reconnect while bit 8 remains clear.",
+  "confidence": "high",
+  "decision": "Track handler_source_present, route_policy_harness, live_handshake_canonical_unsupported, and daemon_socket_route as separate claims. Keep capability bit 8 unadvertised until a live negotiated client sends type 18 and completes every owner-bound stage without relying on the policy harness as socket evidence.",
+  "evidence_ids": ["EV-0056", "EV-0057"],
+  "id": "BL-0098",
+  "invalidated_assumptions": [
+    "A source-level dispatch branch automatically proves that production capability negotiation can reach it.",
+    "A policy harness that encodes a canonical type-19 failure is equivalent to a raw type-18 request over the live Unix socket.",
+    "A successful baseline reconnect after generic-capability rejection permits capability bit 8 to be advertised."
+  ],
+  "observation": "CP24 commits an owner-bound generic session, type-18 handler branch, type-19 outbound plumbing, and a route-policy harness. The live runtime-to-gem5 endpoint test requests generic capability, receives canonical UnsupportedCapability because bit 8 is absent, reconnects with baseline capabilities, and sends no MessageType 18 frame.",
+  "question_or_symptom": "Which CP24 results demonstrate real daemon reachability, and which still stop short of a positive generic-dispatch socket route?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

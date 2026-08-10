@@ -223,6 +223,14 @@ CP admission, retire, and UNMAP with rejection rollback. It is not a live
 daemon path: capability bit 8 advertisement and MessageType 18 routing are
 false, as are GPUDispatcher/CU execution, normal Triton launcher, compiler/JIT,
 and fallback. The 12-DWORD (48-byte) Triton preload remains NOT_SUPPORTED.
-CP-0024 / `P5-TRITON-VECADD-03-DAEMON-ROUTE` is the next unique action.
+CP-0024 accepts the next bounded partial step: gem5 contains an owner-bound
+type-18 handler, type-19 response plumbing, and a shared route-policy harness,
+while the runtime adds an opt-in endpoint probe. The retained live
+runtime-to-gem5 result is a canonical unsupported-capability handshake followed
+by a successful baseline reconnect; bit 8 is still unadvertised and no type-18
+request is sent. A positive socket route, daemon H2D publication, normal
+logical alignment 8, SUBMIT ACK, type-20 completion, launcher, compiler/JIT,
+GPU execution, and fallback remain false. CP-0025 /
+`P5-TRITON-VECADD-04-DAEMON-LIFECYCLE` is the next unique action.
 
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

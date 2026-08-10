@@ -1,0 +1,26 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc",
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "docs/host-transport-v2.md",
+    "protocol/host-transport-v2.json"
+  ],
+  "checkpoint_id": "CP-0024",
+  "conclusion": "The partial handler cannot interoperate with the normal logical ALLOC alignment 8 because it honestly exposes only 4096/65536 page-backed alignment, and its first MAP fixes page size for the owner session. H2D remains the existing v1 memory carrier, while SUBMIT and type-20 completion must remain unsupported until queue, signal, packet, CRC, and nonzero lifecycle ticks are owner-bound end to end.",
+  "confidence": "high",
+  "decision": "Resolve logical-versus-backing alignment without falsifying the ACK, bind v1 MEMORY_COPY_H2D to the same generic owner/allocation session, preserve the owner-session-fixed page-size restriction until deliberately changed, and implement queue/signal/AQL packet/tick plus cancellation and disconnect semantics before enabling SUBMIT or advertising bit 8.",
+  "evidence_ids": ["EV-0056", "EV-0057"],
+  "id": "BL-0099",
+  "invalidated_assumptions": [
+    "Accepting ALLOC alignment 8 is safe when the native response reports its 4096-byte backing alignment.",
+    "Generic dispatch needs or may invent a separate KERNARG wire opcode instead of retaining v1 MEMORY_COPY_H2D.",
+    "A local native CP admission result is sufficient to emit a successful SUBMIT ACK or type-20 completion without queue, signal, packet CRC, and nonzero tick identities."
+  ],
+  "observation": "The CP24 route harness accepts 4K/64K page policy, rejects ALLOC alignment 8 and every SUBMIT, and records page_size_lifetime=owner-session-fixed. Existing runtime mock evidence carries kernarg bytes through sealed-FD v1 MEMORY_COPY_H2D, but no live gem5 daemon H2D route, successful SUBMIT ACK, or type-20 completion is retained.",
+  "question_or_symptom": "Why can CP24 expose MAP/ALLOC/H2D/UNMAP handler source while still refusing the ordinary runtime allocation and every SUBMIT?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

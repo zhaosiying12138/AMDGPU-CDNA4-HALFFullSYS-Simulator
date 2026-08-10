@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-10`
 
-**State at this commit:** `CP-0023 generic adapter/client/admission boundary accepted; daemon route and normal launcher blocked; next-CP-0024 P5-TRITON-VECADD-03-DAEMON-ROUTE`
+**State at this commit:** `CP-0024 bounded daemon-handler boundary accepted; bit8 positive route, submit lifecycle, and normal launcher blocked; next-CP-0025 P5-TRITON-VECADD-04-DAEMON-LIFECYCLE`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -497,7 +497,8 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | CP-0021 | P5 | Hash-bound Triton vecadd compile/provenance prerequisite; normal launcher remains blocked |
 | CP-0022 | P5 | Generic payload-v2 codec/admission boundary; daemon mapping and launcher handoff remain blocked |
 | CP-0023 / P5-TRITON-VECADD-02-RUNTIME | P5 | Owner-bound runtime client plus local native MAP/ALLOC/publish/fetch/CP-admission/retire/unmap; daemon route remains blocked |
-| CP-0024 / P5-TRITON-VECADD-03-DAEMON-ROUTE | P5 | Negotiate and route MessageType 18 through a real daemon handler without advertising partial support |
+| CP-0024 / P5-TRITON-VECADD-03-DAEMON-ROUTE | P5 | Bounded handler source/type-19 plumbing, route-policy harness, and live canonical negative handshake; bit 8 and positive type-18/H2D/SUBMIT route remain blocked |
+| CP-0025 / P5-TRITON-VECADD-04-DAEMON-LIFECYCLE | P5 | Resolve alignment and owner-bound v1 H2D, then wire queue/signal/AQL packet/ticks, SUBMIT ACK, and type-20 completion before reconsidering bit 8 |
 | P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
 | P5-PARALLEL-TB-01 | P5B | Safe serial-versus-parallel threadblock experiment |
 | P5-OPS-01 | P5C | Broader model-operator manifest and differential gates |
@@ -812,8 +813,14 @@ checks and cancel-fetch rollback. It deliberately stops before the live daemon:
 capability bit 8 advertisement and MessageType 18 routing are false, as are
 GPUDispatcher/CU execution, the normal Triton launcher, compiler/JIT, and
 fallback. The 12-DWORD descriptor preload remains an explicit NOT_SUPPORTED
-boundary. The next unique action is CP-0024 /
-`P5-TRITON-VECADD-03-DAEMON-ROUTE`.
+   boundary. CP-0024 adds an owner-bound MessageType 18 handler source path,
+   MessageType 19 response plumbing, and a shared route-policy harness. Its
+   live runtime-to-gem5 probe proves only the canonical unsupported-capability
+   handshake and baseline reconnect while bit 8 remains unadvertised; it does
+   not send MessageType 18. A positive socket/H2D route, normal alignment 8,
+   SUBMIT ACK, MessageType 20 completion, launcher, compiler/JIT, execution,
+   and fallback remain false. The next unique action is CP-0025 /
+   `P5-TRITON-VECADD-04-DAEMON-LIFECYCLE`.
 
 ### P3H - host-native simulator and first Triton gate
 
@@ -862,8 +869,12 @@ The work is staged as follows:
    a committed launcher or device execution path. CP-0022 freezes the wire-v2
    codec. CP-0023 adds the runtime client contract and local owner-bound native
    adapter/admission lifecycle, but no daemon advertises bit 8 or routes
-   MessageType 18 and no GPU execution is claimed. CP-0024 /
-   `P5-TRITON-VECADD-03-DAEMON-ROUTE` is the next coordinated daemon gate.
+   MessageType 18 and no GPU execution is claimed. CP-0024 adds the bounded
+   handler/policy source and a negative live capability probe without selecting
+   bit 8 or sending type 18. CP-0025 /
+   `P5-TRITON-VECADD-04-DAEMON-LIFECYCLE` is the next coordinated daemon gate:
+   resolve ALLOC alignment and owner-bound v1 H2D, then implement queue/signal/
+   packet/tick submission and type-20 completion before advertisement.
 
 This workstream is not a cycle-accurate replacement. Timing, wider operator
 coverage, host-parallel threadblocks, HIP/OpenCL CTS, PyTorch, vLLM, and Qwen

@@ -1,0 +1,322 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0057",
+  "checkpoint_id": "CP-0024",
+  "type": "cp24-root-umbrella",
+  "claim": "EV-0057 binds the byte-exact EV-0056 child manifest, clean CP24 gem5 and runtime commits and trailers, the CP23 root anchor, the active CP24 prepare journal, a live runtime-to-gem5 negative capability handshake with exact binary identity, and a fresh 47/47 gem5 protocol test run. The accepted boundary is a committed but unadvertised partial handler: no live MessageType 18 route, positive generic negotiation, SUBMIT ACK, type-20 completion, launcher, execution, or fallback is claimed.",
+  "cwd": ".",
+  "started_at": "2026-08-10T09:49:19+08:00",
+  "ended_at": "2026-08-10T10:02:06+08:00",
+  "exit_code": 0,
+  "command_argv": [
+    [
+      "python3",
+      "-c",
+      "import json,subprocess\nchildren=((\"gem5\",\"projects/gem5\",\"7d52923899d9017c8ee318aa27dae5229b282a26\",\"32ef31e6ae861fd3e6855437d97b0293075cb87d\",\"67bf805d8c01fe9848b0c9fb5c663d5fbfe2a055\",\"cbf0eae213c5e39c727172b546434287d47b5bbe\"),(\"self-amdgpu-runtime\",\"projects/self-amdgpu-runtime\",\"497092b7696bf4454eacca850b033e3760f53375\",\"9b2e65a4e62dee32b378a177359cd76f890ba757\",\"b043a7ec00499e63ba6ba342711ef22471d9fd09\",\"54f0badb0a30c486334f15daea252ab6b55dd9a5\"))\ncommon={\"Checkpoint-ID\":\"CP-0024\",\"Goal-ID\":\"GSIM-001\",\"Plan-Revision\":\"2\",\"Source-Lock-SHA256\":\"8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4\",\"Evidence-Manifest-SHA256\":\"e77671d6087b9a0dab7c00c284590e92c152edd818c5a70896bc0d2ee80a5b2a\",\"Change-Kind\":\"code\"}\nresult={}\nfor name,path,head,tree,parent,baseline in children:\n actual_head=subprocess.check_output([\"git\",\"-C\",path,\"rev-parse\",\"HEAD\"],text=True).strip(); actual_tree=subprocess.check_output([\"git\",\"-C\",path,\"rev-parse\",\"HEAD^{tree}\"],text=True).strip(); actual_parent=subprocess.check_output([\"git\",\"-C\",path,\"rev-parse\",\"HEAD^\"],text=True).strip(); status=subprocess.check_output([\"git\",\"-C\",path,\"status\",\"--porcelain=v1\",\"--untracked-files=all\"],text=True); message=subprocess.check_output([\"git\",\"-C\",path,\"show\",\"-s\",\"--format=%B\",head],text=True)\n assert (actual_head,actual_tree,actual_parent,status)==(head,tree,parent,\"\"),(name,actual_head,actual_tree,actual_parent,status)\n expected={**common,\"Baseline-Commit\":baseline}\n for key,value in expected.items(): assert message.count(f\"{key}: {value}\")==1,(name,key,message)\n result[name]={\"head\":head,\"tree\":tree,\"parent\":parent,\"clean\":True,\"trailers\":expected}\nprint(json.dumps(result,sort_keys=True))"
+    ],
+    [
+      "python3",
+      "-c",
+      "validate EV-0056 identity, evidence policy, and retained external artifact hashes"
+    ],
+    [
+      "/bin/bash",
+      "-lc",
+      "cp24_live_dir=$(mktemp -d /tmp/cp24-evidence.XXXXXX); endpoint_path=\"$cp24_live_dir/bridge.sock\"; projects/gem5/build/VEGA_X86/gem5.opt --listener-mode=on -d \"$cp24_live_dir/out\" projects/gem5/configs/example/gemsim/host_bridge.py --endpoint \"$endpoint_path\" --epoch 1 --startup-timeout-ms 10000 --run-timeout-ms 10000 >\"$cp24_live_dir/gem5.stdout\" 2>\"$cp24_live_dir/gem5.stderr\" & gem5_pid=$!; for attempt in $(seq 1 200); do test -S \"$endpoint_path\" && break; kill -0 \"$gem5_pid\" 2>/dev/null || break; sleep 0.05; done; test -S \"$endpoint_path\" || { wait \"$gem5_pid\" || true; exit 1; }; SAGR_GENERIC_BRIDGE_ENDPOINT=\"$endpoint_path\" /tmp/cp24-runtime-check/tests/self_amdgpu_runtime_generic_dispatch_v2_endpoint_test; probe_rc=$?; kill \"$gem5_pid\" 2>/dev/null || true; wait \"$gem5_pid\" 2>/dev/null || true; exit \"$probe_rc\""
+    ],
+    [
+      "/bin/bash",
+      "-lc",
+      "sha256sum projects/gem5/build/VEGA_X86/gem5.opt /tmp/cp24-runtime-check/tests/self_amdgpu_runtime_generic_dispatch_v2_endpoint_test && git -C projects/gem5 rev-parse HEAD^{commit} HEAD^{tree} && git -C projects/self-amdgpu-runtime rev-parse HEAD^{commit} HEAD^{tree}"
+    ],
+    [
+      "/bin/bash",
+      "-lc",
+      "build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt --gtest_brief=1"
+    ],
+    [
+      "python3",
+      "scripts/transaction.py",
+      "status"
+    ],
+    [
+      "python3",
+      "-c",
+      "assert the EV-0056 and live-handshake boundary booleans remain fail-closed"
+    ]
+  ],
+  "command_results": [
+    {
+      "id": "umbrella-child-identities",
+      "argv": [
+        "python3",
+        "-c",
+        "import json,subprocess\nchildren=((\"gem5\",\"projects/gem5\",\"7d52923899d9017c8ee318aa27dae5229b282a26\",\"32ef31e6ae861fd3e6855437d97b0293075cb87d\",\"67bf805d8c01fe9848b0c9fb5c663d5fbfe2a055\",\"cbf0eae213c5e39c727172b546434287d47b5bbe\"),(\"self-amdgpu-runtime\",\"projects/self-amdgpu-runtime\",\"497092b7696bf4454eacca850b033e3760f53375\",\"9b2e65a4e62dee32b378a177359cd76f890ba757\",\"b043a7ec00499e63ba6ba342711ef22471d9fd09\",\"54f0badb0a30c486334f15daea252ab6b55dd9a5\"))\ncommon={\"Checkpoint-ID\":\"CP-0024\",\"Goal-ID\":\"GSIM-001\",\"Plan-Revision\":\"2\",\"Source-Lock-SHA256\":\"8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4\",\"Evidence-Manifest-SHA256\":\"e77671d6087b9a0dab7c00c284590e92c152edd818c5a70896bc0d2ee80a5b2a\",\"Change-Kind\":\"code\"}\nresult={}\nfor name,path,head,tree,parent,baseline in children:\n actual_head=subprocess.check_output([\"git\",\"-C\",path,\"rev-parse\",\"HEAD\"],text=True).strip(); actual_tree=subprocess.check_output([\"git\",\"-C\",path,\"rev-parse\",\"HEAD^{tree}\"],text=True).strip(); actual_parent=subprocess.check_output([\"git\",\"-C\",path,\"rev-parse\",\"HEAD^\"],text=True).strip(); status=subprocess.check_output([\"git\",\"-C\",path,\"status\",\"--porcelain=v1\",\"--untracked-files=all\"],text=True); message=subprocess.check_output([\"git\",\"-C\",path,\"show\",\"-s\",\"--format=%B\",head],text=True)\n assert (actual_head,actual_tree,actual_parent,status)==(head,tree,parent,\"\"),(name,actual_head,actual_tree,actual_parent,status)\n expected={**common,\"Baseline-Commit\":baseline}\n for key,value in expected.items(): assert message.count(f\"{key}: {value}\")==1,(name,key,message)\n result[name]={\"head\":head,\"tree\":tree,\"parent\":parent,\"clean\":True,\"trailers\":expected}\nprint(json.dumps(result,sort_keys=True))"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T01:57:39+00:00",
+      "ended_at": "2026-08-10T01:57:39+00:00",
+      "exit_code": 0,
+      "result": "Both CP24 child repositories are clean at the exact committed heads, trees, and CP23 parents, with one exact trailer set bound to byte-exact EV-0056.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0024/child-current-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "436bce83af706654adbd1f6f7d797a4cd526498857890aab3167dc552a621ccc",
+        "size": 2415,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0024/child-current-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "208297d119318bebed197b21bdf872874769f4d462d6ef5f63574a838c30faab",
+        "size": 1100,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0024/child-current-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "umbrella-ev0056-policy",
+      "argv": [
+        "python3",
+        "-c",
+        "validate EV-0056 identity, evidence policy, and retained external artifact hashes"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "EV-0056 is byte-exact at e77671d6087b9a0dab7c00c284590e92c152edd818c5a70896bc0d2ee80a5b2a and passes evidence policy with 8 result IDs, 6 retained descriptors, and exact descriptor size/SHA validation.",
+      "raw_streams_retained": false,
+      "raw_streams_limitation": "the validation result is aggregated without a separate raw command transcript"
+    },
+    {
+      "id": "umbrella-live-negative-handshake",
+      "argv": [
+        "/bin/bash",
+        "-lc",
+        "cp24_live_dir=$(mktemp -d /tmp/cp24-evidence.XXXXXX); endpoint_path=\"$cp24_live_dir/bridge.sock\"; projects/gem5/build/VEGA_X86/gem5.opt --listener-mode=on -d \"$cp24_live_dir/out\" projects/gem5/configs/example/gemsim/host_bridge.py --endpoint \"$endpoint_path\" --epoch 1 --startup-timeout-ms 10000 --run-timeout-ms 10000 >\"$cp24_live_dir/gem5.stdout\" 2>\"$cp24_live_dir/gem5.stderr\" & gem5_pid=$!; for attempt in $(seq 1 200); do test -S \"$endpoint_path\" && break; kill -0 \"$gem5_pid\" 2>/dev/null || break; sleep 0.05; done; test -S \"$endpoint_path\" || { wait \"$gem5_pid\" || true; exit 1; }; SAGR_GENERIC_BRIDGE_ENDPOINT=\"$endpoint_path\" /tmp/cp24-runtime-check/tests/self_amdgpu_runtime_generic_dispatch_v2_endpoint_test; probe_rc=$?; kill \"$gem5_pid\" 2>/dev/null || true; wait \"$gem5_pid\" 2>/dev/null || true; exit \"$probe_rc\""
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T01:49:19+00:00",
+      "ended_at": "2026-08-10T01:49:19+00:00",
+      "exit_code": 0,
+      "result": "The runtime reached a live VEGA_X86 gem5 Unix listener. Required-generic hello was canonically rejected, baseline retry completed, bit 8 was not selected, and execution and launcher remained false. No MessageType 18 request was sent.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0024/runtime-live-gem5-handshake.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d3967c9485c4829e0f951bd498ef174bc29a3082c3e153f810abcfe5169746f4",
+        "size": 1459,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0024/runtime-live-gem5-handshake.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "67a8bd54037cd4ad2f346a2befbc98a7684e0d7a58a77700563a36622de87b98",
+        "size": 119,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0024/runtime-live-gem5-handshake.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1f1de75416c5586179d0604a3604e598f52e484da559d8f8913f29d42b316e4f",
+        "size": 88,
+        "tracked": false
+      }
+    },
+    {
+      "id": "umbrella-live-binary-identity",
+      "argv": [
+        "/bin/bash",
+        "-lc",
+        "sha256sum projects/gem5/build/VEGA_X86/gem5.opt /tmp/cp24-runtime-check/tests/self_amdgpu_runtime_generic_dispatch_v2_endpoint_test && git -C projects/gem5 rev-parse HEAD^{commit} HEAD^{tree} && git -C projects/self-amdgpu-runtime rev-parse HEAD^{commit} HEAD^{tree}"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T01:50:30+00:00",
+      "ended_at": "2026-08-10T01:50:32+00:00",
+      "exit_code": 0,
+      "result": "The live probe used VEGA_X86 gem5.opt SHA256 38c4c8a2e099538228ced6686b21e1d02f5c1cfea2e5c320820858bf5f4fda48 and endpoint-test SHA256 6a733e5a4c97b4360ac5e8ac6c19b5eb24a1820656076f122b4c19979a993b33 from the captured pre-commit child source state.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0024/runtime-live-gem5-identity.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "53ee68b0a576afbabdba50491b1490542623b2f603fe744a34c5e94959463eca",
+        "size": 871,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0024/runtime-live-gem5-identity.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "981f92d5649e06062994a9c2b32a61472922a8caac0006dd9d0d479fffce278e",
+        "size": 418,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0024/runtime-live-gem5-identity.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "umbrella-gem5-protocol-gtest",
+      "argv": [
+        "/bin/bash",
+        "-lc",
+        "build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt --gtest_brief=1"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-10T01:57:47+00:00",
+      "ended_at": "2026-08-10T01:57:47+00:00",
+      "exit_code": 0,
+      "result": "The fresh gem5 protocol binary run passes 47/47 tests, covering the fixed generic-dispatch codec contract without proving the bridge's live MessageType 18 route.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0024/gem5-protocol-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0fbfeb7255d8b5d643ab95fccc16ba447695c47dfa1ac215bd4dd7bcbfaae542",
+        "size": 671,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0024/gem5-protocol-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e113d780d3dc090febdb2c0a8bb708a8a185df599254ea67cf8ea95c07179c4e",
+        "size": 145,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0024/gem5-protocol-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "umbrella-transaction-status",
+      "argv": [
+        "python3",
+        "scripts/transaction.py",
+        "status"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "CP-0024 remains in prepare at root anchor 69d3f56e; journal SHA256 e05455c0b9f01e2108432986b59226c8597446a41a57dac02a78f8641ab8825d records the exact expected gem5 and runtime commits and trees.",
+      "raw_streams_retained": false,
+      "raw_streams_limitation": "transaction status and journal identity are aggregated without a separate raw transcript"
+    },
+    {
+      "id": "umbrella-boundary-audit",
+      "argv": [
+        "python3",
+        "-c",
+        "assert the EV-0056 and live-handshake boundary booleans remain fail-closed"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "Boundary assertions pass: handler/policy harness and live negative handshake are true; raw18 socket proof, daemon route, bit8, positive ALLOC route, daemon H2D proof, SUBMIT, completion, execution, launcher, compiler/JIT, and fallback are false.",
+      "raw_streams_retained": false,
+      "raw_streams_limitation": "the assertion summary is aggregated without a separate raw transcript"
+    }
+  ],
+  "environment_fingerprint": {
+    "root_anchor_head": "69d3f56ea044baf8457fee61a97541b4b5b4d87e",
+    "root_anchor_tree": "e9e053595d8cd609147005e2605dad21e086f575",
+    "root_anchor_parent": "b20364b457ea6a378e645cf8216d54c407c95482",
+    "cp23_checkpoint_sha256": "667ef2811552f76cfa9d02b16270ce952acaa6bcfafd10f0e60e8191c0938802",
+    "cp23_current_sha256": "34d01a343a3c373bc43e1e6f5a8caad6f669dc78744820c93053bf7fc3805225",
+    "cp23_protocol_sha256": "e2cb8e874f772444831512a252ae0b7df054f4a0a42aa4d8e48821d0cda2160b",
+    "transaction_phase": "prepare",
+    "transaction_journal_sha256": "e05455c0b9f01e2108432986b59226c8597446a41a57dac02a78f8641ab8825d",
+    "gem5_head": "7d52923899d9017c8ee318aa27dae5229b282a26",
+    "gem5_tree": "32ef31e6ae861fd3e6855437d97b0293075cb87d",
+    "gem5_parent": "67bf805d8c01fe9848b0c9fb5c663d5fbfe2a055",
+    "runtime_head": "497092b7696bf4454eacca850b033e3760f53375",
+    "runtime_tree": "9b2e65a4e62dee32b378a177359cd76f890ba757",
+    "runtime_parent": "b043a7ec00499e63ba6ba342711ef22471d9fd09",
+    "child_evidence_manifest_sha256": "e77671d6087b9a0dab7c00c284590e92c152edd818c5a70896bc0d2ee80a5b2a",
+    "live_gem5_binary_sha256": "38c4c8a2e099538228ced6686b21e1d02f5c1cfea2e5c320820858bf5f4fda48",
+    "live_endpoint_binary_sha256": "6a733e5a4c97b4360ac5e8ac6c19b5eb24a1820656076f122b4c19979a993b33",
+    "runtime_ctest_total": 20,
+    "runtime_ctest_passed": 19,
+    "runtime_ctest_skipped": 1,
+    "runtime_ctest_failed": 0,
+    "gem5_protocol_tests_passed": 47,
+    "gem5_protocol_tests_failed": 0
+  },
+  "boundary": {
+    "handler_source_present": true,
+    "handler_committed": true,
+    "route_policy_harness": true,
+    "protocol_gtest_47_of_47": true,
+    "raw18_canonical_reject": true,
+    "raw18_reject_is_socket_proven": false,
+    "daemon_socket_handshake": true,
+    "runtime_to_gem5_live_handshake": true,
+    "live_handshake_canonical_unsupported": true,
+    "daemon_socket_route": false,
+    "bit8_advertised": false,
+    "bit8_negotiated": false,
+    "map_alloc_unmap_handler_present": true,
+    "map_alloc_unmap_positive_socket_tested": false,
+    "alloc_handler_alignment_allowlist": [4096, 65536],
+    "alloc_positive_4k_64k_tested": false,
+    "alloc_logical_alignment_8": false,
+    "page_size_lifetime": "owner-session-fixed",
+    "h2d_v1_carrier_runtime_mock": true,
+    "h2d_handler_present": true,
+    "h2d_daemon_socket_proven": false,
+    "submit_ack": false,
+    "generic_completion_type20": false,
+    "execution": false,
+    "launcher": false,
+    "compiler_or_jit": false,
+    "fallback": false,
+    "qwen_e2e": false,
+    "descriptor_preload": "unsupported"
+  },
+  "limitations": [
+    "The live runtime-to-gem5 evidence exercises hello negotiation and baseline retry only. It sends no MessageType 18 request and proves no positive generic route.",
+    "The route harness exercises shared policy and codec helpers, not HostGPUBridge's live Unix-socket MAP/ALLOC/H2D/UNMAP path.",
+    "The daemon handler accepts only 4096/65536 ALLOC alignment while the runtime's normal logical request remains 8; no positive ALLOC lifecycle is interoperable yet.",
+    "The first successful MAP fixes page size for the owner session even after UNMAP; this partial-handler restriction must remain documented until the lifecycle is completed.",
+    "The v1 sealed-FD H2D carrier is proven by the runtime mock and handler source, not by a live gem5 daemon route.",
+    "SUBMIT always returns UnsupportedCapability. No successful SUBMIT ACK, type-20 completion, queue/signal/tick identity, launcher, compiler/JIT, GPUDispatcher/CU execution, output oracle, fallback, or Qwen result exists.",
+    "The live gem5.opt is hash-identified but is not a fresh full gem5.opt rebuild; the known unrelated amdgpu_device.cc pointer-member build blocker remains outside this checkpoint.",
+    "The retained 12-DWORD Triton descriptor preload remains unsupported and fail-closed."
+  ],
+  "redactions": [],
+  "result": "CP24 is accepted only as a committed unadvertised partial-handler boundary: child identities and EV-0056 are exact, policy/codec tests pass, and a real daemon socket proves canonical negative capability negotiation. MessageType 18 socket routing, bit8, positive ALLOC/H2D, SUBMIT, completion, launcher, execution, and fallback remain false for CP25.",
+  "includes": {
+    "EV-0056": "e77671d6087b9a0dab7c00c284590e92c152edd818c5a70896bc0d2ee80a5b2a"
+  },
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0024/EV-0056-draft.json",
+      "size": 15457,
+      "sha256": "e77671d6087b9a0dab7c00c284590e92c152edd818c5a70896bc0d2ee80a5b2a",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "tracked": false
+    }
+  ]
+}

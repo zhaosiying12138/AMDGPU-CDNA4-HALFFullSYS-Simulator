@@ -1,14 +1,14 @@
 {
   "schema": "amdgpu-sim.host-transport-v2.generic-dispatch.v2",
   "title": "GemSim generic object mapping and dispatch payload-v2 authority",
-  "checkpoint": "CP-0023",
-  "authority_status": "adapter-client-admission-only",
+  "checkpoint": "CP-0024",
+  "authority_status": "accepted-bounded-handler-negative-live-boundary",
   "base_protocol": "protocol/host-transport-v1.json",
-  "scope": "A versioned, fixed-record schema plus an append-only runtime client and a separate local gem5 owner-bound mapping, kernarg, queue, CP-admission, retire, and unmap adapter. The local halves are not connected by a daemon MessageType 18 route and do not establish launcher or GPU execution.",
+  "scope": "A versioned, fixed-record schema, append-only runtime client, local gem5 owner-bound adapter, and bounded daemon-handler source path. CP24 proves route-policy behavior and a live canonical negative capability handshake only; it does not prove a positive MessageType 18 socket route, daemon H2D publication, SUBMIT/type-20 lifecycle, launcher, or GPU execution.",
   "next_action": {
-    "checkpoint": "CP-0024",
-    "id": "P5-TRITON-VECADD-03-DAEMON-ROUTE",
-    "boundary": "Negotiate capability bit 8 and route MessageType 18 through one real daemon handler without advertising partial support or claiming GPU execution."
+    "checkpoint": "CP-0025",
+    "id": "P5-TRITON-VECADD-04-DAEMON-LIFECYCLE",
+    "boundary": "Reconcile logical alignment 8 with page-backed allocation, bind v1 MEMORY_COPY_H2D to the owner session, and implement queue/signal/AQL packet/tick, SUBMIT ACK, and type-20 completion before reconsidering capability bit 8."
   },
   "versioning": {
     "framing_major": 1,
@@ -16,7 +16,7 @@
     "payload_major": 2,
     "payload_minor": 0,
     "compatibility": "The v1 80-byte envelope, byte order, CRC-32C rule, and all v1 message records remain unchanged. A v2 payload is opt-in and is never decoded as a v1 record.",
-    "server_status": "The current daemon does not advertise capability bit 8 or route MessageType 18. Codec/client/local-adapter success is not a negotiated daemon transport or execution result."
+    "server_status": "The current daemon contains an owner-bound MessageType 18 handler branch and type-19 output plumbing but does not advertise capability bit 8. The retained live endpoint probe therefore proves only canonical handshake rejection plus baseline reconnect and does not send a MessageType 18 request."
   },
   "capability": {
     "name": "GENERIC_DISPATCH_V2",
@@ -62,7 +62,7 @@
     "ancillary_descriptors": 0,
     "host_pointers": false,
     "client_aql_bytes": false,
-    "fd_carrier": "No FD or SCM_RIGHTS field is part of v2. CP23 exercises existing sealed-memfd v1 MEMORY_COPY_H2D as the runtime mock byte carrier and a separate native publishKernarg adapter locally; no daemon route joins them."
+    "fd_carrier": "No FD or SCM_RIGHTS field and no KERNARG opcode is part of v2. Existing sealed-memfd v1 MEMORY_COPY_H2D remains the kernarg byte carrier. CP23 proves the runtime mock and local native publish halves; CP24 does not prove that carrier through a live gem5 daemon session."
   },
   "request_payload": {
     "bytes": 4016,
@@ -191,9 +191,10 @@
   },
   "state_rules": {
     "ordering": ["MAP_OBJECT", "ALLOC_KERNARG", "SUBMIT_AQL", "UNMAP_OBJECT"],
+    "publication_order": "MAP_OBJECT -> ALLOC_KERNARG -> existing v1 MEMORY_COPY_H2D -> SUBMIT_AQL -> type-20 completion -> UNMAP_OBJECT. MEMORY_COPY_H2D is a v1 carrier, not a new v2 opcode.",
     "ownership": "Every nonzero object, mapping, queue, allocation, signal, ticket, and generation is connection/owner scoped. Stale or cross-owner generations are rejected before publication.",
-    "aql": "SUBMIT_AQL contains launch metadata only. The live daemon contract owns packet materialization, kernel_object, kernarg VA, completion signal linkage, publication, and CRC. CP23 proves equivalent local publish/fetch/CP-admission/retire state but no routed handler.",
-    "memory": "The v2 schema does not make public simulated_va packet-visible by itself. CP23 local adapter VAs and leases are owner-bound selftest state; only a routed daemon handler can return them to a real client and pin them through completion.",
+    "aql": "SUBMIT_AQL contains launch metadata only. The live daemon contract owns packet materialization, kernel_object, kernarg VA, completion signal linkage, publication, CRC, and nonzero lifecycle ticks. CP24's handler returns UnsupportedCapability for SUBMIT until that complete route exists.",
+    "memory": "The v2 schema does not make public simulated_va packet-visible by itself. CP24's handler policy limits ALLOC alignment to 4096 or 65536 and fixes page size for the owner session; normal logical alignment 8 and a live v1 H2D-to-session route remain unproven.",
     "fetch_rollback": "If CP admission rejects a locally fetched packet, CP23 cancelFetch restores the queue slot before mapping/kernarg pins are released. Admission success records ownership and queue state only; it is not GPU execution."
   },
   "cp23_local_boundary": {
@@ -222,6 +223,41 @@
     "jit": false,
     "fallback": false
   },
+  "cp24_bounded_handler_boundary": {
+    "status": "accepted-bounded-partial",
+    "gem5_child_head": "7d52923899d9017c8ee318aa27dae5229b282a26",
+    "gem5_child_tree": "32ef31e6ae861fd3e6855437d97b0293075cb87d",
+    "runtime_child_head": "497092b7696bf4454eacca850b033e3760f53375",
+    "runtime_child_tree": "9b2e65a4e62dee32b378a177359cd76f890ba757",
+    "handler_source_present": true,
+    "type18_dispatch_branch_present": true,
+    "type19_ack_plumbing_present": true,
+    "route_policy_harness": true,
+    "raw18_canonical_reject": true,
+    "raw18_reject_is_socket_proven": false,
+    "runtime_ctest": "20 total; 19 passed; 1 expected endpoint skip; 0 failed",
+    "runtime_to_gem5_live_handshake": true,
+    "live_handshake_canonical_unsupported": true,
+    "baseline_reconnect": true,
+    "daemon_socket_route": false,
+    "bit8_advertised": false,
+    "bit8_negotiated_in_endpoint_probe": false,
+    "alloc_handler_alignment_allowlist": [4096, 65536],
+    "alloc_positive_4k_64k_tested": false,
+    "alloc_logical_alignment_8": false,
+    "page_size_lifetime": "owner-session-fixed",
+    "h2d_carrier": "v1 MEMORY_COPY_H2D",
+    "h2d_handler_present": true,
+    "h2d_daemon_route": false,
+    "submit_ack": false,
+    "generic_completion_type20": false,
+    "queue_signal_packet_ticks_complete": false,
+    "normal_triton_launcher": false,
+    "compiler_invoked": false,
+    "jit": false,
+    "execution": false,
+    "fallback": false
+  },
   "bounded_fixture_observation": {
     "tutorial_sha256": "842430949e0ccde4fbce07606cce3ac4bac36bf21b2b12619a31b795ca4029b3",
     "hsaco_sha256": "ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e",
@@ -231,7 +267,7 @@
     "kernarg_segment_bytes": 48,
     "kernarg_alignment": 8,
     "descriptor_preload_dwords": 12,
-    "preload_status": "NOT_SUPPORTED by the CP23 local mapping/admission gate until preload-aware mapping and +256-byte entry semantics are implemented; the 12-DWORD value is never silently stripped or treated as bytes."
+    "preload_status": "NOT_SUPPORTED through the CP24 bounded handler gate until preload-aware mapping and +256-byte entry semantics are implemented; the 12-DWORD value is never silently stripped or treated as bytes."
   },
   "acceptance_boundary": {
     "codec_test": true,
@@ -244,9 +280,19 @@
     "local_command_processor_admission": true,
     "local_retire": true,
     "local_unmap": true,
+    "handler_source_present": true,
+    "type18_dispatch_branch_present": true,
+    "type19_ack_plumbing_present": true,
+    "route_policy_harness": true,
+    "runtime_to_gem5_live_negative_handshake": true,
     "daemon_message_type_18_route": false,
     "daemon_capability_advertisement": false,
-    "daemon_generic_handler": false,
+    "h2d_handler_present": true,
+    "daemon_h2d_route": false,
+    "alloc_logical_alignment_8": false,
+    "submit_ack": false,
+    "generic_completion_type20": false,
+    "daemon_generic_handler": true,
     "normal_launcher": false,
     "normal_triton_launcher": false,
     "gem5_dispatcher_or_cu": false,

@@ -1,9 +1,9 @@
 {
-  "checkpoint_id": "CP-0023",
-  "checkpoint_sha256": "667ef2811552f76cfa9d02b16270ce952acaa6bcfafd10f0e60e8191c0938802",
+  "checkpoint_id": "CP-0024",
+  "checkpoint_sha256": "e25a3fc2b3d56476aad6fcb476c74c0433ec1ca262d30e43c533c0fa077ce697",
   "goal_id": "GSIM-001",
-  "next_action_id": "P5-TRITON-VECADD-03-DAEMON-ROUTE",
-  "next_action_summary": "Route negotiated generic payload-v2 records through one owner-bound daemon session handler and advertise capability bit 8 only when the complete lifecycle is available.",
+  "next_action_id": "P5-TRITON-VECADD-04-DAEMON-LIFECYCLE",
+  "next_action_summary": "Resolve logical alignment and owner-bound v1 H2D, then complete queue, signal, AQL packet, tick, SUBMIT ACK, and type-20 lifecycle before reconsidering capability bit 8.",
   "phase_id": "P5",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,

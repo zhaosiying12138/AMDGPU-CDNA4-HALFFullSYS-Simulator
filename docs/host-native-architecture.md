@@ -30,8 +30,11 @@ CP-0021 adds only a child-side Triton vecadd metadata/provenance gate: the
 unknown-gfx950 target spelling and DEFAULT-visible descriptor exception are
 accepted for parsing. CP-0022 freezes the generic payload-v2 codec. CP-0023
 adds the append-only runtime client contract and a separate local
-`HostNativeDispatchStateV2`/bridge-adapter admission lifecycle; it is not wired
-into a daemon session or the GPU execution pipeline.
+`HostNativeDispatchStateV2`/bridge-adapter admission lifecycle. CP-0024 adds an
+owner-bound MessageType 18 handler and MessageType 19 output plumbing to the
+VEGA_X86 bridge plus a shared route-policy harness, but production capability
+bit 8 remains clear and the retained live probe exercises only the negative
+hello path, not a type-18 request or GPU execution pipeline.
 
 The host-native process must preserve the CP8/CP13 fixed-width transport and
 the runtime ownership/generation rules. It must not introduce a second wire
@@ -103,8 +106,18 @@ unmaps; a post-fetch CP rejection uses `cancelFetch` to restore queue ownership
 before pins are released. Admission is not execution. The daemon still neither
 advertises capability bit 8 nor routes MessageType 18; GPUDispatcher/CU,
 kernel execution, normal Triton launcher, compiler/JIT, and fallback remain
-false. The retained 12-DWORD preload is NOT_SUPPORTED. CP-0024 /
-`P5-TRITON-VECADD-03-DAEMON-ROUTE` is the next gate.
+false. The retained 12-DWORD preload is NOT_SUPPORTED. CP-0024 accepts a
+bounded partial handler boundary: source routing and canonical type-19 failure
+encoding exist, and a policy harness covers absent-capability rejection,
+no-mutation failure, 4K/64K page policy, alignment-8 rejection, SUBMIT
+rejection, MAP, and UNMAP. The page-size policy is fixed for the owner session.
+The live runtime-to-gem5 probe proves the canonical unsupported-capability
+hello and baseline reconnect only; it does not send MessageType 18. A daemon
+H2D route is also unproven: kernarg bytes retain the existing v1
+`MEMORY_COPY_H2D` carrier rather than gaining a new v2 opcode. Normal alignment
+8, positive type-18 routing, SUBMIT ACK, MessageType 20, queue/signal/packet/
+ticks, launcher, compiler/JIT, execution, and fallback are still false.
+CP-0025 / `P5-TRITON-VECADD-04-DAEMON-LIFECYCLE` is the next gate.
 
 ## Non-goals
 

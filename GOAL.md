@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0023-generic-adapter-client-admission-boundary-accepted; daemon-route-and-normal-launcher-blocked; next-CP-0024-P5-TRITON-VECADD-03-DAEMON-ROUTE`
+**Current state:** `CP-0024-bounded-daemon-handler-boundary-accepted; bit8-positive-route-submit-and-normal-launcher-blocked; next-CP-0025-P5-TRITON-VECADD-04-DAEMON-LIFECYCLE`
 
 **Current phase:** `P5`
 
@@ -122,11 +122,16 @@ gfx950 gpuReadWrite 的 4 个 256-item workgroup、16 个 wave64、每 wave 19
 个 instruction-start（304 总数）和输出/队列/信号差分；这只是单一 fixture
 的功能边界，不是通用 gfx950、timing、fence/atomic、TLB/Ruby 或任意 HSACO
 支持。CP-0021/CP-0022/CP-0023 已依次冻结 Triton provenance、payload-v2 wire
-codec 和 runtime client/local native admission 边界；CP-0023 的本地
-MAP/ALLOC、kernarg publish、queue publish/fetch、CP admission、retire 和
-UNMAP 不等于 daemon 路由或 GPU 执行。当前唯一 next_action 是 CP-0024 的
-`P5-TRITON-VECADD-03-DAEMON-ROUTE`：在具备完整 handler 前不得广告
-capability bit 8，也不得把本地 admission 当作正常 Triton launcher 成功。
+codec 和 runtime client/local native admission 边界。CP-0024 又增加了
+owner-bound type-18 handler 源码、type-19 ACK 出站 plumbing 和共享 route-policy
+harness；真实 runtime-to-gem5 probe 只证明 bit 8 未广告时 canonical reject，且
+随后 baseline reconnect 成功，没有发送或证明 type-18 socket/H2D daemon route。
+当前唯一 next_action 是 CP-0025 的
+`P5-TRITON-VECADD-04-DAEMON-LIFECYCLE`：先解决正常 alignment 8 与 page-backed
+ALLOC 的契约差异，把既有 v1 `MEMORY_COPY_H2D` carrier 绑定到同一 owner session，
+再补齐 queue/signal/AQL packet/tick、SUBMIT ACK 和 type-20 completion；完整
+lifecycle 通过前仍不得广告 capability bit 8，也不得把 handler/admission 当作
+正常 Triton launcher 或 GPU 执行成功。
 在 Triton 用户命令 `tutorial/01-vecadd.py`（当前 pinned checkout 中对应未修改的
 `python/tutorials/01-vector-add.py`）首次透明通过后，先完成可复现的 gem5
 算子 profile、80/20 优化和 threadblock host-parallel 正确性/可行性门禁，再
@@ -254,4 +259,17 @@ state: the daemon does not advertise capability bit 8 or route MessageType 18,
 and GPUDispatcher, ComputeUnit, kernel execution, normal Triton launcher,
 compiler/JIT, and fallback remain false. The retained Triton 12-DWORD (48-byte)
 descriptor preload still fails closed as NOT_SUPPORTED. The next unique action
-is CP-0024 / `P5-TRITON-VECADD-03-DAEMON-ROUTE`.
+was CP-0024 / `P5-TRITON-VECADD-03-DAEMON-ROUTE`.
+
+`CP-0024` accepts a bounded partial daemon-handler boundary. Gem5 now contains
+an owner-bound MessageType 18 handler, MessageType 19 response plumbing, and a
+shared route-policy harness. The runtime adds an opt-in endpoint probe; against
+the live VEGA_X86 listener it observes the canonical unsupported-capability
+handshake and then reconnects successfully with the baseline capability set.
+That negative handshake does not send MessageType 18. Capability bit 8 remains
+unadvertised, a positive socket route and daemon H2D publication are unproven,
+ALLOC accepts only page-backed 4096/65536 alignment while the normal logical
+alignment is 8, and the page-size policy is fixed for the owner session.
+SUBMIT ACK, MessageType 20 completion, launcher, compiler/JIT, GPU execution,
+and fallback remain false. The next unique action is CP-0025 /
+`P5-TRITON-VECADD-04-DAEMON-LIFECYCLE`.

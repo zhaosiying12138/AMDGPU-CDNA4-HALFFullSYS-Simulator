@@ -1,0 +1,323 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0056",
+  "checkpoint_id": "CP-0024",
+  "type": "cp24-child-handler-policy-and-endpoint-boundary",
+  "claim": "Provisional CP24 child evidence: gem5 contains a shared generic-dispatch route policy and owner-bound MessageType 18 bridge handler, while the runtime adds an opt-in endpoint handshake probe. A live runtime-to-gem5 socket probe proves the production daemon omits capability bit 8 and returns the canonical UnsupportedCapability handshake path. The evidence does not prove a MessageType 18 daemon route, positive generic negotiation, or execution.",
+  "cwd": ".",
+  "started_at": "2026-08-10T09:41:15+08:00",
+  "ended_at": "2026-08-10T09:50:32+08:00",
+  "exit_code": 0,
+  "command_argv": [
+    [
+      "git",
+      "-C",
+      "projects/gem5",
+      "diff",
+      "--check",
+      "--",
+      "src/dev/amdgpu/SConscript",
+      "src/dev/amdgpu/host_gpu_bridge.cc",
+      "src/dev/amdgpu/host_gpu_bridge.hh",
+      "src/dev/amdgpu/host_gpu_generic_dispatch_route.cc",
+      "src/dev/amdgpu/host_gpu_generic_dispatch_route.hh",
+      "src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc"
+    ],
+    [
+      "g++",
+      "-std=c++17",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-fsyntax-only",
+      "-I",
+      "src",
+      "-I",
+      "build/VEGA_X86",
+      "-I",
+      "build/VEGA_X86/gem5.build",
+      "-I",
+      "ext",
+      "-I",
+      ".",
+      "src/dev/amdgpu/host_gpu_generic_dispatch_route.cc",
+      "src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc"
+    ],
+    [
+      "build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_generic_dispatch_route_core.opt"
+    ],
+    [
+      "cmake",
+      "--build",
+      "/tmp/amdgpu-sim-cp24-runtime-package",
+      "-j2"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "/tmp/amdgpu-sim-cp24-runtime-package",
+      "--output-on-failure"
+    ],
+    [
+      "/tmp/amdgpu-sim-cp24-runtime-package/tests/self_amdgpu_runtime_generic_dispatch_v2_endpoint_test"
+    ],
+    [
+      "/bin/bash",
+      "-lc",
+      "cp24_live_dir=$(mktemp -d /tmp/cp24-evidence.XXXXXX); endpoint_path=\"$cp24_live_dir/bridge.sock\"; projects/gem5/build/VEGA_X86/gem5.opt --listener-mode=on -d \"$cp24_live_dir/out\" projects/gem5/configs/example/gemsim/host_bridge.py --endpoint \"$endpoint_path\" --epoch 1 --startup-timeout-ms 10000 --run-timeout-ms 10000 >\"$cp24_live_dir/gem5.stdout\" 2>\"$cp24_live_dir/gem5.stderr\" & gem5_pid=$!; for attempt in $(seq 1 200); do test -S \"$endpoint_path\" && break; kill -0 \"$gem5_pid\" 2>/dev/null || break; sleep 0.05; done; test -S \"$endpoint_path\" || { wait \"$gem5_pid\" || true; exit 1; }; SAGR_GENERIC_BRIDGE_ENDPOINT=\"$endpoint_path\" /tmp/cp24-runtime-check/tests/self_amdgpu_runtime_generic_dispatch_v2_endpoint_test; probe_rc=$?; kill \"$gem5_pid\" 2>/dev/null || true; wait \"$gem5_pid\" 2>/dev/null || true; exit \"$probe_rc\""
+    ],
+    [
+      "/bin/bash",
+      "-lc",
+      "sha256sum projects/gem5/build/VEGA_X86/gem5.opt /tmp/cp24-runtime-check/tests/self_amdgpu_runtime_generic_dispatch_v2_endpoint_test && git -C projects/gem5 rev-parse HEAD^{commit} HEAD^{tree} && git -C projects/self-amdgpu-runtime rev-parse HEAD^{commit} HEAD^{tree}"
+    ]
+  ],
+  "command_results": [
+    {
+      "id": "gem5-route-diff-check",
+      "argv": [
+        "git",
+        "diff",
+        "--check",
+        "--",
+        "src/dev/amdgpu/SConscript",
+        "src/dev/amdgpu/host_gpu_bridge.cc",
+        "src/dev/amdgpu/host_gpu_bridge.hh",
+        "src/dev/amdgpu/host_gpu_generic_dispatch_route.cc",
+        "src/dev/amdgpu/host_gpu_generic_dispatch_route.hh",
+        "src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc"
+      ],
+      "cwd": "projects/gem5",
+      "exit_code": 0,
+      "result": "pass",
+      "raw_streams_retained": false,
+      "raw_streams_limitation": "provisional aggregate retains command identity and semantic result only"
+    },
+    {
+      "id": "gem5-route-policy-syntax",
+      "argv": [
+        "g++",
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-fsyntax-only",
+        "-I",
+        "src",
+        "-I",
+        "build/VEGA_X86",
+        "-I",
+        "build/VEGA_X86/gem5.build",
+        "-I",
+        "ext",
+        "-I",
+        ".",
+        "src/dev/amdgpu/host_gpu_generic_dispatch_route.cc",
+        "src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc"
+      ],
+      "cwd": "projects/gem5",
+      "exit_code": 0,
+      "result": "route policy implementation and CPU-less harness translation unit pass C++17 syntax-only compilation",
+      "raw_streams_retained": false,
+      "raw_streams_limitation": "provisional aggregate retains command identity and semantic result only"
+    },
+    {
+      "id": "gem5-route-policy-harness",
+      "argv": [
+        "build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_generic_dispatch_route_core.opt"
+      ],
+      "cwd": "projects/gem5",
+      "exit_code": 0,
+      "stdout": "host_gpu_generic_dispatch_route_core: PASS",
+      "result": "raw type-18 absent-capability gate, canonical failure zeroing, no-mutation policy probe, ALLOC align-8 rejection, SUBMIT rejection, MAP/UNMAP policy, and 64K page policy pass; observed stdout SHA256 15bedbc4e398aa71de07a6585d974b1594143551e5f537c1d6f82fdcd3f7f865",
+      "raw_streams_retained": false,
+      "raw_streams_limitation": "provisional aggregate retains semantic output summary only"
+    },
+    {
+      "id": "runtime-cp24-package-build",
+      "argv": [
+        "cmake",
+        "--build",
+        "/tmp/amdgpu-sim-cp24-runtime-package",
+        "-j2"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "runtime test package builds, including the endpoint probe",
+      "raw_streams_retained": false,
+      "raw_streams_limitation": "provisional aggregate retains command identity and semantic result only"
+    },
+    {
+      "id": "runtime-cp24-ctest",
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "/tmp/amdgpu-sim-cp24-runtime-package",
+        "--output-on-failure"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "20 total tests; 19 passed; 1 expected endpoint skip; 0 failed; observed stdout SHA256 1a38ca14e1b2ae7cab78c7f759076d103b9cc4c6b28588efe8b14fccb0056b1e",
+      "raw_streams_retained": false,
+      "raw_streams_limitation": "provisional aggregate retains test-count summary only"
+    },
+    {
+      "id": "runtime-endpoint-probe",
+      "argv": [
+        "/tmp/amdgpu-sim-cp24-runtime-package/tests/self_amdgpu_runtime_generic_dispatch_v2_endpoint_test"
+      ],
+      "cwd": ".",
+      "exit_code": 77,
+      "result": "expected environment-gated skip: SAGR_GENERIC_BRIDGE_ENDPOINT is unset; no daemon endpoint was probed; observed stderr SHA256 4f0bcf31f94ada106e155d3586497f3f347c2b4525d416f91f3427b3f8528fa4",
+      "raw_streams_retained": false,
+      "raw_streams_limitation": "provisional aggregate retains expected skip summary only"
+    },
+    {
+      "id": "runtime-live-gem5-handshake",
+      "argv": [
+        "/bin/bash",
+        "-lc",
+        "cp24_live_dir=$(mktemp -d /tmp/cp24-evidence.XXXXXX); endpoint_path=\"$cp24_live_dir/bridge.sock\"; projects/gem5/build/VEGA_X86/gem5.opt --listener-mode=on -d \"$cp24_live_dir/out\" projects/gem5/configs/example/gemsim/host_bridge.py --endpoint \"$endpoint_path\" --epoch 1 --startup-timeout-ms 10000 --run-timeout-ms 10000 >\"$cp24_live_dir/gem5.stdout\" 2>\"$cp24_live_dir/gem5.stderr\" & gem5_pid=$!; for attempt in $(seq 1 200); do test -S \"$endpoint_path\" && break; kill -0 \"$gem5_pid\" 2>/dev/null || break; sleep 0.05; done; test -S \"$endpoint_path\" || { wait \"$gem5_pid\" || true; exit 1; }; SAGR_GENERIC_BRIDGE_ENDPOINT=\"$endpoint_path\" /tmp/cp24-runtime-check/tests/self_amdgpu_runtime_generic_dispatch_v2_endpoint_test; probe_rc=$?; kill \"$gem5_pid\" 2>/dev/null || true; wait \"$gem5_pid\" 2>/dev/null || true; exit \"$probe_rc\""
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T01:49:19+00:00",
+      "ended_at": "2026-08-10T01:49:19+00:00",
+      "exit_code": 0,
+      "result": "The runtime reached a live VEGA_X86 gem5 listener; the required-generic hello was canonically rejected, the baseline retry completed, capability bit 8 remained unselected, and execution and launcher remained false. This does not send or prove a MessageType 18 route.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0024/runtime-live-gem5-handshake.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d3967c9485c4829e0f951bd498ef174bc29a3082c3e153f810abcfe5169746f4",
+        "size": 1459,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0024/runtime-live-gem5-handshake.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "67a8bd54037cd4ad2f346a2befbc98a7684e0d7a58a77700563a36622de87b98",
+        "size": 119,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0024/runtime-live-gem5-handshake.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1f1de75416c5586179d0604a3604e598f52e484da559d8f8913f29d42b316e4f",
+        "size": 88,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-live-gem5-identity",
+      "argv": [
+        "/bin/bash",
+        "-lc",
+        "sha256sum projects/gem5/build/VEGA_X86/gem5.opt /tmp/cp24-runtime-check/tests/self_amdgpu_runtime_generic_dispatch_v2_endpoint_test && git -C projects/gem5 rev-parse HEAD^{commit} HEAD^{tree} && git -C projects/self-amdgpu-runtime rev-parse HEAD^{commit} HEAD^{tree}"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T01:50:30+00:00",
+      "ended_at": "2026-08-10T01:50:32+00:00",
+      "exit_code": 0,
+      "result": "The live probe is bound to VEGA_X86 gem5.opt SHA256 38c4c8a2e099538228ced6686b21e1d02f5c1cfea2e5c320820858bf5f4fda48, endpoint-test SHA256 6a733e5a4c97b4360ac5e8ac6c19b5eb24a1820656076f122b4c19979a993b33, gem5 base 67bf805d/tree b63d1ede, and runtime base b043a7ec/tree 536394f4.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0024/runtime-live-gem5-identity.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "53ee68b0a576afbabdba50491b1490542623b2f603fe744a34c5e94959463eca",
+        "size": 871,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0024/runtime-live-gem5-identity.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "981f92d5649e06062994a9c2b32a61472922a8caac0006dd9d0d479fffce278e",
+        "size": 418,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0024/runtime-live-gem5-identity.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "environment_fingerprint": {
+    "transaction_phase": "prepare",
+    "previous_checkpoint": "CP-0023",
+    "scope": "partial handler and endpoint handshake boundary",
+    "gem5_base_head": "67bf805d8c01fe9848b0c9fb5c663d5fbfe2a055",
+    "gem5_base_tree": "b63d1ede7cfdc9149ec40a7285052de53482eab6",
+    "gem5_working_diff_sha256": "dc9cd72abcd412d2e6c1fa7260f58ded4d93295ae71837e5b40377e7f13baa75",
+    "runtime_base_head": "b043a7ec00499e63ba6ba342711ef22471d9fd09",
+    "runtime_base_tree": "536394f47ed94ecb5c1f7a49ab188adc94fcabf7",
+    "runtime_working_diff_sha256": "9d9cd57defa5d0369ec0c1ab7fe3c7e98b8f9c2a582a70f76bb0038ffbaaa2d0",
+    "provisional_child_trailer_sha256": {
+      "gem5": "02b274a8cc005b97a48f94480a4460840950a59b4a95763eb5988fe156b0df44",
+      "self-amdgpu-runtime": "cce5901ba17d1fcdb9261ab33da86d2c4e5d41017edb316c8e430a3bfb784c12"
+    },
+    "runtime_ctest_total": 20,
+    "runtime_ctest_passed": 19,
+    "runtime_ctest_skipped": 1,
+    "runtime_ctest_failed": 0,
+    "runtime_live_gem5_handshake": true,
+    "runtime_live_generic_capability_selected": false,
+    "runtime_live_canonical_unsupported": true,
+    "runtime_live_gem5_binary_sha256": "38c4c8a2e099538228ced6686b21e1d02f5c1cfea2e5c320820858bf5f4fda48",
+    "runtime_live_endpoint_binary_sha256": "6a733e5a4c97b4360ac5e8ac6c19b5eb24a1820656076f122b4c19979a993b33"
+  },
+  "boundary": {
+    "handler_source_present": true,
+    "route_policy_harness": true,
+    "raw18_canonical_reject": true,
+    "raw18_reject_is_socket_proven": false,
+    "daemon_socket_handshake": true,
+    "runtime_to_gem5_live_handshake": true,
+    "live_handshake_canonical_unsupported": true,
+    "daemon_socket_route": false,
+    "bit8_advertised": false,
+    "bit8_negotiated_in_endpoint_probe": false,
+    "alloc_handler_alignment_allowlist": [4096, 65536],
+    "alloc_positive_4k_64k_tested": false,
+    "alloc_logical_alignment_8": false,
+    "h2d_v1_carrier_runtime_mock": true,
+    "h2d_daemon_route": false,
+    "submit_ack": false,
+    "generic_completion_type20": false,
+    "execution": false,
+    "launcher": false,
+    "compiler_or_jit": false,
+    "fallback": false,
+    "descriptor_preload": "unsupported"
+  },
+  "observed_artifacts": [
+    {
+      "path": "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_generic_dispatch_route_core.opt",
+      "sha256": "cc211e97e6f8877573ddd48c3c5527c3daa612d73b1325e6b33385b47e6d5cea",
+      "note": "ignored existing binary used for the PASS probe"
+    },
+    {
+      "path": "/tmp/amdgpu-sim-cp24-runtime-package/tests/self_amdgpu_runtime_generic_dispatch_v2_endpoint_test",
+      "sha256": "f7dacf44b01e043f5a86ddf9898a915fd242faad714a4da154da722c046faca0",
+      "note": "ignored build output; endpoint probe returned the expected skip"
+    }
+  ],
+  "limitations": [
+    "This is provisional evidence. Child commits and final Evidence-Manifest-SHA256 trailers are not yet recorded; EV-0057 must replace the provisional child hashes.",
+    "The gem5 route harness exercises shared policy/codec helpers, not HostGPUBridge's live Unix socket or a negotiated positive session.",
+    "The environment-gated CTest instance skipped because SAGR_GENERIC_BRIDGE_ENDPOINT was unset; a separate retained live probe reached VEGA_X86 gem5 and proved only the negative capability handshake, not a MessageType 18 request or route.",
+    "The sealed-FD H2D carrier is proven by the existing runtime mock client test, not by a gem5 daemon route.",
+    "The 4K/64K ALLOC restriction is a daemon-handler policy gate; the CP23 protocol and local native adapter still represent logical alignment 8.",
+    "No SUBMIT success ACK, type-20 completion, queue/signal/tick identity, launcher, compiler/JIT, GPUDispatcher/CU, output, or fallback claim is made."
+  ],
+  "redactions": [],
+  "result": "Provisional partial boundary accepted for evidence drafting only: route_policy_harness=true, handler_source_present=true, daemon_socket_handshake=true, live_handshake_canonical_unsupported=true, raw18_canonical_reject=true, raw18_reject_is_socket_proven=false, daemon_socket_route=false, bit8=false, h2d_v1_carrier_runtime_mock=true, h2d_daemon_route=false, submit_ack=false, generic_completion_type20=false, execution=false, launcher=false, fallback=false.",
+  "superseded_by": "EV-0057"
+}

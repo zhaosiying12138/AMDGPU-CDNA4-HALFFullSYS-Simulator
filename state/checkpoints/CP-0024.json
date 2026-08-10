@@ -1,0 +1,228 @@
+{
+  "baseline_commit_marker": "N/A",
+  "bitlesson_ids": [
+    "BL-0098",
+    "BL-0099"
+  ],
+  "bitlesson_sha256": {
+    "BL-0098": "3b0d34f83f59c36f03938b5dbbaecd2bb1c0a912dbe84fa63e31bf3a843c1b92",
+    "BL-0099": "df1090008c3db8891c36b289b463482e07a4c0b0dfce57b632029498cd20966c"
+  },
+  "blockers": [
+    {
+      "id": "WIRE-B002",
+      "severity": "blocking",
+      "statement": "Capability bit 8 remains unadvertised. The live runtime-to-gem5 probe proves canonical negative hello and baseline reconnect only; it sends no MessageType 18 frame, so the positive generic socket route is unproven."
+    },
+    {
+      "id": "ALLOC-B001",
+      "severity": "blocking",
+      "statement": "The daemon handler policy accepts only page-backed ALLOC alignments 4096 and 65536, while the normal runtime and retained Triton metadata request logical alignment 8; page size is also fixed for the owner session after the first successful MAP."
+    },
+    {
+      "id": "SUBMIT-B001",
+      "severity": "blocking",
+      "statement": "The existing v1 MEMORY_COPY_H2D carrier is not proven through a live generic daemon session, and SUBMIT, queue/signal/AQL packet ownership, packet CRC, lifecycle ticks, successful ACK, and MessageType 20 completion remain fail-closed."
+    },
+    {
+      "id": "TRITON-B003",
+      "severity": "blocking",
+      "statement": "The retained Triton descriptor carries 12 DWORD (48-byte) kernarg preload and preload-aware native mapping plus entry-offset semantics remain unimplemented; the image must continue to fail closed."
+    },
+    {
+      "id": "EXEC-B004",
+      "severity": "blocking",
+      "statement": "No normal Triton launcher, compiler/JIT transport, positive generic lifecycle, GPUDispatcher/ComputeUnit kernel execution, output differential, fallback, or Qwen inference has been demonstrated through the CP24 path."
+    }
+  ],
+  "change_kind": "code",
+  "changes": [
+    "Accepted a bounded partial gem5 daemon-handler boundary: a per-client owner/generation-bound generic session, MessageType 18 dispatch branch, canonical MessageType 19 ACK plumbing, cleanup ordering, MAP/ALLOC/UNMAP native-state calls, and explicit fail-closed SUBMIT.",
+    "Added a shared generic route-policy harness covering absent-capability canonical failure, failure zeroing and no mutation, MAP/UNMAP policy, 4K/64K page rules, logical alignment-8 rejection, and SUBMIT rejection without advertising capability bit 8.",
+    "Added an opt-in runtime endpoint test. The complete runtime CTest result is 20 total, 19 passed, one expected endpoint skip, and zero failed; a separate live VEGA_X86 run proves canonical required-generic rejection and baseline reconnect with bit 8 unselected.",
+    "Preserved the existing v1 MEMORY_COPY_H2D sealed-FD carrier instead of adding a KERNARG opcode. Handler source can recognize owner-bound kernarg H2D, but no live daemon H2D path or positive allocation lifecycle is claimed.",
+    "Kept positive MessageType 18 routing, bit-8 advertisement, normal alignment 8, successful SUBMIT ACK, MessageType 20 completion, launcher, compiler/JIT, GPU execution, output correctness, and CPU/NVIDIA fallback false."
+  ],
+  "created_at": "2026-08-10T10:11:50+08:00",
+  "evidence_ids": [
+    "EV-0056",
+    "EV-0057"
+  ],
+  "evidence_manifest_id": "EV-0057",
+  "evidence_manifest_sha256": "5cad75e70b8f4461bcd1524cbf7f999a3db4d2c64633901b93602ff9790717eb",
+  "evidence_sha256": {
+    "EV-0056": "e77671d6087b9a0dab7c00c284590e92c152edd818c5a70896bc0d2ee80a5b2a",
+    "EV-0057": "5cad75e70b8f4461bcd1524cbf7f999a3db4d2c64633901b93602ff9790717eb"
+  },
+  "goal_id": "GSIM-001",
+  "goal_sha256": "3f010b15a344cf2528fd1d0f518c0b7cdb0deff6f00e41e6acaec39a8bf20377",
+  "id": "CP-0024",
+  "limitations": [
+    "CP24 is accepted as a bounded partial handler milestone so the next transaction can proceed; accepted does not mean the CP23 target of a complete advertised daemon lifecycle was met.",
+    "The route-policy harness tests shared policy and codec helpers, not HostGPUBridge's live Unix-socket MAP/ALLOC/H2D/UNMAP route. Its raw type-18 canonical rejection is not socket proof.",
+    "The live runtime-to-gem5 evidence covers hello negotiation and baseline retry only. It sends no MessageType 18 request and leaves capability bit 8 unadvertised and unselected.",
+    "The handler accepts only 4096/65536 ALLOC alignment and fixes page size for the owner session; the normal logical alignment 8 is rejected and no positive ALLOC route is interoperable yet.",
+    "Kernarg bytes retain the existing sealed-FD v1 MEMORY_COPY_H2D carrier. Runtime mock behavior and handler source exist, but a live daemon H2D route is unproven and no KERNARG v2 opcode is introduced.",
+    "SUBMIT always fails with UnsupportedCapability; no successful SUBMIT ACK, MessageType 20 completion, queue/signal/packet CRC/tick lifecycle, cancellation after admission, or disconnect retirement is claimed.",
+    "The live gem5.opt is hash-bound but was not freshly rebuilt in full because of the known unrelated amdgpu_device.cc pointer-member build blocker outside CP24.",
+    "The retained 12-DWORD preload, normal Triton launcher, compiler/JIT, GPUDispatcher/ComputeUnit execution, output differential, timing/performance, fallback, and Qwen end-to-end remain unsupported or false."
+  ],
+  "next_action": {
+    "id": "P5-TRITON-VECADD-04-DAEMON-LIFECYCLE",
+    "argv": [
+      "python3",
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0025",
+      "--intent",
+      "Resolve generic ALLOC alignment and owner-bound v1 H2D, then wire queue, signal, daemon-built AQL packet, lifecycle ticks, SUBMIT ACK, and MessageType 20 completion before reconsidering capability bit 8",
+      "--participant",
+      "gem5=projects/gem5",
+      "--participant",
+      "self-amdgpu-runtime=projects/self-amdgpu-runtime"
+    ],
+    "cwd": ".",
+    "expected": "CP-0025 must reconcile normal logical alignment 8 with honest native backing alignment, preserve the owner-session page-size rule or replace it with tested lifecycle semantics, bind sealed-FD v1 MEMORY_COPY_H2D to the exact generic allocation owner/generation, and produce a live positive MAP/ALLOC/H2D/SUBMIT/type-20/UNMAP socket lifecycle with queue, signal, packet CRC, and nonzero admission/start/end/retire ticks. Capability bit 8 remains clear until the complete lifecycle and disconnect/cancellation failures pass; GPU execution and the normal launcher require separate evidence.",
+    "prerequisites": [
+      "CP-0024 root checkpoint and byte-exact EV-0056/EV-0057 are accepted and scripts/resume.sh --verify passes offline.",
+      "Gem5 child 7d52923899d9017c8ee318aa27dae5229b282a26/tree 32ef31e6ae861fd3e6855437d97b0293075cb87d and runtime child 497092b7696bf4454eacca850b033e3760f53375/tree 9b2e65a4e62dee32b378a177359cd76f890ba757 are clean and trailer-bound to EV-0056.",
+      "The v1 envelope and records, payload-v2 codec, no-fallback policy, CP20 locked functional fixture, CP21 Triton identities, and word-0-bit-8 to wire-byte-1-mask-0x01 mapping remain immutable.",
+      "The handler source, negative live handshake, alignment mismatch, owner-session-fixed page size, v1 H2D carrier, and fail-closed SUBMIT boundary remain explicit; none may be promoted from source/harness evidence to live route evidence."
+    ],
+    "rollback_boundary": "Keep CP24 child commits, handler/policy harness, opt-in endpoint test, negative live handshake, v1 byte compatibility, CP23 client/native adapter, capability bit 8 unadvertised, SUBMIT/type-20/execution false, and Triton E2E=0/1 if the complete lifecycle cannot be implemented safely."
+  },
+  "parent_checkpoint": "CP-0023",
+  "phase_id": "P5",
+  "plan_sha256": "64f01fce56ef8393046926cfe69390e5193eab0fa2b4dd3b03f4f4363d8ba284",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "administrative_git_dir": "modules/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "clean": true,
+      "head": "7d52923899d9017c8ee318aa27dae5229b282a26",
+      "id": "gem5",
+      "path": "projects/gem5",
+      "tree": "32ef31e6ae861fd3e6855437d97b0293075cb87d"
+    },
+    {
+      "administrative_git_dir": "modules/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "clean": true,
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58"
+    },
+    {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "clean": true,
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489"
+    },
+    {
+      "administrative_git_dir": "modules/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "clean": true,
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "id": "triton",
+      "path": "projects/triton",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1"
+    },
+    {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "clean": true,
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315"
+    },
+    {
+      "administrative_git_dir": "modules/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "clean": true,
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "id": "vllm",
+      "path": "projects/vllm",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb"
+    },
+    {
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "clean": true,
+      "head": "497092b7696bf4454eacca850b033e3760f53375",
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "tree": "9b2e65a4e62dee32b378a177359cd76f890ba757"
+    }
+  ],
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "root_parent_commit": "69d3f56ea044baf8457fee61a97541b4b5b4d87e",
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "sequence": 24,
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "status": "accepted",
+  "validation": [
+    {
+      "command": "CP24 child handler, policy harness, and runtime endpoint boundary",
+      "cwd": ".",
+      "evidence_id": "EV-0056",
+      "exit_code": 0,
+      "result": "EV-0056 records committed handler-policy source, the route harness, runtime 20 total/19 pass/one expected endpoint skip/zero fail, and all positive daemon-route, SUBMIT, execution, launcher, and fallback flags false."
+    },
+    {
+      "command": "CP24 gem5 generic route-policy harness",
+      "cwd": "projects/gem5",
+      "evidence_id": "EV-0056",
+      "exit_code": 0,
+      "result": "The standalone policy harness passes raw absent-capability rejection, canonical failure zeroing, no mutation, MAP/UNMAP and 64K policy, alignment-8 rejection, and fail-closed SUBMIT; it is not a live bridge socket test."
+    },
+    {
+      "command": "CP24 live runtime-to-gem5 negative capability handshake",
+      "cwd": ".",
+      "evidence_id": "EV-0057",
+      "exit_code": 0,
+      "result": "The runtime reaches a live VEGA_X86 Unix listener, receives canonical UnsupportedCapability for required generic, reconnects with baseline capabilities, and closes cleanly; bit 8 remains unselected and no MessageType 18 request is sent."
+    },
+    {
+      "command": "CP24 final child identities, trailers, protocol test, and CP23 root anchor",
+      "cwd": ".",
+      "evidence_id": "EV-0057",
+      "exit_code": 0,
+      "result": "EV-0057 binds clean gem5 7d529238/tree 32ef31e6 and runtime 497092b7/tree 9b2e65a4 children to exact EV-0056 trailers, retains the CP23 root anchor and prepare journal, and records a fresh 47/47 protocol test pass."
+    },
+    {
+      "command": "CP24 evidence policy, external artifact, capture semantics, and boundary verification",
+      "cwd": ".",
+      "evidence_id": "EV-0057",
+      "exit_code": 0,
+      "result": "EV-0056 and EV-0057 pass JSON and evidence policy, exact includes linkage, retained external-artifact identity, capture semantics, and fail-closed boundary assertions with page_size_lifetime=owner-session-fixed."
+    }
+  ]
+}
