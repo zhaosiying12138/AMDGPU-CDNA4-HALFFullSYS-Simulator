@@ -413,6 +413,37 @@ add_test(
 set_tests_properties(
   self_amdgpu_runtime.generic_dispatch_v2_client PROPERTIES TIMEOUT 30)
 
+# CP-0024 endpoint probe.  This is an opt-in real-daemon handshake gate: the
+# endpoint comes from SAGR_GENERIC_BRIDGE_ENDPOINT, no mock server is started,
+# and return 77 is an intentional skip when the endpoint is not configured or
+# unavailable.  A successful run proves only capability selection/cleanup;
+# it does not claim MAP, SUBMIT, launcher, or GPU execution.
+add_executable(
+  self_amdgpu_runtime_generic_dispatch_v2_endpoint_test
+  generic_dispatch_v2_endpoint_test.c)
+target_compile_features(
+  self_amdgpu_runtime_generic_dispatch_v2_endpoint_test PRIVATE c_std_11)
+target_include_directories(
+  self_amdgpu_runtime_generic_dispatch_v2_endpoint_test
+  PRIVATE ../src ../include)
+target_link_libraries(
+  self_amdgpu_runtime_generic_dispatch_v2_endpoint_test
+  PRIVATE SelfAmdgpuRuntime::runtime)
+if(MSVC)
+  target_compile_options(
+    self_amdgpu_runtime_generic_dispatch_v2_endpoint_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    self_amdgpu_runtime_generic_dispatch_v2_endpoint_test
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(
+  NAME self_amdgpu_runtime.generic_dispatch_v2_endpoint
+  COMMAND self_amdgpu_runtime_generic_dispatch_v2_endpoint_test)
+set_tests_properties(
+  self_amdgpu_runtime.generic_dispatch_v2_endpoint
+  PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
+
 add_executable(self_amdgpu_runtime_cli_test cli_test.c)
 target_compile_features(self_amdgpu_runtime_cli_test PRIVATE c_std_11)
 target_link_libraries(
