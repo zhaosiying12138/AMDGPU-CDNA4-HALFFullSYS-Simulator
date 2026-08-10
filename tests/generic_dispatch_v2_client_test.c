@@ -389,7 +389,8 @@ static int handle_generic_request(
 static int handle_memory_request(int peer, const sagr_instance_info_t *info,
                                  const uint8_t *frame, size_t frame_size,
                                  int descriptor, const uint8_t *expected,
-                                 uint64_t expected_size) {
+                                 uint64_t expected_size,
+                                 uint64_t expected_offset) {
   const uint8_t *payload = frame + SAGR_WIRE_HEADER_BYTES;
   const uint64_t request_id = request_id_from_frame(frame);
   const uint16_t opcode = get_u16(payload + 4U);
@@ -402,8 +403,8 @@ static int handle_memory_request(int peer, const sagr_instance_info_t *info,
   int result = -1;
   if (frame_size != SAGR_WIRE_MEMORY_FRAME_BYTES ||
       opcode != SAGR_WIRE_MEMORY_OPCODE_COPY_H2D || allocation_id == 0U ||
-      generation == 0U || byte_count != expected_size || offset != 0U ||
-      expected_crc == 0U || descriptor < 0) {
+      generation == 0U || byte_count != expected_size ||
+      offset != expected_offset || expected_crc == 0U || descriptor < 0) {
     goto done;
   }
   copy = (uint8_t *)malloc((size_t)byte_count);
@@ -566,7 +567,8 @@ static void *mock_server_main(void *opaque) {
           0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
           0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f};
       if (handle_memory_request(peer, &info, frame, frame_size, descriptor,
-                                expected_bytes, sizeof(expected_bytes)) != 0) {
+                                expected_bytes, sizeof(expected_bytes), 8U) !=
+          0) {
         server->thread_error = EPROTO;
         break;
       }
@@ -766,29 +768,29 @@ static int run_full_lifecycle(void) {
 
   (void)sagr_generic_kernarg_allocate_options_init(
       &alloc_options, (uint32_t)sizeof(alloc_options));
-  alloc_options.size_bytes = 48U;
+  alloc_options.size_bytes = 64U;
   failures += expect(sagr_generic_alloc_kernarg(
                          mapping, &alloc_options, NULL, &kernarg, &kernarg_info,
                          (uint32_t)sizeof(kernarg_info), &error,
                          (uint32_t)sizeof(error)) == SAGR_STATUS_SUCCESS,
                      "ALLOC creates an owner-bound kernarg lease");
-  failures += expect(kernarg_info.size_bytes == 48U &&
+  failures += expect(kernarg_info.size_bytes == 64U &&
                          kernarg_info.kernarg_va != 0U,
                      "ALLOC publishes daemon-issued kernarg metadata");
   for (index = 0; index < sizeof(kernarg_bytes); ++index) {
     kernarg_bytes[index] = (uint8_t)index;
   }
   failures += expect(sagr_generic_kernarg_copy_from_host(
-                         kernarg, 0U, kernarg_bytes, sizeof(kernarg_bytes),
+                         kernarg, 8U, kernarg_bytes, sizeof(kernarg_bytes),
                          NULL, &error, (uint32_t)sizeof(error)) ==
                          SAGR_STATUS_SUCCESS,
                      "kernarg bytes use the sealed v1 H2D carrier");
 
   (void)sagr_generic_submit_options_init(&submit_options,
                                          (uint32_t)sizeof(submit_options));
-  /* Exercise a legal subrange rather than assuming submit == allocation. */
+  /* The full manifest is a legal subrange of a larger allocation. */
   submit_options.kernarg_offset = 8U;
-  submit_options.kernarg_size = 40U;
+  submit_options.kernarg_size = 48U;
   submit_options.grid_x = 24832U;
   submit_options.grid_y = 1U;
   submit_options.grid_z = 1U;
@@ -849,7 +851,7 @@ static int run_full_lifecycle(void) {
   failures += expect(completion.status == SAGR_STATUS_SUCCESS &&
                          completion.kernarg_va ==
                              UINT64_C(0x0000200000004008) &&
-                         completion.kernarg_size == 40U &&
+                         completion.kernarg_size == 48U &&
                          completion.start_tick == 110U &&
                          completion.retire_tick == 125U,
                      "completion exposes canonical daemon ticks");
@@ -1033,7 +1035,11 @@ int main(void) {
   failures += run_failed_completion();
   failures += run_no_capability_gate();
   if (failures == 0) {
-    puts("{\"api_lifecycle\":true,\"failed_completion\":true,\"no_capability_gate\":true,\"v1_compatibility\":true,\"owner_validation\":true,\"kernarg_subrange\":true,\"execution\":false,\"fallback\":false}");
+    puts("{\"api_lifecycle\":true,\"failed_completion\":true,"
+         "\"no_capability_gate\":true,\"v1_compatibility\":true,"
+         "\"owner_validation\":true,\"kernarg_subrange\":true,"
+         "\"full_manifest\":true,\"h2d_offset_nonzero\":true,"
+         "\"execution\":false,\"fallback\":false}");
   }
   return failures == 0 ? 0 : 1;
 }
