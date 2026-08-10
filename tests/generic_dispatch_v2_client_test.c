@@ -34,12 +34,19 @@ static const uint64_t k_all_caps =
     SAGR_CAPABILITY_MEMORY_MASK | SAGR_CAPABILITY_SIGNAL_MASK |
     SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK |
     SAGR_CAPABILITY_GENERIC_DISPATCH_MASK;
+static const uint64_t k_execution_caps =
+    SAGR_CAPABILITY_TOPOLOGY_MASK | SAGR_CAPABILITY_QUEUE_MASK |
+    SAGR_CAPABILITY_MEMORY_MASK | SAGR_CAPABILITY_SIGNAL_MASK |
+    SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK |
+    SAGR_CAPABILITY_GENERIC_DISPATCH_MASK |
+    SAGR_CAPABILITY_GENERIC_EXECUTION_MASK;
 
 enum mock_mode {
   MOCK_FULL,
   MOCK_FULL_FAILURE,
   MOCK_NO_GENERIC,
-  MOCK_SIGNAL_ONLY
+  MOCK_SIGNAL_ONLY,
+  MOCK_EXECUTION
 };
 
 typedef struct mock_server {
@@ -281,7 +288,7 @@ static int check_sealed_descriptor(int descriptor, uint64_t byte_count,
 static int handle_generic_request(
     int peer, const sagr_instance_info_t *info, const uint8_t *frame,
     size_t frame_size, uint64_t request_id, const uint8_t image_sha256[32],
-    int fail_submit_completion) {
+    int fail_submit_completion, int execution_capability) {
   sagr_wire_generic_request_t request;
   sagr_wire_generic_response_t response;
   uint64_t decoded_request_id = 0U;
@@ -376,7 +383,9 @@ static int handle_generic_request(
     response.start_tick = UINT64_C(110);
     response.end_tick = UINT64_C(120);
     response.retire_tick = UINT64_C(125);
-    response.output_crc32c = UINT32_C(0xabcdef01);
+    response.output_crc32c = execution_capability != 0
+                                 ? UINT32_C(0xabcdef01)
+                                 : 0U;
     if (send_generic_response(
             peer, info, request_id,
             SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_COMPLETION, &response) != 0) {
@@ -492,7 +501,9 @@ static void *mock_server_main(void *opaque) {
   uint8_t frame[SAGR_WIRE_MAX_RECORD_BYTES];
   sagr_instance_info_t info;
   uint64_t last_request_id = 0U;
-  uint64_t capabilities = k_all_caps;
+  uint64_t capabilities = server->mode == MOCK_EXECUTION
+                              ? k_execution_caps
+                              : k_all_caps;
   int peer;
 
   peer = accept4(server->listener, (struct sockaddr *)&address, &address_size,
@@ -502,7 +513,8 @@ static void *mock_server_main(void *opaque) {
     return NULL;
   }
   if (server->mode == MOCK_NO_GENERIC) {
-    capabilities &= ~SAGR_CAPABILITY_GENERIC_DISPATCH_MASK;
+    capabilities &= ~(SAGR_CAPABILITY_GENERIC_DISPATCH_MASK |
+                      SAGR_CAPABILITY_GENERIC_EXECUTION_MASK);
   }
   if (server->mode == MOCK_SIGNAL_ONLY) {
     capabilities = k_all_caps;
@@ -581,7 +593,8 @@ static void *mock_server_main(void *opaque) {
                                                      15, 16, 17, 18, 19, 20,
                                                      21, 22, 23, 24, 25, 26,
                                                      27, 28, 29, 30, 31, 32},
-                                 server->mode == MOCK_FULL_FAILURE) !=
+                                 server->mode == MOCK_FULL_FAILURE,
+                                 server->mode == MOCK_EXECUTION) !=
               0) {
         server->thread_error = EPROTO;
         if (descriptor >= 0) {
@@ -669,11 +682,17 @@ static void initialize_open_options(sagr_instance_open_options_t *options,
   options->expected_rank = 3U;
   options->expected_world_size = 8U;
   options->open_timeout_ns = UINT64_C(1000000000);
-  options->offered_capabilities[0] = k_all_caps;
-  options->required_capabilities[0] = k_all_caps;
+  options->offered_capabilities[0] =
+      generic_capability == 2 ? k_execution_caps : k_all_caps;
+  options->required_capabilities[0] =
+      generic_capability == 2 ? k_execution_caps : k_all_caps;
   if (generic_capability == 0) {
-    options->offered_capabilities[0] &= ~SAGR_CAPABILITY_GENERIC_DISPATCH_MASK;
-    options->required_capabilities[0] &= ~SAGR_CAPABILITY_GENERIC_DISPATCH_MASK;
+    options->offered_capabilities[0] &=
+        ~(SAGR_CAPABILITY_GENERIC_DISPATCH_MASK |
+          SAGR_CAPABILITY_GENERIC_EXECUTION_MASK);
+    options->required_capabilities[0] &=
+        ~(SAGR_CAPABILITY_GENERIC_DISPATCH_MASK |
+          SAGR_CAPABILITY_GENERIC_EXECUTION_MASK);
   }
 }
 
@@ -698,7 +717,8 @@ static int expect(int condition, const char *message) {
   return 0;
 }
 
-static int run_full_lifecycle(void) {
+static int run_full_lifecycle(enum mock_mode mode, int capability_mode,
+                              int expect_execution_crc) {
   mock_server_t server;
   mock_server_t owner_server;
   sagr_instance_t instance = NULL;
@@ -726,8 +746,8 @@ static int run_full_lifecycle(void) {
   int failures = 0;
   size_t index;
 
-  if (start_server(&server, MOCK_FULL) != 0 ||
-      open_instance(&server, 1, &instance) != 0) {
+  if (start_server(&server, mode) != 0 ||
+      open_instance(&server, capability_mode, &instance) != 0) {
     return 1;
   }
   memset(&queue_info, 0, sizeof(queue_info));
@@ -853,7 +873,11 @@ static int run_full_lifecycle(void) {
                              UINT64_C(0x0000200000004008) &&
                          completion.kernarg_size == 48U &&
                          completion.start_tick == 110U &&
-                         completion.retire_tick == 125U,
+                         completion.retire_tick == 125U &&
+                         (expect_execution_crc != 0
+                              ? completion.output_crc32c ==
+                                    UINT32_C(0xabcdef01)
+                              : completion.output_crc32c == 0U),
                      "completion exposes canonical daemon ticks");
   {
     const sagr_status_t unmap_status = sagr_generic_unmap_object(
@@ -1031,11 +1055,14 @@ static int run_failed_completion(void) {
 
 int main(void) {
   int failures = 0;
-  failures += run_full_lifecycle();
+  failures += run_full_lifecycle(MOCK_FULL, 1, 0);
+  failures += run_full_lifecycle(MOCK_EXECUTION, 2, 1);
   failures += run_failed_completion();
   failures += run_no_capability_gate();
   if (failures == 0) {
-    puts("{\"api_lifecycle\":true,\"failed_completion\":true,"
+    puts("{\"api_lifecycle\":true,\"execution_capability_matcher\":true,"
+         "\"bit8_control_crc_zero\":true,\"bit9_execution_crc_nonzero\":true,"
+         "\"failed_completion\":true,"
          "\"no_capability_gate\":true,\"v1_compatibility\":true,"
          "\"owner_validation\":true,\"kernarg_subrange\":true,"
          "\"full_manifest\":true,\"h2d_offset_nonzero\":true,"

@@ -59,6 +59,10 @@ enum {
 #define SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK (UINT64_C(1) << 7)
 #define SAGR_CAPABILITY_GENERIC_DISPATCH_WORD UINT32_C(0)
 #define SAGR_CAPABILITY_GENERIC_DISPATCH_MASK (UINT64_C(1) << 8)
+/* CP-0026 selects the real GPU execution adapter only when the existing
+ * generic control capability and all of its dependencies are also selected. */
+#define SAGR_CAPABILITY_GENERIC_EXECUTION_WORD UINT32_C(0)
+#define SAGR_CAPABILITY_GENERIC_EXECUTION_MASK (UINT64_C(1) << 9)
 
 #define SAGR_QUEUE_PROTOCOL_MAJOR UINT16_C(1)
 #define SAGR_QUEUE_PROTOCOL_MINOR UINT16_C(0)

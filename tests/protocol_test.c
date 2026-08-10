@@ -449,10 +449,14 @@ static int test_capability_wire_numbering(void) {
   size_t frame_size = 0;
   (void)sagr_instance_open_options_init(&options, (uint32_t)sizeof(options));
   options.offered_capabilities[0] |= UINT64_C(1) << 8;
+  options.offered_capabilities[0] |= UINT64_C(1) << 9;
+  options.required_capabilities[0] |= UINT64_C(1) << 8;
+  options.required_capabilities[0] |= UINT64_C(1) << 9;
   if (sagr_protocol_encode_hello(
           &options, UINT64_C(1), k_client_nonce, frame, sizeof(frame),
           &frame_size) != SAGR_STATUS_SUCCESS ||
-      frame[80 + 24] != 1 || frame[80 + 25] != 1) {
+      frame[80 + 24] != 1 || frame[80 + 25] != 3 ||
+      frame[80 + 56] != 1 || frame[80 + 57] != 3) {
     fprintf(stderr, "capability bit numbering is not byte-local\n");
     return 1;
   }

@@ -39,6 +39,13 @@ static int expect_options_defaults(void) {
     return 1;
   }
 
+  if (SAGR_CAPABILITY_GENERIC_EXECUTION_WORD != UINT32_C(0) ||
+      SAGR_CAPABILITY_GENERIC_EXECUTION_MASK != (UINT64_C(1) << 9) ||
+      SAGR_CAPABILITY_GENERIC_DISPATCH_MASK != (UINT64_C(1) << 8)) {
+    fprintf(stderr, "generic execution capability numbering drifted\n");
+    return 1;
+  }
+
   if (sagr_instance_open_options_init(NULL, (uint32_t)sizeof(options)) !=
           SAGR_STATUS_INVALID_ARGUMENT ||
       sagr_instance_open_options_init(&options, (uint32_t)sizeof(options) - 1) !=

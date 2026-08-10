@@ -289,6 +289,12 @@ static sagr_status_t validate_options(
   const int generic_dispatch_required =
       (options->required_capabilities[SAGR_CAPABILITY_GENERIC_DISPATCH_WORD] &
        SAGR_CAPABILITY_GENERIC_DISPATCH_MASK) != 0;
+  const int generic_execution_offered =
+      (options->offered_capabilities[SAGR_CAPABILITY_GENERIC_EXECUTION_WORD] &
+       SAGR_CAPABILITY_GENERIC_EXECUTION_MASK) != 0;
+  const int generic_execution_required =
+      (options->required_capabilities[SAGR_CAPABILITY_GENERIC_EXECUTION_WORD] &
+       SAGR_CAPABILITY_GENERIC_EXECUTION_MASK) != 0;
   if (options->struct_size < sizeof(*options) || options->flags != 0 ||
       options->cancel_fd < -1 || options->reserved0 != 0 ||
       !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
@@ -311,12 +317,17 @@ static sagr_status_t validate_options(
       kmt_offered != kmt_required ||
       code_object_offered != code_object_required ||
       generic_dispatch_offered != generic_dispatch_required ||
+      generic_execution_offered != generic_execution_required ||
       (dispatch_required != 0 &&
        (queue_required == 0 || memory_required == 0 ||
         signal_required == 0)) ||
       (generic_dispatch_required != 0 &&
        (queue_required == 0 || memory_required == 0 ||
-        signal_required == 0 || code_object_required == 0))) {
+        signal_required == 0 || code_object_required == 0)) ||
+      (generic_execution_required != 0 &&
+       (generic_dispatch_required == 0 || queue_required == 0 ||
+        memory_required == 0 || signal_required == 0 ||
+        code_object_required == 0))) {
     return SAGR_STATUS_INVALID_ARGUMENT;
   }
   return SAGR_STATUS_SUCCESS;
@@ -5280,6 +5291,14 @@ static int generic_capability_selected_instance(
          (selected & SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK) != 0U;
 }
 
+static int generic_execution_capability_selected_instance(
+    const struct sagr_instance *instance) {
+  const uint64_t selected =
+      instance->info.negotiated_capabilities[SAGR_CAPABILITY_GENERIC_EXECUTION_WORD];
+  return generic_capability_selected_instance(instance) &&
+         (selected & SAGR_CAPABILITY_GENERIC_EXECUTION_MASK) != 0U;
+}
+
 static sagr_status_t require_generic_transport(
     const struct sagr_instance *instance, sagr_error_info_t *error,
     uint32_t error_size) {
@@ -5999,6 +6018,8 @@ static int generic_completion_success_matches(
     const sagr_wire_generic_response_t *completion) {
   const sagr_wire_generic_response_t *ack = &pending->ack;
   uint64_t expected_kernarg_va;
+  const int execution_selected =
+      generic_execution_capability_selected_instance(pending->instance);
   if (pending->kernarg_offset > pending->kernarg->size_bytes ||
       pending->kernarg_size >
           pending->kernarg->size_bytes - pending->kernarg_offset ||
@@ -6037,7 +6058,9 @@ static int generic_completion_success_matches(
       completion->retire_tick == 0U ||
       completion->start_tick < completion->admission_tick ||
       completion->end_tick < completion->start_tick ||
-      completion->retire_tick < completion->end_tick) {
+      completion->retire_tick < completion->end_tick ||
+      (execution_selected && completion->output_crc32c == 0U) ||
+      (!execution_selected && completion->output_crc32c != 0U)) {
     return 0;
   }
   return 1;

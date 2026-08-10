@@ -566,6 +566,28 @@ static int test_public_validation(void) {
     return 1;
   }
   initialize_options(&options);
+  options.offered_capabilities[0] |= SAGR_CAPABILITY_GENERIC_EXECUTION_MASK;
+  options.required_capabilities[0] |= SAGR_CAPABILITY_GENERIC_EXECUTION_MASK;
+  instance = (sagr_instance_t)(uintptr_t)1;
+  if (sagr_instance_open("/unused", &options, &instance, &error,
+                         (uint32_t)sizeof(error)) !=
+          SAGR_STATUS_INVALID_ARGUMENT ||
+      instance != NULL) {
+    fprintf(stderr,
+            "execution capability without generic dependencies was accepted\n");
+    return 1;
+  }
+  initialize_options(&options);
+  options.offered_capabilities[0] |= SAGR_CAPABILITY_GENERIC_EXECUTION_MASK;
+  instance = (sagr_instance_t)(uintptr_t)1;
+  if (sagr_instance_open("/unused", &options, &instance, &error,
+                         (uint32_t)sizeof(error)) !=
+          SAGR_STATUS_INVALID_ARGUMENT ||
+      instance != NULL) {
+    fprintf(stderr, "offered-only execution capability was accepted\n");
+    return 1;
+  }
+  initialize_options(&options);
   options.minimum_version_major = 2;
   options.maximum_version_major = 1;
   if (sagr_instance_open("/unused", &options, &instance, &error,

@@ -413,13 +413,13 @@ add_test(
 set_tests_properties(
   self_amdgpu_runtime.generic_dispatch_v2_client PROPERTIES TIMEOUT 30)
 
-# CP-0025 endpoint probe.  This is an opt-in real-daemon lifecycle gate: the
+# CP-0026 endpoint probe.  This is an opt-in real-daemon execution gate: the
 # endpoint and gpuReadWrite HSACO come from SAGR_GENERIC_BRIDGE_ENDPOINT and
 # SAGR_CODE_OBJECT_GPU_READ_WRITE_PATH, no mock server is started, and return
 # 77 is an intentional skip when the endpoint is not configured or available.
-# The positive path proves the owner-bound protocol lifecycle and reconnect
-# cleanup, while execution, output correctness, compiler, JIT, and launcher
-# remain explicitly outside this test's claims.
+# The positive path proves the owner-bound protocol lifecycle, three-buffer
+# H2D/SUBMIT/type-20/D2H oracle, and reconnect cleanup.  Compiler, JIT, and
+# launcher paths remain explicitly outside this test's claims.
 add_executable(
   self_amdgpu_runtime_generic_dispatch_v2_endpoint_test
   generic_dispatch_v2_endpoint_test.c)

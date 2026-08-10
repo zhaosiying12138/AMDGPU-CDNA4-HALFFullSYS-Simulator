@@ -13,11 +13,30 @@
 /* CTest treats this return value as an explicit environment-gated skip. */
 #define SAGR_ENDPOINT_TEST_SKIP 77
 #define SAGR_ENDPOINT_TEST_HSACO_ENV "SAGR_CODE_OBJECT_GPU_READ_WRITE_PATH"
+#define SAGR_ENDPOINT_TEST_MODE_ENV "SAGR_GENERIC_ENDPOINT_MODE"
+#define SAGR_ENDPOINT_TEST_MODE_DISCONNECT_AFTER_ACK "disconnect-after-ack"
 #define SAGR_ENDPOINT_TEST_KERNEL "gpuReadWrite"
 #define SAGR_ENDPOINT_TEST_KERNARG_BYTES UINT32_C(280)
-#define SAGR_ENDPOINT_TEST_ALLOCATION_BYTES UINT64_C(512)
+#define SAGR_ENDPOINT_TEST_KERNARG_ALLOCATION_BYTES UINT64_C(512)
+#define SAGR_ENDPOINT_TEST_BUFFER_BYTES UINT64_C(4096)
+#define SAGR_ENDPOINT_TEST_BUFFER_WORDS UINT32_C(1024)
 #define SAGR_ENDPOINT_TEST_KERNARG_OFFSET UINT64_C(64)
 #define SAGR_ENDPOINT_TEST_LOGICAL_ALIGNMENT UINT64_C(8)
+#define SAGR_ENDPOINT_TEST_BUFFER_ALIGNMENT UINT64_C(4096)
+#define SAGR_ENDPOINT_TEST_OUTPUT_CRC32C UINT32_C(0x6f67026f)
+#define SAGR_ENDPOINT_TEST_A_CRC32C UINT32_C(0x4705cdab)
+#define SAGR_ENDPOINT_TEST_B_CRC32C UINT32_C(0xb28d0486)
+
+typedef enum endpoint_mode {
+  ENDPOINT_MODE_POSITIVE = 0,
+  ENDPOINT_MODE_DISCONNECT_AFTER_ACK = 1
+} endpoint_mode_t;
+
+typedef enum lifecycle_result {
+  LIFECYCLE_COMPLETE = 0,
+  LIFECYCLE_FAILED = 1,
+  LIFECYCLE_DISCONNECT_AFTER_ACK = 2
+} lifecycle_result_t;
 
 typedef struct reconnect_snapshot {
   sagr_instance_info_t owner;
@@ -33,14 +52,40 @@ static int endpoint_unavailable(sagr_status_t status) {
          status == SAGR_STATUS_CONNECTION_LOST;
 }
 
-static uint64_t generic_dependency_mask(void) {
+static int get_endpoint_mode(endpoint_mode_t *mode) {
+  const char *value = getenv(SAGR_ENDPOINT_TEST_MODE_ENV);
+
+  if (mode == NULL) {
+    return 1;
+  }
+  if (value == NULL || value[0] == '\0' || strcmp(value, "positive") == 0) {
+    *mode = ENDPOINT_MODE_POSITIVE;
+    return 0;
+  }
+  if (strcmp(value, SAGR_ENDPOINT_TEST_MODE_DISCONNECT_AFTER_ACK) == 0) {
+    *mode = ENDPOINT_MODE_DISCONNECT_AFTER_ACK;
+    return 0;
+  }
+  fprintf(stderr,
+          "generic endpoint probe: %s must be positive or %s\n",
+          SAGR_ENDPOINT_TEST_MODE_ENV,
+          SAGR_ENDPOINT_TEST_MODE_DISCONNECT_AFTER_ACK);
+  return 1;
+}
+
+static uint64_t generic_control_dependency_mask(void) {
   return SAGR_CAPABILITY_TOPOLOGY_MASK | SAGR_CAPABILITY_QUEUE_MASK |
          SAGR_CAPABILITY_MEMORY_MASK | SAGR_CAPABILITY_SIGNAL_MASK |
          SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK |
          SAGR_CAPABILITY_GENERIC_DISPATCH_MASK;
 }
 
-static int open_options_for_generic(
+static uint64_t generic_execution_dependency_mask(void) {
+  return generic_control_dependency_mask() |
+         SAGR_CAPABILITY_GENERIC_EXECUTION_MASK;
+}
+
+static int open_options_for_execution(
     sagr_instance_open_options_t *options) {
   const sagr_status_t status = sagr_instance_open_options_init(
       options, (uint32_t)sizeof(*options));
@@ -49,13 +94,26 @@ static int open_options_for_generic(
             sagr_status_string(status));
     return 1;
   }
-  /* GENERIC_DISPATCH_V2 is a required selection here.  The runtime API
-   * intentionally does not model optional capability offers; dependencies
-   * are required as mandated by the v2 handshake contract. */
+  /* CP-0026 requires bit 9 plus the existing bit-8 control/dependency set. */
   options->offered_capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] |=
-      generic_dependency_mask();
+      generic_execution_dependency_mask();
   options->required_capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] |=
-      generic_dependency_mask();
+      generic_execution_dependency_mask();
+  return 0;
+}
+
+static int open_options_for_control(sagr_instance_open_options_t *options) {
+  const sagr_status_t status = sagr_instance_open_options_init(
+      options, (uint32_t)sizeof(*options));
+  if (status != SAGR_STATUS_SUCCESS) {
+    fprintf(stderr, "generic endpoint probe: control options init failed: %s\n",
+            sagr_status_string(status));
+    return 1;
+  }
+  options->offered_capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] |=
+      generic_control_dependency_mask();
+  options->required_capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] |=
+      generic_control_dependency_mask();
   return 0;
 }
 
@@ -158,9 +216,8 @@ static int read_image(const char *path, uint8_t **out_image,
   return 1;
 }
 
-static int get_required_generic_info(sagr_instance_t instance,
-                                     sagr_instance_info_t *info) {
-  const uint64_t dependencies = generic_dependency_mask();
+static int get_required_info(sagr_instance_t instance, sagr_instance_info_t *info,
+                             uint64_t dependencies, const char *label) {
   const sagr_status_t status =
       sagr_instance_get_info(instance, info, (uint32_t)sizeof(*info));
   if (status != SAGR_STATUS_SUCCESS) {
@@ -171,10 +228,23 @@ static int get_required_generic_info(sagr_instance_t instance,
   if ((info->negotiated_capabilities[SAGR_CAPABILITY_GENERIC_DISPATCH_WORD] &
        dependencies) != dependencies) {
     fprintf(stderr,
-            "generic endpoint probe: successful handshake did not select bit 8 and all dependencies\n");
+            "generic endpoint probe: successful handshake did not select %s and all dependencies\n",
+            label);
     return 1;
   }
   return 0;
+}
+
+static int get_required_execution_info(sagr_instance_t instance,
+                                       sagr_instance_info_t *info) {
+  return get_required_info(instance, info, generic_execution_dependency_mask(),
+                           "bit 9 execution");
+}
+
+static int get_required_control_info(sagr_instance_t instance,
+                                     sagr_instance_info_t *info) {
+  return get_required_info(instance, info, generic_control_dependency_mask(),
+                           "bit 8 control");
 }
 
 static int validate_fixture(const uint8_t *image, size_t image_size,
@@ -225,6 +295,254 @@ static int validate_fixture(const uint8_t *image, size_t image_size,
              : 1;
 }
 
+typedef struct execution_buffers {
+  sagr_memory_t a;
+  sagr_memory_t b;
+  sagr_memory_t c;
+  sagr_memory_info_t a_info;
+  sagr_memory_info_t b_info;
+  sagr_memory_info_t c_info;
+  uint32_t a_host[SAGR_ENDPOINT_TEST_BUFFER_WORDS];
+  uint32_t b_host[SAGR_ENDPOINT_TEST_BUFFER_WORDS];
+  uint32_t c_host[SAGR_ENDPOINT_TEST_BUFFER_WORDS];
+  uint32_t a_result[SAGR_ENDPOINT_TEST_BUFFER_WORDS];
+  uint32_t b_result[SAGR_ENDPOINT_TEST_BUFFER_WORDS];
+  uint32_t c_result[SAGR_ENDPOINT_TEST_BUFFER_WORDS];
+} execution_buffers_t;
+
+static uint64_t load_le64(const uint8_t *bytes) {
+  uint64_t value = 0U;
+  uint32_t index;
+  for (index = 0U; index < 8U; ++index) {
+    value |= (uint64_t)bytes[index] << (index * 8U);
+  }
+  return value;
+}
+
+static int pack_execution_kernarg(
+    const sagr_code_object_kernel_info_t *kernel, uint64_t a_va, uint64_t b_va,
+    uint64_t c_va, uint8_t destination[SAGR_ENDPOINT_TEST_KERNARG_BYTES]) {
+  sagr_code_object_arg_value_t values[4];
+  uint32_t hidden_grid_index = UINT32_MAX;
+  uint32_t written_size = 0U;
+  uint32_t index;
+  sagr_status_t status;
+
+  if (kernel == NULL || kernel->arg_count < 4U) {
+    return 0;
+  }
+  for (index = 0U; index < kernel->arg_count; ++index) {
+    if (strcmp(kernel->args[index].value_kind, "hidden_grid_dims") == 0) {
+      hidden_grid_index = kernel->args[index].index;
+      if (kernel->args[index].offset_bytes != 88U ||
+          kernel->args[index].size_bytes != 2U ||
+          kernel->args[index].kind != SAGR_CODE_OBJECT_ARG_HIDDEN) {
+        return 0;
+      }
+      break;
+    }
+  }
+  if (hidden_grid_index == UINT32_MAX ||
+      kernel->args[0].offset_bytes != 0U || kernel->args[0].size_bytes != 8U ||
+      kernel->args[1].offset_bytes != 8U || kernel->args[1].size_bytes != 8U ||
+      kernel->args[2].offset_bytes != 16U ||
+      kernel->args[2].size_bytes != 8U ||
+      strcmp(kernel->args[0].value_kind, "global_buffer") != 0 ||
+      strcmp(kernel->args[1].value_kind, "global_buffer") != 0 ||
+      strcmp(kernel->args[2].value_kind, "global_buffer") != 0 ||
+      kernel->args[0].kind != SAGR_CODE_OBJECT_ARG_VISIBLE ||
+      kernel->args[1].kind != SAGR_CODE_OBJECT_ARG_VISIBLE ||
+      kernel->args[2].kind != SAGR_CODE_OBJECT_ARG_VISIBLE) {
+    return 0;
+  }
+  memset(values, 0, sizeof(values));
+  for (index = 0U; index < 4U; ++index) {
+    values[index].struct_size = (uint32_t)sizeof(values[index]);
+  }
+  values[0].arg_index = kernel->args[0].index;
+  values[0].value = a_va;
+  values[1].arg_index = kernel->args[1].index;
+  values[1].value = b_va;
+  values[2].arg_index = kernel->args[2].index;
+  values[2].value = c_va;
+  values[3].arg_index = hidden_grid_index;
+  values[3].value = 1U;
+  status = sagr_code_object_pack_kernarg(
+      kernel, values, 4U, destination, SAGR_ENDPOINT_TEST_KERNARG_BYTES,
+      &written_size);
+  if (status != SAGR_STATUS_SUCCESS ||
+      written_size != SAGR_ENDPOINT_TEST_KERNARG_BYTES ||
+      load_le64(destination) != a_va || load_le64(destination + 8U) != b_va ||
+      load_le64(destination + 16U) != c_va ||
+      load_le64(destination + 24U) != 0U ||
+      load_le64(destination + 32U) != 0U ||
+      load_le64(destination + 40U) != 0U ||
+      load_le64(destination + 64U) != 0U ||
+      load_le64(destination + 72U) != 0U ||
+      load_le64(destination + 80U) != 0U || destination[88] != 1U ||
+      destination[89] != 0U) {
+    return 0;
+  }
+  /* The locked RDC object executes with device-library OLD_ABI global
+   * offsets at +24/+32/+40 even though its metadata names block/group fields.
+   * Match the CP20 executor: all of +24..+47 and the explicit global offsets
+   * at +64/+72/+80 remain zero; only hidden_grid_dims at +88 is one. */
+  for (index = 24U; index < SAGR_ENDPOINT_TEST_KERNARG_BYTES; ++index) {
+    if (index != 88U && index != 89U && destination[index] != 0U) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int memory_info_matches_owner(const sagr_memory_info_t *memory,
+                                     const sagr_instance_info_t *owner) {
+  return memory->struct_size == sizeof(*memory) && memory->allocation_id != 0U &&
+         memory->generation != 0U && memory->simulated_va != 0U &&
+         memory->size_bytes == SAGR_ENDPOINT_TEST_BUFFER_BYTES &&
+         memory->alignment_bytes == SAGR_ENDPOINT_TEST_BUFFER_ALIGNMENT &&
+         memory->connection_id == owner->connection_id &&
+         memory->epoch == owner->epoch &&
+         memcmp(memory->daemon_uuid, owner->daemon_uuid,
+                sizeof(memory->daemon_uuid)) == 0;
+}
+
+static int allocate_execution_buffers(sagr_instance_t instance,
+                                      const sagr_instance_info_t *owner,
+                                      execution_buffers_t *buffers) {
+  sagr_memory_allocate_options_t options;
+  sagr_error_info_t error;
+  sagr_memory_t *handles[3] = {&buffers->a, &buffers->b, &buffers->c};
+  sagr_memory_info_t *infos[3] = {&buffers->a_info, &buffers->b_info,
+                                  &buffers->c_info};
+  uint32_t *patterns[3] = {buffers->a_host, buffers->b_host, buffers->c_host};
+  uint32_t index;
+  uint32_t word;
+  sagr_status_t status;
+
+  memset(buffers, 0, sizeof(*buffers));
+  status = sagr_memory_allocate_options_init(&options, (uint32_t)sizeof(options));
+  if (!require_condition(status == SAGR_STATUS_SUCCESS,
+                         "buffer ALLOC options initialization failed")) {
+    return 1;
+  }
+  options.size_bytes = SAGR_ENDPOINT_TEST_BUFFER_BYTES;
+  options.alignment_bytes = SAGR_ENDPOINT_TEST_BUFFER_ALIGNMENT;
+  for (index = 0U; index < 3U; ++index) {
+    for (word = 0U; word < SAGR_ENDPOINT_TEST_BUFFER_WORDS; ++word) {
+      patterns[index][word] =
+          index == 0U ? (UINT32_C(0x51000000) ^ word)
+                      : index == 1U ? (UINT32_C(0x6b000000) ^ word)
+                                    : (UINT32_C(0x7c000000) ^ word);
+    }
+    memset(&error, 0, sizeof(error));
+    status = sagr_memory_allocate(instance, &options, NULL, handles[index],
+                                  infos[index], (uint32_t)sizeof(*infos[index]),
+                                  &error, (uint32_t)sizeof(error));
+    if (!call_succeeded("buffer ALLOC", status, &error) ||
+        !require_condition(memory_info_matches_owner(infos[index], owner),
+                           "buffer ALLOC returned a noncanonical owner lease")) {
+      return 1;
+    }
+    if (!require_condition(
+            (index == 0U || infos[index]->simulated_va != buffers->a_info.simulated_va) &&
+                (index < 2U || infos[index]->simulated_va != buffers->b_info.simulated_va),
+            "buffer ALLOC returned duplicate GPU virtual addresses")) {
+      return 1;
+    }
+    status = sagr_memory_copy_from_host(
+        *handles[index], 0U, patterns[index], SAGR_ENDPOINT_TEST_BUFFER_BYTES,
+        NULL, &error, (uint32_t)sizeof(error));
+    if (!call_succeeded("buffer H2D", status, &error)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int verify_execution_buffers(execution_buffers_t *buffers,
+                                    uint32_t *output_crc) {
+  sagr_memory_t handles[3] = {buffers->a, buffers->b, buffers->c};
+  uint32_t *results[3] = {buffers->a_result, buffers->b_result,
+                          buffers->c_result};
+  uint8_t combined[SAGR_ENDPOINT_TEST_BUFFER_BYTES * 2U];
+  sagr_error_info_t error;
+  sagr_status_t status;
+  uint32_t word;
+  uint32_t index;
+
+  for (index = 0U; index < 3U; ++index) {
+    memset(&error, 0, sizeof(error));
+    status = sagr_memory_copy_to_host(
+        handles[index], 0U, results[index], SAGR_ENDPOINT_TEST_BUFFER_BYTES,
+        NULL, &error, (uint32_t)sizeof(error));
+    if (!call_succeeded("buffer D2H", status, &error)) {
+      return 1;
+    }
+  }
+  for (word = 0U; word < SAGR_ENDPOINT_TEST_BUFFER_WORDS; ++word) {
+    if (buffers->a_result[word] != buffers->a_host[word] ||
+        buffers->b_result[word] != word ||
+        buffers->c_result[word] != buffers->a_host[word]) {
+      return 1;
+    }
+  }
+  if (sagr_crc32c((const uint8_t *)buffers->a_result,
+                  (size_t)SAGR_ENDPOINT_TEST_BUFFER_BYTES) !=
+          SAGR_ENDPOINT_TEST_A_CRC32C ||
+      sagr_crc32c((const uint8_t *)buffers->b_result,
+                  (size_t)SAGR_ENDPOINT_TEST_BUFFER_BYTES) !=
+          SAGR_ENDPOINT_TEST_B_CRC32C) {
+    return 1;
+  }
+  memcpy(combined, buffers->b_result, (size_t)SAGR_ENDPOINT_TEST_BUFFER_BYTES);
+  memcpy(combined + SAGR_ENDPOINT_TEST_BUFFER_BYTES, buffers->c_result,
+         (size_t)SAGR_ENDPOINT_TEST_BUFFER_BYTES);
+  *output_crc = sagr_crc32c(combined, sizeof(combined));
+  return *output_crc == SAGR_ENDPOINT_TEST_OUTPUT_CRC32C ? 0 : 1;
+}
+
+static int verify_duplicate_a_d2h(execution_buffers_t *buffers) {
+  uint32_t duplicate_a[SAGR_ENDPOINT_TEST_BUFFER_WORDS];
+  sagr_error_info_t error;
+  sagr_status_t status;
+
+  memset(&error, 0, sizeof(error));
+  memset(duplicate_a, 0, sizeof(duplicate_a));
+  status = sagr_memory_copy_to_host(
+      buffers->a, 0U, duplicate_a, SAGR_ENDPOINT_TEST_BUFFER_BYTES, NULL,
+      &error, (uint32_t)sizeof(error));
+  if (!call_succeeded("duplicate buffer A D2H", status, &error)) {
+    return 1;
+  }
+  return require_condition(
+             memcmp(duplicate_a, buffers->a_result, sizeof(duplicate_a)) == 0 &&
+                 sagr_crc32c((const uint8_t *)duplicate_a,
+                             sizeof(duplicate_a)) ==
+                     SAGR_ENDPOINT_TEST_A_CRC32C,
+             "duplicate buffer A D2H did not preserve the full bytes and CRC")
+             ? 0
+             : 1;
+}
+
+static int free_execution_buffers(execution_buffers_t *buffers) {
+  sagr_memory_t *handles[3] = {&buffers->a, &buffers->b, &buffers->c};
+  sagr_error_info_t error;
+  int failures = 0;
+  int index;
+  for (index = 2; index >= 0; --index) {
+    if (*handles[index] != NULL) {
+      memset(&error, 0, sizeof(error));
+      if (sagr_memory_free(handles[index], NULL, &error,
+                           (uint32_t)sizeof(error)) != SAGR_STATUS_SUCCESS) {
+        print_open_error("buffer FREE", error.status, &error);
+        failures = 1;
+      }
+    }
+  }
+  return failures;
+}
+
 static int upload_object(sagr_instance_t instance, const uint8_t *image,
                          size_t image_size,
                          const sagr_code_object_info_t *info,
@@ -258,12 +576,11 @@ static int upload_object(sagr_instance_t instance, const uint8_t *image,
              : 1;
 }
 
-static int map_alloc_and_publish(
+static int map_and_alloc(
     sagr_instance_t instance, const sagr_instance_info_t *owner,
     const sagr_code_object_info_t *info,
     const sagr_code_object_kernel_info_t *kernel,
     const sagr_code_object_remote_info_t *remote,
-    const uint8_t kernarg_bytes[SAGR_ENDPOINT_TEST_KERNARG_BYTES],
     sagr_generic_mapping_t *mapping, sagr_generic_mapping_info_t *mapping_info,
     sagr_generic_kernarg_t *kernarg,
     sagr_generic_kernarg_info_t *kernarg_info) {
@@ -331,7 +648,7 @@ static int map_alloc_and_publish(
                          "ALLOC_KERNARG options initialization failed")) {
     return 1;
   }
-  alloc_options.size_bytes = SAGR_ENDPOINT_TEST_ALLOCATION_BYTES;
+  alloc_options.size_bytes = SAGR_ENDPOINT_TEST_KERNARG_ALLOCATION_BYTES;
   alloc_options.alignment_bytes = SAGR_ENDPOINT_TEST_LOGICAL_ALIGNMENT;
   memset(kernarg_info, 0, sizeof(*kernarg_info));
   status = sagr_generic_alloc_kernarg(
@@ -350,7 +667,8 @@ static int map_alloc_and_publish(
               kernarg_info->generation != 0U && kernarg_info->kernarg_va != 0U &&
               (kernarg_info->kernarg_va %
                    SAGR_ENDPOINT_TEST_LOGICAL_ALIGNMENT) == 0U &&
-              kernarg_info->size_bytes == SAGR_ENDPOINT_TEST_ALLOCATION_BYTES &&
+              kernarg_info->size_bytes ==
+                  SAGR_ENDPOINT_TEST_KERNARG_ALLOCATION_BYTES &&
               kernarg_info->alignment_bytes ==
                   SAGR_ENDPOINT_TEST_LOGICAL_ALIGNMENT &&
               kernarg_info->connection_id == owner->connection_id &&
@@ -363,8 +681,18 @@ static int map_alloc_and_publish(
     return 1;
   }
 
+  return 0;
+}
+
+static int publish_kernarg(
+    sagr_generic_kernarg_t kernarg,
+    const uint8_t kernarg_bytes[SAGR_ENDPOINT_TEST_KERNARG_BYTES]) {
+  sagr_error_info_t error;
+  sagr_status_t status;
+
+  memset(&error, 0, sizeof(error));
   status = sagr_generic_kernarg_copy_from_host(
-      *kernarg, SAGR_ENDPOINT_TEST_KERNARG_OFFSET, kernarg_bytes,
+      kernarg, SAGR_ENDPOINT_TEST_KERNARG_OFFSET, kernarg_bytes,
       SAGR_ENDPOINT_TEST_KERNARG_BYTES, NULL, &error,
       (uint32_t)sizeof(error));
   return call_succeeded("sealed v1 kernarg H2D", status, &error) ? 0 : 1;
@@ -383,9 +711,9 @@ static int stage_abandoned_owner(
   snapshot->owner = *owner;
   if (upload_object(instance, image, image_size, info, kernel,
                     &snapshot->object) != 0 ||
-      map_alloc_and_publish(instance, owner, info, kernel, &snapshot->object,
-                            kernarg_bytes, &mapping, &snapshot->mapping,
-                            &kernarg, &snapshot->kernarg) != 0) {
+      map_and_alloc(instance, owner, info, kernel, &snapshot->object, &mapping,
+                    &snapshot->mapping, &kernarg, &snapshot->kernarg) != 0 ||
+      publish_kernarg(kernarg, kernarg_bytes) != 0) {
     return 1;
   }
   /* Deliberately leave mapping and kernarg live.  Instance close must release
@@ -447,8 +775,7 @@ static int run_positive_lifecycle(
     sagr_instance_t instance, const sagr_instance_info_t *owner,
     const reconnect_snapshot_t *abandoned, const uint8_t *image,
     size_t image_size, const sagr_code_object_info_t *info,
-    const sagr_code_object_kernel_info_t *kernel,
-    const uint8_t kernarg_bytes[SAGR_ENDPOINT_TEST_KERNARG_BYTES]) {
+    const sagr_code_object_kernel_info_t *kernel, endpoint_mode_t mode) {
   sagr_code_object_remote_info_t remote;
   sagr_queue_t queue = NULL;
   sagr_queue_info_t queue_info;
@@ -463,6 +790,9 @@ static int run_positive_lifecycle(
   sagr_generic_submit_options_t submit_options;
   sagr_generic_dispatch_ticket_t ticket;
   sagr_generic_dispatch_completion_t completion;
+  execution_buffers_t buffers;
+  uint8_t execution_kernarg[SAGR_ENDPOINT_TEST_KERNARG_BYTES];
+  uint32_t output_crc = 0U;
   sagr_error_info_t error;
   sagr_status_t status;
 
@@ -479,9 +809,8 @@ static int run_positive_lifecycle(
                               &signal_info) != 0) {
     return 1;
   }
-  if (map_alloc_and_publish(instance, owner, info, kernel, &remote,
-                            kernarg_bytes, &mapping, &mapping_info, &kernarg,
-                            &kernarg_info) != 0) {
+  if (map_and_alloc(instance, owner, info, kernel, &remote, &mapping,
+                    &mapping_info, &kernarg, &kernarg_info) != 0) {
     return 1;
   }
   if (!require_condition(
@@ -493,6 +822,16 @@ static int run_positive_lifecycle(
               kernarg_info.generation > abandoned->kernarg.generation &&
               kernarg_info.kernarg_va == abandoned->kernarg.kernarg_va,
           "disconnect cleanup did not recycle mapping/allocation slots with new generations")) {
+    return 1;
+  }
+  if (allocate_execution_buffers(instance, owner, &buffers) != 0 ||
+      !require_condition(
+          pack_execution_kernarg(kernel, buffers.a_info.simulated_va,
+                                 buffers.b_info.simulated_va,
+                                 buffers.c_info.simulated_va, execution_kernarg),
+          "execution kernarg did not match the locked OLD_ABI 280-byte manifest") ||
+      publish_kernarg(kernarg, execution_kernarg) != 0) {
+    (void)free_execution_buffers(&buffers);
     return 1;
   }
 
@@ -546,6 +885,10 @@ static int run_positive_lifecycle(
     return 1;
   }
 
+  if (mode == ENDPOINT_MODE_DISCONNECT_AFTER_ACK) {
+    return LIFECYCLE_DISCONNECT_AFTER_ACK;
+  }
+
   memset(&completion, 0, sizeof(completion));
   status = sagr_queue_wait_generic_dispatch(
       queue, &ticket, NULL, &completion, (uint32_t)sizeof(completion), &error,
@@ -579,7 +922,7 @@ static int run_positive_lifecycle(
               completion.trace_id == ticket.trace_id &&
               completion.packet_va == ticket.packet_va &&
               completion.packet_crc32c == ticket.packet_crc32c &&
-              completion.output_crc32c == 0U &&
+              completion.output_crc32c == SAGR_ENDPOINT_TEST_OUTPUT_CRC32C &&
               completion.admission_tick == ticket.admission_tick &&
               completion.sim_tick >= completion.admission_tick &&
               completion.start_tick >= completion.admission_tick &&
@@ -592,6 +935,21 @@ static int run_positive_lifecycle(
               memcmp(completion.image_sha256, ticket.image_sha256,
                      sizeof(completion.image_sha256)) == 0,
           "type-20 completion did not preserve the admitted tuple and ticks")) {
+    return 1;
+  }
+
+  if (!require_condition(verify_execution_buffers(&buffers, &output_crc) == 0,
+                         "D2H output oracle did not match gpuReadWrite")) {
+    return 1;
+  }
+  if (!require_condition(output_crc == completion.output_crc32c,
+                         "type-20 output CRC did not match D2H B||C")) {
+    return 1;
+  }
+  if (verify_duplicate_a_d2h(&buffers) != 0) {
+    return 1;
+  }
+  if (free_execution_buffers(&buffers) != 0) {
     return 1;
   }
 
@@ -632,84 +990,131 @@ static int run_positive_lifecycle(
              : 1;
 }
 
+static int run_negative_capability_probe(
+    const char *endpoint, sagr_instance_open_options_t *control_options,
+    sagr_instance_open_options_t *baseline_options, sagr_instance_t *instance,
+    sagr_error_info_t *error) {
+  sagr_instance_info_t info;
+  sagr_status_t status;
+  const uint64_t selected_mask =
+      SAGR_CAPABILITY_GENERIC_DISPATCH_MASK |
+      SAGR_CAPABILITY_GENERIC_EXECUTION_MASK;
+
+  fprintf(stderr,
+          "generic endpoint probe: execution capability was canonically rejected\n");
+  if (open_options_for_control(control_options) != 0) {
+    return 1;
+  }
+  status = sagr_instance_open(endpoint, control_options, instance, error,
+                              (uint32_t)sizeof(*error));
+  if (status == SAGR_STATUS_SUCCESS && *instance != NULL) {
+    memset(&info, 0, sizeof(info));
+    if (get_required_control_info(*instance, &info) != 0 ||
+        (info.negotiated_capabilities[0] &
+         SAGR_CAPABILITY_GENERIC_EXECUTION_MASK) != 0U ||
+        close_instance(instance) != 0) {
+      (void)close_instance(instance);
+      return 1;
+    }
+    printf("{\"schema\":\"self-amdgpu-runtime.generic-dispatch-v2-endpoint.v3\","
+           "\"handshake\":true,\"required_generic_selected\":true,"
+           "\"required_execution_selected\":false,"
+           "\"dependencies_selected\":true,"
+           "\"bit8_selected\":true,\"bit9_selected\":false,"
+           "\"execution_capability_unsupported\":true,"
+           "\"canonical_unsupported\":false,\"raw18_sent\":false,"
+           "\"execution\":false,\"output_correctness\":false,"
+           "\"launcher\":false,\"compiler\":false,\"jit\":false,"
+           "\"fallback\":false}\n");
+    return 0;
+  }
+  if (endpoint_unavailable(status)) {
+    print_open_error("control handshake after execution rejection", status,
+                     error);
+    return SAGR_ENDPOINT_TEST_SKIP;
+  }
+  if (status != SAGR_STATUS_CAPABILITY_MISMATCH ||
+      error->wire_status != SAGR_WIRE_STATUS_UNSUPPORTED_CAPABILITY) {
+    print_open_error("control handshake after execution rejection", status,
+                     error);
+    return 1;
+  }
+  if (open_options_for_baseline(baseline_options) != 0) {
+    return 1;
+  }
+  status = sagr_instance_open(endpoint, baseline_options, instance, error,
+                              (uint32_t)sizeof(*error));
+  if (endpoint_unavailable(status)) {
+    print_open_error("baseline handshake after capability rejection", status,
+                     error);
+    return SAGR_ENDPOINT_TEST_SKIP;
+  }
+  if (status != SAGR_STATUS_SUCCESS || *instance == NULL) {
+    print_open_error("baseline handshake after capability rejection", status,
+                     error);
+    return 1;
+  }
+  memset(&info, 0, sizeof(info));
+  status = sagr_instance_get_info(*instance, &info, (uint32_t)sizeof(info));
+  if (status != SAGR_STATUS_SUCCESS ||
+      (info.negotiated_capabilities[0] & selected_mask) != 0U ||
+      close_instance(instance) != 0) {
+    if (*instance != NULL) {
+      (void)close_instance(instance);
+    }
+    return 1;
+  }
+  printf("{\"schema\":\"self-amdgpu-runtime.generic-dispatch-v2-endpoint.v3\","
+         "\"handshake\":true,\"required_generic_selected\":false,"
+         "\"bit8_selected\":false,\"bit9_selected\":false,"
+         "\"canonical_unsupported\":true,"
+         "\"execution_capability_unsupported\":true,"
+         "\"baseline_reconnect\":true,\"raw18_sent\":false,"
+         "\"execution\":false,\"output_correctness\":false,"
+         "\"launcher\":false,\"compiler\":false,\"jit\":false,"
+         "\"fallback\":false}\n");
+  return 0;
+}
+
 int main(void) {
   const char *endpoint = getenv("SAGR_GENERIC_BRIDGE_ENDPOINT");
   const char *hsaco_path = getenv(SAGR_ENDPOINT_TEST_HSACO_ENV);
-  sagr_instance_open_options_t generic_options;
+  sagr_instance_open_options_t execution_options;
+  sagr_instance_open_options_t control_options;
   sagr_instance_open_options_t baseline_options;
   sagr_instance_t instance = NULL;
   sagr_instance_info_t info;
   sagr_instance_info_t reconnect_info;
   sagr_error_info_t error;
   sagr_status_t status;
-  const uint64_t generic_mask = SAGR_CAPABILITY_GENERIC_DISPATCH_MASK;
   uint8_t *image = NULL;
   size_t image_size = 0U;
   sagr_code_object_info_t code_object;
   sagr_code_object_kernel_info_t kernel;
   uint8_t kernarg_bytes[SAGR_ENDPOINT_TEST_KERNARG_BYTES];
   reconnect_snapshot_t abandoned;
+  endpoint_mode_t mode;
+  int lifecycle_result;
 
   if (endpoint == NULL || endpoint[0] == '\0') {
     fprintf(stderr,
             "SKIP: SAGR_GENERIC_BRIDGE_ENDPOINT is unset; no daemon endpoint was probed\n");
     return SAGR_ENDPOINT_TEST_SKIP;
   }
+  if (get_endpoint_mode(&mode) != 0) {
+    return 1;
+  }
 
-  if (open_options_for_generic(&generic_options) != 0) {
+  if (open_options_for_execution(&execution_options) != 0) {
     return 1;
   }
   memset(&error, 0, sizeof(error));
-  status = sagr_instance_open(endpoint, &generic_options, &instance, &error,
+  status = sagr_instance_open(endpoint, &execution_options, &instance, &error,
                               (uint32_t)sizeof(error));
   if (status == SAGR_STATUS_CAPABILITY_MISMATCH &&
       error.wire_status == SAGR_WIRE_STATUS_UNSUPPORTED_CAPABILITY) {
-    /* A reachable daemon that has not advertised bit 8 remains the canonical
-     * fail-closed boundary.  This public-API branch rejects the required hello;
-     * it does not claim that a raw type-18 record was sent. */
-    fprintf(stderr,
-            "generic endpoint probe: endpoint reachable; generic capability was canonically rejected\n");
-    if (open_options_for_baseline(&baseline_options) != 0) {
-      return 1;
-    }
-    status = sagr_instance_open(endpoint, &baseline_options, &instance, &error,
-                                (uint32_t)sizeof(error));
-    if (endpoint_unavailable(status)) {
-      print_open_error("baseline handshake after capability rejection",
-                       status, &error);
-      return SAGR_ENDPOINT_TEST_SKIP;
-    }
-    if (status != SAGR_STATUS_SUCCESS) {
-      print_open_error("baseline handshake after capability rejection", status,
-                       &error);
-      return 1;
-    }
-    memset(&info, 0, sizeof(info));
-    status = sagr_instance_get_info(instance, &info, (uint32_t)sizeof(info));
-    if (status != SAGR_STATUS_SUCCESS) {
-      fprintf(stderr, "generic endpoint probe: get_info failed: %s\n",
-              sagr_status_string(status));
-      (void)close_instance(&instance);
-      return 1;
-    }
-    if ((info.negotiated_capabilities[SAGR_CAPABILITY_GENERIC_DISPATCH_WORD] &
-         generic_mask) != 0U) {
-      fprintf(stderr,
-              "generic endpoint probe: baseline handshake unexpectedly selected generic capability\n");
-      (void)close_instance(&instance);
-      return 1;
-    }
-    if (close_instance(&instance) != 0) {
-      return 1;
-    }
-    printf("{\"schema\":\"self-amdgpu-runtime.generic-dispatch-v2-endpoint.v2\","
-           "\"handshake\":true,\"required_generic_selected\":false,"
-           "\"bit8_selected\":false,\"canonical_unsupported\":true,"
-           "\"baseline_reconnect\":true,\"raw18_sent\":false,"
-           "\"execution\":false,\"output_correctness\":false,"
-           "\"launcher\":false,\"compiler\":false,\"jit\":false,"
-           "\"fallback\":false}\n");
-    return 0;
+    return run_negative_capability_probe(endpoint, &control_options,
+                                         &baseline_options, &instance, &error);
   }
 
   if (endpoint_unavailable(status)) {
@@ -723,7 +1128,7 @@ int main(void) {
     return 1;
   }
   memset(&info, 0, sizeof(info));
-  if (get_required_generic_info(instance, &info) != 0) {
+  if (get_required_execution_info(instance, &info) != 0) {
     (void)close_instance(&instance);
     return 1;
   }
@@ -755,7 +1160,7 @@ int main(void) {
   }
 
   memset(&error, 0, sizeof(error));
-  status = sagr_instance_open(endpoint, &generic_options, &instance, &error,
+  status = sagr_instance_open(endpoint, &execution_options, &instance, &error,
                               (uint32_t)sizeof(error));
   if (status != SAGR_STATUS_SUCCESS || instance == NULL) {
     print_open_error("required-generic reconnect after abandoned owner", status,
@@ -764,7 +1169,7 @@ int main(void) {
     return 1;
   }
   memset(&reconnect_info, 0, sizeof(reconnect_info));
-  if (get_required_generic_info(instance, &reconnect_info) != 0 ||
+  if (get_required_execution_info(instance, &reconnect_info) != 0 ||
       !require_condition(
           reconnect_info.connection_id != info.connection_id &&
               reconnect_info.epoch == info.epoch &&
@@ -776,9 +1181,43 @@ int main(void) {
     return 1;
   }
 
-  if (run_positive_lifecycle(instance, &reconnect_info, &abandoned, image,
-                             image_size, &code_object, &kernel,
-                             kernarg_bytes) != 0) {
+  lifecycle_result = run_positive_lifecycle(
+      instance, &reconnect_info, &abandoned, image, image_size, &code_object,
+      &kernel, mode);
+  if (lifecycle_result == LIFECYCLE_DISCONNECT_AFTER_ACK) {
+    free(image);
+    if (close_instance(&instance) != 0) {
+      return 1;
+    }
+    printf("{\"schema\":\"self-amdgpu-runtime.generic-dispatch-v2-endpoint.v3\","
+           "\"mode\":\"disconnect-after-ack\",\"handshake\":true,"
+           "\"required_generic_selected\":true,"
+           "\"required_execution_selected\":true,"
+           "\"dependencies_selected\":true,\"bit8_selected\":true,"
+           "\"bit9_selected\":true,\"code_object_upload\":true,"
+           "\"queue_signal\":true,\"map\":true,\"alloc\":true,"
+           "\"buffer_count\":3,\"buffer_h2d\":true,\"h2d_v1\":true,"
+           "\"kernarg_opcode\":false,\"submit_ack\":true,"
+           "\"packet_crc_nonzero\":true,\"admission_tick_nonzero\":true,"
+           "\"disconnect_after_ack\":true,\"instance_close_success\":true,"
+           "\"post_type19_disconnect\":true,\"wait_called\":false,"
+           "\"wait_type20_called\":false,\"type20_read_attempted\":false,"
+           "\"completion_observed\":false,\"completion_type20\":false,"
+           "\"d2h_verified\":false,"
+           "\"duplicate_d2h_verified\":false,\"unmap\":false,"
+           "\"explicit_resource_destroy\":false,"
+           "\"execution_observed\":false,\"execution_claimed\":false,"
+           "\"client_output_correctness\":false,"
+           "\"output_correctness\":false,"
+           "\"remote_cleanup_verified\":false,"
+           "\"remote_cleanup_observed\":false,"
+           "\"remote_cleanup_unknown\":true,"
+           "\"remote_resource_counters_observed\":false,"
+           "\"launcher\":false,\"compiler\":false,\"jit\":false,"
+           "\"fallback\":false,\"triton\":false,\"qwen\":false}\n");
+    return 0;
+  }
+  if (lifecycle_result != LIFECYCLE_COMPLETE) {
     free(image);
     (void)close_instance(&instance);
     return 1;
@@ -788,27 +1227,40 @@ int main(void) {
     return 1;
   }
 
-  printf("{\"schema\":\"self-amdgpu-runtime.generic-dispatch-v2-endpoint.v2\","
+  printf("{\"schema\":\"self-amdgpu-runtime.generic-dispatch-v2-endpoint.v3\","
          "\"handshake\":true,\"required_generic_selected\":true,"
+         "\"required_execution_selected\":true,"
          "\"dependencies_selected\":true,\"bit8_selected\":true,"
-         "\"canonical_unsupported\":false,\"code_object_upload\":true,"
-         "\"queue_signal\":true,\"map\":true,\"alloc\":true,"
-         "\"logical_alignment_8\":true,\"backing_alignment_hidden\":true,"
-         "\"allocation_bytes\":512,\"kernarg_offset\":64,"
-         "\"kernarg_manifest_bytes\":280,\"h2d_v1\":true,"
-         "\"kernarg_opcode\":false,\"submit_ack\":true,"
+         "\"bit9_selected\":true,\"execution_capability_selected\":true,"
+         "\"canonical_unsupported\":false,"
+         "\"code_object_upload\":true,\"queue_signal\":true,"
+         "\"map\":true,\"alloc\":true,\"logical_alignment_8\":true,"
+         "\"backing_alignment_hidden\":true,\"kernarg_allocation_bytes\":512,"
+         "\"buffer_allocation_bytes\":4096,\"buffer_count\":3,"
+         "\"buffer_owner_bound\":true,"
+         "\"buffer_ids_generations_nonzero\":true,"
+         "\"buffer_vas_distinct\":true,\"buffer_h2d\":true,"
+         "\"kernarg_offset\":64,\"kernarg_manifest_bytes\":280,"
+         "\"zero_preload\":true,\"preload_dwords\":0,\"h2d_v1\":true,"
+         "\"d2h_v1\":true,\"kernarg_opcode\":false,\"submit_ack\":true,"
          "\"packet_crc_nonzero\":true,\"admission_tick_nonzero\":true,"
+         "\"signal_value_bits_expected\":1,"
+         "\"signal_after_observed\":false,"
          "\"completion_type20\":true,\"ticks_monotonic\":true,"
-         "\"unmap\":true,\"disconnect_with_live_leases\":true,"
-         "\"reconnect_after_disconnect\":true,"
-         "\"reconnect_cleanup\":true,\"remote_cleanup_verified\":true,"
+         "\"output_crc32c\":1869021807,\"output_crc_nonzero\":true,"
+         "\"output_crc_b_then_c\":true,\"input_a_unchanged\":true,"
+         "\"output_b_is_gid\":true,\"output_c_is_a\":true,"
+         "\"d2h_verified\":true,\"d2h_oracle\":true,"
+         "\"duplicate_d2h_verified\":true,\"unmap\":true,"
+         "\"disconnect_with_live_leases\":true,"
+         "\"reconnect_after_disconnect\":true,\"reconnect_cleanup\":true,"
+         "\"remote_cleanup_verified\":true,"
          "\"remote_resource_counters_observed\":false,"
-         "\"preload_dwords\":0,"
          "\"native_cp_admission\":true,\"native_retire\":true,"
-         "\"gpu_dispatcher\":false,\"compute_unit\":false,"
-         "\"kernel_executed\":false,"
-         "\"execution\":false,\"output_correctness\":false,"
-         "\"launcher\":false,\"compiler\":false,\"jit\":false,"
-         "\"fallback\":false,\"triton\":false,\"qwen\":false}\n");
+         "\"gpu_dispatcher\":true,\"compute_unit\":true,"
+         "\"kernel_executed\":true,\"execution\":true,"
+         "\"output_correctness\":true,\"launcher\":false,"
+         "\"compiler\":false,\"jit\":false,\"fallback\":false,"
+         "\"triton\":false,\"qwen\":false}\n");
   return 0;
 }

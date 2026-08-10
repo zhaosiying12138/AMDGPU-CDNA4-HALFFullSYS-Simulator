@@ -110,7 +110,8 @@ static int capabilities_are_valid_selection(const uint64_t *capabilities) {
                            SAGR_CAPABILITY_DISPATCH_MASK |
                            SAGR_CAPABILITY_KMT_MASK |
                            SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK |
-                           SAGR_CAPABILITY_GENERIC_DISPATCH_MASK;
+                           SAGR_CAPABILITY_GENERIC_DISPATCH_MASK |
+                           SAGR_CAPABILITY_GENERIC_EXECUTION_MASK;
   if ((capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] &
        SAGR_CAPABILITY_TOPOLOGY_MASK) == 0 ||
       (capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] & ~allowed) != 0) {
@@ -137,6 +138,20 @@ static int capabilities_are_valid_selection(const uint64_t *capabilities) {
   if ((capabilities[SAGR_CAPABILITY_GENERIC_DISPATCH_WORD] &
        SAGR_CAPABILITY_GENERIC_DISPATCH_MASK) != 0 &&
       ((capabilities[SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_WORD] &
+        SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK) == 0 ||
+       (capabilities[SAGR_CAPABILITY_QUEUE_WORD] &
+        SAGR_CAPABILITY_QUEUE_MASK) == 0 ||
+       (capabilities[SAGR_CAPABILITY_MEMORY_WORD] &
+        SAGR_CAPABILITY_MEMORY_MASK) == 0 ||
+       (capabilities[SAGR_CAPABILITY_SIGNAL_WORD] &
+        SAGR_CAPABILITY_SIGNAL_MASK) == 0)) {
+    return 0;
+  }
+  if ((capabilities[SAGR_CAPABILITY_GENERIC_EXECUTION_WORD] &
+       SAGR_CAPABILITY_GENERIC_EXECUTION_MASK) != 0 &&
+      ((capabilities[SAGR_CAPABILITY_GENERIC_DISPATCH_WORD] &
+        SAGR_CAPABILITY_GENERIC_DISPATCH_MASK) == 0 ||
+       (capabilities[SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_WORD] &
         SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK) == 0 ||
        (capabilities[SAGR_CAPABILITY_QUEUE_WORD] &
         SAGR_CAPABILITY_QUEUE_MASK) == 0 ||
@@ -669,6 +684,13 @@ sagr_status_t sagr_protocol_decode_ack(
       ((options->required_capabilities[SAGR_CAPABILITY_GENERIC_DISPATCH_WORD] &
         SAGR_CAPABILITY_GENERIC_DISPATCH_MASK) != 0)) {
     *reason = "ACK generic dispatch capability was not both offered and required";
+    return SAGR_STATUS_CAPABILITY_MISMATCH;
+  }
+  if (((selected[SAGR_CAPABILITY_GENERIC_EXECUTION_WORD] &
+        SAGR_CAPABILITY_GENERIC_EXECUTION_MASK) != 0) !=
+      ((options->required_capabilities[SAGR_CAPABILITY_GENERIC_EXECUTION_WORD] &
+        SAGR_CAPABILITY_GENERIC_EXECUTION_MASK) != 0)) {
+    *reason = "ACK generic execution capability was not both offered and required";
     return SAGR_STATUS_CAPABILITY_MISMATCH;
   }
   if (!bytes_are_zero(options->expected_daemon_uuid, 16) &&
