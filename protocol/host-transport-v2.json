@@ -1,14 +1,14 @@
 {
   "schema": "amdgpu-sim.host-transport-v2.generic-dispatch.v2",
   "title": "GemSim generic object mapping and dispatch payload-v2 authority",
-  "checkpoint": "CP-0026",
-  "authority_status": "accepted-locked-generic-execution-and-quarantine",
+  "checkpoint": "CP-0027",
+  "authority_status": "accepted-direct-opencl-exact-execution;cp26-generic-regression-retained",
   "base_protocol": "protocol/host-transport-v1.json",
-  "scope": "A versioned, fixed-record schema and committed owner-bound runtime-to-gem5 daemon lifecycle. CP25 proves the bit-8 control contract: required-generic negotiation, live MessageType 18 MAP/ALLOC/SUBMIT/UNMAP, v1 MEMORY_COPY_H2D publication, MessageType 19 ACK, MessageType 20 native admission/retire bookkeeping, disconnect cleanup, and reconnect. CP26 adds optional bit-9 GENERIC_EXECUTION_V2 for one exact zero-preload gpuReadWrite fixture, with daemon-trace and A/B/C output-oracle authority plus a post-ACK quarantine boundary. It does not prove generic gfx950/arbitrary HSACO, a standalone no-x86 daemon, a normal launcher, compiler/JIT, performance, fallback, Triton, or Qwen.",
+  "scope": "A versioned, fixed-record schema and committed owner-bound runtime-to-gem5 daemon lifecycle. CP25 proves the bit-8 control contract and CP26 proves one exact bit-9 gpuReadWrite execution fixture. CP27 adds the first product-facing OpenCL entry: a normal executable linked to a repository-local libOpenCL/runtime stack compiles one exact vecadd image, privately supervises gem5, submits through the unchanged wire, waits, performs C-only D2H, validates C=A+B, and exits cleanly. The direct executable is one-submit-per-context and remains fixture-scoped; it does not prove reusable multi-dispatch, general OpenCL, normal Triton Python, model operators, multi-token inference, TP, CCL, generic gfx950/arbitrary HSACO, performance, or fallback.",
   "next_action": {
-    "checkpoint": "CP-0027",
-    "id": "P5-PROFILE-01",
-    "boundary": "Retain a profile of the accepted locked execution path, rank the 80/20 bottlenecks, and implement one measured optimization with unchanged output correctness. This ID is allocated when the next transaction begins; Triton preload and the normal launcher remain separate gates."
+    "checkpoint": "CP-0028",
+    "id": "P5-TRITON-VECADD-06-NORMAL-PYTHON",
+    "boundary": "Run an ordinary pinned Triton Python vecadd through the normal driver/runtime path, with managed gem5 execution, returned-output oracle, and zero fallback. Resolve preload-aware code-object admission and reusable dispatch only within this bounded gate; do not start profiling unless a retained real workload materially blocks operator or model coverage."
   },
   "versioning": {
     "framing_major": 1,
@@ -16,7 +16,7 @@
     "payload_major": 2,
     "payload_minor": 0,
     "compatibility": "The v1 80-byte envelope, byte order, CRC-32C rule, and all v1 message records remain unchanged. A v2 payload is opt-in and is never decoded as a v1 record.",
-    "server_status": "The current daemon advertises bit 8 for the complete control contract and bit 9 only for the locked execution extension with all dependencies. The positive endpoint and fsynced daemon trace complete the exact gpuReadWrite execution/output oracle; a separate trace proves post-ACK quarantine cleanup. The retained Triton preload, normal launcher, compiler/JIT, performance, fallback, and Qwen claims remain false."
+    "server_status": "The current daemon advertises bit 8 for the complete control contract and bit 9 for the locked execution extensions. CP26 gpuReadWrite and CP27 OpenCL vecadd traces complete their separate exact execution/output oracles; the CP26 quarantine trace remains retained. The normal Triton launcher/driver, preload-aware compiler/JIT transport, model operators, performance, fallback, and Qwen claims remain false."
   },
   "capability": {
     "name": "GENERIC_DISPATCH_V2",
@@ -476,6 +476,122 @@
     "normal_completed_disconnect_is_separate": true,
     "no_type20_to_disconnected_owner": true
   },
+  "cp27_opencl_direct_boundary": {
+    "status": "accepted-direct-opencl-exact-execution",
+    "checkpoint": "CP-0027",
+    "gem5_child_head": "ed808f6a57b843c040ba864b9e9aad188d0eab36",
+    "gem5_child_tree": "27fdc466df4eeebda19e8c6ef18234b07c3ec79f",
+    "runtime_child_head": "749717e1a5c7c337d73ab26eae5b0827a34a795a",
+    "runtime_child_tree": "fb6dec26311ff4aebfe31c4364cfa9a2575bc0fb",
+    "evidence_ids": [
+      "EV-0062",
+      "EV-0063"
+    ],
+    "ev0062_sha256": "b9568e60e93295a253e12812670816139141e32d14c8bb2ffacfd3bae0b2c34d",
+    "wire_unchanged": true,
+    "bit8_control_selected": true,
+    "bit9_execution_selected": true,
+    "dependencies_selected": true,
+    "user_entry": {
+      "kernel_source": "projects/self-amdgpu-runtime/examples/opencl/vecadd.cl",
+      "host_source": "projects/self-amdgpu-runtime/examples/opencl/vecadd_host.c",
+      "opencl_soname": "libOpenCL.so.1",
+      "normal_executable": "opencl-vecadd",
+      "manual_endpoint": false,
+      "managed_gem5": true,
+      "source_compiled": true,
+      "repository_local_prefix": true,
+      "system_rocm_install": false,
+      "production_umd_kmd": false,
+      "cpu_fallback": false,
+      "nvidia_fallback": false
+    },
+    "fixture": {
+      "image_sha256": "314ede16940432996c9fe190115408bf42744a8ab7d0036bf07b931e39c4cb19",
+      "image_bytes": 5160,
+      "target_spelling": "amdgcn-amd-amdhsa-unknown-gfx950",
+      "kernel": "vecadd",
+      "descriptor_preload_dwords": 0,
+      "kernarg_segment_bytes": 88,
+      "kernarg_alignment": 8,
+      "buffer_count": 3,
+      "buffer_bytes": 4096,
+      "grid_x": 1024,
+      "workgroup_x": 256,
+      "workgroups": 4,
+      "waves_per_workgroup": 4,
+      "wavefront_size": 64,
+      "required_d2h_mask": 4,
+      "exact_elf_metadata_descriptor_resources_isa": true
+    },
+    "execution": {
+      "trace_schema": "amdgpu-sim.cp27-opencl-execution-trace.v1",
+      "trace_events": [
+        "generic_execution_retired",
+        "generic_execution_type20_durable",
+        "generic_execution_session_complete"
+      ],
+      "packet_fetches": 1,
+      "command_processor_submissions": 1,
+      "gpu_dispatcher_starts": 1,
+      "gpu_dispatcher": true,
+      "compute_unit": true,
+      "kernel_executed": true,
+      "workgroups_completed": 4,
+      "waves_started": 16,
+      "pc_offsets_per_wave": 28,
+      "pc_coverage_exact": true,
+      "instructions_started": 448,
+      "global_reads": 2048,
+      "global_writes": 1024,
+      "store_events": 16,
+      "store_lanes": 1024,
+      "native_cp_admission": true,
+      "native_retire": true
+    },
+    "output_oracle": {
+      "input_a_unchanged": true,
+      "input_b_unchanged": true,
+      "output_c_is_float32_a_plus_b": true,
+      "bit_exact": true,
+      "c_crc32c": 3210199849,
+      "c_d2h_verified": true,
+      "a_d2h_required": false,
+      "b_d2h_required": false,
+      "client_returned_bytes_authority": true,
+      "daemon_execution_authority": true
+    },
+    "lifecycle": {
+      "private_job_uuid": true,
+      "private_socket": true,
+      "supervisor_spawned_gem5": true,
+      "type19_durable_before_issue": true,
+      "type20_durable": true,
+      "native_private_signal_before": 1,
+      "native_private_signal_after": 0,
+      "wire_signal_after_observed": false,
+      "c_d2h_durable": true,
+      "unmap_durable": true,
+      "owner_disconnected": true,
+      "cleanup_complete": true,
+      "supervisor_joined": true
+    },
+    "boundary": {
+      "one_execution_per_context": true,
+      "one_execution_per_session": true,
+      "multiple_dispatch": false,
+      "events_or_async_queues": false,
+      "arbitrary_opencl": false,
+      "normal_triton_python": false,
+      "model_operators": false,
+      "stable_multi_token": false,
+      "tensor_parallel": false,
+      "ccl": false,
+      "performance_claim": false,
+      "optimization_claim": false,
+      "fallback": false
+    }
+  },
   "bounded_fixture_observation": {
     "tutorial_sha256": "842430949e0ccde4fbce07606cce3ac4bac36bf21b2b12619a31b795ca4029b3",
     "hsaco_sha256": "ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e",
@@ -549,6 +665,25 @@
     "cp26_compiler_or_jit": false,
     "cp26_fallback": false,
     "cp26_triton": false,
-    "cp26_qwen_e2e": false
+    "cp26_qwen_e2e": false,
+    "cp27_direct_opencl_executable": true,
+    "cp27_source_compiled": true,
+    "cp27_managed_gem5": true,
+    "cp27_gpu_dispatcher": true,
+    "cp27_compute_unit": true,
+    "cp27_kernel_executed": true,
+    "cp27_output_correctness": true,
+    "cp27_c_only_d2h": true,
+    "cp27_owner_cleanup": true,
+    "cp27_zero_fallback": true,
+    "cp27_one_execution_per_context": true,
+    "cp27_multiple_dispatch": false,
+    "cp27_general_opencl": false,
+    "cp27_normal_triton_python": false,
+    "cp27_model_operators": false,
+    "cp27_stable_multi_token": false,
+    "cp27_tensor_parallel": false,
+    "cp27_ccl": false,
+    "cp27_performance_claim": false
   }
 }

@@ -1,0 +1,223 @@
+{
+  "baseline_commit_marker": "N/A",
+  "bitlesson_ids": [
+    "BL-0104",
+    "BL-0105"
+  ],
+  "bitlesson_sha256": {
+    "BL-0104": "234c0d4b364f8d6cbbb68fccc8f6d1a43b787df0b0258bd46d3f55d28fe382ba",
+    "BL-0105": "39caaae45e679ce739e9f95fe9b9bec4ac98c6e36e8aebcd6f1d5b25409926bb"
+  },
+  "blockers": [
+    {
+      "id": "OPENCL-B001",
+      "severity": "blocking",
+      "statement": "CP27 accepts one exact vecadd image and one submit per context/session. Reusable multi-dispatch, events/asynchrony, arbitrary OpenCL images and shapes, and model operators remain unproven."
+    },
+    {
+      "id": "TRITON-B004",
+      "severity": "blocking",
+      "statement": "The pinned normal Triton Python backend/driver/runtime, preload-aware launch, reusable sessions, model execution, stable multi-token inference, TP, and CCL remain unproven."
+    }
+  ],
+  "change_kind": "code",
+  "changes": [
+    "Added a repository-local OpenCL 1.2 subset and normal host executable that compile vecadd.cl with the pinned local compiler/device libraries, supervise gem5 implicitly, submit through the self runtime, read C back, and validate the application-visible oracle.",
+    "Added a second exact gem5 execution variant for the 5160-byte gfx950 OpenCL vecadd image, with hash/ELF/metadata/ISA admission, dynamic workgroup observation for the accepted launch, C=A+B validation, C-only D2H correlation, cleanup, and zero fallback.",
+    "Installed the compiler, device libraries, runtime, libOpenCL, kernel sources, and executable into a versioned repository-local ROCm prefix under an environment-scrubbed build; no system ROCm/HIP/OpenCL provider or host GPU device is used.",
+    "Recorded normal OpenCL direct execution as the product gate and deferred profiling until a retained operator, layer, or model bottleneck materially blocks correctness coverage."
+  ],
+  "created_at": "2026-08-11T01:55:00+08:00",
+  "evidence_ids": [
+    "EV-0062",
+    "EV-0063"
+  ],
+  "evidence_manifest_id": "EV-0063",
+  "evidence_manifest_sha256": "cbd6190b33072b2765633132dcccd6de2ff3b5252b886d2001591a9b3ceb4115",
+  "evidence_sha256": {
+    "EV-0062": "b9568e60e93295a253e12812670816139141e32d14c8bb2ffacfd3bae0b2c34d",
+    "EV-0063": "cbd6190b33072b2765633132dcccd6de2ff3b5252b886d2001591a9b3ceb4115"
+  },
+  "goal_id": "GSIM-001",
+  "goal_sha256": "803d4f1b6ccf86ee76c113192f24cfd0a8ac3a05c47767a1dce952b8d7026b5a",
+  "id": "CP-0027",
+  "limitations": [
+    "The accepted product path is restricted to the exact 5160-byte gfx950 vecadd HSACO with SHA-256 314ede16940432996c9fe190115408bf42744a8ab7d0036bf07b931e39c4cb19, zero descriptor preload, one 88-byte kernarg, and global/local sizes 1024/256.",
+    "The OpenCL subset is synchronous, one-dimensional, one-device, one-queue, and one-submit-per-context/session. Events, asynchronous queues, arbitrary source images, repeated dispatch, and general OpenCL conformance are not claimed.",
+    "The fsynced daemon trace is authoritative for GPUDispatcher/ComputeUnit execution; the normal application readback and CPU oracle are authoritative for bytes delivered to the user. Neither side alone proves the full product result.",
+    "The isolated v5 prefix contains the pinned compiler/device libraries and self-authored runtime/OpenCL stack. The freshly compiled gpuReadWrite provenance artifact is not substituted for the separately locked CP26 image.",
+    "Normal Triton Python, its 12-DWORD preload-aware launcher path, reusable device allocations/sessions, broader model operators, full-model execution, stable multi-token inference, TP, CCL, and all CPU/NVIDIA fallback remain false.",
+    "The retained sub-second wall observations and gem5 host-time value are diagnostic only, not performance or timing-model claims; profiling is conditional on a demonstrated workload bottleneck."
+  ],
+  "next_action": {
+    "id": "P5-TRITON-VECADD-06-NORMAL-PYTHON",
+    "argv": [
+      "python3",
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0028",
+      "--intent",
+      "Run the pinned Triton vector-add kernel through a normal Python backend and simulator driver/runtime, then return the exact oracle with no fallback",
+      "--participant",
+      "gem5=projects/gem5",
+      "--participant",
+      "self-amdgpu-runtime=projects/self-amdgpu-runtime"
+    ],
+    "cwd": ".",
+    "expected": "CP-0028 will preserve the CP27 direct OpenCL gate while a normal pinned Triton Python program compiles and launches vecadd through the simulator backend/runtime, reaches gem5, returns the exact oracle, and records zero fallback.",
+    "prerequisites": [
+      "CP-0027 root checkpoint, EV-0062, and EV-0063 are accepted and scripts/resume.sh --verify passes offline.",
+      "Both CP27 child commits are clean, descend from the CP26 heads, and carry the exact EV-0062 trailer.",
+      "The v5 repository-local compiler/runtime/OpenCL prefix verifies under a scrubbed environment, and the CP27 OpenCL plus CP26 positive/quarantine regressions remain green."
+    ],
+    "rollback_boundary": "Keep CP27 direct OpenCL execution, the repository-local isolated prefix, CP26 bit-9 execution/quarantine, and all normal Triton/model/multi-token/TP/CCL/fallback fields false if the pinned Python driver, preload path, or output oracle cannot be completed."
+  },
+  "parent_checkpoint": "CP-0026",
+  "phase_id": "P5",
+  "plan_sha256": "25e86311094293183c025b9b221b8dfcd8144ecec7bd7978c825eae32a84d1a8",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "administrative_git_dir": "modules/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "clean": true,
+      "head": "ed808f6a57b843c040ba864b9e9aad188d0eab36",
+      "id": "gem5",
+      "path": "projects/gem5",
+      "tree": "27fdc466df4eeebda19e8c6ef18234b07c3ec79f"
+    },
+    {
+      "administrative_git_dir": "modules/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "clean": true,
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58"
+    },
+    {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "clean": true,
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489"
+    },
+    {
+      "administrative_git_dir": "modules/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "clean": true,
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "id": "triton",
+      "path": "projects/triton",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1"
+    },
+    {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "clean": true,
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315"
+    },
+    {
+      "administrative_git_dir": "modules/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "clean": true,
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "id": "vllm",
+      "path": "projects/vllm",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb"
+    },
+    {
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "clean": true,
+      "head": "749717e1a5c7c337d73ab26eae5b0827a34a795a",
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "tree": "fb6dec26311ff4aebfe31c4364cfa9a2575bc0fb"
+    }
+  ],
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "root_parent_commit": "6dd8a0052d027dc92de01d79b1f549f2db2ed837",
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "sequence": 27,
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "status": "accepted",
+  "validation": [
+    {
+      "command": "CP27 recursive EV-0062 policy and retained artifact validation",
+      "cwd": ".",
+      "evidence_id": "EV-0063",
+      "exit_code": 0,
+      "result": "EV-0062 SHA b9568e60 and 22 command results/95 artifacts pass policy, external hashes, and capture semantics."
+    },
+    {
+      "command": "CP27 final child identity, trailer, source inventory, and prepare-journal validation",
+      "cwd": ".",
+      "evidence_id": "EV-0063",
+      "exit_code": 0,
+      "result": "Gem5 ed808f6/tree27fdc466 (8 paths) and runtime 749717e/treefb6dec2 (14 paths) are clean, parent-bound, and trailer-bound to EV-0062; the prepare journal has the exact 16-path allowlist."
+    },
+    {
+      "command": "CP27 isolated v5 prefix build, verify-only, manifest, and DSO isolation validation",
+      "cwd": ".",
+      "evidence_id": "EV-0063",
+      "exit_code": 0,
+      "result": "The versioned repository-local prefix passes source locks, compiler/device-library/runtime/OpenCL artifact hashes, verify-only, NEEDED/RUNPATH/ldd isolation, and contains no accepted dependency on system ROCm/HIP/OpenCL/CUDA providers."
+    },
+    {
+      "command": "CP27 installed and ordinary-cc direct OpenCL execution plus trace/output oracle validation",
+      "cwd": ".",
+      "evidence_id": "EV-0063",
+      "exit_code": 0,
+      "result": "Both normal executables compile vecadd.cl, manage gem5, record exact three-event 4-WG/16-wave/448-instruction traces, read only C, validate C=A+B and CRC32C 3210199849, unmap/clean up, and report zero fallback."
+    },
+    {
+      "command": "CP27 post-commit focused gem5 and GCC/Clang runtime validation",
+      "cwd": ".",
+      "evidence_id": "EV-0063",
+      "exit_code": 0,
+      "result": "Gem5 protocol/code-object/memory/dispatch/queue/signal/KMT/socket/token/route/native/fixture/decoder gates pass; GCC, Clang, and installed-prefix default and opt-in OpenCL E2E tests pass with only intentional default skips."
+    },
+    {
+      "command": "CP26 positive execution and post-ACK disconnect quarantine regression",
+      "cwd": ".",
+      "evidence_id": "EV-0063",
+      "exit_code": 0,
+      "result": "The exact CP26 gpuReadWrite positive and disconnect-after-ACK traces still pass output, lifecycle, quarantine, cleanup, and no-fallback parsers after CP27."
+    },
+    {
+      "command": "CP27 final evidence policy, clean workspace, and no-active-process guard",
+      "cwd": ".",
+      "evidence_id": "EV-0063",
+      "exit_code": 0,
+      "result": "EV-0063 has 43 command results and 179 verified artifacts with policy/external/capture checks passing; both child repositories are clean, root staging is empty before publication, and no build or simulator process remains."
+    }
+  ]
+}

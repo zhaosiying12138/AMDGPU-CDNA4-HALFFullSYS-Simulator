@@ -40,6 +40,14 @@ signal, packet CRC, type-19 ACK, type-20 retirement, cleanup, and reconnect are
 live. That path still does not issue the packet to GPUDispatcher/ComputeUnit or
 validate kernel output.
 
+CP-0026 subsequently adds exact `gpuReadWrite` GPU execution, and CP-0027 adds
+the first product-facing OpenCL variant on the same `VEGA_X86` reference
+bridge. A normal executable linked to the repository-local `libOpenCL.so.1`
+compiles `vecadd.cl`, spawns and manages gem5, submits, waits, copies C back,
+checks `C=A+B`, and exits without a manual endpoint. The accepted 5,160-byte
+image is SHA-pinned and instruction-audited; this is a reference-bridge product
+gate, not completion of the eventual standalone no-x86 daemon extraction.
+
 The host-native process must preserve the CP8/CP13 fixed-width transport and
 the runtime ownership/generation rules. It must not introduce a second wire
 format, serialize host pointers, open `/dev/kfd` or `/dev/dri`, or silently
@@ -152,12 +160,29 @@ and one `VEGA_X86` bridge route, not generic gfx950/arbitrary HSACO or a
 standalone no-x86 daemon claim. `Gem5IsaSupported=false` and
 `LockedGpuReadWriteExecutionSupported=true` remain intentionally distinct.
 The 5,408-byte Triton image with 12-DWORD preload, normal launcher,
-compiler/JIT, fallback, performance, Triton E2E, and Qwen remain false. The
-next planned gate is `P5-PROFILE-01`, to be allocated as CP-0027 when begun.
+compiler/JIT, fallback, performance, Triton E2E, and Qwen remain false at the
+CP26 boundary.
+
+CP-0027 accepts a separate `OpenClVecAdd` execution variant. The local compiler
+produces an exact 5,160-byte gfx950 code object (SHA-256
+`314ede16940432996c9fe190115408bf42744a8ab7d0036bf07b931e39c4cb19`) with an
+88-byte kernarg and zero descriptor preload. The daemon validates the complete
+ELF/metadata/descriptor/PT_LOAD/ISA profile, then observes four workgroups,
+sixteen waves, 28 PCs per wave (448 instruction starts), 2,048 global reads,
+1,024 global writes, and 16 stores. Only C is required for D2H; its bit-exact
+oracle is `C=A+B`, output CRC-32C is `3210199849`, and both CPU and NVIDIA
+fallback remain false. The runtime supervisor uses a private job UUID/socket,
+launches and joins gem5, and cleans the owner session automatically.
+
+This remains one exact kernel and one execution per OpenCL context. Reusable
+multi-dispatch sessions, arbitrary OpenCL images, normal Triton Python,
+model-operator coverage, stable multi-token inference, TP, and CCL remain
+future gates. The next product gate is the normal Triton Python vecadd path;
+profiling is deferred unless a real workload becomes a material blocker.
 
 ## Non-goals
 
 This workstream does not promise cycle/timing accuracy, full ROCr/libhsakmt coverage,
-fence/barrier or atomic semantics, GPU TLB/Ruby/coherence behavior, full ROCm/OpenCL CTS, HIP/OpenCL compatibility, broad Triton operators, host-parallel threadblocks,
+fence/barrier or atomic semantics, GPU TLB/Ruby/coherence behavior, full ROCm/OpenCL CTS, general OpenCL compatibility beyond the locked vecadd subset, broad Triton operators, host-parallel threadblocks,
 PyTorch/vLLM execution, or performance improvement. Those remain separate
 checkpoints after the first deterministic vecadd differential result.

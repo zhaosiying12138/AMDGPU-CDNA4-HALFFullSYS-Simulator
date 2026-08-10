@@ -1,0 +1,31 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh",
+    "projects/gem5/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc",
+    "projects/self-amdgpu-runtime/src/opencl_compiler.c",
+    "projects/self-amdgpu-runtime/src/opencl_enqueue.c",
+    "GOAL.md",
+    "PLAN.md",
+    "protocol/host-transport-v2.json"
+  ],
+  "checkpoint_id": "CP-0027",
+  "conclusion": "CP27 is an exact one-shot OpenCL vecadd boundary, not general OpenCL support. Its sub-second direct wall time does not justify delaying normal Triton Python and model-operator coverage for an unconditional profiling checkpoint.",
+  "confidence": "high",
+  "decision": "Keep the exact image, ABI, geometry, trace, D2H mask, and one-submit admission fail closed. Proceed to normal Triton Python and then the model-required operator matrix. Open a profiling or optimization checkpoint only when retained evidence from a real operator, layer, or model shows a material bottleneck, and never promote a single timing observation into a simulator performance claim.",
+  "evidence_ids": [
+    "EV-0062",
+    "EV-0063"
+  ],
+  "id": "BL-0105",
+  "invalidated_assumptions": [
+    "One hash-pinned vecadd proves arbitrary OpenCL images, kernels, or launch shapes.",
+    "One successful submit implies reusable multi-dispatch sessions, events, or asynchronous queues.",
+    "Correctness and operator coverage must wait for a microbenchmark optimization.",
+    "One host wall-time sample is a simulator performance or timing-model claim."
+  ],
+  "observation": "The accepted image is exactly 5160 bytes with one SHA-256, an 88-byte kernarg, global/local sizes 1024/256, three 4096-byte buffers, one submit per context, four workgroups, sixteen waves, 448 instruction starts, 2048 reads, 1024 writes, 16 stores, C-only D2H, and CRC32C 3210199849. The retained direct run is about 0.94 seconds wall while gem5 reports about 0.07 host seconds.",
+  "question_or_symptom": "Why does the accepted direct vecadd neither establish general OpenCL nor require profiling before normal Triton and model-operator coverage?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

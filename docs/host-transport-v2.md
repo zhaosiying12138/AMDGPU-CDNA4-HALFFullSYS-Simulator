@@ -7,7 +7,9 @@ an owner-bound type-18 handler source path, type-19 response plumbing, a shared
 route-policy harness, and an opt-in live endpoint probe. CP-0025 completes the
 positive negotiated daemon control lifecycle through native admission and
 retirement. CP-0026 adds a separate locked execution extension and a
-trace-authoritative disconnect quarantine boundary. The authority is
+trace-authoritative disconnect quarantine boundary. CP-0027 reuses that wire
+unchanged for the first direct OpenCL executable and a second exact execution
+variant. The authority is
 `protocol/host-transport-v2.json`; the implementations are in
 `projects/self-amdgpu-runtime` and `projects/gem5`.
 
@@ -215,6 +217,34 @@ does not wait, read type-20, D2H, or UNMAP; the daemon emits one
 cleanup authority. Pre-SUBMIT live-lease cleanup and normal completed-session
 cleanup remain separate positive boundaries.
 
+## CP27 accepted direct OpenCL boundary
+
+CP-0027 does not add an opcode or reinterpret bit 9. It adds a second
+server-side exact execution profile plus a local OpenCL/runtime supervisor. A
+normal host executable calls the bounded `libOpenCL.so.1`; `clBuildProgram`
+invokes only the versioned repository-local Clang/device-libs and produces the
+exact 5,160-byte gfx950 `vecadd` image, SHA-256
+`314ede16940432996c9fe190115408bf42744a8ab7d0036bf07b931e39c4cb19`. The same
+process creates a private job identity/socket, starts gem5, performs the
+existing object/memory/queue/signal/generic records, waits for type 20, reads C,
+unmaps, closes, and joins the daemon. The user does not launch an endpoint or
+construct transport records.
+
+The variant locks an 88-byte kernarg, zero descriptor preload, 1D global size
+1,024, local size 256, and A/B/C 4 KiB owner-bound allocations. The fsynced
+trace proves one packet/CP/dispatcher submission, four workgroups, sixteen
+wave64 waves, 28 PCs per wave (448 instruction starts), 2,048 read lanes,
+1,024 write lanes, 16 stores, native-private signal `1 -> 0`, and output CRC-32C
+`3210199849`. Only C is required for D2H (`required_d2h_mask=4`); the client
+independently verifies bit-exact float32 `C=A+B`. Session completion requires
+durable type 20, C D2H, UNMAP, owner cleanup, and no CPU/NVIDIA fallback.
+
+This is one submit per owner/session. A second kernel on the same connection,
+arbitrary OpenCL images, events/asynchrony, general launch shapes, normal
+Triton Python, model operators, multi-token inference, TP, and CCL remain
+unaccepted. The CP26 `gpuReadWrite` profile and its three-buffer D2H/quarantine
+rules remain unchanged.
+
 ## Triton boundary and non-claims
 
 The CP-0021 retained Triton tutorial and HSACO identities are recorded in the
@@ -223,8 +253,9 @@ work-item/workgroup geometry, but the 12-DWORD (48-byte) descriptor preload is
 rejected until preload-aware mapping and entry semantics exist. CP25 continues
 to return NOT_SUPPORTED instead of stripping or reinterpreting that field.
 
-CP-0026 does not promote the retained 5,408-byte Triton image with 12-DWORD
+CP-0027 does not promote the retained 5,408-byte Triton image with 12-DWORD
 preload, and it does not exercise a normal launcher, compiler/JIT transport,
 performance path, arbitrary gfx950 HSACO, Triton end-to-end, CPU/NVIDIA
-fallback, or Qwen inference. The next planned gate is `P5-PROFILE-01`, which
-will be allocated as CP-0027 when its transaction begins.
+fallback, or Qwen inference. The next product gate is the normal Triton Python
+vecadd driver/runtime path. Profiling remains conditional on a measured real
+operator, layer, or model bottleneck.

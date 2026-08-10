@@ -1,0 +1,1405 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0062",
+  "checkpoint_id": "CP-0027",
+  "type": "cp27-precommit-direct-opencl-execution",
+  "claim": "EV-0062 binds the frozen 8-path gem5 and 14-path runtime source lanes to the canonical VEGA_X86 gem5 binary, independent Clang/GCC runtime test trees, and a direct user-facing OpenCL vecadd executable. With a scrubbed environment and no endpoint or LD_LIBRARY_PATH, the executable compiles vecadd.cl, spawns the managed gem5 daemon, submits one 1024-item kernel, receives C-only D2H, and passes the CPU oracle. The daemon's exact three-event trace records four workgroups, sixteen waves, 448 instructions, 2048 reads, 1024 writes, 16 stores/1024 store lanes, CRC32C 3210199849, durable type20, UNMAP, clean exit, and no fallback. This is a one-shot session only; multi-dispatch, Triton runtime, model, TP/CCL, and stable multi-token inference remain false.",
+  "command_argv": [
+    [
+      "git",
+      "status",
+      "--porcelain=v1",
+      "--untracked-files=all"
+    ],
+    [
+      "git",
+      "diff",
+      "--check"
+    ],
+    [
+      "git",
+      "diff",
+      "--binary",
+      "--no-ext-diff",
+      "+",
+      "untracked"
+    ],
+    [
+      "git",
+      "status",
+      "--porcelain=v1",
+      "--untracked-files=all"
+    ],
+    [
+      "git",
+      "diff",
+      "--check"
+    ],
+    [
+      "git",
+      "diff",
+      "--binary",
+      "--no-ext-diff",
+      "+",
+      "untracked"
+    ],
+    [
+      "build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt",
+      "--gtest_color=no",
+      "--gtest_filter=GpuDecoderTest.Cp27OpenClVecAddLockedIsa"
+    ],
+    [
+      "build/VEGA_X86/dev/amdgpu/host_gpu_generic_dispatch_route_core.opt"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "/tmp/cp27-opencl-clang-build.Fq4hnZ",
+      "--output-on-failure",
+      "--parallel",
+      "16"
+    ],
+    [
+      "/tmp/cp27-opencl-clang-build.Fq4hnZ/tests/self_amdgpu_runtime_opencl_api_test"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "/tmp/cp27-opencl-clang-build.Fq4hnZ",
+      "--output-on-failure",
+      "-R",
+      "^self_amdgpu_runtime\\.opencl_vecadd_e2e$",
+      "--timeout",
+      "240",
+      "-V"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "/tmp/cp27-opencl-gcc-build.73wl0G",
+      "--output-on-failure",
+      "--parallel",
+      "16"
+    ],
+    [
+      "/tmp/cp27-opencl-gcc-build.73wl0G/tests/self_amdgpu_runtime_opencl_api_test"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "/tmp/cp27-opencl-gcc-build.73wl0G",
+      "--output-on-failure",
+      "-R",
+      "^self_amdgpu_runtime\\.opencl_vecadd_e2e$",
+      "--timeout",
+      "240",
+      "-V"
+    ],
+    [
+      "sha256sum",
+      "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/gem5.opt",
+      "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_generic_dispatch_route_core.opt",
+      "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/bin/opencl-vecadd",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libOpenCL.so.1.2.0",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libself_amdgpu_runtime.so.1",
+      "/tmp/cp27-opencl-gcc-prefix.zdDeCM/bin/opencl-vecadd",
+      "/tmp/cp27-opencl-gcc-prefix.zdDeCM/lib/libOpenCL.so.1.2.0",
+      "/tmp/cp27-opencl-gcc-prefix.zdDeCM/lib/libself_amdgpu_runtime.so.1",
+      "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v4-llvm-73f2a21fe16b-rocm-92115a294198-runtime-d3dfa38f2bf6/kernels/gfx950/compiled/opencl_vecadd_probe.hsaco",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/share/self-amdgpu-runtime/opencl/vecadd.cl"
+    ],
+    [
+      "file",
+      "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/gem5.opt",
+      "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_generic_dispatch_route_core.opt",
+      "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/bin/opencl-vecadd",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libOpenCL.so.1.2.0",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libself_amdgpu_runtime.so.1",
+      "/tmp/cp27-opencl-gcc-prefix.zdDeCM/bin/opencl-vecadd",
+      "/tmp/cp27-opencl-gcc-prefix.zdDeCM/lib/libOpenCL.so.1.2.0",
+      "/tmp/cp27-opencl-gcc-prefix.zdDeCM/lib/libself_amdgpu_runtime.so.1",
+      "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v4-llvm-73f2a21fe16b-rocm-92115a294198-runtime-d3dfa38f2bf6/kernels/gfx950/compiled/opencl_vecadd_probe.hsaco",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/share/self-amdgpu-runtime/opencl/vecadd.cl"
+    ],
+    [
+      "readelf",
+      "-n",
+      "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/gem5.opt",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/bin/opencl-vecadd",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libOpenCL.so.1.2.0",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libself_amdgpu_runtime.so.1",
+      "/tmp/cp27-opencl-gcc-prefix.zdDeCM/bin/opencl-vecadd",
+      "/tmp/cp27-opencl-gcc-prefix.zdDeCM/lib/libOpenCL.so.1.2.0",
+      "/tmp/cp27-opencl-gcc-prefix.zdDeCM/lib/libself_amdgpu_runtime.so.1"
+    ],
+    [
+      "readelf",
+      "-d",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/bin/opencl-vecadd",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libOpenCL.so.1.2.0",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libself_amdgpu_runtime.so.1"
+    ],
+    [
+      "ldd",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/bin/opencl-vecadd",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libOpenCL.so.1.2.0",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libself_amdgpu_runtime.so.1",
+      "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/gem5.opt"
+    ],
+    [
+      "/usr/bin/env"
+    ],
+    [
+      "/usr/bin/time",
+      "-v",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/bin/opencl-vecadd",
+      "/tmp/cp27-opencl-clang-prefix.ElO6Pr/share/self-amdgpu-runtime/opencl/vecadd.cl"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0027/validate_opencl_trace.py",
+      "artifacts/evidence/CP-0027/live-direct/dispatch-trace.jsonl",
+      "artifacts/evidence/CP-0027/live-direct/gem5.log",
+      "artifacts/evidence/CP-0027/live-direct/stats.txt",
+      "artifacts/evidence/CP-0027/live-direct/direct-opencl-vecadd.stdout"
+    ]
+  ],
+  "command_results": [
+    {
+      "id": "gem5-source-inventory",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-10T16:44:13.298459+00:00",
+      "ended_at": "2026-08-10T16:44:13.298459+00:00",
+      "exit_code": 0,
+      "result": "gem5 frozen source inventory has exactly 8 paths",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-source-inventory.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c8ee1db2d360916dcc367f0712057cecec5a4c853ad6ab49e32cf820e710be6a",
+        "size": 678,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-source-inventory.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9eb1e110e1e594949f76fc6660e4925a0801fa369c4dc6d513ba0a3fc0be2ad4",
+        "size": 2174,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-source-inventory.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "gem5-diff-check",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-10T16:44:13.298682+00:00",
+      "ended_at": "2026-08-10T16:44:13.305463+00:00",
+      "exit_code": 0,
+      "result": "gem5 tracked diff whitespace check is clean",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "76c2954f16e22f106056a11f3ac9ece9eae454b3a842fb8a489bb47d86e13fcb",
+        "size": 625,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "gem5-source-diff-identity",
+      "argv": [
+        "git",
+        "diff",
+        "--binary",
+        "--no-ext-diff",
+        "+",
+        "untracked"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-10T16:44:13.335574+00:00",
+      "ended_at": "2026-08-10T16:44:13.335574+00:00",
+      "exit_code": 0,
+      "result": "gem5 complete tracked-plus-untracked diff identity retained",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-source-diff-identity.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4fe5ddfb47eb2bbef45e6cfb0f0b6efe2b812b420f9025673cadefa98fbd2763",
+        "size": 695,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-source-diff-identity.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "495176d7afc17734684d87fa6bba2a0e6f37cd604ce8526646606acf4d43f5be",
+        "size": 255,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-source-diff-identity.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-source-inventory",
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-10T16:44:13.365814+00:00",
+      "ended_at": "2026-08-10T16:44:13.365814+00:00",
+      "exit_code": 0,
+      "result": "runtime frozen source inventory has exactly 14 paths",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-source-inventory.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3be10f2afa1fce267d1988b8c5ea5a705f2ce75d7803ca766617a20dd9e9e8e2",
+        "size": 699,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-source-inventory.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a2259f0d5ab4b04c2df149141b8fdde2d213695026aedf528e068a1633a29295",
+        "size": 2811,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-source-inventory.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-diff-check",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-10T16:44:13.366002+00:00",
+      "ended_at": "2026-08-10T16:44:13.367369+00:00",
+      "exit_code": 0,
+      "result": "runtime tracked diff whitespace check is clean",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "34ff49b39cc2cd78717ea72e76aef1ac0a62b5a177b50732957c6b6ff48418b4",
+        "size": 646,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-source-diff-identity",
+      "argv": [
+        "git",
+        "diff",
+        "--binary",
+        "--no-ext-diff",
+        "+",
+        "untracked"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-10T16:44:13.385656+00:00",
+      "ended_at": "2026-08-10T16:44:13.385656+00:00",
+      "exit_code": 0,
+      "result": "runtime complete tracked-plus-untracked diff identity retained",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-source-diff-identity.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "832cbfa9ab35026513487113dc17b62dbdd54c85494b2a573338ffc94d18227f",
+        "size": 716,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-source-diff-identity.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "234f6e805c28e9340e35f018408f55bb9fa7a339e9b1c11b4579f6093d7c88a1",
+        "size": 259,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-source-diff-identity.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "gem5-cp27-decoder-gtest",
+      "argv": [
+        "build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt",
+        "--gtest_color=no",
+        "--gtest_filter=GpuDecoderTest.Cp27OpenClVecAddLockedIsa"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-10T16:44:13.385829+00:00",
+      "ended_at": "2026-08-10T16:44:13.424507+00:00",
+      "exit_code": 0,
+      "result": "CP27 locked vecadd ISA decoder regression passes 1/1",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-cp27-decoder-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0330e2b4eb8a5274a15cb2e5c52aab93b1c53fab5ab0e3fc10fcf5d7ebdb1de5",
+        "size": 752,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-cp27-decoder-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "13b14a423d4e5de6126e7d1e70cdf908e880f02ac646798247215cf02dbcda67",
+        "size": 557,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-cp27-decoder-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "gem5-generic-route-core",
+      "argv": [
+        "build/VEGA_X86/dev/amdgpu/host_gpu_generic_dispatch_route_core.opt"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-10T16:44:13.425080+00:00",
+      "ended_at": "2026-08-10T16:44:13.427266+00:00",
+      "exit_code": 0,
+      "result": "generic route core accepts exact CP27 image/layout, requires C-only D2H, and validates vecadd oracle",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-generic-route-core.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d711aeabac8bd1a4a21583ccfbdc5166a40d0b850ca298a00b2611caa97d4ba7",
+        "size": 679,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-generic-route-core.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "917069e9af4177568568d9aeaaa4ff38ccbd6e39e3ea09584bf5226c6e4110a4",
+        "size": 514,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/gem5-generic-route-core.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-clang-ctest-default",
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "/tmp/cp27-opencl-clang-build.Fq4hnZ",
+        "--output-on-failure",
+        "--parallel",
+        "16"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T16:44:13.427650+00:00",
+      "ended_at": "2026-08-10T16:44:15.680610+00:00",
+      "exit_code": 0,
+      "result": "runtime clang CTest: 21 total, 19 pass, two intentional skips, zero failures",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-clang-ctest-default.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8f435b77b1f46b62966c9eb69c33d1c1a9733c967ed7cbd852fdb215273fe13f",
+        "size": 731,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-clang-ctest-default.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b9bfe4f23f50f062d5fecf0c6ac30fbc2c4f72c08db08babe31fba4f4d6196e0",
+        "size": 3253,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-clang-ctest-default.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-clang-opencl-api",
+      "argv": [
+        "/tmp/cp27-opencl-clang-build.Fq4hnZ/tests/self_amdgpu_runtime_opencl_api_test"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T16:44:15.682822+00:00",
+      "ended_at": "2026-08-10T16:44:15.947552+00:00",
+      "exit_code": 0,
+      "result": "runtime clang OpenCL API/build/metadata/layout test passes",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-clang-opencl-api.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "dd977c274daa91b9ef03c50df9005a8a6f47c19665507a1e639d7a4c79ffdb90",
+        "size": 680,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-clang-opencl-api.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a5a3c09ab6dcccc200964ea70ac367c95503c465a0b84afbbc0e80e2b47d6d8f",
+        "size": 179,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-clang-opencl-api.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-clang-opencl-e2e",
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "/tmp/cp27-opencl-clang-build.Fq4hnZ",
+        "--output-on-failure",
+        "-R",
+        "^self_amdgpu_runtime\\.opencl_vecadd_e2e$",
+        "--timeout",
+        "240",
+        "-V"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T16:44:15.948003+00:00",
+      "ended_at": "2026-08-10T16:44:16.934463+00:00",
+      "exit_code": 0,
+      "result": "runtime clang opt-in direct OpenCL E2E passes 1/1",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-clang-opencl-e2e.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1dd5e0bba9c0badb813e47af8c4fda96ccdf40621927dde4befafba9452a2a8a",
+        "size": 794,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-clang-opencl-e2e.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9842634f4a5c9db25336fc36b9d5117d4ec52d9bee570e31dc9e6108bbdcf7c3",
+        "size": 1208,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-clang-opencl-e2e.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-gcc-ctest-default",
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "/tmp/cp27-opencl-gcc-build.73wl0G",
+        "--output-on-failure",
+        "--parallel",
+        "16"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T16:44:16.935057+00:00",
+      "ended_at": "2026-08-10T16:44:19.300385+00:00",
+      "exit_code": 0,
+      "result": "runtime gcc CTest: 21 total, 19 pass, two intentional skips, zero failures",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-gcc-ctest-default.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a81ede9dde7442415cf4b6fd845459244ea592350844648750439a697cbe1efb",
+        "size": 725,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-gcc-ctest-default.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6348c72f0cd5b9d9707ee0db7b7e1fa8da2e65aafdc54e5415de9ea93525db5a",
+        "size": 3251,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-gcc-ctest-default.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-gcc-opencl-api",
+      "argv": [
+        "/tmp/cp27-opencl-gcc-build.73wl0G/tests/self_amdgpu_runtime_opencl_api_test"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T16:44:19.300916+00:00",
+      "ended_at": "2026-08-10T16:44:19.565304+00:00",
+      "exit_code": 0,
+      "result": "runtime gcc OpenCL API/build/metadata/layout test passes",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-gcc-opencl-api.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f2295a06738ec74c592ed3c3afe7b31e7e5f5e667ea57f7508b83a481a94321f",
+        "size": 674,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-gcc-opencl-api.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a5a3c09ab6dcccc200964ea70ac367c95503c465a0b84afbbc0e80e2b47d6d8f",
+        "size": 179,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-gcc-opencl-api.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-gcc-opencl-e2e",
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "/tmp/cp27-opencl-gcc-build.73wl0G",
+        "--output-on-failure",
+        "-R",
+        "^self_amdgpu_runtime\\.opencl_vecadd_e2e$",
+        "--timeout",
+        "240",
+        "-V"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T16:44:19.565757+00:00",
+      "ended_at": "2026-08-10T16:44:20.510373+00:00",
+      "exit_code": 0,
+      "result": "runtime gcc opt-in direct OpenCL E2E passes 1/1",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-gcc-opencl-e2e.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0de712f03935635bbc8e7d855b349ce61461f74cda039bc43ad2e03e69cdf809",
+        "size": 788,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-gcc-opencl-e2e.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "38456db8b25a6c8313a420df2bd50808dd03e41d75b93090d96a840339c300f1",
+        "size": 1198,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-gcc-opencl-e2e.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "binary-sha256-identities",
+      "argv": [
+        "sha256sum",
+        "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/gem5.opt",
+        "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_generic_dispatch_route_core.opt",
+        "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/bin/opencl-vecadd",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libOpenCL.so.1.2.0",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libself_amdgpu_runtime.so.1",
+        "/tmp/cp27-opencl-gcc-prefix.zdDeCM/bin/opencl-vecadd",
+        "/tmp/cp27-opencl-gcc-prefix.zdDeCM/lib/libOpenCL.so.1.2.0",
+        "/tmp/cp27-opencl-gcc-prefix.zdDeCM/lib/libself_amdgpu_runtime.so.1",
+        "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v4-llvm-73f2a21fe16b-rocm-92115a294198-runtime-d3dfa38f2bf6/kernels/gfx950/compiled/opencl_vecadd_probe.hsaco",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/share/self-amdgpu-runtime/opencl/vecadd.cl"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T16:44:20.510947+00:00",
+      "ended_at": "2026-08-10T16:44:24.089311+00:00",
+      "exit_code": 0,
+      "result": "canonical gem5, focused tests, runtime DSOs/executables, source, and HSACO hashes retained",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/binary-sha256-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "bb0765c6ffaec6e8536509e0e66c78b1696626bd794fa978a285e157bec88860",
+        "size": 1556,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/binary-sha256-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4a8208da17dce1635404dfb1dd771b7ebce2859f67e8a3e982f7a3678a411309",
+        "size": 1592,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/binary-sha256-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "binary-file-identities",
+      "argv": [
+        "file",
+        "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/gem5.opt",
+        "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_generic_dispatch_route_core.opt",
+        "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/bin/opencl-vecadd",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libOpenCL.so.1.2.0",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libself_amdgpu_runtime.so.1",
+        "/tmp/cp27-opencl-gcc-prefix.zdDeCM/bin/opencl-vecadd",
+        "/tmp/cp27-opencl-gcc-prefix.zdDeCM/lib/libOpenCL.so.1.2.0",
+        "/tmp/cp27-opencl-gcc-prefix.zdDeCM/lib/libself_amdgpu_runtime.so.1",
+        "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v4-llvm-73f2a21fe16b-rocm-92115a294198-runtime-d3dfa38f2bf6/kernels/gfx950/compiled/opencl_vecadd_probe.hsaco",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/share/self-amdgpu-runtime/opencl/vecadd.cl"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T16:44:24.089783+00:00",
+      "ended_at": "2026-08-10T16:44:24.117321+00:00",
+      "exit_code": 0,
+      "result": "ELF and gfx950 HSACO file identities retained",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/binary-file-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "dc5175d5065e976098dc42f56135c9ecc1d3e78c4305a0ca2ee5450bdc20708a",
+        "size": 1547,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/binary-file-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c853c60b5e066df4554242128080d45b147610c7eb4c13662efa6da3ea6d4092",
+        "size": 3368,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/binary-file-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "binary-build-ids",
+      "argv": [
+        "readelf",
+        "-n",
+        "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/gem5.opt",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/bin/opencl-vecadd",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libOpenCL.so.1.2.0",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libself_amdgpu_runtime.so.1",
+        "/tmp/cp27-opencl-gcc-prefix.zdDeCM/bin/opencl-vecadd",
+        "/tmp/cp27-opencl-gcc-prefix.zdDeCM/lib/libOpenCL.so.1.2.0",
+        "/tmp/cp27-opencl-gcc-prefix.zdDeCM/lib/libself_amdgpu_runtime.so.1"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T16:44:24.117726+00:00",
+      "ended_at": "2026-08-10T16:44:24.123240+00:00",
+      "exit_code": 0,
+      "result": "gem5 and runtime ELF build IDs retained",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/binary-build-ids.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e7cb002d54556cb6d20206098d230d7c8cb532f82d6c89495911f78d8ff6b6ba",
+        "size": 1082,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/binary-build-ids.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "088449c79ad6df4a3e9906803ae338dafae1990e4f6941c2ba26a37f70a4f031",
+        "size": 3636,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/binary-build-ids.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-dynamic-sections",
+      "argv": [
+        "readelf",
+        "-d",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/bin/opencl-vecadd",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libOpenCL.so.1.2.0",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libself_amdgpu_runtime.so.1"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T16:44:24.123589+00:00",
+      "ended_at": "2026-08-10T16:44:24.124312+00:00",
+      "exit_code": 0,
+      "result": "direct executable and local runtime DSO NEEDED/RUNPATH sections retained",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-dynamic-sections.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "84cdefea2446a098362b45a5c2d870cbd32ac6f6cd3215f75d7b1e1899143e05",
+        "size": 826,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-dynamic-sections.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ffa482c03fc92f599c1b232a69b739065907b141eb11416991b1906104191f76",
+        "size": 4652,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/runtime-dynamic-sections.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "binary-runtime-dependencies",
+      "argv": [
+        "ldd",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/bin/opencl-vecadd",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libOpenCL.so.1.2.0",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/lib/libself_amdgpu_runtime.so.1",
+        "/home/zhaosiying/amdgpu-sim/projects/gem5/build/VEGA_X86/gem5.opt"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T16:44:24.124581+00:00",
+      "ended_at": "2026-08-10T16:44:24.135134+00:00",
+      "exit_code": 0,
+      "result": "resolved runtime dependencies bind the direct executable to the temporary local prefix",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/binary-runtime-dependencies.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a462fb0572abb48afba4c8c8f42dfb78da7bc108724cbc828f987e746400bc23",
+        "size": 891,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/binary-runtime-dependencies.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "fa8a4048b488621d4a4277fd3dfd9ba266c15b7a61a423f5b05748369b3c1174",
+        "size": 1718,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/binary-runtime-dependencies.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "direct-scrubbed-environment",
+      "argv": [
+        "/usr/bin/env"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T16:44:24.140102+00:00",
+      "ended_at": "2026-08-10T16:44:24.141724+00:00",
+      "exit_code": 0,
+      "result": "direct user process has only HOME, PATH, and LC_ALL; endpoint and LD_LIBRARY_PATH are absent",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/live-direct/direct-scrubbed-environment.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "dae962c6b547eeb7ce709083fd79916ae1f9592f03e3ee728bd164e33066fb40",
+        "size": 628,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/live-direct/direct-scrubbed-environment.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f8a563b7968781a9761cb508044432544abceef1527477cef77b5706415bf3e9",
+        "size": 71,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/live-direct/direct-scrubbed-environment.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "direct-opencl-vecadd",
+      "argv": [
+        "/usr/bin/time",
+        "-v",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/bin/opencl-vecadd",
+        "/tmp/cp27-opencl-clang-prefix.ElO6Pr/share/self-amdgpu-runtime/opencl/vecadd.cl"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T16:44:24.141960+00:00",
+      "ended_at": "2026-08-10T16:44:25.088948+00:00",
+      "exit_code": 0,
+      "result": "direct OpenCL executable compiles vecadd.cl, spawns gem5, executes, copies C back, and passes the CPU oracle",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/live-direct/direct-opencl-vecadd.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "169ac88369465a4d063279179e08a2d944c8d4c9a2b5c230fcf55006cbab689f",
+        "size": 777,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/live-direct/direct-opencl-vecadd.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "eef144e589d3ddd650244f6ed9050b398130c1cd42ab5bb7518f758e2482c217",
+        "size": 293,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/live-direct/direct-opencl-vecadd.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "db86b7e6dc7a7314dd9c684d600c100acfc55076aa10b2e8f2b639c59804c604",
+        "size": 853,
+        "tracked": false
+      }
+    },
+    {
+      "id": "direct-opencl-trace-validation",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0027/validate_opencl_trace.py",
+        "artifacts/evidence/CP-0027/live-direct/dispatch-trace.jsonl",
+        "artifacts/evidence/CP-0027/live-direct/gem5.log",
+        "artifacts/evidence/CP-0027/live-direct/stats.txt",
+        "artifacts/evidence/CP-0027/live-direct/direct-opencl-vecadd.stdout"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T16:44:25.092590+00:00",
+      "ended_at": "2026-08-10T16:44:25.112670+00:00",
+      "exit_code": 0,
+      "result": "independent parser validates exact three-event OpenCL trace, counters, C-only D2H, CRC, clean exit, and no fallback",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0027/focused/direct-opencl-trace-validation.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "cd4c61601a4dd9b20bdddb5338a5d0239c46468b66e5c99272a2e79d101ae83a",
+        "size": 933,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0027/focused/direct-opencl-trace-validation.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "379b707886dc5ef597219cdb543a745fb88a580279dda6c5e929d10357111b03",
+        "size": 661,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0027/focused/direct-opencl-trace-validation.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "started_at": "2026-08-10T16:44:13.298459+00:00",
+  "ended_at": "2026-08-10T16:44:25.112670+00:00",
+  "exit_code": 0,
+  "environment_fingerprint": {
+    "checkpoint": "CP-0027",
+    "transaction_phase": "prepare",
+    "root_anchor": "6dd8a0052d027dc92de01d79b1f549f2db2ed837",
+    "gem5_head": "a4b80d76ad1a9bf89e0483984953583048e31122",
+    "gem5_tree": "6a58df7137f41b0a824b582508ae25dd73ad18c7",
+    "gem5_changed_path_count": 8,
+    "gem5_dirty_paths": [
+      "src/arch/amdgpu/vega/gpu_decoder.test.cc",
+      "src/dev/amdgpu/host_gpu_bridge.cc",
+      "src/dev/amdgpu/host_gpu_bridge.hh",
+      "src/dev/amdgpu/host_gpu_code_object_image.cc",
+      "src/dev/amdgpu/host_gpu_generic_dispatch_route.cc",
+      "src/dev/amdgpu/host_gpu_generic_dispatch_route.hh",
+      "src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc",
+      "src/dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh"
+    ],
+    "gem5_content_snapshot_sha256": "856c2f2fe825e315389f3c4f41731838f6c31819eee18717e6e0f7751ab3a425",
+    "gem5_complete_diff_sha256": "1a439b1a8b0777f886fdb98dc1b85202bba41c447d8cf0329d64c014e3b220e1",
+    "runtime_head": "d3dfa38f2bf6aa68a319f81652af1649df668183",
+    "runtime_tree": "e69f7bed68d35b49b3c462c10022d2e515acab75",
+    "runtime_changed_path_count": 14,
+    "runtime_dirty_paths": [
+      "CMakeLists.txt",
+      "examples/opencl/vecadd.cl",
+      "examples/opencl/vecadd_host.c",
+      "include/CL/cl.h",
+      "include/CL/cl_platform.h",
+      "src/opencl_api.c",
+      "src/opencl_compiler.c",
+      "src/opencl_enqueue.c",
+      "src/opencl_internal.h",
+      "src/opencl_objects.c",
+      "src/simulator_process.c",
+      "tests/CMakeLists.txt",
+      "tests/opencl_api_test.c",
+      "tests/opencl_vecadd_e2e.c"
+    ],
+    "runtime_content_snapshot_sha256": "bac34343ae1c86ceb806d0f3ea3f45c406d678c635c791000774619bf4183a78",
+    "runtime_complete_diff_sha256": "a82ae2b1f64c25e15aa6fb4b78100aeb0d46a43270fb228aff0053a4dd3d0d88",
+    "gem5_binary_sha256": "ac7323ebc93818be391a7e42c06a6e19c49c56442ebcce456ee23f156e3a8a76",
+    "gem5_binary_size": 1186126760,
+    "gem5_build_id": "fd25c2e38211e1f3e75c57aa7c79d6c9ab78b863",
+    "opencl_hsaco_sha256": "314ede16940432996c9fe190115408bf42744a8ab7d0036bf07b931e39c4cb19",
+    "opencl_hsaco_size": 5160,
+    "opencl_target": "amdgcn-amd-amdhsa-unknown-gfx950",
+    "runtime_clang_ctest_total": 21,
+    "runtime_clang_ctest_pass": 19,
+    "runtime_clang_ctest_intentional_skip": 2,
+    "runtime_gcc_ctest_total": 21,
+    "runtime_gcc_ctest_pass": 19,
+    "runtime_gcc_ctest_intentional_skip": 2,
+    "runtime_clang_opt_in_e2e": true,
+    "runtime_gcc_opt_in_e2e": true,
+    "direct_scrubbed_environment": {
+      "HOME": "/tmp/cp27-direct-opencl-home.qr7h_e63",
+      "PATH": "/usr/bin:/bin",
+      "LC_ALL": "C"
+    },
+    "manual_endpoint": false,
+    "endpoint_environment_present": false,
+    "ld_library_path_present": false,
+    "system_rocm_dependency": false,
+    "production_hsa_dependency": false,
+    "direct_opencl_executable": true,
+    "source_compiled": true,
+    "managed_gem5_spawn": true,
+    "execution_variant": "opencl_vecadd",
+    "workgroup_count": 4,
+    "wave_count": 16,
+    "instructions_started": 448,
+    "global_reads": 2048,
+    "global_writes": 1024,
+    "store_events": 16,
+    "store_lanes": 1024,
+    "required_d2h_mask": 4,
+    "output_crc32c": 3210199849,
+    "trace_event_count": 3,
+    "trace_sha256": "d6da2505cd79e49cd3f5bc98ec5c23a517ed8af5720115a9987296d3afb20f4a",
+    "stats_host_seconds": 0.07,
+    "direct_wall_seconds": 0.94,
+    "direct_max_rss_kb": 211152,
+    "gpu_dispatcher": true,
+    "compute_unit": true,
+    "kernel_executed": true,
+    "output_correctness": true,
+    "cpu_fallback": false,
+    "nvidia_fallback": false,
+    "fallback": false,
+    "one_shot_session": true,
+    "multiple_dispatches": false,
+    "normal_triton_driver_runtime": false,
+    "model_operator_matrix": false,
+    "single_device_model": false,
+    "multi_token_stability": false,
+    "tensor_parallel": false,
+    "ccl": false,
+    "profiling_performed": false,
+    "performance_optimization_claim": false
+  },
+  "limitations": [
+    "EV-0062 is pre-commit evidence over frozen dirty child worktrees. A later umbrella must bind the clean child commits and final root checkpoint.",
+    "The direct OpenCL product path is fixture-scoped to the exact 5160-byte gfx950 vecadd image and currently permits one submitted dispatch per managed simulator session.",
+    "A reusable multi-dispatch session, the broader model operator matrix, normal Python Triton driver/runtime execution, full model execution, TP/CCL, and stable multi-token inference are not implemented or claimed.",
+    "The trace fields compiler=false and launcher=false delimit Triton/compiler execution authority inside gem5; the user process separately proves source_compiled=true and managed gem5 spawning.",
+    "The retained wall/host timing is observational. Profiling and performance optimization were intentionally deferred because this first operator completed in about one second and did not block correctness progress.",
+    "Prior Z85wTk and yz1kDu live files are retained only as corroborating captures; the fresh scrubbed live-direct command and independently parsed trace are the acceptance authority."
+  ],
+  "redactions": [],
+  "result": "Frozen CP27 source, focused gem5 tests, both runtime toolchain test trees, binary/dependency identities, the scrubbed direct OpenCL command, and the independent daemon-trace parser all pass without a manual endpoint or fallback.",
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0027/focused/gem5-complete-source-diff.patch",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1a439b1a8b0777f886fdb98dc1b85202bba41c447d8cf0329d64c014e3b220e1",
+      "size": 82591,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/focused/runtime-complete-source-diff.patch",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a82ae2b1f64c25e15aa6fb4b78100aeb0d46a43270fb228aff0053a4dd3d0d88",
+      "size": 221337,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/fixture/opencl_vecadd_probe.hsaco",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "314ede16940432996c9fe190115408bf42744a8ab7d0036bf07b931e39c4cb19",
+      "size": 5160,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/fixture/vecadd.cl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a05018eceabfe56bd9a8d6a6fef4b8bffbdfcc94cde03e8f7ee8cdc4ea668748",
+      "size": 263,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/build_ev0062.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "755c7bf17983db41cd0dccb3a70124be9e64e7e867e7e26a87bc76f80cdaac0d",
+      "size": 34416,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/validate_opencl_trace.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "4fb7152a8dc9e4130ec692d402953f3cea966f915da2874bd7a1faa977fb5408",
+      "size": 7096,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/runtime/clang-default-LastTest.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7c26c87f90aa5f100464dcf671437969913bce0981735365c65f8945fa3e5a9d",
+      "size": 16142,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/runtime/clang-e2e-LastTest.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1b3d7c575c719dca55a454b4cb655b4269453dc27146b4c4cb652ea00759515f",
+      "size": 1100,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/runtime/gcc-default-LastTest.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "51f11f17f91a4c1b8155630792b584855ec9f1a1f6febab3f1115c6df8ca475c",
+      "size": 16058,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/runtime/gcc-e2e-LastTest.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "15335065ad2d9ea34fc173db6803a7ccf0028765f6e44d4dc507b02c13ced5b5",
+      "size": 1096,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/prior-live/Z85wTk/dispatch-trace.jsonl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6798087caf7003cfcb81164f7ca7b5f45f1e688a88d7ba31ef7cdb4afe14aba8",
+      "size": 5368,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/prior-live/Z85wTk/gem5.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "abeaa73b117e0729a9cec0e336f8a1f6d41a151a73bb80baead9c274826ea736",
+      "size": 2492,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/prior-live/Z85wTk/stats.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7d664c2f99c7fc935779dcce74213e4f91853b22dcbd3da8ad196944f18d4bab",
+      "size": 1073834,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/prior-live/Z85wTk/config.ini",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "eb2251d61125fdad1d535eaa2d54246db3197541b6ac7e0ebdff216dbab24392",
+      "size": 127973,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/prior-live/Z85wTk/config.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "8894d0accc5842bbd9bb543db2314699f021ceb20d0db9de14767abb4314e84c",
+      "size": 349556,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/prior-live/Z85wTk/citations.bib",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "bc52164d0ff6cb700ecf9122a13675f097db019b8647cb4a5e7895083c77c4c0",
+      "size": 5784,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/prior-live/yz1kDu/dispatch-trace.jsonl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "425f9bae74e0fc32655267d1b2876be46e428df5dee6ddf3271d49528f214bfe",
+      "size": 5368,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/prior-live/yz1kDu/gem5.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b07d20a7beacc0815de7eac448b2169b560f53857e03035a7aa4f9f4ab1f3900",
+      "size": 2492,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/prior-live/yz1kDu/stats.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "21777cb14b6334b55a96e0b24cfc369a626dff47e3dbe2a1a6e1de39a1b53ccb",
+      "size": 1073834,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/prior-live/yz1kDu/config.ini",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5dcc64b613f54a646360f0919d01adab3cf16fd10de86da6f4b37ae70a1d214c",
+      "size": 127973,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/prior-live/yz1kDu/config.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "3d71e9f3771bcd3a1fbaa85a50fcffca42ebf11c5ba808f28ce26dfdea40cd9d",
+      "size": 349556,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/prior-live/yz1kDu/citations.bib",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "bc52164d0ff6cb700ecf9122a13675f097db019b8647cb4a5e7895083c77c4c0",
+      "size": 5784,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/live-direct/dispatch-trace.jsonl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d6da2505cd79e49cd3f5bc98ec5c23a517ed8af5720115a9987296d3afb20f4a",
+      "size": 5365,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/live-direct/gem5.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a6f0ea1accba55885f9f51791b6bcddfb851b77c6b2a107656170943d67dac7c",
+      "size": 2492,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/live-direct/stats.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "86c4c9da81d21d39b2a77a3136f4fc48ee1dd92dde951cb40a1fa958b497deb1",
+      "size": 1073834,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/live-direct/config.ini",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "84c005ea7b7a59170c10655d66fe8e9f5f5dbba59ae5e18be96b5c9eca7ebb1e",
+      "size": 127973,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/live-direct/config.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "27f2469e7fcf174bbd3a6d4101f1a1094eff53ed119f88cc4e0e43d208764685",
+      "size": 349556,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/live-direct/citations.bib",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "bc52164d0ff6cb700ecf9122a13675f097db019b8647cb4a5e7895083c77c4c0",
+      "size": 5784,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0027/live-direct/run-identity.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "74ea9702f518568d01228ab67a00a4e16ba2ad6c8f6e0a1b6c15bacd3ccb9832",
+      "size": 1508,
+      "tracked": false
+    }
+  ]
+}

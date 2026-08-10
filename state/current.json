@@ -1,9 +1,9 @@
 {
-  "checkpoint_id": "CP-0026",
-  "checkpoint_sha256": "4a3da01ec72711eff8f825584d4ca510bcdfc6b46c72698d0341a7bdb1e0ed55",
+  "checkpoint_id": "CP-0027",
+  "checkpoint_sha256": "9a384784fb20deb469d023993e05470b453a65c26f3212292d71a018830cb08b",
   "goal_id": "GSIM-001",
-  "next_action_id": "P5-PROFILE-01",
-  "next_action_summary": "Profile the accepted locked generic execution path and measure one output-preserving optimization; allocate CP-0027 when the next transaction begins.",
+  "next_action_id": "P5-TRITON-VECADD-06-NORMAL-PYTHON",
+  "next_action_summary": "Begin CP-0028 and run normal pinned Triton Python vecadd through the simulator backend/runtime with exact output and no fallback; profile only after a retained workload bottleneck.",
   "phase_id": "P5",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,

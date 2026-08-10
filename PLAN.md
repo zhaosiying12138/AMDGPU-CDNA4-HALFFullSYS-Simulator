@@ -4,9 +4,9 @@
 
 **Revision:** `2`
 
-**Revision date:** `2026-08-10`
+**Revision date:** `2026-08-11`
 
-**State at this commit:** `CP-0026 locked generic execution accepted; bit8 control and bit9 execution are separate; daemon trace and A/B/C oracle live; Triton launcher/compiler/JIT/fallback/Qwen remain blocked; next P5-PROFILE-01 (future CP-0027)`
+**State at this commit:** `CP-0027 direct OpenCL vecadd accepted in a repository-local ROCm prefix; one submit per context remains bounded; next CP-0028 normal Triton Python vecadd; model operators precede conditional performance work`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -20,7 +20,8 @@ The final anchor is:
 1. Official `Qwen/Qwen3.5-0.8B`, text-only path (vision is a later extension).
 2. vLLM tensor parallelism `TP=2` across two independently running gem5
    daemon processes, one rank per daemon.
-3. Complete prefill followed by at least one greedy decode token.
+3. Complete prefill followed by a stable, predeclared multi-token greedy decode
+   window; a one-token smoke alone is not model acceptance.
 4. Exact selected token ID agreement with a pinned reference, plus layered
    numerical checks and trace evidence.
 5. Zero host CPU arithmetic fallback and zero loads/accesses of
@@ -33,6 +34,37 @@ control metadata, rendezvous, and barriers only.  Tensor values and reductions
 must travel through the GemSim transport and execute reduction kernels in
 gem5.  A CPU reduction oracle is diagnostic-only and is counted; it cannot
 silently satisfy an acceptance run.
+
+### 1.1 User-facing execution contract and priority
+
+The low-level generic endpoint accepted by CP-0026 is a regression interface,
+not the product entry point. Work proceeds in this order:
+
+1. Compile a user OpenCL `.cl` kernel and its host program against only the
+   repository-local OpenCL/runtime stack. The resulting normal executable is
+   the user command: it transparently starts or connects to gem5, submits,
+   waits, copies results back, checks the oracle, and exits. No manual endpoint
+   or hand-authored transport records are permitted in this acceptance path.
+2. Run an ordinary pinned Triton Python program through Triton's normal
+   backend/driver/runtime selection. Compilation, code-object load, launch,
+   synchronization, and result copy must implicitly traverse our runtime and
+   gem5. A C endpoint, standalone fixture runner, or application-specific
+   launcher is insufficient.
+3. Use the generated model operator manifest as the work queue. Every required
+   operator variant must pass compile plus real gem5 execution plus a
+   differential oracle with fallback counters zero before full-model claims.
+4. Run the complete text model first on one simulated device for stable
+   multi-token inference, then implement CCL and run the complete model at TP=2
+   across independent gem5 daemons. Generalize to valid TP=4/8 shapes only
+   after the TP=2 anchor is stable.
+
+Correctness and coverage outrank simulator speed. Correctness runs retain cheap
+wall-clock and simulated-work observations, but profiling, host-parallel
+threadblocks, or memory fast paths become scheduled work only when an actual
+operator, layer, or model run demonstrates a material bottleneck. A standalone
+microbenchmark cannot displace the next missing product operator. Any active
+checkpoint whose intent makes profiling an unconditional prerequisite must be
+re-scoped before acceptance.
 
 Every change that alters recoverable project state is an atomic progress unit:
 one `Checkpoint-ID`, child commit(s) where applicable, evidence, bitlesson (if
@@ -59,7 +91,7 @@ identities. Existing upstream commits are never rewritten to add our trailers.
 | Fabric | Functional shared-memory/Unix transport first, timed xGMI/SDMA model later | No timing claims before the timed phase |
 | PyTorch | Transparent HIP-compatible path is primary; optional PrivateUse1 adapter is isolated behind the same facade | No backend-specific business logic spread through vLLM |
 | Triton | Reuse AMD lowering/compiler; add an out-of-tree `gemsim_amd` driver and launcher | Cache keys include every toolchain/runtime/simulator revision |
-| Performance | Profile the first transparent Triton vecadd before optimizing; prioritize measured 80/20 bottlenecks | No optimization claim without retained before/after profiles and unchanged correctness |
+| Performance | Profile only when a real OpenCL/Triton operator, layer, or model bottleneck threatens end-to-end progress; then prioritize measured 80/20 causes | Profiling is not a prerequisite to broader operator coverage; no optimization claim without retained before/after evidence and unchanged correctness |
 | Host parallelism | Permit CPU-parallel threadblock simulation only with explicit dependency, barrier, atomic, and determinism gates | Host utilization never overrides simulated ordering or synchronization semantics |
 | Status tooling | Provide a simulator-aware `rocm-smi` view from the daemon registry | Report simulated instances only; never probe hardware nodes or load production SMI libraries |
 | Precision | Bitwise for copies/integers; explicit per-op/layer BF16/FP16 tolerances; exact final greedy token | No claim of all-float bitwise identity |
@@ -336,20 +368,25 @@ tool versions, freshness chain, and final binary hash are evidence.
 
 Build the standalone `self-amdgpu-runtime` plus compatible HIP registration,
 module, stream, event, memory, copy, launch, error, and fatbinary APIs. Add a
-separate OpenCL ICD-compatible shim and compiler path. Gate: hipcc and OpenCL
-conformance subsets run against gem5 with production runtime/device opens absent.
+separate OpenCL ICD-compatible shim and compiler path. The first product gate
+is a `.cl` kernel plus host program compiled and linked against the local stack
+into a normal executable. Running that executable alone must transparently
+manage the gem5 connection, launch the real code object, wait, copy results,
+and validate them. Direct invocation of the generic endpoint is regression
+evidence only. Later gates add hipcc and OpenCL conformance subsets, always with
+production runtime/device opens absent.
 
 ### P5 — Triton operators
 
 Keep AMD TTIR/TTGIR/LLVM lowering; add an out-of-tree `gemsim_amd` backend and
 launcher linked only to the stable runtime ABI. Cache keys contain gem5/runtime/
 ISA/LLVM/Triton/device-lib revisions and capability bits. The first gate is
-unmodified execution of Triton's tutorial vecadd with no fallback. Broader
-operator expansion waits for the P5A profile/optimization gate and the P5B
-parallelism feasibility decision so later work benefits from early simulator
-speedups rather than repeatedly paying an already visible bottleneck.
+unmodified execution of Triton's tutorial vecadd with no fallback. After that,
+expand the model-required operator matrix immediately. Profiling and P5B
+parallelism do not block coverage unless measured end-to-end evidence identifies
+a material simulator bottleneck.
 
-### P5A — transparent vecadd and measured operator optimization
+### P5A — transparent Triton Python vecadd
 
 The first Triton usability checkpoint is unmodified user execution of the
 `python tutorial/01-vecadd.py` request through `gemsim_amd`. In the pinned
@@ -357,14 +394,15 @@ Triton checkout this request maps to `python/tutorials/01-vector-add.py`; the
 upstream file is not edited. The ordinary Triton driver/launcher selection path
 must be used, with no application-specific import, source, or environment
 rewrite beyond selecting the simulator device. After that gate is accepted,
-retain a reproducible profile spanning host protocol, event queue,
-AQL/dispatch, CU pipelines, memory translation/cache, and trace emission.
-Rank bottlenecks by wall-clock contribution and optimize the smallest set that
-explains most runtime. Every optimization records the before/after profile,
-host and simulated work counts, output oracle, deterministic replay, and CPU
-fallback count. Micro-optimizations outside the dominant path are deferred.
+the next default action is model-operator coverage, not profiling. Always record
+basic elapsed time and work counts. If a real operator/layer/model run is slow
+enough to block progress, open a bounded profiling checkpoint spanning host
+protocol, event queue, AQL/dispatch, CU pipelines, memory, and trace emission;
+rank costs by wall-clock contribution and optimize the smallest dominant set.
+Every optimization records before/after profiles, output oracle, deterministic
+replay, and fallback counts.
 
-### P5B — correctness-preserving host-parallel threadblocks
+### P5B — conditional correctness-preserving host-parallel threadblocks
 
 Investigate a separate, explicit simulator execution mode that can process
 independent threadblocks on multiple host CPU workers while preserving gem5's
@@ -380,14 +418,14 @@ criterion. The parallel path must publish a bounded host scheduler/memory
 overhead budget against the serial baseline; if that budget or the proof of
 independence fails, retain the serial path.
 
-### P5C — broader Triton operator matrix
+### P5C — model-required Triton operator matrix
 
-After P5A and P5B are accepted (including an evidence-backed decision to retain
-serial execution where parallelism is unsafe), expand the generated operator
-manifest and differential tests through elementwise, reductions, LDS/barriers,
-atomics, MFMA/GEMM, embedding, RMSNorm, MLP, RoPE, GDN, paged attention, logits,
-and sampling. Each entry keeps its compiler/runtime/simulator identity and
-falls back only by explicit unsupported status, never host arithmetic.
+After the normal Python vecadd path is accepted, expand the generated operator
+manifest and differential tests immediately through elementwise, reductions,
+LDS/barriers, atomics, MFMA/GEMM, embedding, RMSNorm, MLP, RoPE, GDN, paged
+attention, logits, and sampling. P5B is optional and may run only when profile
+evidence justifies it. Each entry keeps its compiler/runtime/simulator identity
+and falls back only by explicit unsupported status, never host arithmetic.
 
 For the official Qwen3.5-0.8B first gate, the generated local manifest is
 currently 15 text-only contracts covering embedding/LM head, RMSNorm, GDN
@@ -421,7 +459,9 @@ Qwen3.5 model implementation. Disable CUDA graphs, unsupported quantization,
 speculative decode and other features until capability-gated. First validate
 individual GDN and full-attention layers, then 24-layer prefill and decode on a
 1-CU quick config, followed by a full MI355X-config single daemon. Gate: same
-checkpoint/tokenizer/template and exact greedy token against the reference.
+checkpoint/tokenizer/template, a stable predeclared multi-token decode window,
+and exact greedy tokens against the reference. One decoded token is a smoke,
+not this acceptance gate.
 
 ### P8 — N-rank transport and RCCL semantics
 
@@ -435,7 +475,7 @@ negative/error/restart cases; host reduction counter remains zero.
 Launch two independent gem5 daemons and two vLLM ranks. Implement exact Qwen
 sharding: vocabulary/LM-head tying, attention Q/KV head rules, row/column MLP
 and projection allreduces, and the GDN convolution/QKVZ/BA/state sharding.
-Run full prefill then one or more greedy decode tokens and compare token IDs,
+Run full prefill then a stable predeclared multi-token greedy decode window and compare token IDs,
 selected logits, hidden-state/layer checkpoints, trace completeness, and
 fallback/device-open audits. This is the first “usable” release; earlier
 phases are prerequisites, not a claimed finished product.
@@ -492,7 +532,7 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | P3-HOST-NATIVE-03-B0 | P3H | No-x86 descriptor/kernarg/AQL admission and queue/lifecycle contract smoke |
 | P3-HOST-NATIVE-03-B1 | P3H | No-x86 native queue/CP-core address resolution, AQL publication/fetch, and admission without legacy SimObjects or CU execution |
 | P3-HOST-NATIVE-03-B2 | P3H | No-x86 GPUDispatcher/CU functional output/trace differential for the locked 4-WG/16-wave gfx950 dispatch |
-| P4-HIP-01 | P4 | Minimal transparent HIP/OpenCL launch surface |
+| CP-0027 / P4-OPENCL-E2E-01 | P4 | User `.cl` plus host program builds into a normal executable that transparently runs on gem5 and validates output; low-level endpoint remains regression-only |
 | P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
 | CP-0021 | P5 | Hash-bound Triton vecadd compile/provenance prerequisite; normal launcher remains blocked |
 | CP-0022 | P5 | Generic payload-v2 codec/admission boundary; daemon mapping and launcher handoff remain blocked |
@@ -500,8 +540,8 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | CP-0024 / P5-TRITON-VECADD-03-DAEMON-ROUTE | P5 | Bounded handler source/type-19 plumbing, route-policy harness, and live canonical negative handshake; bit 8 and positive type-18/H2D/SUBMIT route remain blocked |
 | CP-0025 / P5-TRITON-VECADD-04-DAEMON-LIFECYCLE | P5 | Accepted positive bit-8 daemon control lifecycle through logical-align-8 ALLOC, v1 H2D, native CP admission/type-19 ACK/type-20 retire, cleanup, and reconnect; no GPU execution |
 | CP-0026 / P5-TRITON-VECADD-05-GPU-EXECUTION | P5 | Connect the committed daemon lifecycle to GPUDispatcher/CU execution and prove output correctness for the locked zero-preload fixture |
-| CP-0027 / P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence; ID is allocated when the next transaction begins |
-| P5-PARALLEL-TB-01 | P5B | Safe serial-versus-parallel threadblock experiment |
+| P5-PROFILE-ON-BLOCKER | P5A | Conditional retained profile and measured 80/20 optimization only after a real operator/layer/model bottleneck is demonstrated |
+| P5-PARALLEL-TB-ON-BLOCKER | P5B | Conditional safe serial-versus-parallel threadblock experiment justified by a retained profile |
 | P5-OPS-01 | P5C | Broader model-operator manifest and differential gates |
 | P5-QWEN35-OPS-01 | P5C | All 15 text-only Qwen3.5-0.8B operator contracts execute on AMD with no fallback |
 | P6-PYTORCH-01 | P6 | PyTorch eager/compile device foundation |
@@ -543,8 +583,10 @@ under `state/evidence/`. Required audit classes are:
   UMD/KMD/device nodes; no `amdsmi` probing.
 - Device execution record coverage for every accepted operation and CPU
   fallback counter equal to zero.
-- Triton vecadd transparency, profile attribution, before/after bottleneck
-  evidence, and serial-versus-parallel threadblock differential checks.
+- OpenCL direct-executable and Triton normal-Python transparency, including
+  compile/load/launch/wait/copy/oracle evidence with no manual endpoint.
+- When a real blocking workload triggers optimization: profile attribution,
+  before/after bottleneck evidence, and any serial-versus-parallel differential.
 - Simulator `rocm-smi` registry/lease/epoch ON/OFF behavior with explicit
   absence of hardware device and production management-library access.
 - N-rank collective correctness, ordering, CRC/credit, epoch abort/replay, and
@@ -825,8 +867,9 @@ fallback. The 12-DWORD descriptor preload remains an explicit NOT_SUPPORTED
    retirement, unmaps, reclaims disconnected leases, and accepts a new owner.
    Packet CRC and nondecreasing lifecycle ticks are retained. This is native
    CP admission/retire only; launcher, compiler/JIT, GPUDispatcher/CU execution,
-   output correctness, and fallback remain false. The next unique action is
-   CP-0026 / `P5-TRITON-VECADD-05-GPU-EXECUTION`.
+   output correctness, and fallback remain false at the CP25 boundary. Its
+   historical next action was CP-0026 /
+   `P5-TRITON-VECADD-05-GPU-EXECUTION`, which is accepted below.
 
    CP-0026 accepts the exact bit-9 execution extension while preserving bit-8 as
    the control contract. The negotiated bit is word 0 bit 9 (wire byte 1 bit 1)
@@ -841,7 +884,14 @@ fallback. The 12-DWORD descriptor preload remains an explicit NOT_SUPPORTED
    VEGA_X86 bridge proof, not generic gfx950/arbitrary HSACO or standalone
    no-x86 daemon proof. The 5,408-byte 12-DWORD Triton preload, normal launcher,
    compiler/JIT, fallback, performance, Triton E2E, and Qwen remain false. The
-   next planned gate is `P5-PROFILE-01`, to be allocated as CP-0027 when begun.
+   CP-0027 then accepts `P4-OPENCL-E2E-01`: a normal executable linked only to
+   the repository-local OpenCL/runtime stack compiles the exact 5,160-byte
+   gfx950 `vecadd`, automatically manages gem5, executes four workgroups and
+   sixteen waves, receives C-only D2H, validates bit-exact `C=A+B`, and exits
+   cleanly without fallback. It remains one submit per OpenCL context. The next
+   product gate is CP-0028, the normal Triton Python vecadd path, followed by the
+   model-required operator matrix. Profiling is conditional on a demonstrated
+   operator-, layer-, or model-level bottleneck.
 
 ### P3H - host-native simulator and first Triton gate
 
@@ -896,8 +946,11 @@ The work is staged as follows:
    daemon control lifecycle through bit-8 selection, logical-align-8 ALLOC,
    v1 H2D, native CP admission, type-19 ACK, type-20 retirement, cleanup, and
    reconnect. It does not issue work to GPUDispatcher/CU or validate output.
-   CP-0026 / `P5-TRITON-VECADD-05-GPU-EXECUTION` is the next coordinated gate;
-   preload-aware Triton mapping and the normal launcher remain later work.
+   CP-0026 then connects the locked `gpuReadWrite` route to GPUDispatcher/CU,
+   and CP-0027 accepts the separate direct OpenCL `vecadd` executable with a
+   managed gem5 lifecycle and output oracle. CP-0028 is the next coordinated
+   gate: normal Triton Python driver/runtime launch. Preload-aware Triton mapping
+   and reusable multi-dispatch are part of that bounded work, not OpenCL claims.
 
 This workstream is not a cycle-accurate replacement. Timing, wider operator
 coverage, host-parallel threadblocks, HIP/OpenCL CTS, PyTorch, vLLM, and Qwen

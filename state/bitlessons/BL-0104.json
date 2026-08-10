@@ -1,0 +1,31 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/examples/opencl/vecadd_host.c",
+    "projects/self-amdgpu-runtime/src/opencl_compiler.c",
+    "projects/self-amdgpu-runtime/src/opencl_enqueue.c",
+    "projects/self-amdgpu-runtime/src/simulator_process.c",
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "protocol/host-transport-v2.json",
+    "docs/rocm-environment.md"
+  ],
+  "checkpoint_id": "CP-0027",
+  "conclusion": "A normal executable linked to the repository-local OpenCL/runtime stack is the product-level OpenCL gate. The fsynced daemon trace is authoritative for GPUDispatcher/ComputeUnit execution and lifecycle, while the application-side readback and oracle are authoritative for bytes delivered to the user.",
+  "confidence": "high",
+  "decision": "Require the ordinary host executable to compile the .cl source, manage gem5 without a manually started endpoint, submit and wait through the local runtime, read C back, validate the exact oracle, clean up the owner, and report zero CPU/NVIDIA fallback. Keep the CP26 generic endpoint as regression evidence only, and never infer delivered output from daemon CRC alone.",
+  "evidence_ids": [
+    "EV-0062",
+    "EV-0063"
+  ],
+  "id": "BL-0104",
+  "invalidated_assumptions": [
+    "A manually launched protocol endpoint is equivalent to a normal OpenCL application.",
+    "A durable type-20 response by itself proves GPUDispatcher or ComputeUnit execution.",
+    "A daemon output CRC proves that the application received correct bytes without D2H verification.",
+    "Source compilation may silently use a system OpenCL, ROCr, HIP, CUDA, or hardware fallback path."
+  ],
+  "observation": "Under a scrubbed environment, the normal opencl-vecadd executable links the local libOpenCL.so.1, compiles vecadd.cl with the pinned local compiler/device libraries, creates a private job and socket, supervises gem5, submits one dispatch, reads only C back, validates bit-exact C=A+B, unmaps, joins the daemon, and exits successfully. The daemon records the exact three-event execution trace; the client independently validates the returned C bytes.",
+  "question_or_symptom": "What constitutes product-level OpenCL execution, and which side is authoritative for simulated execution versus bytes returned to the application?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

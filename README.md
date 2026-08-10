@@ -19,7 +19,8 @@ stored in Git.
 The first hard acceptance target is the official text-only
 `Qwen/Qwen3.5-0.8B` checkpoint, served by vLLM with tensor parallelism across
 two independent gem5 instances, producing at least one greedy token with the
-same token ID as the reference and no CPU arithmetic fallback.  The protocol
+same token ID as the reference and no CPU arithmetic fallback, then sustaining
+a predeclared multi-token decode window. The protocol
 is N-rank from the beginning so TP=4/8 can follow without a pair-specific
 rewrite.  The checkpoint is already downloaded at the pinned revision under
 `models/`; its first software gate is a source-grounded 15-contract text-only
@@ -32,14 +33,16 @@ capture: revision `2fc06364715b967f1860aea9cf38778875588b17`, one
 `1,746,942,600`-byte safetensors file, SHA-256
 `04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696`.
 
-Two later goals are explicit in plan revision 2. Once the user's unmodified
-Triton `tutorial/01-vecadd.py` request (the pinned checkout's
-`python/tutorials/01-vector-add.py`) runs through GemSim, retained profiles will drive a
-small number of high-impact operator/simulator optimizations, followed by a
-separately gated experiment for CPU-parallel threadblock simulation that must
-preserve dependency and synchronization semantics. After the model path is
-usable, a low-priority simulator-aware `rocm-smi` client will report the ON/OFF
-state of multiple gem5 daemon instances without probing physical GPUs.
+The product order is explicit in plan revision 2: first a normal OpenCL
+executable that compiles `.cl` and transparently runs through gem5, then the
+user's unmodified Triton `tutorial/01-vecadd.py` request (the pinned checkout's
+`python/tutorials/01-vector-add.py`) through the normal Python driver/runtime,
+then every model-required operator, one-device stable multi-token inference,
+and finally CCL-backed multi-TP stable inference. Profiling and simulator
+optimization are scheduled only when a real operator, layer, or model run
+materially blocks that correctness path. After the model path is usable, a
+low-priority simulator-aware `rocm-smi` client will report the ON/OFF state of
+multiple gem5 daemon instances without probing physical GPUs.
 
 Read [PLAN.md](PLAN.md) for the complete staged plan and [GOAL.md](GOAL.md) for
 the immutable acceptance anchor.  A blank-context handoff starts with:
@@ -241,10 +244,9 @@ type-20 retirement, UNMAP, disconnect cleanup, and reconnect. Packet CRC is
 nonzero and lifecycle ticks are nonzero and nondecreasing. This remains native
 control-processor admission/retire only: GPUDispatcher/CU execution, kernel
 output correctness, normal Triton launcher, compiler/JIT, fallback, and Qwen
-are false. CP-0026 / `P5-TRITON-VECADD-05-GPU-EXECUTION` is the next unique
-action; it must connect this control path to real GPU execution and validate
-the locked zero-preload fixture output before later Triton preload/launcher
-work.
+are false at the CP25 boundary. Its historical next action was CP-0026 /
+`P5-TRITON-VECADD-05-GPU-EXECUTION`, which is accepted below; later Triton
+preload and launcher work remains separate.
 
 CP-0026 accepts the locked generic execution extension while keeping bit 8
 strictly as the control/admission/retire contract. Bit 9 (`GENERIC_EXECUTION_V2`)
@@ -261,7 +263,23 @@ without type 20 or client output. The wire signal field remains expected `1`
 with no observed wire after-value; trace `1 -> 0` is the private native AQL
 completion signal. This is a fixture-scoped `VEGA_X86` bridge proof, not a
 standalone no-x86 daemon, generic gfx950, arbitrary HSACO, Triton, launcher,
-compiler/JIT, performance, fallback, or Qwen claim. The next planned gate is
-`P5-PROFILE-01`, which will be allocated as CP-0027 when its transaction begins.
+compiler/JIT, performance, fallback, or Qwen claim. Its historical next action
+was superseded by the product-priority clarification recorded in GOAL/PLAN and
+by the accepted CP-0027 OpenCL executable boundary below.
+
+CP-0027 accepts the first direct user-facing OpenCL executable. The repository-
+local v5 prefix installs the pinned compiler/device libraries, shared
+`self-amdgpu-runtime`, bounded `libOpenCL.so.1`, the normal `opencl-vecadd`
+host executable, and its `.cl` source without touching system ROCm. Running the
+executable alone compiles a 5,160-byte gfx950 image (SHA-256
+`314ede16940432996c9fe190115408bf42744a8ab7d0036bf07b931e39c4cb19`), starts
+the managed gem5 daemon, executes four workgroups/sixteen waves/448
+instructions through GPUDispatcher/CU, copies only C back, validates bit-exact
+`C=A+B`, and exits with zero CPU/NVIDIA fallback. The retained direct run is
+about 0.94 seconds wall on this checkout, so profiling is not a prerequisite
+to the next gate. This is still one exact vecadd and one execution per OpenCL
+context; multi-dispatch, general OpenCL, normal Triton Python, model operators,
+multi-token inference, TP, and CCL remain unaccepted. The next product gate is
+the normal Triton Python vecadd driver/runtime path.
 
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.
