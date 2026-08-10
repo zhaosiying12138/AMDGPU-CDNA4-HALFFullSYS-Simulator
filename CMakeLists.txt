@@ -24,6 +24,26 @@ option(
   "Test the installed package with an independent default-toolchain consumer"
   ON)
 
+if(NOT UNIX)
+  message(FATAL_ERROR "The managed gem5 runtime requires UNIX")
+endif()
+get_filename_component(
+  SELF_AMDGPU_RUNTIME_REPO_ROOT
+  "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  ABSOLUTE)
+set(
+  SELF_AMDGPU_RUNTIME_OPENCL_PREFIX
+  "${CMAKE_INSTALL_PREFIX}"
+  CACHE PATH "Versioned local ROCm prefix used by the managed runtime")
+set(
+  SELF_AMDGPU_RUNTIME_OPENCL_GEM5
+  "${SELF_AMDGPU_RUNTIME_REPO_ROOT}/projects/gem5/build/VEGA_X86/gem5.opt"
+  CACHE FILEPATH "Repository-local gem5 executable for the managed runtime")
+set(
+  SELF_AMDGPU_RUNTIME_OPENCL_GEM5_CONFIG
+  "${SELF_AMDGPU_RUNTIME_REPO_ROOT}/projects/gem5/configs/example/gemsim/host_dispatch.py"
+  CACHE FILEPATH "Repository-local gem5 dispatch configuration")
+
 add_library(
   self_amdgpu_runtime
   src/runtime.c
@@ -32,6 +52,7 @@ add_library(
   src/provider.c
   src/kmt_shim.c
   src/code_object.c
+  src/managed_session.c
   src/sha256.c)
 add_library(SelfAmdgpuRuntime::runtime ALIAS self_amdgpu_runtime)
 
@@ -47,7 +68,12 @@ set_target_properties(
 target_compile_features(self_amdgpu_runtime PUBLIC c_std_11)
 target_compile_definitions(
   self_amdgpu_runtime
-  PRIVATE SELF_AMDGPU_RUNTIME_BUILDING_LIBRARY=1)
+  PRIVATE
+    SELF_AMDGPU_RUNTIME_BUILDING_LIBRARY=1
+    SAGR_MANAGED_DEFAULT_PREFIX="${SELF_AMDGPU_RUNTIME_OPENCL_PREFIX}"
+    SAGR_MANAGED_DEFAULT_GEM5="${SELF_AMDGPU_RUNTIME_OPENCL_GEM5}"
+    SAGR_MANAGED_DEFAULT_GEM5_CONFIG="${SELF_AMDGPU_RUNTIME_OPENCL_GEM5_CONFIG}"
+    SAGR_MANAGED_DEFAULT_REPO_ROOT="${SELF_AMDGPU_RUNTIME_REPO_ROOT}")
 if(NOT BUILD_SHARED_LIBS)
   target_compile_definitions(
     self_amdgpu_runtime
@@ -59,27 +85,7 @@ target_include_directories(
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 if(SELF_AMDGPU_RUNTIME_BUILD_OPENCL)
-  if(NOT UNIX)
-    message(FATAL_ERROR "The managed gem5 OpenCL process path requires UNIX")
-  endif()
   find_package(Threads REQUIRED)
-  get_filename_component(
-    SELF_AMDGPU_RUNTIME_REPO_ROOT
-    "${CMAKE_CURRENT_SOURCE_DIR}/../.."
-    ABSOLUTE)
-  set(
-    SELF_AMDGPU_RUNTIME_OPENCL_PREFIX
-    "${CMAKE_INSTALL_PREFIX}"
-    CACHE PATH "Versioned local ROCm prefix used by the OpenCL compiler")
-  set(
-    SELF_AMDGPU_RUNTIME_OPENCL_GEM5
-    "${SELF_AMDGPU_RUNTIME_REPO_ROOT}/projects/gem5/build/VEGA_X86/gem5.opt"
-    CACHE FILEPATH "Repository-local gem5 executable for managed OpenCL")
-  set(
-    SELF_AMDGPU_RUNTIME_OPENCL_GEM5_CONFIG
-    "${SELF_AMDGPU_RUNTIME_REPO_ROOT}/projects/gem5/configs/example/gemsim/host_dispatch.py"
-    CACHE FILEPATH "Repository-local gem5 OpenCL dispatch configuration")
-
   add_library(
     self_amdgpu_opencl SHARED
     src/opencl_api.c

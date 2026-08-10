@@ -200,6 +200,64 @@ static int expect_dispatch_option_defaults(void) {
   return 0;
 }
 
+static int expect_managed_option_defaults(void) {
+  sagr_managed_session_options_t session;
+  sagr_managed_launch_options_t launch;
+  if (sagr_managed_session_options_init(
+          &session, (uint32_t)sizeof(session)) != SAGR_STATUS_SUCCESS ||
+      session.struct_size != (uint32_t)sizeof(session) ||
+      session.version != SAGR_MANAGED_RUNTIME_API_VERSION ||
+      session.flags != 0U ||
+      session.queue_depth != SAGR_MANAGED_DEFAULT_QUEUE_DEPTH ||
+      session.startup_timeout_ns !=
+          SAGR_MANAGED_DEFAULT_STARTUP_TIMEOUT_NS ||
+      session.operation_timeout_ns !=
+          SAGR_MANAGED_DEFAULT_OPERATION_TIMEOUT_NS ||
+      session.run_timeout_ns != SAGR_MANAGED_DEFAULT_RUN_TIMEOUT_NS ||
+      session.startup_timeout_ns != UINT64_C(15000000000) ||
+      session.operation_timeout_ns != UINT64_C(21600000000000) ||
+      session.run_timeout_ns != UINT64_C(86400000000000) ||
+      sagr_managed_launch_options_init(
+          &launch, (uint32_t)sizeof(launch)) != SAGR_STATUS_SUCCESS ||
+      launch.struct_size != (uint32_t)sizeof(launch) ||
+      launch.version != SAGR_MANAGED_RUNTIME_API_VERSION ||
+      launch.grid_x != 64U || launch.grid_y != 1U || launch.grid_z != 1U ||
+      launch.workgroup_x != 64U || launch.workgroup_y != 1U ||
+      launch.workgroup_z != 1U || launch.num_warps != 1U ||
+      launch.num_ctas != 1U || launch.wavefront_size != 64U) {
+    fprintf(stderr, "unexpected managed API defaults\n");
+    return 1;
+  }
+  session.queue_depth = 32U;
+  session.startup_timeout_ns = UINT64_C(1000000000);
+  session.operation_timeout_ns = UINT64_C(2000000000);
+  session.run_timeout_ns = UINT64_C(3000000000);
+  if (session.queue_depth != 32U ||
+      session.startup_timeout_ns != UINT64_C(1000000000) ||
+      session.operation_timeout_ns != UINT64_C(2000000000) ||
+      session.run_timeout_ns != UINT64_C(3000000000)) {
+    fprintf(stderr, "managed API caller overrides were not retained\n");
+    return 1;
+  }
+  if (sagr_managed_session_options_init(NULL,
+                                         (uint32_t)sizeof(session)) !=
+          SAGR_STATUS_INVALID_ARGUMENT ||
+      sagr_managed_session_options_init(
+          &session, (uint32_t)sizeof(session) - 1U) !=
+          SAGR_STATUS_BUFFER_TOO_SMALL ||
+      session.struct_size != (uint32_t)sizeof(session) ||
+      sagr_managed_launch_options_init(NULL, (uint32_t)sizeof(launch)) !=
+          SAGR_STATUS_INVALID_ARGUMENT ||
+      sagr_managed_launch_options_init(
+          &launch, (uint32_t)sizeof(launch) - 1U) !=
+          SAGR_STATUS_BUFFER_TOO_SMALL ||
+      launch.struct_size != (uint32_t)sizeof(launch)) {
+    fprintf(stderr, "unexpected managed API option validation\n");
+    return 1;
+  }
+  return 0;
+}
+
 int main(void) {
   int failures = 0;
   const uint32_t abi_version = sagr_abi_version();
@@ -238,12 +296,22 @@ int main(void) {
                  "public dispatch ticket ABI size changed");
   _Static_assert(sizeof(sagr_dispatch_completion_t) == 184,
                  "public dispatch completion ABI size changed");
+  _Static_assert(sizeof(sagr_managed_session_options_t) == 64,
+                 "managed session options ABI size changed");
+  _Static_assert(sizeof(sagr_managed_session_info_t) == 96,
+                 "managed session info ABI size changed");
+  _Static_assert(sizeof(sagr_managed_kernel_info_t) == 176,
+                 "managed kernel info ABI size changed");
+  _Static_assert(sizeof(sagr_managed_launch_options_t) == 76,
+                 "managed launch options ABI size changed");
+  _Static_assert(sizeof(sagr_generic_dispatch_completion_t) == 304,
+                 "generic completion ABI size changed");
 
   if (abi_version != SAGR_ABI_VERSION ||
       strcmp(SAGR_VERSION_STRING, "0.6.0") != 0 ||
       SAGR_ABI_VERSION_DECODE_MAJOR(abi_version) != SAGR_ABI_VERSION_MAJOR ||
       SAGR_ABI_VERSION_DECODE_MINOR(abi_version) != SAGR_ABI_VERSION_MINOR ||
-      SAGR_ABI_VERSION_MAJOR != 1 || SAGR_ABI_VERSION_MINOR != 5 ||
+      SAGR_ABI_VERSION_MAJOR != 1 || SAGR_ABI_VERSION_MINOR != 6 ||
       SAGR_CAPABILITY_QUEUE_MASK != UINT64_C(2) ||
       SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST != UINT64_C(2) ||
       SAGR_CAPABILITY_MEMORY_MASK != UINT64_C(4) ||
@@ -305,6 +373,7 @@ int main(void) {
   failures += expect_memory_option_defaults();
   failures += expect_signal_option_defaults();
   failures += expect_dispatch_option_defaults();
+  failures += expect_managed_option_defaults();
 
   return failures == 0 ? 0 : 1;
 }

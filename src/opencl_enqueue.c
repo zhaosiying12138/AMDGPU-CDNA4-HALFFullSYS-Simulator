@@ -369,7 +369,8 @@ static cl_int dispatch_locked(cl_command_queue queue, cl_kernel kernel,
   if (kernel->info.kernarg_segment_size == 0U ||
       kernel->info.kernarg_segment_size >
           SAGR_CL_KERNARG_ALLOCATION_BYTES - SAGR_CL_KERNARG_OFFSET ||
-      kernel->info.descriptor_kernarg_preload != 0U) {
+      kernel->info.descriptor_kernarg_preload >
+          SAGR_GENERIC_MAX_PRELOAD_DWORDS) {
     return CL_INVALID_PROGRAM_EXECUTABLE;
   }
   result = sagr_cl_ensure_queue(queue);

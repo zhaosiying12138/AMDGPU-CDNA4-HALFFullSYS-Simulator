@@ -2675,12 +2675,12 @@ generic_request_validate(const sagr_wire_generic_request_t *request)
         return SAGR_STATUS_INVALID_ARGUMENT;
       }
       if (body->gfx_target != SAGR_CODE_OBJECT_TARGET_GFX950 ||
-          body->relocation_count != 0U ||
-          body->descriptor_preload_dwords != 0U) {
-        /* Triton gfx950 currently carries a 12-dword preload.  The generic
-         * gate reports this boundary explicitly until CP preload semantics
-         * are implemented; it must not silently strip the preload. */
+          body->relocation_count != 0U) {
         return SAGR_STATUS_NOT_SUPPORTED;
+      }
+      if (body->descriptor_preload_dwords >
+          SAGR_WIRE_GENERIC_MAX_PRELOAD_DWORDS) {
+        return SAGR_STATUS_INVALID_ARGUMENT;
       }
       return SAGR_STATUS_SUCCESS;
     }
@@ -3070,6 +3070,8 @@ generic_response_success_valid(const sagr_wire_generic_response_t *response,
              response->descriptor_va != 0U && response->code_va != 0U &&
              response->entry_va != 0U && response->mapped_bytes != 0U &&
              response->segment_count != 0U &&
+             response->descriptor_preload_dwords <=
+                 SAGR_WIRE_GENERIC_MAX_PRELOAD_DWORDS &&
              response->kernarg_allocation_id == 0U &&
              response->kernarg_generation == 0U && response->kernarg_va == 0U &&
              response->kernarg_size == 0U && response->kernarg_alignment == 0U &&

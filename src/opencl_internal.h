@@ -77,24 +77,10 @@ static inline void sagr_cl_make_job_uuid(uint64_t epoch, uint64_t process_id,
 
 struct sagr_cl_simulator {
   int paths_ready;
-  int external_endpoint;
-  int started;
-  pid_t child_pid;
-  pid_t child_pgid;
-  uint64_t epoch;
-  uint8_t job_uuid[16];
-  char job_uuid_text[33];
+  sagr_managed_session_t managed_session;
   sagr_instance_t instance;
   char prefix[PATH_MAX];
   char clang_path[PATH_MAX];
-  char gem5_path[PATH_MAX];
-  char gem5_config_path[PATH_MAX];
-  char repo_root[PATH_MAX];
-  char run_dir[PATH_MAX];
-  char endpoint[PATH_MAX];
-  char trace_path[PATH_MAX];
-  char output_dir[PATH_MAX];
-  char log_path[PATH_MAX];
 };
 
 struct _cl_platform_id {

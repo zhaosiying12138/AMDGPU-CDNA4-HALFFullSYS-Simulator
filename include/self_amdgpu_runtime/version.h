@@ -11,7 +11,7 @@
 #define SAGR_VERSION_STRING "0.6.0"
 
 #define SAGR_ABI_VERSION_MAJOR 1u
-#define SAGR_ABI_VERSION_MINOR 5u
+#define SAGR_ABI_VERSION_MINOR 6u
 
 #define SAGR_ABI_VERSION_ENCODE(major, minor) \
   ((((uint32_t)(major)) << 16u) | ((uint32_t)(minor)))

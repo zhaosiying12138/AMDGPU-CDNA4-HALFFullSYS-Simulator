@@ -2470,6 +2470,22 @@ static sagr_status_t receive_code_object_ack(
       *poison = 1;
       return status;
     }
+    if (status != SAGR_STATUS_SUCCESS) {
+      switch (request->opcode) {
+        case SAGR_WIRE_CODE_OBJECT_OPCODE_BEGIN:
+          *reason = "daemon rejected code-object BEGIN";
+          break;
+        case SAGR_WIRE_CODE_OBJECT_OPCODE_CHUNK:
+          *reason = "daemon rejected code-object CHUNK";
+          break;
+        case SAGR_WIRE_CODE_OBJECT_OPCODE_COMMIT:
+          *reason = "daemon rejected code-object COMMIT";
+          break;
+        default:
+          *reason = "daemon rejected code-object operation";
+          break;
+      }
+    }
     if (response->opcode != request->opcode) {
       *reason = "code-object ACK opcode mismatch";
       *poison = 1;
@@ -5438,8 +5454,9 @@ static sagr_status_t validate_generic_map_options(
       !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
     return SAGR_STATUS_INVALID_ARGUMENT;
   }
-  if (options->descriptor_preload_dwords != 0U) {
-    return SAGR_STATUS_NOT_SUPPORTED;
+  if (options->descriptor_preload_dwords >
+      SAGR_GENERIC_MAX_PRELOAD_DWORDS) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
   }
   return SAGR_STATUS_SUCCESS;
 }
@@ -5923,6 +5940,11 @@ static int generic_mapping_response_matches(
       response->entry_va >= response->mapped_end_va) {
     return 0;
   }
+  if (options->descriptor_preload_dwords != 0U &&
+      (response->code_va > UINT64_MAX - UINT64_C(256) ||
+       response->entry_va != response->code_va + UINT64_C(256))) {
+    return 0;
+  }
   return 1;
 }
 
@@ -6150,13 +6172,8 @@ sagr_status_t sagr_generic_map_object(
   }
   status = validate_generic_map_options(options);
   if (status != SAGR_STATUS_SUCCESS) {
-    return fail_open(out_error, error_size, status,
-                     status == SAGR_STATUS_NOT_SUPPORTED
-                         ? SAGR_WIRE_STATUS_UNSUPPORTED_CAPABILITY
-                         : -1,
-                     0, status == SAGR_STATUS_NOT_SUPPORTED
-                            ? "descriptor preload is not supported by the v2 client"
-                            : "invalid generic MAP_OBJECT options");
+    return fail_open(out_error, error_size, status, -1, 0,
+                     "invalid generic MAP_OBJECT options");
   }
   memcpy(&local_options, options, sizeof(local_options));
   status = require_generic_transport(instance, out_error, error_size);

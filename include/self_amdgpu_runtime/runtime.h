@@ -114,6 +114,17 @@ enum {
 #define SAGR_GENERIC_MAX_WORKGROUP_DIMENSION UINT32_C(1024)
 #define SAGR_GENERIC_MAX_WARPS UINT32_C(32)
 #define SAGR_GENERIC_MAX_CTAS UINT32_C(8)
+/* The descriptor field is length[6:0], offset[15:7].  Accepting only raw
+ * values <= 64 therefore also fail-closes on every nonzero preload offset. */
+#define SAGR_GENERIC_MAX_PRELOAD_DWORDS UINT32_C(64)
+
+#define SAGR_MANAGED_RUNTIME_API_VERSION UINT32_C(1)
+#define SAGR_MANAGED_DEFAULT_STARTUP_TIMEOUT_NS UINT64_C(15000000000)
+/* gem5 simulation is intentionally slow: keep each call and the reusable
+ * process bounded without inheriting CP27's 120-second one-launch ceiling. */
+#define SAGR_MANAGED_DEFAULT_OPERATION_TIMEOUT_NS UINT64_C(21600000000000)
+#define SAGR_MANAGED_DEFAULT_RUN_TIMEOUT_NS UINT64_C(86400000000000)
+#define SAGR_MANAGED_DEFAULT_QUEUE_DEPTH UINT32_C(8)
 
 typedef struct sagr_instance *sagr_instance_t;
 typedef struct sagr_queue *sagr_queue_t;
@@ -121,6 +132,9 @@ typedef struct sagr_memory *sagr_memory_t;
 typedef struct sagr_signal *sagr_signal_t;
 typedef struct sagr_generic_mapping *sagr_generic_mapping_t;
 typedef struct sagr_generic_kernarg *sagr_generic_kernarg_t;
+typedef struct sagr_managed_session *sagr_managed_session_t;
+typedef struct sagr_managed_buffer *sagr_managed_buffer_t;
+typedef struct sagr_managed_kernel *sagr_managed_kernel_t;
 
 /*
  * All public structures contain fixed-width fields only. Callers initialize
@@ -539,6 +553,85 @@ typedef struct sagr_generic_dispatch_completion {
   uint8_t reserved[16];
 } sagr_generic_dispatch_completion_t;
 
+/*
+ * Managed simulator objects are a synchronous, caller-serialized convenience
+ * layer over the public transport objects above.  Absolute compiler, gem5,
+ * configuration, and repository paths are bound into the installed runtime;
+ * no endpoint setup is required by a normal application.  The returned buffer
+ * VA is simulator-owned and may be packed into a kernel's raw kernarg bytes.
+ */
+typedef struct sagr_managed_session_options {
+  uint32_t struct_size;
+  uint32_t version;
+  uint32_t flags;
+  uint32_t queue_depth;
+  uint64_t startup_timeout_ns;
+  uint64_t operation_timeout_ns;
+  uint64_t run_timeout_ns;
+  uint8_t reserved[24];
+} sagr_managed_session_options_t;
+
+typedef struct sagr_managed_session_info {
+  uint32_t struct_size;
+  uint32_t version;
+  uint32_t flags;
+  uint32_t external_endpoint;
+  uint64_t connection_id;
+  uint64_t epoch;
+  uint32_t rank;
+  uint32_t world_size;
+  uint32_t child_pid;
+  uint32_t reserved0;
+  uint8_t daemon_uuid[SAGR_UUID_SIZE];
+  uint8_t job_uuid[SAGR_UUID_SIZE];
+  uint8_t reserved[16];
+} sagr_managed_session_info_t;
+
+typedef struct sagr_managed_kernel_info {
+  uint32_t struct_size;
+  uint32_t version;
+  uint32_t flags;
+  uint32_t kernel_index;
+  uint32_t kernarg_segment_size;
+  uint32_t kernarg_segment_align;
+  uint32_t group_segment_fixed_size;
+  uint32_t private_segment_fixed_size;
+  uint32_t max_flat_workgroup_size;
+  uint32_t wavefront_size;
+  uint32_t descriptor_preload_dwords;
+  uint32_t reserved0;
+  uint64_t object_id;
+  uint64_t object_generation;
+  uint64_t mapping_id;
+  uint64_t mapping_generation;
+  uint64_t entry_va;
+  uint64_t kernarg_va;
+  uint8_t image_sha256[32];
+  uint64_t connection_id;
+  uint64_t epoch;
+  uint8_t daemon_uuid[SAGR_UUID_SIZE];
+  uint8_t reserved[16];
+} sagr_managed_kernel_info_t;
+
+typedef struct sagr_managed_launch_options {
+  uint32_t struct_size;
+  uint32_t version;
+  uint32_t flags;
+  uint32_t grid_x;
+  uint32_t grid_y;
+  uint32_t grid_z;
+  uint32_t workgroup_x;
+  uint32_t workgroup_y;
+  uint32_t workgroup_z;
+  uint32_t num_warps;
+  uint32_t num_ctas;
+  uint32_t shared_memory_bytes;
+  uint32_t wavefront_size;
+  uint32_t launch_flags;
+  uint32_t reserved0;
+  uint8_t reserved[16];
+} sagr_managed_launch_options_t;
+
 SAGR_API uint32_t sagr_abi_version(void);
 SAGR_API const char *sagr_version_string(void);
 SAGR_API const char *sagr_status_string(sagr_status_t status);
@@ -567,6 +660,10 @@ SAGR_API sagr_status_t sagr_generic_kernarg_allocate_options_init(
     sagr_generic_kernarg_allocate_options_t *options, uint32_t options_size);
 SAGR_API sagr_status_t sagr_generic_submit_options_init(
     sagr_generic_submit_options_t *options, uint32_t options_size);
+SAGR_API sagr_status_t sagr_managed_session_options_init(
+    sagr_managed_session_options_t *options, uint32_t options_size);
+SAGR_API sagr_status_t sagr_managed_launch_options_init(
+    sagr_managed_launch_options_t *options, uint32_t options_size);
 
 /*
  * Open performs exactly one AF_UNIX SOCK_SEQPACKET handshake attempt. When no
@@ -695,6 +792,63 @@ SAGR_API sagr_status_t sagr_generic_unmap_object(
     sagr_generic_mapping_t *mapping,
     const sagr_queue_operation_options_t *operation_options,
     sagr_error_info_t *out_error, uint32_t error_size);
+
+/*
+ * Open starts one private gem5 process and one reusable transport connection.
+ * A test may opt into an existing endpoint with SAGR_GENERIC_BRIDGE_ENDPOINT;
+ * installed user paths do not require or export that variable.  get_instance
+ * returns a borrowed handle for compatibility layers such as libOpenCL; the
+ * session retains ownership and callers must not close the borrowed handle.
+ */
+SAGR_API sagr_status_t sagr_managed_session_open(
+    const sagr_managed_session_options_t *options,
+    sagr_managed_session_t *out_session,
+    sagr_managed_session_info_t *out_info, uint32_t info_size,
+    sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_managed_session_get_info(
+    sagr_managed_session_t session, sagr_managed_session_info_t *out_info,
+    uint32_t info_size);
+SAGR_API sagr_status_t sagr_managed_session_get_instance(
+    sagr_managed_session_t session, sagr_instance_t *out_instance);
+SAGR_API sagr_status_t sagr_managed_session_close(
+    sagr_managed_session_t *session, sagr_error_info_t *out_error,
+    uint32_t error_size);
+
+SAGR_API sagr_status_t sagr_managed_buffer_allocate(
+    sagr_managed_session_t session, uint64_t size_bytes,
+    uint64_t alignment_bytes, sagr_managed_buffer_t *out_buffer,
+    sagr_memory_info_t *out_info, uint32_t info_size,
+    sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_managed_buffer_get_info(
+    sagr_managed_buffer_t buffer, sagr_memory_info_t *out_info,
+    uint32_t info_size);
+SAGR_API sagr_status_t sagr_managed_buffer_copy_from_host(
+    sagr_managed_buffer_t buffer, uint64_t offset, const void *source,
+    uint64_t byte_count, sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_managed_buffer_copy_to_host(
+    sagr_managed_buffer_t buffer, uint64_t offset, void *destination,
+    uint64_t byte_count, sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_managed_buffer_free(
+    sagr_managed_buffer_t *buffer, sagr_error_info_t *out_error,
+    uint32_t error_size);
+
+SAGR_API sagr_status_t sagr_managed_kernel_load(
+    sagr_managed_session_t session, const void *image, uint64_t image_size,
+    const char *kernel_name, sagr_managed_kernel_t *out_kernel,
+    sagr_managed_kernel_info_t *out_info, uint32_t info_size,
+    sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_managed_kernel_get_info(
+    sagr_managed_kernel_t kernel, sagr_managed_kernel_info_t *out_info,
+    uint32_t info_size);
+SAGR_API sagr_status_t sagr_managed_kernel_launch(
+    sagr_managed_kernel_t kernel, const void *packed_kernarg,
+    uint64_t kernarg_size, const sagr_managed_launch_options_t *options,
+    sagr_generic_dispatch_completion_t *out_completion,
+    uint32_t completion_size, sagr_error_info_t *out_error,
+    uint32_t error_size);
+SAGR_API sagr_status_t sagr_managed_kernel_unload(
+    sagr_managed_kernel_t *kernel, sagr_error_info_t *out_error,
+    uint32_t error_size);
 
 /*
  * Memory operations are synchronous and caller-serialized with queue APIs on

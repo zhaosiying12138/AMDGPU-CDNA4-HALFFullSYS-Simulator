@@ -115,11 +115,16 @@ int main(void) {
   request.body.map.kernarg_segment_align = 8U;
   request.body.map.descriptor_preload_dwords = 12U;
   request.body.map.page_size = 4096U;
+  failures += round_trip_request(&info, &request, &decoded_request, 41U);
+  failures += expect(decoded_request.body.map.descriptor_preload_dwords == 12U,
+                     "Triton 12-DWORD preload round-trips exactly");
+  request.body.map.descriptor_preload_dwords =
+      SAGR_WIRE_GENERIC_MAX_PRELOAD_DWORDS + 1U;
   failures += expect(sagr_protocol_encode_generic_dispatch_request(
-                         &info, 41U, &request, frame, sizeof(frame),
-                         &frame_size) == SAGR_STATUS_NOT_SUPPORTED,
-                     "Triton 12-DWORD preload is an explicit unsupported boundary");
-  request.body.map.descriptor_preload_dwords = 0U;
+                         &info, 42U, &request, frame, sizeof(frame),
+                         &frame_size) == SAGR_STATUS_INVALID_ARGUMENT,
+                     "preload above 64 DWORD is rejected");
+  request.body.map.descriptor_preload_dwords = 12U;
   failures += round_trip_request(&info, &request, &decoded_request, 42U);
 
   /* Re-encode before mutating so this check is independent of the helper's

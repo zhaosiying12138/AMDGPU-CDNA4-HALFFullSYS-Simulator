@@ -319,10 +319,15 @@ static int handle_generic_request(
     response.mapped_end_va = UINT64_C(0x0000200000003000);
     response.descriptor_va = UINT64_C(0x0000200000000400);
     response.code_va = UINT64_C(0x0000200000001000);
-    response.entry_va = UINT64_C(0x0000200000001000);
+    response.entry_va = response.code_va +
+                        (request.body.map.descriptor_preload_dwords != 0U
+                             ? UINT64_C(256)
+                             : UINT64_C(0));
     response.mapped_bytes = UINT64_C(0x3000);
     response.kernel_index = request.kernel_index;
     response.segment_count = 3U;
+    response.descriptor_preload_dwords =
+        request.body.map.descriptor_preload_dwords;
     memcpy(response.image_sha256, request.image_sha256,
            sizeof(response.image_sha256));
   } else if (request.opcode == SAGR_WIRE_GENERIC_OPCODE_ALLOC_KERNARG) {
@@ -772,6 +777,7 @@ static int run_full_lifecycle(enum mock_mode mode, int capability_mode,
   map_options.object_generation = 9U;
   map_options.kernarg_segment_size = 48U;
   map_options.kernarg_segment_align = 8U;
+  map_options.descriptor_preload_dwords = 12U;
   for (index = 0; index < sizeof(map_options.image_sha256); ++index) {
     map_options.image_sha256[index] = (uint8_t)(index + 1U);
   }
@@ -783,8 +789,10 @@ static int run_full_lifecycle(enum mock_mode mode, int capability_mode,
                          (uint32_t)sizeof(error)) == SAGR_STATUS_SUCCESS,
                      "MAP creates an owner-bound mapping lease");
   failures += expect(mapping_info.mapping_id == UINT64_C(0x101) &&
-                         mapping_info.mapped_base_va != 0U,
-                     "MAP publishes daemon-issued mapping metadata");
+                         mapping_info.mapped_base_va != 0U &&
+                         mapping_info.descriptor_preload_dwords == 12U &&
+                         mapping_info.entry_va == mapping_info.code_va + 256U,
+                     "MAP publishes preload-aware daemon mapping metadata");
 
   (void)sagr_generic_kernarg_allocate_options_init(
       &alloc_options, (uint32_t)sizeof(alloc_options));
