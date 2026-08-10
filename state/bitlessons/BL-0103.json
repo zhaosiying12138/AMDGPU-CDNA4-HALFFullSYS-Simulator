@@ -1,0 +1,27 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_execution_adapter.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc",
+    "projects/self-amdgpu-runtime/tests/generic_dispatch_v2_endpoint_test.c",
+    "protocol/host-transport-v2.json",
+    "docs/host-transport-v2.md"
+  ],
+  "checkpoint_id": "CP-0026",
+  "conclusion": "The daemon trace is authoritative for native execution, private signal transition, and post-ACK quarantine; the runtime client is authoritative only for completion and bytes delivered to it. A normal completed disconnect, pre-SUBMIT lease cleanup, and post-ACK in-flight quarantine are distinct outcomes.",
+  "confidence": "high",
+  "decision": "Keep wire signal_value_bits=1 and signal_after_observed=false because v2.0 has no wire after-value. Record native private signal 1->0 only in the daemon trace. Accept positive completion only with type 20, three D2H oracles, UNMAP, and session cleanup; accept the negative only when the daemon emits quarantine_cleanup with no type 20/D2H/UNMAP and releases queue, pins, adapter, and owner resources.",
+  "evidence_ids": ["EV-0060", "EV-0061"],
+  "id": "BL-0103",
+  "invalidated_assumptions": [
+    "The client negative JSON alone proves remote quarantine cleanup.",
+    "The native private 1->0 signal transition is a wire post-signal field.",
+    "A normal completed-session EOF is the same as an in-flight post-ACK disconnect.",
+    "A daemon output CRC is equivalent to bytes actually delivered to the client without D2H verification."
+  ],
+  "observation": "The positive trace reaches retired, durable type 20, and session complete, then performs ordinary cleanup. The separate disconnect-after-ACK client receives no wait/type 20/D2H/UNMAP, while the daemon emits exactly one quarantine_cleanup record with owner_disconnected=true, owner_quarantined=true, type20_durable=false, native_queue_retired=true, external_pins_released=true, adapter_released=true, and cleanup_complete=true.",
+  "question_or_symptom": "How are post-ACK disconnect cleanup and completion-signal observations proven without confusing client, wire, and daemon state?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

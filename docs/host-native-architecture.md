@@ -128,10 +128,32 @@ control lifecycle. The wire alignment remains the kernel ABI contract while
 followed by a type-20 bookkeeping retirement with nonzero, nondecreasing ticks;
 disconnect cleanup is verified by generation-advanced slot/VA reuse. Direct
 remote counters are not exposed, although the focused native test reaches zero
-resources. GPUDispatcher, ComputeUnit, kernel execution, output correctness,
-launcher, compiler/JIT, and fallback remain false. CP-0026 /
-`P5-TRITON-VECADD-05-GPU-EXECUTION` is the next gate; Triton preload/launcher
-support remains later.
+resources. CP-0025 remains a control-only boundary; its bit-8 completion does
+not imply GPU execution.
+
+CP-0026 adds a separate bit-9 execution extension. Runtime word 0 bit 9 maps to
+wire byte 1 bit 1 and is selectable only with bit 8 plus topology, queue,
+memory, signal, and code-object dependencies. In the live `VEGA_X86` bridge
+configuration, the exact 5,528-byte gfx950 `gpuReadWrite` image (SHA-256
+`7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56`) has zero
+descriptor preload and reaches the reused `GPUDispatcher`, `Shader`, and
+`ComputeUnit`: four 256-item workgroups, sixteen wave64 waves, 304 instruction
+starts, exact A/B/C output, durable type 20, duplicate D2H verification, and
+UNMAP. The daemon JSONL trace is fsynced and is the authority for dispatch/CU
+execution and post-ACK quarantine; endpoint JSON is only the authority for
+client-delivered bytes. The positive trace has retired/type-20/session-complete
+events; the negative post-ACK disconnect trace has only quarantine cleanup and
+no type 20, D2H, UNMAP, or client-output claim.
+
+The wire `signal_value_bits` remains expected `1` and
+`signal_after_observed=false`; trace `signal_before=1` and `signal_after=0`
+refer to the private native AQL completion signal. This is one locked fixture
+and one `VEGA_X86` bridge route, not generic gfx950/arbitrary HSACO or a
+standalone no-x86 daemon claim. `Gem5IsaSupported=false` and
+`LockedGpuReadWriteExecutionSupported=true` remain intentionally distinct.
+The 5,408-byte Triton image with 12-DWORD preload, normal launcher,
+compiler/JIT, fallback, performance, Triton E2E, and Qwen remain false. The
+next planned gate is `P5-PROFILE-01`, to be allocated as CP-0027 when begun.
 
 ## Non-goals
 

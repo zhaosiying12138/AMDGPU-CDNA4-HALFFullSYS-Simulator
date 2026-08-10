@@ -1,0 +1,1933 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0061",
+  "checkpoint_id": "CP-0026",
+  "type": "cp26-root-umbrella",
+  "claim": "EV-0061 is the final CP26 umbrella over committed children. It recursively binds frozen EV-0060, clean gem5/runtime commits and exact seven-trailer identities, the prepare journal and 14-path coordinator allowlist, canonical VEGA_X86/no-x86/runtime binaries, focused regressions, the three-event positive daemon execution trace, and the one-event post-ACK quarantine trace. The locked zero-preload gpuReadWrite case reaches GPUDispatcher/CU for four workgroups, sixteen waves, 304 instruction starts, the exact A/B/C output oracle and CRC32C 0x6f67026f, while launcher/compiler/JIT/Triton/fallback/Qwen remain false.",
+  "includes": {
+    "EV-0060": "1325d31271c164dcf62cd254f3ca9e99c1582e3572ae370a92370d70c5c84657"
+  },
+  "command_argv": [
+    [
+      "python3",
+      "artifacts/evidence/CP-0026/build_ev0061.py",
+      "ev0060"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0026/build_ev0061.py",
+      "children"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0026/build_ev0061.py",
+      "journal"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0026/build_ev0061.py",
+      "binary-live"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0026/build_ev0061.py",
+      "focused"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0026/build_ev0061.py",
+      "postcommit"
+    ]
+  ],
+  "command_results": [
+    {
+      "id": "recursive-ev0060",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0026/build_ev0061.py",
+        "ev0060"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T08:00:17+00:00",
+      "ended_at": "2026-08-10T08:00:17+00:00",
+      "exit_code": 0,
+      "result": "Byte-exact EV-0060 passes policy, all retained external hashes, and command-capture semantic validation.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0026/final/recursive-ev0060.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "176581fd5b751988a978b044ec14b1671b94304cb6382f6f658809fcb7c9224b",
+        "size": 640,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0026/final/recursive-ev0060.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f61e8e7bc7eb57778c8d69ba8862f5e0ba4513e65ab613669967b221a0098830",
+        "size": 320,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0026/final/recursive-ev0060.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "final-child-identities",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0026/build_ev0061.py",
+        "children"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T08:00:17+00:00",
+      "ended_at": "2026-08-10T08:00:17+00:00",
+      "exit_code": 0,
+      "result": "Both CP26 children are clean at exact parent/head/tree identities, exact 26/9 path sets, and exact seven-trailer EV-0060 bindings.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0026/final/final-child-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "aee214ec328858aba28e5e7be5f581bdd4af0c9b1cf544a5c4c3e1ebae0a9dfd",
+        "size": 655,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0026/final/final-child-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "37d3a5d917c59872807650b651aa37b343ea683896144f99205f2495f661d640",
+        "size": 4060,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0026/final/final-child-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "final-transaction-journal",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0026/build_ev0061.py",
+        "journal"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T08:00:17+00:00",
+      "ended_at": "2026-08-10T08:00:17+00:00",
+      "exit_code": 0,
+      "result": "The active prepare journal binds both final children and the exact 14-path root allowlist with empty root staging.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0026/final/final-transaction-journal.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "796fafde99bbdcce6532ba6fc157888225ef437bcff4964459dcacab6514978b",
+        "size": 660,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0026/final/final-transaction-journal.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f132a942ec20f8715190783513ee2d9ff9d5f837e963d8c6988e31e7bbbc4101",
+        "size": 1150,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0026/final/final-transaction-journal.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "final-binary-live-identities",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0026/build_ev0061.py",
+        "binary-live"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T08:00:17+00:00",
+      "ended_at": "2026-08-10T08:00:17+00:00",
+      "exit_code": 0,
+      "result": "Canonical binaries and exact positive/negative trace identities are stable and the daemon traces retain their execution/quarantine authority boundaries.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0026/final/final-binary-live-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9b13df6c6a0693a2f3f973d4078fa8c67463c6a6c9030c693bbe785faa80633f",
+        "size": 670,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0026/final/final-binary-live-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f68d82b51bc7b848dc99c16a1d48210d6bb0048a7207eb8129caf5d000434dee",
+        "size": 1368,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0026/final/final-binary-live-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "final-focused-capture-summary",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0026/build_ev0061.py",
+        "focused"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T08:00:17+00:00",
+      "ended_at": "2026-08-10T08:00:17+00:00",
+      "exit_code": 0,
+      "result": "EV-0060 focused captures retain all required pass counts, second-submit/quarantine gates, native zero resources, and runtime 20-test result.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0026/final/final-focused-capture-summary.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "89590d595e0f8829b67773a45365ebdfbfe27bc404ae59e65c4495d4c448a4a3",
+        "size": 667,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0026/final/final-focused-capture-summary.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "27dd7d0411bc5ee0eb17cdf6b2890b78715d969668d231dded487d275cc7fa66",
+        "size": 790,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0026/final/final-focused-capture-summary.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "postcommit-aggregate",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0026/build_ev0061.py",
+        "postcommit"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T08:00:17+00:00",
+      "ended_at": "2026-08-10T08:00:17+00:00",
+      "exit_code": 0,
+      "result": "The retained post-commit aggregate validates clean child identities, all focused targets, GCC/Clang CTest, no-x86 B2, and fresh positive/disconnect live sessions with stable binaries.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0026/final/postcommit-aggregate.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "aafb6d0f0c1f64540ca417f1669f5083028b48bbb2e00991952c15efb62dbe6e",
+        "size": 654,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0026/final/postcommit-aggregate.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "30afcda3f8fd2c00d78ebc5d906dc8d0334d1c14e0c45af332ae38d1e43d7481",
+        "size": 45646,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0026/final/postcommit-aggregate.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "started_at": "2026-08-10T08:00:17+00:00",
+  "ended_at": "2026-08-10T08:00:17+00:00",
+  "exit_code": 0,
+  "environment_fingerprint": {
+    "root_anchor_head": "d807d87f9d549b693dcca85decc1c39ea42bdc25",
+    "root_anchor_tree": "77dde98688fe0d9d649f99e600a8f66e1dba4c4d",
+    "transaction_phase": "prepare",
+    "transaction_journal_sha256": "e3c8b8ed37fe8ae1761eb7a1bb4d21e656877200b76118cf71215f243915ff81",
+    "root_allowlist_count": 14,
+    "root_staging_empty": true,
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "child_evidence_manifest_sha256": "1325d31271c164dcf62cd254f3ca9e99c1582e3572ae370a92370d70c5c84657",
+    "child_evidence_policy": true,
+    "child_evidence_external_artifacts": 105,
+    "gem5_head": "a4b80d76ad1a9bf89e0483984953583048e31122",
+    "gem5_tree": "6a58df7137f41b0a824b582508ae25dd73ad18c7",
+    "gem5_parent": "bc63345542950293182bf951b61f26ede32e6974",
+    "gem5_clean": true,
+    "gem5_changed_paths": 26,
+    "gem5_precommit_tracked_diff_sha256": "02624a19c063b107c5c3463a2e87f0a8be231cfe5fdd388afc871e4bdfe62e9f",
+    "gem5_commit_diff_sha256": "f3711e0c5eb688f7cb98424e71a1e272a98e96463154224ea9a4a2ab5eb709c7",
+    "gem5_new_paths_closed_by_commit": [
+      "src/dev/amdgpu/host_gpu_native_dispatch_token_mux.cc",
+      "src/dev/amdgpu/host_gpu_native_dispatch_token_mux.hh",
+      "src/dev/amdgpu/host_gpu_native_dispatch_token_mux.test.cc",
+      "src/dev/amdgpu/host_gpu_native_execution_adapter.cc",
+      "src/dev/amdgpu/host_gpu_native_execution_adapter.hh"
+    ],
+    "runtime_head": "d3dfa38f2bf6aa68a319f81652af1649df668183",
+    "runtime_tree": "e69f7bed68d35b49b3c462c10022d2e515acab75",
+    "runtime_parent": "24ce696911e28e4afaeabd8dbdf266b7097aed06",
+    "runtime_clean": true,
+    "runtime_changed_paths": 9,
+    "runtime_precommit_diff_sha256": "2d26cc856eb5c36430b0da10b0a48bf9cf2386dc4eff24862bcc3da426160579",
+    "runtime_commit_diff_sha256": "2d26cc856eb5c36430b0da10b0a48bf9cf2386dc4eff24862bcc3da426160579",
+    "gem5_binary_sha256": "5286837461a1be23faf31a076b4f3a5e6598e5119c9e61e78107b2511ca95a7d",
+    "gem5_build_id": "fc9cf5874345e0d75b77db8daca498969bc541d7",
+    "b2_binary_sha256": "eb0501f29141a3c995159f3b8fdf41d9496439be8b6eaa4057b84f49c9d040c1",
+    "b2_build_id": "e1e56b40698fbc75a8d86a6cc26a3021c9a079fc",
+    "runtime_endpoint_sha256": "08e9fa3d05c5f992256f8903596114d0c7cbb1790fc03060a6941f9e2b55b7eb",
+    "zero_preload_hsaco_sha256": "7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56",
+    "zero_preload_hsaco_size": 5528,
+    "positive_trace_sha256": "6852359e83fce634fed36a1ce730e28c0725e7e5698c708ea324efbec8fba79a",
+    "positive_trace_events": 3,
+    "negative_trace_sha256": "9a0e5acfe62822c071129c1e700f5f6a5c55a38f11e04cb61a17cefe2e6c89fb",
+    "negative_trace_events": 1,
+    "control_capability_bit": 8,
+    "execution_capability_bit": 9,
+    "bit8_selected": true,
+    "bit9_selected": true,
+    "dependencies_selected": true,
+    "kernarg_offset": 64,
+    "kernarg_manifest_bytes": 280,
+    "grid_size_x": 1024,
+    "workgroup_size_x": 256,
+    "workgroup_count": 4,
+    "wave_count": 16,
+    "instructions_started": 304,
+    "scalar_reads": 32,
+    "global_reads": 1024,
+    "global_writes": 2048,
+    "store_events": 32,
+    "store_lanes": 2048,
+    "output_crc32c": 1869021807,
+    "signal_wire_expected_bits": 1,
+    "signal_native_private_before": 1,
+    "signal_native_private_after": 0,
+    "signal_after_observed": false,
+    "gpu_dispatcher": true,
+    "compute_unit": true,
+    "kernel_executed": true,
+    "execution": true,
+    "output_correctness": true,
+    "post_ack_disconnect_quarantined": true,
+    "negative_type20": false,
+    "launcher": false,
+    "compiler": false,
+    "jit": false,
+    "triton": false,
+    "qwen": false,
+    "cpu_fallback": false,
+    "nvidia_fallback": false,
+    "fallback": false,
+    "missing_listener_diagnostic_passing": false,
+    "postcommit_rebuild": false,
+    "postcommit_focused_targets": 12,
+    "postcommit_runtime_gcc_ctest": "20 total; 19 passed; one expected endpoint skip; zero failed",
+    "postcommit_runtime_clang_ctest": "20 total; 19 passed; one expected endpoint skip; zero failed",
+    "postcommit_b2_exit_code": 0,
+    "postcommit_positive_trace_sha256": "a51d30d700eecf0ed9df0d09291cd1772614fdf46959afae929eb610ad5fc46d",
+    "postcommit_negative_trace_sha256": "f69886eb54fb03b3f4d4eaa603cdbef70984c288d46efd646dc9a848c6f1a159",
+    "postcommit_no_build_processes": true
+  },
+  "limitations": [
+    "The accepted execution proof is fixture-scoped to the exact 5528-byte zero-preload gfx950 gpuReadWrite image. The retained 12-DWORD Triton vecadd preload and normal Triton launcher remain fail-closed and unclaimed.",
+    "Wire signal_value_bits remains the expected value 1 and signal_after_observed remains false. The 1->0 transition in the daemon trace is the private native AQL completion signal, not a wire after-field.",
+    "The positive client JSON is not authority for GPUDispatcher/CU execution and the negative client JSON is not authority for cleanup. Only the retained daemon traces establish execution/output and quarantine cleanup respectively.",
+    "The post-ACK negative sample intentionally has no type20, D2H, UNMAP, or client output claim; it proves quarantine cleanup only.",
+    "EV-0060's pre-commit git diff artifact covers tracked modifications; its inventory also named five then-untracked gem5 files. EV-0061 closes those bytes through the clean final gem5 tree and complete parent-to-head binary diff.",
+    "No post-commit SCons rebuild was performed. The canonical binaries retain the exact hashes used for the focused/live captures, and the clean final commits are bound to the frozen source inventory and complete commit diffs.",
+    "The post-commit producer retained optional jq validation logs with exit 127 because jq is unavailable; EV-0061 does not count those logs as passing evidence. The retained aggregate was independently validated with Python against the daemon JSON, endpoint JSON, CTest, focused outputs, B2 output, and zero-build-process check.",
+    "The earlier missing-listener startup capture remains a non-passing diagnostic and is excluded from acceptance claims.",
+    "No compiler/JIT transport, normal launcher, performance claim, arbitrary gfx950 execution, Triton end-to-end, or Qwen inference is exercised."
+  ],
+  "redactions": [],
+  "result": "CP26 closes the locked generic daemon GPU execution/output gate and post-ACK quarantine boundary over clean child commits, while retaining exact fixture, signal, authority, launcher/compiler/JIT/Triton/fallback/Qwen limits.",
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0026/build_ev0061.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d933189401606de700f68b1d1e79c956f8c379ec82abe83d673e924918e7fc6c",
+      "size": 33143,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/EV-0060-draft.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1325d31271c164dcf62cd254f3ca9e99c1582e3572ae370a92370d70c5c84657",
+      "size": 55746,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/final/transaction-journal.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3c8b8ed37fe8ae1761eb7a1bb4d21e656877200b76118cf71215f243915ff81",
+      "size": 1944,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/final/gem5-commit-diff.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "f3711e0c5eb688f7cb98424e71a1e272a98e96463154224ea9a4a2ab5eb709c7",
+      "size": 155377,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/final/self-amdgpu-runtime-commit-diff.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "2d26cc856eb5c36430b0da10b0a48bf9cf2386dc4eff24862bcc3da426160579",
+      "size": 56042,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/child-and-binary-identities.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "931cfa227eb20930cb972a80838b2cf003ef291b9755e23de701c96eab74ad7e",
+      "size": 7134,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/binary-identities.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "3ebd0d9266315bbec22b00df657fe2a01d845282d84db3f17402505e025f15b8",
+      "size": 973,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/gem5-identity.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "f3fe51cce9193f0e3d76c68eb2e46ed2f0c2102843e312f4c7ace65eda4025bd",
+      "size": 926,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/runtime-identity.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d5b9ae5d619ab91f638a9d265d6c90232bd586d42d48d9f3f7741df7d04aca3b",
+      "size": 654,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/host-native-b2.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b8054d96dad232e7bb27c761ee1505fd92b6e8ddaa4bde5eba1b903f1ee5f38e",
+      "size": 2831,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/no-build-processes.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "520e687ba6baa492c9fb4ec9e6152f91fbf33915b3ffd1150578e46f15c3ce6d",
+      "size": 106,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/runtime-ctest-gcc.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "51c36ddc3307924aff1d710e3a4f23173cc4e86f2e5d848a9e7027e37474a78d",
+      "size": 3218,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/runtime-ctest-clang.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "fbacb2800f505b05a65b42758ffbc908a3ee0d1ff6366b3a0929b24f501cf06a",
+      "size": 3218,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/postcommit-aggregate.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "dd580c1acf688a4981f9bab39cadd6a4b8b66c8e3ad6c47056dc7d9800e6e2ae",
+      "size": 4495,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/postcommit-file-sha256.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "0a4272f473e400198f5e47a6bcb03b90d54721e58680f514f025140142837bd3",
+      "size": 6491,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/positive-trace-node-validation.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "4013f3ba4bc7cbd641f370bbd6b72f16e610df279c661731aa272ed41d479314",
+      "size": 2684,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/negative-trace-node-validation.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b3bf116085a0ffc1d464e1d800c32a3ae8d3e19b87675afc95d87009a3000b65",
+      "size": 2309,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/positive-endpoint-node-validation.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "cecc338312832f3e41f3f52273f0184ccf93212498757b3a0fb3b2d256e12270",
+      "size": 1700,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/negative-endpoint-node-validation.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "f97e6d596e2046d47902b2e160244003b5405096db1e5307f5a6bc67fd1e9f8b",
+      "size": 1728,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/focused-codeobj.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "2b9069ad3e36474ed465b061a16d1c58c1b76f62445bcb03d339744002ad71a9",
+      "size": 2654,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/focused-dispatch.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d9f797bf9dbf09d0f4dec7dc73aa6531ad2deee70c0f5bef44c5f3ccddc74210",
+      "size": 2561,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/focused-kmt.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "cab5b143ec506689e2d5360592a9aad853ec50735acaa7cd2606514b75ca319a",
+      "size": 1164,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/focused-memory.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d30ce54480a2687d60c64fddf1a86bc2c91b764c4d1216e9f63e5b8a352b9b6e",
+      "size": 1718,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/focused-native_fixture.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "554b3bba06da288a0ab4e25282a6f503763627c1045f696a256a43bf4206a1b2",
+      "size": 574,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/focused-native_state.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7c6d97e27c6fcde1ab4bc34a69c99e44bfc32c532c024bb3a2d491a007bdce71",
+      "size": 621,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/focused-protocol.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "47a201ea41f365ab22d85b7957e4c673cdbfcd6c0788dd08a0b80c559c05bbc8",
+      "size": 7282,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/focused-queue.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e0301f41b314d09b56cd3cdc27c4eb25364a24e10a34022bc1e688d3c0e53ee9",
+      "size": 2387,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/focused-route.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b5e1b4ec8697b0ca57178f64cdbb3044e62b891dc88e056421a111595f8e757f",
+      "size": 525,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/focused-signal.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b68e4ef4260b0af383922782be2c4d934e7be0bf8824f31ca4fdfbcad18b72a3",
+      "size": 2530,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/focused-socket.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "56e7622625eec68a8f0e1940dd540921f5c0325ccf0a7477e6fd3a5d2d46a9ba",
+      "size": 4538,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/focused-tokenmux.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "96cda20fafe0b1cb3baea670e33be6d69bf3e5545a5502db5a8d7471b8c9a3c2",
+      "size": 793,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/bridge.sock.lock",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/dispatch-trace.jsonl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a51d30d700eecf0ed9df0d09291cd1772614fdf46959afae929eb610ad5fc46d",
+      "size": 4638,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/endpoint.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/endpoint.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "21ad57edf35325039289785915a93d42b42e0ae3dcf6e7e088b07f1493a0bae6",
+      "size": 1571,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/gem5.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a30e06bf494d5b73d5e19df8533a9eb8a52ec57df5f170906f504affa9d8a188",
+      "size": 1355,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/gem5.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "8e2e48ee15f64e475302252b484eb04ea06085335aaf4fab51059d885429cca1",
+      "size": 1202,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/citations.bib",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "bc52164d0ff6cb700ecf9122a13675f097db019b8647cb4a5e7895083c77c4c0",
+      "size": 5784,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/config.ini",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "01b4583c8177b08ca6277e943fc9bea1346cfd3b6348cc778b97da2678c9c466",
+      "size": 128009,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/config.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "342c0023f0c7df74e4c7a80c1f78705f1526591929da958b7f6061bf9ec48e1e",
+      "size": 349592,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/proc/cpuinfo",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1686b2ad9d17b13b7f77b1564ea7f86c25c4081e68611c7a373346abe729cb05",
+      "size": 395,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/proc/stat",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ca822f4829616f1a8d7024b8704d40c5e45dc8aad8a4c7e70e035dfaad5a8123",
+      "size": 37,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/level",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/number_of_sets",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "f652a122f7ee72f54bbcf3d8dfeaf7f7f070d2eb7b93d8ac79633b010c513393",
+      "size": 9,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/physical_line_partition",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/shared_cpu_list",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "83b97b859aa5f81b2f0f86ba2a675efaf515ad2d5e2b8652cf2de7e1c2267350",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/shared_cpu_map",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "50a9b9163ebb829080aecf9a7a5990715de9fd63d48e3ea3734f6bd77aa3df07",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d4e98df3fab5c7f0a5f47637f056496d4cd67e7d15189884a4924e8e743e5c27",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/type",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "112f3ccb1b36a86a2b35cdf18599408a58b599e19f7073241d78ee588eb1e9fd",
+      "size": 11,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/coherency_line_size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/level",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/number_of_sets",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ceac94de2b46f49b343d8f7e393656985195bdc7931075fe1d8e45a340b05480",
+      "size": 9,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/physical_line_partition",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/shared_cpu_list",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/shared_cpu_map",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ae5ce162888ee3ebe974976cac5ab94a3f55049f8515884883d579fb3fa378d2",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "380bb937c88e2a724d1e494d403c12f324495629375b5220c11190fde32c0b18",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/type",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "cec3a9b89b2e391393d0f68e4bc12a9fa6cf358b3cdf79496dc442d52b8dd528",
+      "size": 4,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/coherency_line_size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/level",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/number_of_sets",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7241e000622d65cdac5d5469671647c131a23f5fe1cf79f16ac2821dc38739af",
+      "size": 10,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/physical_line_partition",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/shared_cpu_list",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "83b97b859aa5f81b2f0f86ba2a675efaf515ad2d5e2b8652cf2de7e1c2267350",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/shared_cpu_map",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "50a9b9163ebb829080aecf9a7a5990715de9fd63d48e3ea3734f6bd77aa3df07",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "2518cb5c6d5a375cb3ab507e073bad27141400415a76845f1ef5ade67ad96a62",
+      "size": 5,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/type",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ad6a950b4620d66f28c903434fae64d76b36df67164ecfbfd60cadd365278164",
+      "size": 7,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/coherency_line_size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/level",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/number_of_sets",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a9a2f42cf680208a86e32966280aa251634dde3f5a333aa689b317022149ad7d",
+      "size": 10,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/physical_line_partition",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/shared_cpu_list",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/shared_cpu_map",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ae5ce162888ee3ebe974976cac5ab94a3f55049f8515884883d579fb3fa378d2",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "048a2515b76b3bac069a57b055e1e765de9271b04174b46c85dbdfdc4a5233d7",
+      "size": 6,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/type",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ad6a950b4620d66f28c903434fae64d76b36df67164ecfbfd60cadd365278164",
+      "size": 7,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/online",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/topology/core_id",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/topology/core_siblings",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ae5ce162888ee3ebe974976cac5ab94a3f55049f8515884883d579fb3fa378d2",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/topology/physical_package_id",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu0/topology/thread_siblings",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7e071fd9b023ed8f18458a73613a0834f6220bd5cc50357ba3493c6040a9ea8c",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/coherency_line_size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/level",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/number_of_sets",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "f652a122f7ee72f54bbcf3d8dfeaf7f7f070d2eb7b93d8ac79633b010c513393",
+      "size": 9,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/physical_line_partition",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/shared_cpu_list",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "83b97b859aa5f81b2f0f86ba2a675efaf515ad2d5e2b8652cf2de7e1c2267350",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/shared_cpu_map",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "50a9b9163ebb829080aecf9a7a5990715de9fd63d48e3ea3734f6bd77aa3df07",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d4e98df3fab5c7f0a5f47637f056496d4cd67e7d15189884a4924e8e743e5c27",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/type",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "112f3ccb1b36a86a2b35cdf18599408a58b599e19f7073241d78ee588eb1e9fd",
+      "size": 11,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/coherency_line_size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/level",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/number_of_sets",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ceac94de2b46f49b343d8f7e393656985195bdc7931075fe1d8e45a340b05480",
+      "size": 9,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/physical_line_partition",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/shared_cpu_list",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/shared_cpu_map",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5c6bed0d94b9be8afbc5c8cac1e9d4be03f556917c2611ec56f4e6f341ef60d9",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "380bb937c88e2a724d1e494d403c12f324495629375b5220c11190fde32c0b18",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/type",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "cec3a9b89b2e391393d0f68e4bc12a9fa6cf358b3cdf79496dc442d52b8dd528",
+      "size": 4,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/coherency_line_size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/level",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/number_of_sets",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7241e000622d65cdac5d5469671647c131a23f5fe1cf79f16ac2821dc38739af",
+      "size": 10,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/physical_line_partition",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/shared_cpu_list",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "83b97b859aa5f81b2f0f86ba2a675efaf515ad2d5e2b8652cf2de7e1c2267350",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/shared_cpu_map",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "50a9b9163ebb829080aecf9a7a5990715de9fd63d48e3ea3734f6bd77aa3df07",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "2518cb5c6d5a375cb3ab507e073bad27141400415a76845f1ef5ade67ad96a62",
+      "size": 5,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/type",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ad6a950b4620d66f28c903434fae64d76b36df67164ecfbfd60cadd365278164",
+      "size": 7,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/online",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/topology/core_id",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/topology/core_siblings",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ae5ce162888ee3ebe974976cac5ab94a3f55049f8515884883d579fb3fa378d2",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/topology/physical_package_id",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/cpu1/topology/thread_siblings",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7e071fd9b023ed8f18458a73613a0834f6220bd5cc50357ba3493c6040a9ea8c",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/online",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "22841ea360fc3c3676a38502aa9a90a1ae1fbdac1d937746358efe559d349b6f",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/fs/sys/devices/system/cpu/possible",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "22841ea360fc3c3676a38502aa9a90a1ae1fbdac1d937746358efe559d349b6f",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/m5out/stats.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "45a2d1745cc6e9e387dd8a9344a137625e82abc0bf8bc89282de7ca97569a0ef",
+      "size": 1073834,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-positive-pass/orchestration.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1168d3fa206b4d6337c132d5232045b04d3f041ebc3b34866a2b0b32d7a1bef6",
+      "size": 4162,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/bridge.sock.lock",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/dispatch-trace.jsonl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "f69886eb54fb03b3f4d4eaa603cdbef70984c288d46efd646dc9a848c6f1a159",
+      "size": 1551,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/endpoint.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/endpoint.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d1f908c578afbdea994bfb78bcfd8fae3ebd82deff4589837f670e10ecd0f904",
+      "size": 1127,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/gem5.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e9469926c4fe2e40e1a3c24b21b320f29e51839cfbde11b851463c2ae9840728",
+      "size": 1357,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/gem5.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "8ea2f5d015164655ccc896f60d0820e9315d00b5feaa81e2b4eb8735c09d6a7d",
+      "size": 1209,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/citations.bib",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "bc52164d0ff6cb700ecf9122a13675f097db019b8647cb4a5e7895083c77c4c0",
+      "size": 5784,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/config.ini",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "801d7eec052e12f1af1d2848fa1b1f9b20807c45e7f95f7ec08316aaf6a380e3",
+      "size": 128019,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/config.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e79c0abb15a3c1b8d9e91818104a4474ede1059b406ffd7a12389011c95bfbe9",
+      "size": 349602,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/proc/cpuinfo",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1686b2ad9d17b13b7f77b1564ea7f86c25c4081e68611c7a373346abe729cb05",
+      "size": 395,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/proc/stat",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ca822f4829616f1a8d7024b8704d40c5e45dc8aad8a4c7e70e035dfaad5a8123",
+      "size": 37,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/level",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/number_of_sets",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "f652a122f7ee72f54bbcf3d8dfeaf7f7f070d2eb7b93d8ac79633b010c513393",
+      "size": 9,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/physical_line_partition",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/shared_cpu_list",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "83b97b859aa5f81b2f0f86ba2a675efaf515ad2d5e2b8652cf2de7e1c2267350",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/shared_cpu_map",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "50a9b9163ebb829080aecf9a7a5990715de9fd63d48e3ea3734f6bd77aa3df07",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d4e98df3fab5c7f0a5f47637f056496d4cd67e7d15189884a4924e8e743e5c27",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index0/type",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "112f3ccb1b36a86a2b35cdf18599408a58b599e19f7073241d78ee588eb1e9fd",
+      "size": 11,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/coherency_line_size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/level",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/number_of_sets",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ceac94de2b46f49b343d8f7e393656985195bdc7931075fe1d8e45a340b05480",
+      "size": 9,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/physical_line_partition",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/shared_cpu_list",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/shared_cpu_map",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ae5ce162888ee3ebe974976cac5ab94a3f55049f8515884883d579fb3fa378d2",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "380bb937c88e2a724d1e494d403c12f324495629375b5220c11190fde32c0b18",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index1/type",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "cec3a9b89b2e391393d0f68e4bc12a9fa6cf358b3cdf79496dc442d52b8dd528",
+      "size": 4,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/coherency_line_size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/level",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/number_of_sets",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7241e000622d65cdac5d5469671647c131a23f5fe1cf79f16ac2821dc38739af",
+      "size": 10,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/physical_line_partition",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/shared_cpu_list",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "83b97b859aa5f81b2f0f86ba2a675efaf515ad2d5e2b8652cf2de7e1c2267350",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/shared_cpu_map",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "50a9b9163ebb829080aecf9a7a5990715de9fd63d48e3ea3734f6bd77aa3df07",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "2518cb5c6d5a375cb3ab507e073bad27141400415a76845f1ef5ade67ad96a62",
+      "size": 5,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index2/type",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ad6a950b4620d66f28c903434fae64d76b36df67164ecfbfd60cadd365278164",
+      "size": 7,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/coherency_line_size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/level",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/number_of_sets",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a9a2f42cf680208a86e32966280aa251634dde3f5a333aa689b317022149ad7d",
+      "size": 10,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/physical_line_partition",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/shared_cpu_list",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/shared_cpu_map",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ae5ce162888ee3ebe974976cac5ab94a3f55049f8515884883d579fb3fa378d2",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "048a2515b76b3bac069a57b055e1e765de9271b04174b46c85dbdfdc4a5233d7",
+      "size": 6,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/cache/index3/type",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ad6a950b4620d66f28c903434fae64d76b36df67164ecfbfd60cadd365278164",
+      "size": 7,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/online",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/topology/core_id",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/topology/core_siblings",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ae5ce162888ee3ebe974976cac5ab94a3f55049f8515884883d579fb3fa378d2",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/topology/physical_package_id",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu0/topology/thread_siblings",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7e071fd9b023ed8f18458a73613a0834f6220bd5cc50357ba3493c6040a9ea8c",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/coherency_line_size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/level",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/number_of_sets",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "f652a122f7ee72f54bbcf3d8dfeaf7f7f070d2eb7b93d8ac79633b010c513393",
+      "size": 9,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/physical_line_partition",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/shared_cpu_list",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "83b97b859aa5f81b2f0f86ba2a675efaf515ad2d5e2b8652cf2de7e1c2267350",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/shared_cpu_map",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "50a9b9163ebb829080aecf9a7a5990715de9fd63d48e3ea3734f6bd77aa3df07",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d4e98df3fab5c7f0a5f47637f056496d4cd67e7d15189884a4924e8e743e5c27",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index0/type",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "112f3ccb1b36a86a2b35cdf18599408a58b599e19f7073241d78ee588eb1e9fd",
+      "size": 11,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/coherency_line_size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/level",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/number_of_sets",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ceac94de2b46f49b343d8f7e393656985195bdc7931075fe1d8e45a340b05480",
+      "size": 9,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/physical_line_partition",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/shared_cpu_list",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/shared_cpu_map",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5c6bed0d94b9be8afbc5c8cac1e9d4be03f556917c2611ec56f4e6f341ef60d9",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "380bb937c88e2a724d1e494d403c12f324495629375b5220c11190fde32c0b18",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index1/type",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "cec3a9b89b2e391393d0f68e4bc12a9fa6cf358b3cdf79496dc442d52b8dd528",
+      "size": 4,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/coherency_line_size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a68b412c4282555f15546cf6e1fc42893b7e07f271557ceb021821098dd66c1b",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/level",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/number_of_sets",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7241e000622d65cdac5d5469671647c131a23f5fe1cf79f16ac2821dc38739af",
+      "size": 10,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/physical_line_partition",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/shared_cpu_list",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "83b97b859aa5f81b2f0f86ba2a675efaf515ad2d5e2b8652cf2de7e1c2267350",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/shared_cpu_map",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "50a9b9163ebb829080aecf9a7a5990715de9fd63d48e3ea3734f6bd77aa3df07",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/size",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "2518cb5c6d5a375cb3ab507e073bad27141400415a76845f1ef5ade67ad96a62",
+      "size": 5,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/cache/index2/type",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ad6a950b4620d66f28c903434fae64d76b36df67164ecfbfd60cadd365278164",
+      "size": 7,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/online",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/topology/core_id",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/topology/core_siblings",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ae5ce162888ee3ebe974976cac5ab94a3f55049f8515884883d579fb3fa378d2",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/topology/physical_package_id",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "size": 1,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/cpu1/topology/thread_siblings",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7e071fd9b023ed8f18458a73613a0834f6220bd5cc50357ba3493c6040a9ea8c",
+      "size": 8,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/online",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "22841ea360fc3c3676a38502aa9a90a1ae1fbdac1d937746358efe559d349b6f",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/fs/sys/devices/system/cpu/possible",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "22841ea360fc3c3676a38502aa9a90a1ae1fbdac1d937746358efe559d349b6f",
+      "size": 3,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/m5out/stats.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "95a4b48eb348974b688bf1546a71050185e0a3105f546a9fb4f0106552a6fa1b",
+      "size": 1073834,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/live-disconnect-pass/orchestration.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6d9248a07e9fed89964a43aaf045a3b7565108e523e0e5674aeee8ba74754201",
+      "size": 4238,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0026/postcommit/postcommit-aggregate.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "30afcda3f8fd2c00d78ebc5d906dc8d0334d1c14e0c45af332ae38d1e43d7481",
+      "size": 45646,
+      "tracked": false
+    }
+  ]
+}

@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-10`
 
-**State at this commit:** `CP-0025 positive generic daemon control lifecycle accepted; bit8 advertised and native admission/retire live; GPU execution, output, and normal launcher blocked; next-CP-0026 P5-TRITON-VECADD-05-GPU-EXECUTION`
+**State at this commit:** `CP-0026 locked generic execution accepted; bit8 control and bit9 execution are separate; daemon trace and A/B/C oracle live; Triton launcher/compiler/JIT/fallback/Qwen remain blocked; next P5-PROFILE-01 (future CP-0027)`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -500,7 +500,7 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | CP-0024 / P5-TRITON-VECADD-03-DAEMON-ROUTE | P5 | Bounded handler source/type-19 plumbing, route-policy harness, and live canonical negative handshake; bit 8 and positive type-18/H2D/SUBMIT route remain blocked |
 | CP-0025 / P5-TRITON-VECADD-04-DAEMON-LIFECYCLE | P5 | Accepted positive bit-8 daemon control lifecycle through logical-align-8 ALLOC, v1 H2D, native CP admission/type-19 ACK/type-20 retire, cleanup, and reconnect; no GPU execution |
 | CP-0026 / P5-TRITON-VECADD-05-GPU-EXECUTION | P5 | Connect the committed daemon lifecycle to GPUDispatcher/CU execution and prove output correctness for the locked zero-preload fixture |
-| P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
+| CP-0027 / P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence; ID is allocated when the next transaction begins |
 | P5-PARALLEL-TB-01 | P5B | Safe serial-versus-parallel threadblock experiment |
 | P5-OPS-01 | P5C | Broader model-operator manifest and differential gates |
 | P5-QWEN35-OPS-01 | P5C | All 15 text-only Qwen3.5-0.8B operator contracts execute on AMD with no fallback |
@@ -827,6 +827,21 @@ fallback. The 12-DWORD descriptor preload remains an explicit NOT_SUPPORTED
    CP admission/retire only; launcher, compiler/JIT, GPUDispatcher/CU execution,
    output correctness, and fallback remain false. The next unique action is
    CP-0026 / `P5-TRITON-VECADD-05-GPU-EXECUTION`.
+
+   CP-0026 accepts the exact bit-9 execution extension while preserving bit-8 as
+   the control contract. The negotiated bit is word 0 bit 9 (wire byte 1 bit 1)
+   and requires bit 8 plus topology, queue, memory, signal, and code-object
+   capabilities. The clean daemon route executes only the locked 5,528-byte
+   gfx950 `gpuReadWrite` image with zero descriptor preload: four workgroups,
+   sixteen wave64 waves, 304 instruction starts, exact A/B/C output, durable
+   type-20, three D2H oracles, duplicate D2H, and UNMAP. The fsynced daemon
+   trace, not endpoint assertion fields, establishes GPUDispatcher/CU execution
+   and post-ACK quarantine cleanup. The wire signal field remains expected `1`;
+   trace `1 -> 0` is the private native completion signal. This is a fixture and
+   VEGA_X86 bridge proof, not generic gfx950/arbitrary HSACO or standalone
+   no-x86 daemon proof. The 5,408-byte 12-DWORD Triton preload, normal launcher,
+   compiler/JIT, fallback, performance, Triton E2E, and Qwen remain false. The
+   next planned gate is `P5-PROFILE-01`, to be allocated as CP-0027 when begun.
 
 ### P3H - host-native simulator and first Triton gate
 

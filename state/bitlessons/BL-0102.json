@@ -1,0 +1,27 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_execution_adapter.cc",
+    "projects/gem5/src/gpu-compute/dispatcher.cc",
+    "projects/self-amdgpu-runtime/tests/generic_dispatch_v2_endpoint_test.c",
+    "protocol/host-transport-v2.json",
+    "docs/host-transport-v2.md"
+  ],
+  "checkpoint_id": "CP-0026",
+  "conclusion": "Bit 8 remains the owner-bound control and admission/retire contract. CP26 adds bit 9 (GENERIC_EXECUTION_V2) only with bit 8 and all dependencies, and the locked daemon trace proves the causal GPUDispatcher/ComputeUnit path rather than treating a type-20 control response as execution evidence.",
+  "confidence": "high",
+  "decision": "Keep bit 8 and bit 9 as separate negotiated capabilities. Require the exact 5528-byte zero-preload gpuReadWrite fixture, ordered daemon trace, independent A/B/C D2H oracle, nonzero output CRC, and no CPU/NVIDIA fallback before asserting execution. Preserve bit-8-only output_crc32c=0 and fail closed for arbitrary gfx950, preload-aware Triton images, and incomplete capability sets.",
+  "evidence_ids": ["EV-0060", "EV-0061"],
+  "id": "BL-0102",
+  "invalidated_assumptions": [
+    "A bit-8/type-20 control lifecycle by itself proves GPUDispatcher or ComputeUnit execution.",
+    "A nonzero client-reported CRC without a daemon trace and independent D2H oracle proves kernel output.",
+    "Bit 9 may be selected without bit 8 and topology, queue, memory, signal, and code-object dependencies.",
+    "The locked fixture result generalizes to arbitrary gfx950 HSACO or Triton preload images."
+  ],
+  "observation": "The accepted live route selects bits 8 and 9, issues only the hash-pinned zero-preload gpuReadWrite image, and records fetch=1, command-processor submission=1, four workgroups, sixteen waves, 304 instruction starts, 1024 reads, 2048 writes, 32 stores, and the exact A/B/C oracle. Bit-8-only completion remains CRC zero while bit 9 emits CRC32C 0x6f67026f.",
+  "question_or_symptom": "Why must the exact GPU execution gate use a separate bit 9 instead of treating CP25 bit 8 and type 20 as execution evidence?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

@@ -1,14 +1,14 @@
 {
   "schema": "amdgpu-sim.host-transport-v2.generic-dispatch.v2",
   "title": "GemSim generic object mapping and dispatch payload-v2 authority",
-  "checkpoint": "CP-0025",
-  "authority_status": "accepted-positive-generic-control-lifecycle",
+  "checkpoint": "CP-0026",
+  "authority_status": "accepted-locked-generic-execution-and-quarantine",
   "base_protocol": "protocol/host-transport-v1.json",
-  "scope": "A versioned, fixed-record schema and committed owner-bound runtime-to-gem5 daemon control lifecycle. CP25 proves required-generic bit-8 negotiation, live MessageType 18 MAP/ALLOC/SUBMIT/UNMAP, existing v1 MEMORY_COPY_H2D publication, MessageType 19 ACK, MessageType 20 native admission/retire bookkeeping, disconnect cleanup, and reconnect. It does not prove GPUDispatcher/ComputeUnit execution, output correctness, a normal launcher, compiler/JIT, fallback, Triton, or Qwen.",
+  "scope": "A versioned, fixed-record schema and committed owner-bound runtime-to-gem5 daemon lifecycle. CP25 proves the bit-8 control contract: required-generic negotiation, live MessageType 18 MAP/ALLOC/SUBMIT/UNMAP, v1 MEMORY_COPY_H2D publication, MessageType 19 ACK, MessageType 20 native admission/retire bookkeeping, disconnect cleanup, and reconnect. CP26 adds optional bit-9 GENERIC_EXECUTION_V2 for one exact zero-preload gpuReadWrite fixture, with daemon-trace and A/B/C output-oracle authority plus a post-ACK quarantine boundary. It does not prove generic gfx950/arbitrary HSACO, a standalone no-x86 daemon, a normal launcher, compiler/JIT, performance, fallback, Triton, or Qwen.",
   "next_action": {
-    "checkpoint": "CP-0026",
-    "id": "P5-TRITON-VECADD-05-GPU-EXECUTION",
-    "boundary": "Connect the committed generic daemon control lifecycle to GPUDispatcher/ComputeUnit execution and prove output correctness for the locked zero-preload fixture. Preload-aware Triton mapping and the normal launcher remain later gates."
+    "checkpoint": "CP-0027",
+    "id": "P5-PROFILE-01",
+    "boundary": "Retain a profile of the accepted locked execution path, rank the 80/20 bottlenecks, and implement one measured optimization with unchanged output correctness. This ID is allocated when the next transaction begins; Triton preload and the normal launcher remain separate gates."
   },
   "versioning": {
     "framing_major": 1,
@@ -16,7 +16,7 @@
     "payload_major": 2,
     "payload_minor": 0,
     "compatibility": "The v1 80-byte envelope, byte order, CRC-32C rule, and all v1 message records remain unchanged. A v2 payload is opt-in and is never decoded as a v1 record.",
-    "server_status": "The current daemon advertises capability bit 8 with all required dependencies and completes the bounded owner-bound control lifecycle through native CP admission and retirement. The retained positive endpoint probe completes two owner generations; all GPU execution, output, launcher, compiler/JIT, and fallback claims remain false."
+    "server_status": "The current daemon advertises bit 8 for the complete control contract and bit 9 only for the locked execution extension with all dependencies. The positive endpoint and fsynced daemon trace complete the exact gpuReadWrite execution/output oracle; a separate trace proves post-ACK quarantine cleanup. The retained Triton preload, normal launcher, compiler/JIT, performance, fallback, and Qwen claims remain false."
   },
   "capability": {
     "name": "GENERIC_DISPATCH_V2",
@@ -41,6 +41,32 @@
       "SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR",
       "SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR"
     ]
+  },
+  "execution_capability": {
+    "name": "GENERIC_EXECUTION_V2",
+    "word_index": 0,
+    "bit": 9,
+    "mask_hex": "0x00000200",
+    "wire_byte_index": 1,
+    "wire_bit_within_byte": 1,
+    "wire_mask_hex": "0x02",
+    "advertised_by_current_daemon": true,
+    "negotiation": "Selected only when offered and required are both set, and only after GENERIC_DISPATCH_V2 plus every dependency is selected. Bit 9 extends the bit-8 control contract; it does not replace or reinterpret bit 8.",
+    "requires": [
+      "GENERIC_DISPATCH_V2",
+      "TOPOLOGY_IDENTITY_V1",
+      "QUEUE_CONTROL_V1",
+      "SIMULATED_MEMORY_V1",
+      "SIGNAL_EVENT_V1",
+      "CODE_OBJECT_TRANSPORT_V1"
+    ],
+    "implementation_symbol_names": [
+      "SAGR_CAPABILITY_GENERIC_EXECUTION_WORD",
+      "SAGR_CAPABILITY_GENERIC_EXECUTION_MASK",
+      "protocol::GenericExecutionCapabilityByte",
+      "protocol::GenericExecutionCapabilityMask"
+    ],
+    "completion_crc_rule": "A bit-8-only type-20 completion must carry output_crc32c=0. A bit-9-selected completion must carry a nonzero output_crc32c that matches the locked daemon/client output oracle."
   },
   "transport": {
     "header_bytes": 80,
@@ -193,10 +219,13 @@
     "ordering": ["MAP_OBJECT", "ALLOC_KERNARG", "v1 MEMORY_COPY_H2D", "SUBMIT_AQL", "type-20 completion", "UNMAP_OBJECT"],
     "publication_order": "MAP_OBJECT -> ALLOC_KERNARG -> existing v1 MEMORY_COPY_H2D -> SUBMIT_AQL -> type-20 completion -> UNMAP_OBJECT. MEMORY_COPY_H2D is a v1 carrier, not a new v2 opcode.",
     "ownership": "Every nonzero object, mapping, queue, allocation, signal, ticket, and generation is connection/owner scoped. Stale or cross-owner generations are rejected before publication.",
-    "aql": "SUBMIT_AQL contains launch metadata only. The live daemon owns packet materialization, kernel_object, kernarg VA, completion signal linkage, publication, nonzero packet CRC, and nonzero lifecycle ticks. CP25 durably commits the type-19 ACK before scheduling type-20 native retirement; GPUDispatcher, ComputeUnit, kernel execution, and output correctness remain false.",
+    "aql": "SUBMIT_AQL contains launch metadata only. The live daemon owns packet materialization, kernel_object, kernarg VA, completion signal linkage, publication, nonzero packet CRC, and lifecycle ticks. Bit 8 records native control admission/retire. When bit 9 is selected, the daemon attaches the execution adapter only after durable type-19, issues one exact locked fixture through GPUDispatcher/ComputeUnit, and emits type-20 only after physical retirement.",
     "memory": "The v2 schema does not make public simulated_va packet-visible by itself. CP25 separates the requested logical kernel ABI alignment from hidden page-backed allocation: logical alignment 8 is returned on wire while the owner-session-fixed 4096/65536 page backing remains private. The live v1 MEMORY_COPY_H2D route publishes the exact owner allocation subrange.",
-    "completion_ordering": "packet_crc32c and admission_tick are nonzero; admission_tick <= start_tick <= end_tick <= retire_tick. The current bounded route may set start, end, and retire to the same bookkeeping tick after the ACK is durably committed.",
-    "fetch_rollback": "If CP admission rejects a locally fetched packet, CP23 cancelFetch restores the queue slot before mapping/kernarg pins are released. Admission success records ownership and queue state only; it is not GPU execution."
+    "completion_ordering": "packet_crc32c and admission_tick are nonzero; admission_tick <= start_tick <= end_tick <= retire_tick. Bit-8-only type-20 output_crc32c is zero; bit-9 execution type-20 output_crc32c is nonzero and oracle-checked. The current route may set start, end, and retire to the same tick after durable ACK.",
+    "execution_session": "At most one execution may be issued per owner/session. A second SUBMIT is rejected before pinning or issue (focused gate second_submit_issue_count=0). Duplicate D2H reads are idempotent and cannot duplicate completion latches.",
+    "disconnect": "A disconnect after type-19 and submission quarantines the in-flight task until retire, then releases queue, signal, adapter, pins, and private state without sending type-20 to the disconnected owner. Pre-SUBMIT lease cleanup and normal completed-session cleanup are separate paths.",
+    "signal_scope": "The wire expected_signal_value_bits field remains 1 and no wire after-value is observed. Trace signal_before=1/signal_after=0 is the private native AQL completion signal, not a wire post-value.",
+    "fetch_rollback": "If CP admission rejects a locally fetched packet, CP23 cancelFetch restores the queue slot before mapping/kernarg pins are released. Admission success records ownership and queue state only unless bit 9's exact execution gate is selected."
   },
   "cp23_local_boundary": {
     "runtime_ctest": "18/18",
@@ -320,6 +349,133 @@
     "triton": false,
     "qwen": false
   },
+  "cp26_locked_execution_boundary": {
+    "status": "accepted-locked-positive-execution",
+    "checkpoint": "CP-0026",
+    "gem5_child_head": "a4b80d76ad1a9bf89e0483984953583048e31122",
+    "gem5_child_tree": "6a58df7137f41b0a824b582508ae25dd73ad18c7",
+    "runtime_child_head": "d3dfa38f2bf6aa68a319f81652af1649df668183",
+    "runtime_child_tree": "e69f7bed68d35b49b3c462c10022d2e515acab75",
+    "ev0060_sha256": "1325d31271c164dcf62cd254f3ca9e99c1582e3572ae370a92370d70c5c84657",
+    "ev0061_sha256": "78c86d1b82b426d7c633ba425fb34ca50010961bef96a8cbdb554bddb2dfadfd",
+    "bit8_control_selected": true,
+    "bit9_execution_selected": true,
+    "dependencies_selected": true,
+    "daemon_socket_route": true,
+    "trace_schema": "amdgpu-sim.cp26-generic-execution-trace.v1",
+    "trace_events": [
+      "generic_execution_retired",
+      "generic_execution_type20_durable",
+      "generic_execution_session_complete"
+    ],
+    "fixture": {
+      "image_sha256": "7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56",
+      "image_bytes": 5528,
+      "gfx_target": "gfx950",
+      "kernel": "gpuReadWrite",
+      "descriptor_symbol": "gpuReadWrite.kd",
+      "descriptor_preload_dwords": 0,
+      "gem5_isa_supported": false,
+      "locked_gpu_read_write_execution_supported": true,
+      "map_page_bytes": 4096,
+      "kernarg_allocation_bytes": 512,
+      "kernarg_alignment": 8,
+      "kernarg_offset": 64,
+      "kernarg_manifest_bytes": 280,
+      "buffer_count": 3,
+      "buffer_bytes": 4096,
+      "grid_x": 1024,
+      "workgroup_x": 256,
+      "workgroups": 4,
+      "num_warps": 4,
+      "wavefront_size": 64
+    },
+    "execution": {
+      "gpu_dispatcher": true,
+      "compute_unit": true,
+      "kernel_executed": true,
+      "execution": true,
+      "packet_fetches": 1,
+      "command_processor_submissions": 1,
+      "gpu_dispatcher_starts": 1,
+      "waves_started": 16,
+      "instructions_started": 304,
+      "pc_offsets_per_wave": 19,
+      "pc_coverage_exact": true,
+      "global_reads": 1024,
+      "global_writes": 2048,
+      "store_events": 32,
+      "store_lanes": 2048,
+      "workgroups_completed": 4,
+      "native_cp_admission": true,
+      "native_retire": true,
+      "ticks": "admission <= start <= end <= retire"
+    },
+    "output_oracle": {
+      "input_a_unchanged": true,
+      "output_b_is_gid": true,
+      "output_c_is_a": true,
+      "a_crc32c": "0x4705cdab",
+      "b_crc32c": "0xb28d0486",
+      "c_crc32c": "0x4705cdab",
+      "b_then_c_crc32c": "0x6f67026f",
+      "b_then_c_crc32c_decimal": 1869021807,
+      "output_crc_nonzero": true,
+      "d2h_verified": true,
+      "duplicate_d2h_verified": true,
+      "unmap": true
+    },
+    "lifecycle": {
+      "type19_durable_before_issue": true,
+      "type20_durable": true,
+      "wire_signal_value_bits_expected": 1,
+      "wire_signal_after_observed": false,
+      "native_private_signal_before": 1,
+      "native_private_signal_after": 0,
+      "signal_scope_note": "native private AQL completion signal; not a wire post-value",
+      "one_execution_per_session": true,
+      "second_submit_issue_count": 0,
+      "positive_client_output": true
+    },
+    "false_claims": {
+      "normal_launcher": false,
+      "normal_triton_launcher": false,
+      "compiler": false,
+      "compiler_invoked": false,
+      "jit": false,
+      "triton": false,
+      "qwen": false,
+      "fallback": false,
+      "cpu_fallback": false,
+      "nvidia_fallback": false,
+      "performance": false,
+      "generic_gfx950": false,
+      "arbitrary_hsaco": false,
+      "standalone_no_x86_live": false
+    }
+  },
+  "cp26_quarantine_boundary": {
+    "status": "accepted-post-ack-negative-quarantine",
+    "trace_schema": "amdgpu-sim.cp26-generic-execution-trace.v1",
+    "trace_event": "generic_execution_quarantine_cleanup",
+    "daemon_trace_authority": true,
+    "post_type19_disconnect": true,
+    "owner_disconnected": true,
+    "owner_quarantined": true,
+    "cleanup_complete": true,
+    "type20_durable": false,
+    "d2h_durable": false,
+    "unmap_durable": false,
+    "client_completion_delivered": false,
+    "client_output_correctness": false,
+    "daemon_execution_before_quarantine": true,
+    "daemon_output_oracle_before_quarantine": true,
+    "runtime_negative_remote_cleanup_authority": false,
+    "runtime_negative_remote_cleanup_unknown": true,
+    "pre_submit_cleanup_is_separate": true,
+    "normal_completed_disconnect_is_separate": true,
+    "no_type20_to_disconnected_owner": true
+  },
   "bounded_fixture_observation": {
     "tutorial_sha256": "842430949e0ccde4fbce07606cce3ac4bac36bf21b2b12619a31b795ca4029b3",
     "hsaco_sha256": "ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e",
@@ -378,6 +534,21 @@
     "execution": false,
     "fallback": false,
     "triton": false,
-    "qwen_e2e": false
+    "qwen_e2e": false,
+    "cp26_execution_capability": true,
+    "cp26_gpu_dispatcher": true,
+    "cp26_compute_unit": true,
+    "cp26_kernel_executed": true,
+    "cp26_output_correctness": true,
+    "cp26_positive_trace": true,
+    "cp26_negative_quarantine_trace": true,
+    "cp26_type20_after_retire": true,
+    "cp26_second_submit_rejected": true,
+    "cp26_wire_signal_after_observed": false,
+    "cp26_normal_launcher": false,
+    "cp26_compiler_or_jit": false,
+    "cp26_fallback": false,
+    "cp26_triton": false,
+    "cp26_qwen_e2e": false
   }
 }

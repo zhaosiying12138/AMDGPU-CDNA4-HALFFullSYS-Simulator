@@ -246,4 +246,22 @@ action; it must connect this control path to real GPU execution and validate
 the locked zero-preload fixture output before later Triton preload/launcher
 work.
 
+CP-0026 accepts the locked generic execution extension while keeping bit 8
+strictly as the control/admission/retire contract. Bit 9 (`GENERIC_EXECUTION_V2`)
+maps to runtime word 0 bit 9 and wire byte 1 bit 1, and is selected only with
+bit 8 and all dependencies. The live daemon route uses the exact 5,528-byte
+gfx950 `gpuReadWrite` image (SHA-256
+`7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56`, zero
+preload) and reaches `GPUDispatcher`/`ComputeUnit`: four workgroups, sixteen
+wave64 waves, 304 instruction starts, A/B/C oracle, durable type 20, duplicate
+D2H verification, and UNMAP. The fsynced daemon trace is authoritative for
+execution and quarantine; endpoint JSON is authoritative only for bytes
+delivered to the client. A post-ACK disconnect trace proves quarantine cleanup
+without type 20 or client output. The wire signal field remains expected `1`
+with no observed wire after-value; trace `1 -> 0` is the private native AQL
+completion signal. This is a fixture-scoped `VEGA_X86` bridge proof, not a
+standalone no-x86 daemon, generic gfx950, arbitrary HSACO, Triton, launcher,
+compiler/JIT, performance, fallback, or Qwen claim. The next planned gate is
+`P5-PROFILE-01`, which will be allocated as CP-0027 when its transaction begins.
+
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

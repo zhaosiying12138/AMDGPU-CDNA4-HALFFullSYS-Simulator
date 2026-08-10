@@ -6,21 +6,24 @@ runtime API and a separate owner-bound native gem5 state machine. CP-0024 adds
 an owner-bound type-18 handler source path, type-19 response plumbing, a shared
 route-policy harness, and an opt-in live endpoint probe. CP-0025 completes the
 positive negotiated daemon control lifecycle through native admission and
-retirement. The authority is
+retirement. CP-0026 adds a separate locked execution extension and a
+trace-authoritative disconnect quarantine boundary. The authority is
 `protocol/host-transport-v2.json`; the implementations are in
 `projects/self-amdgpu-runtime` and `projects/gem5`.
 
 This is deliberately an opt-in extension. The envelope remains the existing
 80-byte, big-endian, CRC-32C v1 frame, while the payload declares major `2`,
 minor `0`. Existing v1 queue, memory, signal, pinned-dispatch, and A1
-code-object records are unchanged. The new runtime capability is word 0 bit 8,
-`GENERIC_DISPATCH_V2`; on the 32-byte wire bitmap this is byte 1 bit 0,
-mask `0x01`. It is valid only with topology, queue, memory, signal, and
-code-object transport capabilities. The current daemon advertises bit 8 only
-with that complete dependency set. CP-0025 retains both the canonical
-unnegotiated rejection policy and a fresh positive two-generation socket run;
-the latter selects bit 8 and completes every bounded owner stage. Capability
-advertisement proves this control contract, not GPU execution.
+code-object records are unchanged. Runtime word 0 bit 8,
+`GENERIC_DISPATCH_V2`, remains the control/admission/retire contract; on the
+32-byte wire bitmap this is byte 1 bit 0, mask `0x01`. CP-0026 adds
+`GENERIC_EXECUTION_V2` at word 0 bit 9, wire byte 1 bit 1, mask `0x02`. Bit 9
+is valid only when bit 8 and topology, queue, memory, signal, and code-object
+transport capabilities are selected. Bit-8-only type-20 responses retain
+`output_crc32c=0`; bit 9 requires a nonzero output CRC and a matching daemon
+trace/output oracle. Capability advertisement alone never proves execution.
+The current live route is the `VEGA_X86` bridge; the CP-0020 no-x86 functional
+fixture is a separate boundary.
 
 ## Records
 
@@ -175,6 +178,43 @@ ACK has been durably committed. These timestamps are daemon bookkeeping for
 native CP admission and retirement: `gpu_dispatcher`, `compute_unit`,
 `kernel_executed`, `execution`, and `output_correctness` all remain false.
 
+## CP26 accepted locked execution boundary
+
+CP-0026 keeps the CP25 control contract and selects bit 9 only as its exact
+execution extension. The accepted live fixture is the 5,528-byte gfx950
+`gpuReadWrite` HSACO, SHA-256
+`7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56`, with
+zero descriptor preload. The daemon validates a 4 KiB map, 512-byte
+alignment-8 kernarg allocation, a 280-byte OLD_ABI manifest at offset 64, and
+three 4 KiB A/B/C allocations before issuing the packet. The live route is
+`VEGA_X86` `host_dispatch.py`, while the separate CP-0020 no-x86 B2 fixture is
+used as an additional functional differential; neither result is a claim of a
+standalone no-x86 daemon.
+
+The positive daemon trace has three ordered events:
+`generic_execution_retired`, `generic_execution_type20_durable`, and
+`generic_execution_session_complete`. It records one packet fetch and one
+GPUDispatcher start, four workgroups, sixteen wave64 waves, 19 instruction
+starts per wave (304 total), exact PC coverage, 1,024 global reads, 2,048
+global writes, 32 store events, and 2,048 store lanes. The A/B/C oracle is A
+unchanged, B=`gid`, C=A; A and C CRC-32C are `0x4705cdab`, B is
+`0xb28d0486`, and the B-then-C output CRC is `0x6f67026f`. The runtime endpoint
+verifies all three D2H buffers, a duplicate D2H read, and UNMAP. The daemon
+trace, not endpoint assertion booleans, establishes GPUDispatcher,
+ComputeUnit, execution, and output correctness.
+
+The wire response's `signal_value_bits` remains the expected value `1`, and
+the endpoint records `signal_after_observed=false`. Trace
+`signal_before=1`/`signal_after=0` is the private native AQL completion signal,
+not a wire post-value. A positive completed disconnect is distinct from a
+post-ACK quarantine: the negative endpoint closes after durable type-19 and
+does not wait, read type-20, D2H, or UNMAP; the daemon emits one
+`generic_execution_quarantine_cleanup` event with
+`owner_disconnected=true`, `owner_quarantined=true`,
+`cleanup_complete=true`, and `type20_durable=false`. Client JSON is not
+cleanup authority. Pre-SUBMIT live-lease cleanup and normal completed-session
+cleanup remain separate positive boundaries.
+
 ## Triton boundary and non-claims
 
 The CP-0021 retained Triton tutorial and HSACO identities are recorded in the
@@ -183,9 +223,8 @@ work-item/workgroup geometry, but the 12-DWORD (48-byte) descriptor preload is
 rejected until preload-aware mapping and entry semantics exist. CP25 continues
 to return NOT_SUPPORTED instead of stripping or reinterpreting that field.
 
-The next implementation checkpoint is CP-0026 /
-`P5-TRITON-VECADD-05-GPU-EXECUTION`. It must connect the committed control
-lifecycle to GPUDispatcher/ComputeUnit execution and validate output for the
-locked zero-preload fixture. The retained 12-DWORD Triton preload, normal
-launcher, compiler/JIT integration, broader execution, and performance remain
-later gates unless separately proven.
+CP-0026 does not promote the retained 5,408-byte Triton image with 12-DWORD
+preload, and it does not exercise a normal launcher, compiler/JIT transport,
+performance path, arbitrary gfx950 HSACO, Triton end-to-end, CPU/NVIDIA
+fallback, or Qwen inference. The next planned gate is `P5-PROFILE-01`, which
+will be allocated as CP-0027 when its transaction begins.

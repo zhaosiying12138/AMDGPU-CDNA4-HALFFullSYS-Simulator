@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0025-positive-generic-control-lifecycle-accepted; bit8-advertised-native-admission-retire; gpu-execution-output-and-triton-launcher-blocked; next-CP-0026-P5-TRITON-VECADD-05-GPU-EXECUTION`
+**Current state:** `CP-0026-locked-generic-execution-accepted; bit8-control-and-bit9-execution-separate; trace-and-output-oracle-live; Triton-launcher/compiler/JIT/fallback/Qwen-blocked; next-P5-PROFILE-01 (future CP-0027)`
 
 **Current phase:** `P5`
 
@@ -289,3 +289,31 @@ remain false. The next unique action is CP-0026 /
 `P5-TRITON-VECADD-05-GPU-EXECUTION`; it must connect the committed control
 lifecycle to actual GPU execution and output correctness for the locked
 zero-preload fixture before later preload-aware Triton launcher work.
+
+`CP-0026` closes the locked generic execution extension, without changing the
+meaning of bit 8. Bit 8 remains the owner-bound control/admission/retire
+contract; bit 9 (`GENERIC_EXECUTION_V2`, word 0 bit 9, wire byte 1 bit 1) is
+selected only with bit 8 and all of its topology, queue, memory, signal, and
+code-object dependencies. A fresh daemon-socket run sends the exact 5,528-byte
+gfx950 `gpuReadWrite` image (SHA-256
+`7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56`) through
+the real `GPUDispatcher`/`ComputeUnit` path: four 256-item workgroups, sixteen
+wave64 waves, 304 instruction starts, exact A/B/C output oracle, durable type 20,
+three D2H checks including a duplicate read, and UNMAP. The daemon's fsynced
+trace is the authority for dispatch/CU/execution and quarantine; the runtime
+client is the authority only for bytes actually delivered to it. The positive
+output CRC is `0x6f67026f` (A and C `0x4705cdab`, B `0xb28d0486`).
+
+The live route is the `VEGA_X86` bridge configuration; this does not promote the
+separate CP-0020 no-x86 functional fixture into a no-x86 daemon claim. The
+fixture is intentionally exact (`Gem5IsaSupported=false` while
+`LockedGpuReadWriteExecutionSupported=true`), so generic gfx950 or arbitrary
+HSACO support remains unproven. The wire `signal_value_bits` remains the
+expected value `1` and no wire after-value is observed; trace `1 -> 0` is the
+private native AQL completion signal. A separate post-ACK disconnect sample
+proves daemon quarantine cleanup with no type-20, D2H, UNMAP, or client output;
+normal completed disconnect cleanup and pre-SUBMIT live-lease cleanup remain
+separate boundaries. Triton's 5,408-byte image with 12-DWORD preload, the
+normal launcher, compiler/JIT, performance, CPU/NVIDIA fallback, and Qwen all
+remain false. The next planned action is `P5-PROFILE-01`; when begun it will
+allocate the next transaction as CP-0027.
