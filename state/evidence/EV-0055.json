@@ -1,0 +1,374 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0055",
+  "checkpoint_id": "CP-0023",
+  "type": "cp23-root-umbrella",
+  "claim": "EV-0055 binds the final gem5 and self-amdgpu-runtime CP23 child commits, aggregate EV-0054, audited trailer-only journal migration, prepare-phase transaction, and accepted CP22 root anchor. The accepted scope is adapter/client/codec/admission only: no daemon MessageType 18 route or generic capability advertisement, normal launcher, simulator kernel execution, output correctness, or fallback is claimed.",
+  "command_argv": [
+    [
+      "python3",
+      "artifacts/evidence/CP-0023/verify_ev0055_inputs.py",
+      "root-anchor"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0023/verify_ev0055_inputs.py",
+      "child-identities"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0023/verify_ev0055_inputs.py",
+      "child-trailers"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0023/verify_ev0055_inputs.py",
+      "journal-migration"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0023/verify_ev0055_inputs.py",
+      "ev0054"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0023/verify_ev0055_inputs.py",
+      "boundary"
+    ]
+  ],
+  "command_results": [
+    {
+      "id": "umbrella-root-anchor",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0023/verify_ev0055_inputs.py",
+        "root-anchor"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T00:23:51+00:00",
+      "ended_at": "2026-08-10T00:23:51+00:00",
+      "exit_code": 0,
+      "result": "The coordinator remains anchored at the exact accepted CP22 commit, tree, parent, and trailers.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0023/umbrella-root-anchor.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "20a7e504147d854c2b341178708e3717715fcb359cd82fae65d7d86c9b7372ba",
+        "size": 649,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0023/umbrella-root-anchor.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7e4d4df85638f0f2caf065f3558f2c74e4e2c6863704f5673d596f022d77d17e",
+        "size": 195,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0023/umbrella-root-anchor.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "umbrella-child-identities",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0023/verify_ev0055_inputs.py",
+        "child-identities"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T00:23:51+00:00",
+      "ended_at": "2026-08-10T00:23:51+00:00",
+      "exit_code": 0,
+      "result": "Both CP23 child repositories are clean at the exact final heads, unchanged trees, and CP22/CP20 parents.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0023/umbrella-child-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "12f24e4dbfa53d9fcf6e57b90fa6530782a2af38cd72cb7536a11843979bf48d",
+        "size": 664,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0023/umbrella-child-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a4e6aed8739b73c75809f02f2679718103a940d4e751eaf7ca2a13947884d73b",
+        "size": 443,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0023/umbrella-child-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "umbrella-child-trailers",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0023/verify_ev0055_inputs.py",
+        "child-trailers"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T00:23:51+00:00",
+      "ended_at": "2026-08-10T00:23:51+00:00",
+      "exit_code": 0,
+      "result": "Both final child commits carry one exact CP23 trailer set bound to EV-0054.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0023/umbrella-child-trailers.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8cf5f413dd046bf2e8c079b7f3ffcbda8a29fc2d46b51b234eb8e72e50668d55",
+        "size": 658,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0023/umbrella-child-trailers.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1a38a9fd3561b4f6b6b728c0911e510c4eaa204448c4e9076a89bacfdb78c798",
+        "size": 250,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0023/umbrella-child-trailers.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "umbrella-journal-migration",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0023/verify_ev0055_inputs.py",
+        "journal-migration"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T00:23:51+00:00",
+      "ended_at": "2026-08-10T00:23:51+00:00",
+      "exit_code": 0,
+      "result": "The prepare journal binds the final children and retains a replayable same-parent, same-tree, trailer-only identity migration from its exact backup.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0023/umbrella-journal-migration.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "fcbcde659d216426674b3a52b3df298b4177fbcef07c604bd19a82cd45829a98",
+        "size": 667,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0023/umbrella-journal-migration.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1ce041c8405bf7aab5821a471e7f68fd5fef369463906bb22fd436095db08699",
+        "size": 327,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0023/umbrella-journal-migration.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "umbrella-ev0054",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0023/verify_ev0055_inputs.py",
+        "ev0054"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T00:23:51+00:00",
+      "ended_at": "2026-08-10T00:23:52+00:00",
+      "exit_code": 0,
+      "result": "EV-0054 is exact and passes evidence policy, external-artifact identity, and retained command-capture semantic validation.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0023/umbrella-ev0054.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1e790ee928f3fc3c441a0439a5fd6ffeddea124cf1127f2ff036567b68f71e43",
+        "size": 634,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0023/umbrella-ev0054.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b49f9bc9b63859e7f2f429b3d5784d4bb6255e9143baa84bf3afc0f8c698c81e",
+        "size": 195,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0023/umbrella-ev0054.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "umbrella-boundary",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0023/verify_ev0055_inputs.py",
+        "boundary"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T00:23:51+00:00",
+      "ended_at": "2026-08-10T00:23:51+00:00",
+      "exit_code": 0,
+      "result": "EV-0054 records only adapter, client, codec, and admission behavior; daemon routing, advertisement, launcher, execution, and fallback remain false.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0023/umbrella-boundary.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "dcb7f0e4c48a621e4cbeeebce9f5e9578ddc9d7f220cb0522dac1fa79d2a6643",
+        "size": 640,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0023/umbrella-boundary.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "bd2568d54fd11cbc9ea5ac4feb9163a3455a6112f8be8ce4e1b43bae6bc65699",
+        "size": 198,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0023/umbrella-boundary.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "started_at": "2026-08-10T00:23:51+00:00",
+  "ended_at": "2026-08-10T00:23:52+00:00",
+  "exit_code": 0,
+  "environment_fingerprint": {
+    "checkpoint": "CP-0023",
+    "transaction_phase": "prepare",
+    "previous_root": "b20364b457ea6a378e645cf8216d54c407c95482",
+    "previous_root_tree": "67d5b7257195249ac9194d9d35bcd86795de3a86",
+    "previous_root_parent": "708e41377893ba5b7055d798cc728a7b3996af7e",
+    "gem5_head": "67bf805d8c01fe9848b0c9fb5c663d5fbfe2a055",
+    "gem5_tree": "b63d1ede7cfdc9149ec40a7285052de53482eab6",
+    "gem5_parent": "d4b96099040140369b9d55108f7bde21e0acfd59",
+    "gem5_clean": true,
+    "runtime_head": "b043a7ec00499e63ba6ba342711ef22471d9fd09",
+    "runtime_tree": "536394f47ed94ecb5c1f7a49ab188adc94fcabf7",
+    "runtime_parent": "02adb53580c7b7ffef65973dd178fd954e06cf09",
+    "runtime_clean": true,
+    "identity_migration_schema": "amdgpu-sim.transaction-identity-migration.v1",
+    "identity_migration_kind": "same-parent-same-tree-evidence-trailer-only",
+    "journal_backup_sha256": "1f6eb1056dc4a2464395d3dedb6be622e416f36c55f2d92bc829adcf9a5e7e09",
+    "ev0054_sha256": "67846fdd4d51e64831ae0f4b9ce8139d990f37fbeaaa829e1da0aa638e2a172b",
+    "ev0054_result_count": 21,
+    "ev0054_artifact_count": 66,
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "scope": "adapter/client/admission-only",
+    "payload_version": "2.0 over framing 1.0",
+    "generic_message_types": "18/19/20",
+    "generic_capability_bit": 8,
+    "generic_record_bytes": 4096,
+    "runtime_ctest": "18/18",
+    "gem5_protocol_gtest": "47/47",
+    "gem5_protocol_sanitizer_gtest": "47/47",
+    "message_type_18_bridge_route": false,
+    "generic_capability_advertised": false,
+    "bridge_handler": false,
+    "compiler_invoked": false,
+    "jit": false,
+    "launcher": false,
+    "execution": false,
+    "fallback": false
+  },
+  "limitations": [
+    "The transaction remains in prepare phase; EV-0055 is an umbrella draft for root publication, not a completed checkpoint.",
+    "The journal identity migration is limited to two successor commits with identical parents and trees whose messages differ only in Evidence-Manifest-SHA256; the exact pre-migration journal is retained.",
+    "No daemon bridge routes MessageType 18/19/20 or advertises generic capability bit 8 in this checkpoint.",
+    "The runtime client and gem5 native state prove owner-bound map, kernarg, submission admission, completion bookkeeping, and unmap boundaries without constructing a production launcher or executing a GPU kernel.",
+    "The retained Triton descriptor preload remains explicitly NOT_SUPPORTED; Triton E2E, Qwen execution, output differential, timing, and performance remain unclaimed.",
+    "CPU or NVIDIA fallback is not used and never counts as success."
+  ],
+  "redactions": [],
+  "result": "The final child identities, EV-0054, migration audit, journal, and CP22 anchor are mutually consistent; CP23 remains a no-execution admission boundary.",
+  "includes": {
+    "EV-0054": "67846fdd4d51e64831ae0f4b9ce8139d990f37fbeaaa829e1da0aa638e2a172b"
+  },
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0023/EV-0054-draft.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "67846fdd4d51e64831ae0f4b9ce8139d990f37fbeaaa829e1da0aa638e2a172b",
+      "size": 49947,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0023/build_ev0054_aggregate.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b062ed9df96c54ba574f5b477b84732b197a587dc0632e07a50e700c52e22587",
+      "size": 12688,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0023/migrate_cp23_journal_trailer_amends.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "9c6b547c123c8a57fa62b35365b4a90a8bb7706843b8e17fe5e5af84fd02266b",
+      "size": 5119,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0023/transaction-journal-before-trailer-migration.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1f6eb1056dc4a2464395d3dedb6be622e416f36c55f2d92bc829adcf9a5e7e09",
+      "size": 1937,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0023/verify_ev0055_inputs.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "154eabdeadafc13eb0ea12ff4dc8f355d8818085865da4cd5e11fb68ebf64dcd",
+      "size": 10988,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0023/build_ev0055.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "afa0e841b83b9cef490cf79ef71191dc80625ce36fafabc5da97e9a5f4ecfb2b",
+      "size": 9331,
+      "tracked": false
+    }
+  ]
+}

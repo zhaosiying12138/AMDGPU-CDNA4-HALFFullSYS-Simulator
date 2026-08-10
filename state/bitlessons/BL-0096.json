@@ -1,0 +1,26 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/src/transport.c",
+    "projects/self-amdgpu-runtime/tests/generic_dispatch_v2_client_test.c",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.hh",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_state_v2_main.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_queue_core.hh"
+  ],
+  "checkpoint_id": "CP-0023",
+  "conclusion": "Generic mapping, allocation, publication, queue, signal, ticket, and completion state must remain bound to one connection owner and generation; a packet fetched before a rejected CP admission must be returned to that owner, and successful CP admission is still not GPU execution.",
+  "confidence": "high",
+  "decision": "Validate owner/request/object/mapping/allocation/queue/signal identities at every transition, keep mapped and kernarg pages pinned through retirement, invoke cancelFetch on post-fetch CP rejection before releasing pins, and publish execution=false until GPUDispatcher/CU and kernel output are separately proven.",
+  "evidence_ids": ["EV-0054", "EV-0055"],
+  "id": "BL-0096",
+  "invalidated_assumptions": [
+    "A valid packet CRC and queue slot are enough to authorize submit or retire across connection owners.",
+    "A queue fetch may be discarded after CP rejection without restoring pending ownership.",
+    "commandProcessorSubmitted or SUBMIT admission proves that GPUDispatcher, a ComputeUnit, or a kernel executed."
+  ],
+  "observation": "The CP23 runtime test rejects stale and cross-owner handles and preserves canonical failed completions; the native selftest covers owner-bound MAP/ALLOC/publish/fetch/admit/retire/UNMAP and confirms cp_failure_cancelled=true while gpu_dispatcher, compute_unit, kernel_executed, and execution_claim are false.",
+  "question_or_symptom": "Which identities and rollback step prevent a failed or cross-owner generic submission from leaking queue ownership or being misreported as execution?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

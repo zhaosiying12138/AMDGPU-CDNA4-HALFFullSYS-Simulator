@@ -1,0 +1,218 @@
+{
+  "baseline_commit_marker": "N/A",
+  "bitlesson_ids": [
+    "BL-0095",
+    "BL-0096",
+    "BL-0097"
+  ],
+  "bitlesson_sha256": {
+    "BL-0095": "7e4f100ecb074cbda5bd7e66e39062f74a8a7f3940db657237003f3438ba04b3",
+    "BL-0096": "92f57d06dc489ac9a16c01f375f0d6e80ddbc2e97c9fad6258c271027b564d02",
+    "BL-0097": "a99611aecf9e0a7bbdaa5ccebbd68dadeeade6acf6be1a9cf3948d8235ebefcf"
+  },
+  "blockers": [
+    {
+      "id": "WIRE-B001",
+      "severity": "blocking",
+      "statement": "The current daemon and gem5 bridge still do not advertise generic capability bit 8 or route message types 18/19/20; CP-0023 proves separate client and local native admission boundaries, not a production session handler."
+    },
+    {
+      "id": "TRITON-B003",
+      "severity": "blocking",
+      "statement": "The retained Triton descriptor carries 12 DWORD (48-byte) kernarg preload and preload-aware native mapping plus entry-offset semantics remain unimplemented; the image must continue to fail closed."
+    },
+    {
+      "id": "EXEC-B004",
+      "severity": "blocking",
+      "statement": "No normal Triton launcher, real daemon transport, GPUDispatcher/ComputeUnit kernel execution, output differential, or Qwen inference has been demonstrated through the CP-0023 path."
+    }
+  ],
+  "change_kind": "code",
+  "changes": [
+    "Accepted matching payload-v2 generic-dispatch codecs in gem5 and self-amdgpu-runtime while preserving the v1 envelope and existing records; runtime word 0 bit 8 maps explicitly to wire byte 1 mask 0x01 and requires all dependency capabilities.",
+    "Added append-only runtime MAP, ALLOC_KERNARG, publish, SUBMIT, WAIT, and UNMAP client APIs with owner/epoch/generation-bound opaque handles, strict mapped-VA and kernarg-range checks, canonical failed completions, and v1 compatibility.",
+    "Added a separate local gem5 native-state adapter that binds committed image metadata, owner-scoped mappings and allocations, packet-visible kernarg publication, queue fetch and CP submission admission, retirement, unmap, pin lifetimes, and cancelFetch rollback.",
+    "Accepted runtime CTest 18/18, gem5 protocol 47/47 plus 47/47 ASAN/UBSAN, and a no-ISA standalone native-state selftest whose wire ACK and identity/cancellation guards pass with execution flags false.",
+    "Kept generic capability advertisement, a daemon MessageType 18 route, the retained 12-DWORD Triton preload, normal launcher, GPUDispatcher/ComputeUnit execution, output correctness, and CPU/NVIDIA fallback unclaimed."
+  ],
+  "created_at": "2026-08-10T08:31:07+08:00",
+  "evidence_ids": [
+    "EV-0054",
+    "EV-0055"
+  ],
+  "evidence_manifest_id": "EV-0055",
+  "evidence_manifest_sha256": "967988c17fef773f72d0d0d7c1cac1a0d6a52281d2c16bdbf67381ea8de5b9fc",
+  "evidence_sha256": {
+    "EV-0054": "67846fdd4d51e64831ae0f4b9ce8139d990f37fbeaaa829e1da0aa638e2a172b",
+    "EV-0055": "967988c17fef773f72d0d0d7c1cac1a0d6a52281d2c16bdbf67381ea8de5b9fc"
+  },
+  "goal_id": "GSIM-001",
+  "goal_sha256": "558255bee7c501bab5aa9fed014403e0fd881879c9485a2794c847ef5aea4a3a",
+  "id": "CP-0023",
+  "limitations": [
+    "CP-0023 joins a public runtime client contract, strict wire codecs, and a separate local native-state adapter. The runtime test uses an in-process mock transport, and the current daemon/gem5 bridge neither advertises bit 8 nor routes MessageType 18/19/20.",
+    "The native selftest proves owner-bound map, allocation, kernarg publication, queue fetch, CP admission, retirement, unmap, pinning, and cancellation bookkeeping only; GPUDispatcher, ComputeUnit, kernel execution, and execution_claim remain false.",
+    "Framing remains v1 major/minor 1.0 and existing v1 records remain unchanged. Payload v2.0 is opt-in, runtime word 0 bit 8 maps to wire byte 1 mask 0x01, and all dependency capabilities are mandatory.",
+    "The exact Triton target and descriptor metadata remain hash-bound from CP-0021. Its 12-DWORD (48-byte) preload is explicitly NOT_SUPPORTED; no preload-aware native mapping or +256-byte entry semantics are claimed.",
+    "Normal Triton launcher/compiler/JIT transport, Triton E2E, Qwen execution, output differential, timing/performance, and CPU/NVIDIA fallback remain 0/1 or false.",
+    "The CP23 prepare journal contains a retained same-parent/same-tree, Evidence-Manifest-SHA256-only child identity migration with its script and pre-migration backup; this is audited checkpoint evidence, not a claim that transaction.py provides a native repair operation."
+  ],
+  "next_action": {
+    "id": "P5-TRITON-VECADD-03-DAEMON-ROUTE",
+    "argv": [
+      "python3",
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0024",
+      "--intent",
+      "Route negotiated generic payload-v2 records through one owner-bound daemon session handler, advertise capability bit 8 only with complete dependencies, and retain fail-closed preload behavior without CPU or NVIDIA fallback",
+      "--participant",
+      "gem5=projects/gem5",
+      "--participant",
+      "self-amdgpu-runtime=projects/self-amdgpu-runtime"
+    ],
+    "cwd": ".",
+    "expected": "CP-0024 must connect the accepted runtime client to one real daemon session handler for MessageType 18/19/20, bind that session to the owner-bound native adapter, and advertise generic capability bit 8 only when all dependencies and lifecycle routes are live. Stale ownership and the retained unsupported preload must fail closed; launcher or GPU execution is a separate later claim.",
+    "prerequisites": [
+      "CP-0023 root checkpoint and EV-0054/EV-0055 are accepted and scripts/resume.sh --verify passes offline.",
+      "Gem5 child 67bf805d8c01fe9848b0c9fb5c663d5fbfe2a055/tree b63d1ede7cfdc9149ec40a7285052de53482eab6 and runtime child b043a7ec00499e63ba6ba342711ef22471d9fd09/tree 536394f47ed94ecb5c1f7a49ab188adc94fcabf7 are clean and trailer-bound to EV-0054.",
+      "The v1 envelope and records, no-fallback policy, CP20 locked functional fixture, CP21 Triton identities, and CP23 word-to-wire capability mapping remain immutable.",
+      "The daemon must leave bit 8 unadvertised until one negotiated session can route MAP, ALLOC_KERNARG, SUBMIT_AQL, completion, and UNMAP end to end; the 12-DWORD preload remains fail-closed."
+    ],
+    "rollback_boundary": "Keep CP-0023 codec/client/native-admission tests and evidence, both clean child commits, v1 byte compatibility, CP20 B2 execution, CP21 metadata provenance, capability bit 8 unadvertised, and Triton E2E=0/1 if daemon routing cannot be completed safely."
+  },
+  "parent_checkpoint": "CP-0022",
+  "phase_id": "P5",
+  "plan_sha256": "7bf971abe41e272733a8d64b1faf39722bb7da16231a6bb9ca09ece7453e6963",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "administrative_git_dir": "modules/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "clean": true,
+      "head": "67bf805d8c01fe9848b0c9fb5c663d5fbfe2a055",
+      "id": "gem5",
+      "path": "projects/gem5",
+      "tree": "b63d1ede7cfdc9149ec40a7285052de53482eab6"
+    },
+    {
+      "administrative_git_dir": "modules/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "clean": true,
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58"
+    },
+    {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "clean": true,
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489"
+    },
+    {
+      "administrative_git_dir": "modules/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "clean": true,
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "id": "triton",
+      "path": "projects/triton",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1"
+    },
+    {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "clean": true,
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315"
+    },
+    {
+      "administrative_git_dir": "modules/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "clean": true,
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "id": "vllm",
+      "path": "projects/vllm",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb"
+    },
+    {
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "clean": true,
+      "head": "b043a7ec00499e63ba6ba342711ef22471d9fd09",
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "tree": "536394f47ed94ecb5c1f7a49ab188adc94fcabf7"
+    }
+  ],
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "root_parent_commit": "b20364b457ea6a378e645cf8216d54c407c95482",
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "sequence": 23,
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "status": "accepted",
+  "validation": [
+    {
+      "command": "CP23 aggregate runtime client, gem5 protocol, and native admission evidence",
+      "cwd": ".",
+      "evidence_id": "EV-0054",
+      "exit_code": 0,
+      "result": "EV-0054 records the bounded runtime client, gem5 payload-v2 codec, and owner-bound native-state adapter with runtime 18/18, protocol 47/47, sanitizer 47/47, and all daemon-route, launcher, execution, and fallback flags false."
+    },
+    {
+      "command": "CP23 runtime client lifecycle and compatibility gate",
+      "cwd": "projects/self-amdgpu-runtime",
+      "evidence_id": "EV-0054",
+      "exit_code": 0,
+      "result": "A fresh build and complete CTest suite pass 18/18; the mock client gate covers MAP/ALLOC/publish/SUBMIT/WAIT/UNMAP, failed completion, missing-capability rejection, v1 compatibility, owner validation, and legal kernarg subranges without claiming a daemon handler."
+    },
+    {
+      "command": "CP23 gem5 owner-bound native-state and fail-closed admission gate",
+      "cwd": "projects/gem5",
+      "evidence_id": "EV-0054",
+      "exit_code": 0,
+      "result": "The no-ISA standalone target passes map, allocation, publication, queue fetch, CP admission, retirement, unmap, wire ACK, identity, pin, and cancelFetch checks; preload is unsupported and GPUDispatcher, ComputeUnit, kernel execution, and fallback remain false."
+    },
+    {
+      "command": "CP23 final child identities, trailers, journal migration, and CP22 root anchor",
+      "cwd": ".",
+      "evidence_id": "EV-0055",
+      "exit_code": 0,
+      "result": "EV-0055 binds clean gem5 67bf805d/tree b63d1ede and runtime b043a7ec/tree 536394f4 children, exact EV-0054 trailers, the CP22 root anchor, and a retained same-parent/same-tree Evidence-Manifest-SHA256-only journal migration capture and backup; this migration is not described as a native transaction.py repair."
+    },
+    {
+      "command": "CP23 evidence policy, external artifact, capture semantics, and scope verification",
+      "cwd": ".",
+      "evidence_id": "EV-0055",
+      "exit_code": 0,
+      "result": "EV-0054 and EV-0055 pass shared evidence policy, exact external artifact verification, retained command-capture semantics, includes linkage, and the explicit no-route/no-advertisement/no-execution boundary."
+    }
+  ]
+}

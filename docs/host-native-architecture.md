@@ -28,7 +28,10 @@ ComputeUnit, and Vega instruction path for one locked `gpuReadWrite` fixture.
 The legacy device/system front-end remains present as the reference path.
 CP-0021 adds only a child-side Triton vecadd metadata/provenance gate: the
 unknown-gfx950 target spelling and DEFAULT-visible descriptor exception are
-accepted for parsing, while GemSim ISA support remains false.
+accepted for parsing. CP-0022 freezes the generic payload-v2 codec. CP-0023
+adds the append-only runtime client contract and a separate local
+`HostNativeDispatchStateV2`/bridge-adapter admission lifecycle; it is not wired
+into a daemon session or the GPU execution pipeline.
 
 The host-native process must preserve the CP8/CP13 fixed-width transport and
 the runtime ownership/generation rules. It must not introduce a second wire
@@ -84,18 +87,24 @@ Process, Ruby, TLB, HSAPP, or GPUCommandProcessor objects. This does not prove
 generic gfx950/arbitrary HSACO, timing accuracy, fences/barriers, atomics,
 LDS/scratch, GPU TLB/Ruby/coherence, HIP/OpenCL, or performance. The historical
 next gate was `P5-TRITON-VECADD-01`; CP-0021 now records its compile/provenance
-prerequisite, while Triton and Qwen end-to-end remain 0/1. The next runtime
-gate is CP-0022 for generic wire-v2 integration. CP-0021
+prerequisite, while Triton and Qwen end-to-end remain 0/1. The following wire
+gate was CP-0022. CP-0021
 records the pinned unmodified tutorial and 5,408-byte HSACO identities,
 12-DWORD (48-byte) descriptor preload, runtime CTest 16/16, and explicit false
 compiler/JIT/launcher/transport/execution/fallback fields. It performs no
-normal launch and leaves public A1 mapping VAs at zero. CP-0022 now accepts a
-separate payload-v2 codec/admission boundary: v1 framing remains byte-stable,
-bit 8 and records 18/19/20 are opt-in, and owner-scoped mapping, kernarg,
-submit, and unmap identities are strictly validated. The retained Triton
-preload is an explicit NOT_SUPPORTED boundary. No daemon handler, GPU VA
-publication, normal launcher, or execution is claimed; CP-0023 is the next
-coordinated wire/daemon integration gate.
+normal launch and leaves public A1 mapping VAs at zero. CP-0022 accepts a
+separate payload-v2 codec boundary: v1 framing remains byte-stable, bit 8 and
+records 18/19/20 are opt-in, and owner-scoped identities are strict. CP-0023
+accepts the runtime client and local native adapter/admission step. Runtime
+CTest is 18/18 and the gem5 protocol suite is 47/47 normally and under
+ASAN/UBSAN. The local no-x86 state maps, allocates, publishes kernarg,
+publishes/fetches AQL, admits through the extracted CP core, retires, and
+unmaps; a post-fetch CP rejection uses `cancelFetch` to restore queue ownership
+before pins are released. Admission is not execution. The daemon still neither
+advertises capability bit 8 nor routes MessageType 18; GPUDispatcher/CU,
+kernel execution, normal Triton launcher, compiler/JIT, and fallback remain
+false. The retained 12-DWORD preload is NOT_SUPPORTED. CP-0024 /
+`P5-TRITON-VECADD-03-DAEMON-ROUTE` is the next gate.
 
 ## Non-goals
 

@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-10`
 
-**State at this commit:** `CP-0022 generic wire-v2 codec boundary accepted; normal launcher blocked; next-CP-0023 daemon wire integration`
+**State at this commit:** `CP-0023 generic adapter/client/admission boundary accepted; daemon route and normal launcher blocked; next-CP-0024 P5-TRITON-VECADD-03-DAEMON-ROUTE`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -496,7 +496,8 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
 | CP-0021 | P5 | Hash-bound Triton vecadd compile/provenance prerequisite; normal launcher remains blocked |
 | CP-0022 | P5 | Generic payload-v2 codec/admission boundary; daemon mapping and launcher handoff remain blocked |
-| CP-0023 | P5 | Coordinated daemon/client mapping leases, kernarg publication, AQL submission, and normal launcher handoff |
+| CP-0023 / P5-TRITON-VECADD-02-RUNTIME | P5 | Owner-bound runtime client plus local native MAP/ALLOC/publish/fetch/CP-admission/retire/unmap; daemon route remains blocked |
+| CP-0024 / P5-TRITON-VECADD-03-DAEMON-ROUTE | P5 | Negotiate and route MessageType 18 through a real daemon handler without advertising partial support |
 | P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
 | P5-PARALLEL-TB-01 | P5B | Safe serial-versus-parallel threadblock experiment |
 | P5-OPS-01 | P5C | Broader model-operator manifest and differential gates |
@@ -800,12 +801,19 @@ but compiler/JIT invocation, normal launcher, transport, simulator execution,
 output differential, and fallback are all false. Public A1 mapping remains
 zero-address and fixture-only. Triton E2E and Qwen inference remain 0/1. The
 `CP-0022` accepts the independent payload-v2 codec/admission boundary: v1
- framing and records remain byte-compatible, while owner-scoped MAP,
- ALLOC_KERNARG, SUBMIT_AQL, and UNMAP records are fixed-width and canonically
- padded. It does not add a daemon handler or publish a GPU VA. The Triton
- 12-DWORD descriptor preload remains an explicit NOT_SUPPORTED boundary. The
- next unique action is `CP-0023` for coordinated daemon/client mapping leases,
- kernarg publication, AQL submission, and normal launcher handoff.
+framing and records remain byte-compatible, while owner-scoped MAP,
+ALLOC_KERNARG, SUBMIT_AQL, and UNMAP records are fixed-width and canonically
+padded. `CP-0023` adds an append-only runtime client API and a separate local
+native adapter/state selftest. Runtime CTest passes 18/18; the gem5 protocol
+suite passes 47/47 normally and under ASAN/UBSAN. The local native lifecycle
+maps the object, allocates and publishes kernarg bytes, publishes/fetches AQL,
+performs command-processor admission, retires, and unmaps with owner/generation
+checks and cancel-fetch rollback. It deliberately stops before the live daemon:
+capability bit 8 advertisement and MessageType 18 routing are false, as are
+GPUDispatcher/CU execution, the normal Triton launcher, compiler/JIT, and
+fallback. The 12-DWORD descriptor preload remains an explicit NOT_SUPPORTED
+boundary. The next unique action is CP-0024 /
+`P5-TRITON-VECADD-03-DAEMON-ROUTE`.
 
 ### P3H - host-native simulator and first Triton gate
 
@@ -851,8 +859,11 @@ The work is staged as follows:
    compiler/JIT, launcher, transport, execution, and fallback remain false.
    Triton end-to-end is still 0/1. The exact LLVM/Triton pair has a temporary
    AMD-only overlay that produced the retained compile artifact; it is not yet
-   a committed launcher or device execution path. CP-0022 now freezes the
-   codec-only wire-v2 boundary; CP-0023 is the next coordinated daemon gate.
+   a committed launcher or device execution path. CP-0022 freezes the wire-v2
+   codec. CP-0023 adds the runtime client contract and local owner-bound native
+   adapter/admission lifecycle, but no daemon advertises bit 8 or routes
+   MessageType 18 and no GPU execution is claimed. CP-0024 /
+   `P5-TRITON-VECADD-03-DAEMON-ROUTE` is the next coordinated daemon gate.
 
 This workstream is not a cycle-accurate replacement. Timing, wider operator
 coverage, host-parallel threadblocks, HIP/OpenCL CTS, PyTorch, vLLM, and Qwen

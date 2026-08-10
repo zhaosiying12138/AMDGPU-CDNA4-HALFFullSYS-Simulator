@@ -1,18 +1,20 @@
 # Host Transport v2 Generic Dispatch Boundary
 
-CP-0022 adds a reviewed payload-v2 codec and admission boundary for a future
-generic code-object launch. The authority is
-`protocol/host-transport-v2.json`; the runtime implementation is in
-`projects/self-amdgpu-runtime`.
+CP-0022 froze the payload-v2 codec for a future generic code-object launch.
+CP-0023 accepts the next bounded client/adapter/admission layer: an append-only
+runtime API and a separate owner-bound native gem5 state machine. The authority
+is `protocol/host-transport-v2.json`; the implementations are in
+`projects/self-amdgpu-runtime` and `projects/gem5`.
 
 This is deliberately an opt-in extension. The envelope remains the existing
 80-byte, big-endian, CRC-32C v1 frame, while the payload declares major `2`,
 minor `0`. Existing v1 queue, memory, signal, pinned-dispatch, and A1
-code-object records are unchanged. The new capability is bit 8,
-`GENERIC_DISPATCH_V2`, and it is valid only with topology, queue, memory,
-signal, and code-object transport capabilities. The current daemon does not
-advertise or route this bit; successful local codec validation is not a
-negotiated transport or execution result.
+code-object records are unchanged. The new runtime capability is word 0 bit 8,
+`GENERIC_DISPATCH_V2`; on the 32-byte wire bitmap this is byte 1 bit 0,
+mask `0x01`. It is valid only with topology, queue, memory, signal, and
+code-object transport capabilities. The current daemon does not advertise the
+bit or route MessageType 18. Codec support, a client API, and a local adapter
+must not cause advertisement before a complete session handler exists.
 
 ## Records
 
@@ -47,9 +49,11 @@ the corresponding preload and entry-offset semantics.
 
 `ALLOC_KERNARG` uses offsets 232, 240, 248, and 252 for size, alignment, flags,
 and reserved data. It binds a nonzero object and mapping identity but does not
-accept queue or signal identities. Future byte publication remains a separate
-v1 memory carrier operation; this record allocates and names the daemon-owned
-packet-visible allocation only.
+accept queue or signal identities. Byte publication remains a separate v1
+memory carrier operation. The CP23 runtime client exercises a sealed-memfd v1
+`MEMORY_COPY_H2D` publication against its mock transport, while the native
+selftest calls an owner-bound `publishKernarg` adapter. Those two local tests
+are not connected by a daemon route.
 
 `SUBMIT_AQL` uses offsets 232 through 332 for the kernarg allocation and range,
 signal identity and expected value, grid/workgroup dimensions, Triton launch
@@ -57,7 +61,10 @@ metadata, shared memory, wavefront size, and reserved flags. The bounded
 validator requires a direct expected signal value of one, wavefront 64, a
 workgroup product equal to `num_warps * 64`, grid dimensions at least as large
 as their workgroup dimensions, and bounded sizes. It carries no raw packet.
-The daemon must construct the 64-byte AQL packet after validating ownership.
+The wire contract requires the daemon to construct the 64-byte AQL packet after
+validating ownership. CP23 proves the corresponding operations locally by
+materializing, publishing, and fetching a packet before extracted CP-core
+admission, but no MessageType 18 daemon handler performs that sequence yet.
 
 `UNMAP_OBJECT` carries only object and mapping identity. All queue, signal,
 kernel, hash/name, body, and tail bytes are zero.
@@ -83,27 +90,48 @@ For a failed response, all resource identities, VAs, hashes, CRCs, tickets,
 traces, and ticks are zero except the echoed opcode, and `error_code` is
 nonzero. Noncanonical failures are protocol errors rather than partial state.
 
-The intended future ordering is:
+The intended live ordering remains:
 
 `MAP_OBJECT -> ALLOC_KERNARG -> v1 MEMORY_COPY_H2D -> SUBMIT_AQL -> completion -> UNMAP_OBJECT`
 
 The mapping, allocation, queue, signal, and object generations must belong to
 the same connection and remain pinned through completion. A public
 `simulated_va` value is not automatically packet-visible GPU memory; only a
-future daemon-issued mapping/lease response can establish that relation.
+daemon-issued mapping/lease response from the routed handler can establish
+that relation.
+
+## CP23 accepted local boundary
+
+The runtime child preserves the v1 ABI and passes its complete CTest suite
+18/18. Its v2 client test covers MAP, ALLOC, sealed-memfd kernarg publication,
+SUBMIT, failed and successful completion, wait, UNMAP, stale/cross-owner
+rejection, and no-capability failure against an in-process mock transport.
+
+The gem5 protocol codec passes 47/47 normally and 47/47 under ASAN/UBSAN. A
+separate no-x86 native selftest binds one owner and request epoch across MAP,
+ALLOC_KERNARG, `publishKernarg`, queue publish/fetch, extracted command-
+processor admission, retire, and UNMAP. If the CP rejects after fetch,
+`cancelFetch` restores the slot to the queue owner before mapped/kernarg pins
+are released; a retry or explicit cancellation cannot silently lose the slot.
+
+These are two local halves, not an end-to-end daemon path. Capability bit 8 is
+not advertised, MessageType 18 is not routed, and admission does not reach
+GPUDispatcher, Shader, ComputeUnit, or kernel execution. Normal Triton launcher,
+compiler/JIT, output correctness, and fallback remain false.
 
 ## Triton boundary and non-claims
 
 The CP-0021 retained Triton tutorial and HSACO identities are recorded in the
 authority JSON. The codec can represent its 48-byte kernarg and 24832-by-256
-work-item/workgroup geometry, but the 12-DWORD descriptor preload is rejected
-until a preload-aware admission and execution path exists. CP-0022 therefore
-does not claim code-object mapping, kernarg publication, AQL queue submission,
-normal launcher operation, compiler/JIT invocation, gem5 Dispatcher/CU
-execution, output correctness, or CPU/NVIDIA fallback absence at runtime.
+work-item/workgroup geometry, but the 12-DWORD (48-byte) descriptor preload is
+rejected until preload-aware mapping and entry semantics exist. CP23 continues
+to return NOT_SUPPORTED instead of stripping or reinterpreting that field.
 
-The next implementation checkpoint must add a coordinated daemon/client
-handler, owner-bound leases, AQL construction, and preload-aware native CP
-semantics. It must preserve the v1 byte-level contract and prove stale,
-cross-owner, out-of-order, overflow, CRC, and unsupported-preload failures
-before any launch result is reported.
+The next implementation checkpoint is CP-0024 /
+`P5-TRITON-VECADD-03-DAEMON-ROUTE`. It must add capability negotiation and a
+real MessageType 18 daemon route that joins the reviewed runtime client to the
+owner-bound native adapter, while preserving v1 byte compatibility and every
+stale, cross-owner, cancellation, overflow, CRC, and unsupported-preload
+failure. It must not advertise bit 8 until the handler can complete the whole
+accepted lifecycle; GPU execution and the normal Triton launcher remain later
+gates unless separately proven.

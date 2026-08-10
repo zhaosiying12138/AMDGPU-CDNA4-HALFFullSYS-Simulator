@@ -1,0 +1,26 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/src/transport_codec.c",
+    "projects/gem5/src/dev/amdgpu/host_gpu_protocol.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc",
+    "projects/gem5/src/dev/amdgpu/host_native_code_object_mapper.cc",
+    "protocol/host-transport-v2.json",
+    "state/evidence/EV-0054.json"
+  ],
+  "checkpoint_id": "CP-0023",
+  "conclusion": "The retained Triton vecadd descriptor preload is 12 DWORDs, covering 48 bytes, and remains incompatible with the current native mapping/entry semantics; both wire validation and local admission must fail closed rather than strip, zero, or reinterpret it.",
+  "confidence": "high",
+  "decision": "Carry descriptor_preload_dwords through MAP metadata, return NOT_SUPPORTED for the 12-DWORD artifact before publishing a mapping or admitting a packet, and keep launcher/JIT/execution/fallback false until preload-aware mapping plus entry semantics have dedicated evidence.",
+  "evidence_ids": ["EV-0054", "EV-0055"],
+  "id": "BL-0097",
+  "invalidated_assumptions": [
+    "A local owner-bound mapper may ignore preload because no GPU execution is claimed yet.",
+    "The value 12 can be treated as 12 bytes or silently replaced with zero while retaining the same Triton code-object identity.",
+    "Passing MAP/ALLOC/SUBMIT lifecycle tests for a zero-preload fixture makes the retained Triton vecadd launchable."
+  ],
+  "observation": "The pinned 5,408-byte Triton HSACO still encodes descriptor preload 12 DWORD (48 bytes); CP23 protocol and native-state paths report it unsupported before publication/admission, while compiler_invoked, JIT, launcher, GPU execution, and fallback remain false.",
+  "question_or_symptom": "Why must CP23 reject the retained Triton vecadd image even though its generic wire fields and 48-byte kernarg range are otherwise representable?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

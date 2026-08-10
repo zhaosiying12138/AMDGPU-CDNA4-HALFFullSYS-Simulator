@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0022-generic-wire-v2-codec-boundary-accepted; normal-launcher-blocked; next-CP-0023-daemon-wire-integration`
+**Current state:** `CP-0023-generic-adapter-client-admission-boundary-accepted; daemon-route-and-normal-launcher-blocked; next-CP-0024-P5-TRITON-VECADD-03-DAEMON-ROUTE`
 
 **Current phase:** `P5`
 
@@ -121,7 +121,12 @@ GPUDispatcher/Shader/ComputeUnit/Vega instruction path，并完成锁定
 gfx950 gpuReadWrite 的 4 个 256-item workgroup、16 个 wave64、每 wave 19
 个 instruction-start（304 总数）和输出/队列/信号差分；这只是单一 fixture
 的功能边界，不是通用 gfx950、timing、fence/atomic、TLB/Ruby 或任意 HSACO
-支持。下一步是唯一的未修改 Triton vecadd 透明 launcher gate。
+支持。CP-0021/CP-0022/CP-0023 已依次冻结 Triton provenance、payload-v2 wire
+codec 和 runtime client/local native admission 边界；CP-0023 的本地
+MAP/ALLOC、kernarg publish、queue publish/fetch、CP admission、retire 和
+UNMAP 不等于 daemon 路由或 GPU 执行。当前唯一 next_action 是 CP-0024 的
+`P5-TRITON-VECADD-03-DAEMON-ROUTE`：在具备完整 handler 前不得广告
+capability bit 8，也不得把本地 admission 当作正常 Triton launcher 成功。
 在 Triton 用户命令 `tutorial/01-vecadd.py`（当前 pinned checkout 中对应未修改的
 `python/tutorials/01-vector-add.py`）首次透明通过后，先完成可复现的 gem5
 算子 profile、80/20 优化和 threadblock host-parallel 正确性/可行性门禁，再
@@ -230,21 +235,23 @@ descriptor preload is 12 DWORD (48 bytes), runtime CTest is 16/16 with focused
 code-object tests 4/4, and caller-local code/kernarg preparation succeeds.
 `compiler_invoked`, `jit`, `launcher`, `transport`, `execution`, and `fallback`
 are all false; Triton E2E and Qwen inference remain `0/1`. Public A1 mapping,
-descriptor, code, and kernarg VAs remain zero and fixture-only. CP-0022 accepts
-the independent payload-v2 codec/admission boundary: v1 framing and records
-remain byte-compatible, while owner-scoped MAP, ALLOC_KERNARG, SUBMIT_AQL, and
-UNMAP records are fixed-width and canonically padded. It does not add a daemon
-handler or publish a GPU VA. The Triton 12-DWORD descriptor preload remains an
-explicit NOT_SUPPORTED boundary. The next unique action is CP-0023 for
-coordinated daemon/client mapping leases, kernarg publication, AQL submission,
-and normal launcher handoff without fallback.
+descriptor, code, and kernarg VAs remain zero and fixture-only.
 
 `CP-0022` accepts the independent generic payload-v2 codec boundary. It keeps
 the v1 80-byte framing and records byte-identical, adds opt-in capability bit 8
 and message types 18/19/20, and validates owner-scoped MAP, ALLOC_KERNARG,
 SUBMIT_AQL, and UNMAP records with canonical zero padding and daemon-issued GPU
-VA response fields. The codec explicitly rejects the retained Triton
-12-DWORD descriptor preload until native preload and entry-offset semantics are
-implemented. No daemon handler, mapping lease, kernarg publication, AQL queue
-submission, normal launcher, compiler/JIT, gem5 execution, or fallback claim is
-made; those are the CP-0023 integration boundary.
+VA response fields.
+
+`CP-0023` accepts the next adapter/client/admission boundary. The standalone
+runtime keeps v1 behavior and passes CTest 18/18 while exercising its public v2
+client lifecycle against a mock transport. The gem5 protocol suite passes
+47/47 normally and 47/47 under ASAN/UBSAN. A separate no-x86 native selftest
+performs owner-bound MAP, ALLOC_KERNARG, kernarg publication, AQL queue
+publication/fetch, command-processor admission, retirement, and UNMAP, including
+cancel-fetch rollback after a rejected CP admission. This remains local adapter
+state: the daemon does not advertise capability bit 8 or route MessageType 18,
+and GPUDispatcher, ComputeUnit, kernel execution, normal Triton launcher,
+compiler/JIT, and fallback remain false. The retained Triton 12-DWORD (48-byte)
+descriptor preload still fails closed as NOT_SUPPORTED. The next unique action
+is CP-0024 / `P5-TRITON-VECADD-03-DAEMON-ROUTE`.

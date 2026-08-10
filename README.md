@@ -212,11 +212,17 @@ HSACO target is `amdgcn-amd-amdhsa-unknown-gfx950`, and its descriptor preload
 is 12 DWORD (48 bytes). Runtime CTest is 16/16 (focused code-object tests 4/4),
 but compiler/JIT invocation, normal launcher, transport, execution, and
 fallback are all false. The public A1 path still publishes zero VAs and remains
-fixture-only. CP-0022 now accepts the independent payload-v2 codec boundary:
-v1 framing remains unchanged, bit 8 and records 18/19/20 are opt-in, and
+fixture-only. CP-0022 accepts the independent payload-v2 codec boundary: v1
+framing remains unchanged, bit 8 and records 18/19/20 are opt-in, and
 owner-scoped MAP/ALLOC_KERNARG/SUBMIT_AQL/UNMAP records are strictly validated.
-The daemon, normal launcher, mapping leases, kernarg publication, AQL
-submission, execution, and fallback remain false; CP-0023 is the next
-coordinated daemon/client integration gate.
+CP-0023 now accepts the bounded adapter/client/admission step. The runtime
+public v2 lifecycle preserves v1 and passes CTest 18/18; gem5's protocol suite
+passes 47/47 normally and under ASAN/UBSAN. A separate local no-x86 adapter
+selftest performs owner-bound MAP, ALLOC, kernarg publish, AQL publish/fetch,
+CP admission, retire, and UNMAP with rejection rollback. It is not a live
+daemon path: capability bit 8 advertisement and MessageType 18 routing are
+false, as are GPUDispatcher/CU execution, normal Triton launcher, compiler/JIT,
+and fallback. The 12-DWORD (48-byte) Triton preload remains NOT_SUPPORTED.
+CP-0024 / `P5-TRITON-VECADD-03-DAEMON-ROUTE` is the next unique action.
 
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

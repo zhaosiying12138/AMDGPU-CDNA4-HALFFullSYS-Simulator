@@ -1,24 +1,33 @@
 {
   "schema": "amdgpu-sim.host-transport-v2.generic-dispatch.v2",
   "title": "GemSim generic object mapping and dispatch payload-v2 authority",
-  "checkpoint": "CP-0022",
-  "authority_status": "codec-admission-only",
+  "checkpoint": "CP-0023",
+  "authority_status": "adapter-client-admission-only",
   "base_protocol": "protocol/host-transport-v1.json",
-  "scope": "A versioned, fixed-record schema for future object mapping, kernarg allocation, daemon-owned AQL submission, and unmapping. This checkpoint validates the payload codec and ownership rules only; it does not implement a daemon handler, launcher, mapping, or GPU execution.",
+  "scope": "A versioned, fixed-record schema plus an append-only runtime client and a separate local gem5 owner-bound mapping, kernarg, queue, CP-admission, retire, and unmap adapter. The local halves are not connected by a daemon MessageType 18 route and do not establish launcher or GPU execution.",
+  "next_action": {
+    "checkpoint": "CP-0024",
+    "id": "P5-TRITON-VECADD-03-DAEMON-ROUTE",
+    "boundary": "Negotiate capability bit 8 and route MessageType 18 through one real daemon handler without advertising partial support or claiming GPU execution."
+  },
   "versioning": {
     "framing_major": 1,
     "framing_minor": 0,
     "payload_major": 2,
     "payload_minor": 0,
     "compatibility": "The v1 80-byte envelope, byte order, CRC-32C rule, and all v1 message records remain unchanged. A v2 payload is opt-in and is never decoded as a v1 record.",
-    "server_status": "The current daemon does not advertise or route this capability. A codec success is not a transport or execution result."
+    "server_status": "The current daemon does not advertise capability bit 8 or route MessageType 18. Codec/client/local-adapter success is not a negotiated daemon transport or execution result."
   },
   "capability": {
     "name": "GENERIC_DISPATCH_V2",
     "word_index": 0,
     "bit": 8,
-    "mask_hex": "100",
-    "negotiation": "Selected only when offered and required are both set, matching the existing runtime capability policy.",
+    "mask_hex": "0x00000100",
+    "wire_byte_index": 1,
+    "wire_bit_within_byte": 0,
+    "wire_mask_hex": "0x01",
+    "advertised_by_current_daemon": false,
+    "negotiation": "Selected only when offered and required are both set, matching the existing runtime capability policy. Runtime word 0 bit 8 maps to wire capability byte 1 bit 0; codec presence alone must not advertise the bit.",
     "requires": [
       "TOPOLOGY_IDENTITY_V1",
       "QUEUE_CONTROL_V1",
@@ -53,7 +62,7 @@
     "ancillary_descriptors": 0,
     "host_pointers": false,
     "client_aql_bytes": false,
-    "fd_carrier": "No FD or SCM_RIGHTS field is part of v2. Existing v1 MEMORY_COPY_H2D remains the future byte-carrier for daemon-owned allocations."
+    "fd_carrier": "No FD or SCM_RIGHTS field is part of v2. CP23 exercises existing sealed-memfd v1 MEMORY_COPY_H2D as the runtime mock byte carrier and a separate native publishKernarg adapter locally; no daemon route joins them."
   },
   "request_payload": {
     "bytes": 4016,
@@ -183,8 +192,35 @@
   "state_rules": {
     "ordering": ["MAP_OBJECT", "ALLOC_KERNARG", "SUBMIT_AQL", "UNMAP_OBJECT"],
     "ownership": "Every nonzero object, mapping, queue, allocation, signal, ticket, and generation is connection/owner scoped. Stale or cross-owner generations are rejected before publication.",
-    "aql": "SUBMIT_AQL contains launch metadata only. The daemon owns packet materialization, kernel_object, kernarg VA, completion signal linkage, publication, and CRC.",
-    "memory": "The v2 schema does not make public simulated_va packet-visible by itself. A future handler must return daemon-issued GPU VAs and pin the referenced allocations until completion."
+    "aql": "SUBMIT_AQL contains launch metadata only. The live daemon contract owns packet materialization, kernel_object, kernarg VA, completion signal linkage, publication, and CRC. CP23 proves equivalent local publish/fetch/CP-admission/retire state but no routed handler.",
+    "memory": "The v2 schema does not make public simulated_va packet-visible by itself. CP23 local adapter VAs and leases are owner-bound selftest state; only a routed daemon handler can return them to a real client and pin them through completion.",
+    "fetch_rollback": "If CP admission rejects a locally fetched packet, CP23 cancelFetch restores the queue slot before mapping/kernarg pins are released. Admission success records ownership and queue state only; it is not GPU execution."
+  },
+  "cp23_local_boundary": {
+    "runtime_ctest": "18/18",
+    "runtime_client_transport": "in-process mock",
+    "runtime_v1_compatibility": true,
+    "gem5_protocol_gtest": "47/47",
+    "gem5_protocol_asan_ubsan": "47/47",
+    "owner_bound_operations": [
+      "MAP_OBJECT",
+      "ALLOC_KERNARG",
+      "publishKernarg",
+      "queue_publish_fetch",
+      "command_processor_admission",
+      "retire",
+      "UNMAP_OBJECT"
+    ],
+    "cp_rejection_cancel_fetch": true,
+    "daemon_message_type_18_route": false,
+    "daemon_capability_advertisement": false,
+    "gpu_dispatcher": false,
+    "compute_unit": false,
+    "execution": false,
+    "normal_triton_launcher": false,
+    "compiler_invoked": false,
+    "jit": false,
+    "fallback": false
   },
   "bounded_fixture_observation": {
     "tutorial_sha256": "842430949e0ccde4fbce07606cce3ac4bac36bf21b2b12619a31b795ca4029b3",
@@ -195,17 +231,30 @@
     "kernarg_segment_bytes": 48,
     "kernarg_alignment": 8,
     "descriptor_preload_dwords": 12,
-    "preload_status": "NOT_SUPPORTED by this codec/admission gate until native preload and +256-byte entry semantics are implemented; the value is never silently stripped."
+    "preload_status": "NOT_SUPPORTED by the CP23 local mapping/admission gate until preload-aware mapping and +256-byte entry semantics are implemented; the 12-DWORD value is never silently stripped or treated as bytes."
   },
   "acceptance_boundary": {
     "codec_test": true,
-    "mapping_handler": false,
-    "allocator_handler": false,
-    "kernarg_publication": false,
-    "aql_queue_submission": false,
+    "runtime_client_api": true,
+    "runtime_v1_compatibility": true,
+    "local_mapping_adapter": true,
+    "local_allocator_adapter": true,
+    "local_kernarg_publication": true,
+    "local_aql_publish_fetch": true,
+    "local_command_processor_admission": true,
+    "local_retire": true,
+    "local_unmap": true,
+    "daemon_message_type_18_route": false,
+    "daemon_capability_advertisement": false,
+    "daemon_generic_handler": false,
     "normal_launcher": false,
+    "normal_triton_launcher": false,
     "gem5_dispatcher_or_cu": false,
+    "gpu_dispatcher": false,
+    "compute_unit": false,
     "compiler_or_jit": false,
+    "compiler_invoked": false,
+    "jit": false,
     "execution": false,
     "fallback": false,
     "qwen_e2e": false

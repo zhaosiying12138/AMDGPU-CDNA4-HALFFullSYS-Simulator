@@ -1,0 +1,25 @@
+{
+  "applies_to": [
+    "projects/self-amdgpu-runtime/include/self_amdgpu_runtime/runtime.h",
+    "projects/self-amdgpu-runtime/src/transport_codec.c",
+    "projects/gem5/src/dev/amdgpu/host_gpu_protocol.hh",
+    "projects/gem5/src/dev/amdgpu/host_gpu_protocol.cc",
+    "protocol/host-transport-v2.json",
+    "docs/host-transport-v2.md"
+  ],
+  "checkpoint_id": "CP-0023",
+  "conclusion": "Runtime capability word 0 bit 8 is wire capability byte 1 bit 0 (mask 0x01), and codec/client support is not sufficient authority for a daemon to advertise that bit.",
+  "confidence": "high",
+  "decision": "Keep the word-to-byte mapping explicit in both implementations, require all topology/queue/memory/signal/code-object dependencies, and leave capability advertisement plus MessageType 18 routing disabled until one daemon session handler owns the complete lifecycle.",
+  "evidence_ids": ["EV-0054", "EV-0055"],
+  "id": "BL-0095",
+  "invalidated_assumptions": [
+    "Capability bit 8 means byte 0 mask 0x100 on the serialized bitmap.",
+    "Adding encode/decode helpers or a public client API makes it safe for the daemon handshake to advertise generic dispatch."
+  ],
+  "observation": "CP23 tests bind runtime word 0 bit 8 to gem5 wire byte 1 mask 0x01 and reject missing dependency capabilities, while the accepted environment explicitly reports generic_capability_advertised=false and message_type_18_bridge_route=false.",
+  "question_or_symptom": "How can both children agree on the generic capability bit without accidentally advertising a payload family that the daemon cannot route?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}
