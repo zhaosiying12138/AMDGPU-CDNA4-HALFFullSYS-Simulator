@@ -422,7 +422,8 @@ set_tests_properties(
 # launcher paths remain explicitly outside this test's claims.
 add_executable(
   self_amdgpu_runtime_generic_dispatch_v2_endpoint_test
-  generic_dispatch_v2_endpoint_test.c)
+  generic_dispatch_v2_endpoint_test.c
+  ../src/transport_codec.c)
 target_compile_features(
   self_amdgpu_runtime_generic_dispatch_v2_endpoint_test PRIVATE c_std_11)
 target_include_directories(
@@ -461,6 +462,67 @@ endif()
 add_test(
   NAME self_amdgpu_runtime.cli
   COMMAND self_amdgpu_runtime_cli_test)
+
+if(SELF_AMDGPU_RUNTIME_BUILD_OPENCL)
+  add_executable(
+    self_amdgpu_runtime_opencl_api_test
+    opencl_api_test.c)
+  target_compile_features(
+    self_amdgpu_runtime_opencl_api_test
+    PRIVATE c_std_11)
+  target_compile_definitions(
+    self_amdgpu_runtime_opencl_api_test
+    PRIVATE
+      SAGR_OPENCL_VECADD_SOURCE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../examples/opencl/vecadd.cl")
+  target_include_directories(
+    self_amdgpu_runtime_opencl_api_test
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src")
+  target_link_libraries(
+    self_amdgpu_runtime_opencl_api_test
+    PRIVATE SelfAmdgpuRuntime::OpenCL SelfAmdgpuRuntime::runtime)
+  if(MSVC)
+    target_compile_options(
+      self_amdgpu_runtime_opencl_api_test PRIVATE /W4 /WX)
+  else()
+    target_compile_options(
+      self_amdgpu_runtime_opencl_api_test
+      PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+  endif()
+  add_test(
+    NAME self_amdgpu_runtime.opencl_api
+    COMMAND self_amdgpu_runtime_opencl_api_test)
+  set_tests_properties(
+    self_amdgpu_runtime.opencl_api
+    PROPERTIES TIMEOUT 120)
+
+  add_executable(
+    self_amdgpu_runtime_opencl_vecadd_e2e
+    opencl_vecadd_e2e.c)
+  target_compile_features(
+    self_amdgpu_runtime_opencl_vecadd_e2e
+    PRIVATE c_std_11)
+  target_compile_definitions(
+    self_amdgpu_runtime_opencl_vecadd_e2e
+    PRIVATE
+      SAGR_OPENCL_VECADD_SOURCE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../examples/opencl/vecadd.cl")
+  target_link_libraries(
+    self_amdgpu_runtime_opencl_vecadd_e2e
+    PRIVATE SelfAmdgpuRuntime::OpenCL)
+  if(MSVC)
+    target_compile_options(
+      self_amdgpu_runtime_opencl_vecadd_e2e PRIVATE /W4 /WX)
+  else()
+    target_compile_options(
+      self_amdgpu_runtime_opencl_vecadd_e2e
+      PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+  endif()
+  add_test(
+    NAME self_amdgpu_runtime.opencl_vecadd_e2e
+    COMMAND self_amdgpu_runtime_opencl_vecadd_e2e)
+  set_tests_properties(
+    self_amdgpu_runtime.opencl_vecadd_e2e
+    PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+endif()
 
 if(SELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE)
   add_test(

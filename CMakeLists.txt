@@ -18,6 +18,7 @@ file(
 
 option(SELF_AMDGPU_RUNTIME_BUILD_TESTS "Build self-amdgpu-runtime tests" ON)
 option(SELF_AMDGPU_RUNTIME_BUILD_TOOLS "Build self-amdgpu-runtime tools" ON)
+option(SELF_AMDGPU_RUNTIME_BUILD_OPENCL "Build the local OpenCL 1.2 subset" ON)
 option(
   SELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE
   "Test the installed package with an independent default-toolchain consumer"
@@ -38,6 +39,7 @@ set_target_properties(
   self_amdgpu_runtime
   PROPERTIES C_VISIBILITY_PRESET hidden
              EXPORT_NAME runtime
+             POSITION_INDEPENDENT_CODE ON
              VISIBILITY_INLINES_HIDDEN YES
              VERSION "${PROJECT_VERSION}"
              SOVERSION "1")
@@ -55,6 +57,94 @@ target_include_directories(
   self_amdgpu_runtime
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+if(SELF_AMDGPU_RUNTIME_BUILD_OPENCL)
+  if(NOT UNIX)
+    message(FATAL_ERROR "The managed gem5 OpenCL process path requires UNIX")
+  endif()
+  find_package(Threads REQUIRED)
+  get_filename_component(
+    SELF_AMDGPU_RUNTIME_REPO_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+    ABSOLUTE)
+  set(
+    SELF_AMDGPU_RUNTIME_OPENCL_PREFIX
+    "${CMAKE_INSTALL_PREFIX}"
+    CACHE PATH "Versioned local ROCm prefix used by the OpenCL compiler")
+  set(
+    SELF_AMDGPU_RUNTIME_OPENCL_GEM5
+    "${SELF_AMDGPU_RUNTIME_REPO_ROOT}/projects/gem5/build/VEGA_X86/gem5.opt"
+    CACHE FILEPATH "Repository-local gem5 executable for managed OpenCL")
+  set(
+    SELF_AMDGPU_RUNTIME_OPENCL_GEM5_CONFIG
+    "${SELF_AMDGPU_RUNTIME_REPO_ROOT}/projects/gem5/configs/example/gemsim/host_dispatch.py"
+    CACHE FILEPATH "Repository-local gem5 OpenCL dispatch configuration")
+
+  add_library(
+    self_amdgpu_opencl SHARED
+    src/opencl_api.c
+    src/opencl_compiler.c
+    src/opencl_enqueue.c
+    src/opencl_objects.c
+    src/simulator_process.c
+    src/sha256.c)
+  add_library(SelfAmdgpuRuntime::OpenCL ALIAS self_amdgpu_opencl)
+  set_target_properties(
+    self_amdgpu_opencl
+    PROPERTIES C_VISIBILITY_PRESET hidden
+               EXPORT_NAME OpenCL
+               INSTALL_RPATH "$ORIGIN"
+               OUTPUT_NAME OpenCL
+               VERSION "1.2.0"
+               SOVERSION "1"
+               VISIBILITY_INLINES_HIDDEN YES)
+  target_compile_features(self_amdgpu_opencl PUBLIC c_std_11)
+  target_compile_definitions(
+    self_amdgpu_opencl
+    PRIVATE
+      SAGR_OPENCL_DEFAULT_PREFIX="${SELF_AMDGPU_RUNTIME_OPENCL_PREFIX}"
+      SAGR_OPENCL_DEFAULT_GEM5="${SELF_AMDGPU_RUNTIME_OPENCL_GEM5}"
+      SAGR_OPENCL_DEFAULT_GEM5_CONFIG="${SELF_AMDGPU_RUNTIME_OPENCL_GEM5_CONFIG}"
+      SAGR_OPENCL_DEFAULT_REPO_ROOT="${SELF_AMDGPU_RUNTIME_REPO_ROOT}")
+  target_include_directories(
+    self_amdgpu_opencl
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_link_libraries(
+    self_amdgpu_opencl
+    PRIVATE SelfAmdgpuRuntime::runtime Threads::Threads)
+  if(MSVC)
+    target_compile_options(self_amdgpu_opencl PRIVATE /W4 /WX)
+  else()
+    target_compile_options(
+      self_amdgpu_opencl
+      PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+  endif()
+
+  add_executable(
+    self_amdgpu_opencl_vecadd
+    examples/opencl/vecadd_host.c)
+  set_target_properties(
+    self_amdgpu_opencl_vecadd
+    PROPERTIES INSTALL_RPATH
+               "$ORIGIN/${SELF_AMDGPU_RUNTIME_INSTALL_LIBDIR_FROM_BINDIR}"
+               OUTPUT_NAME opencl-vecadd)
+  target_compile_features(self_amdgpu_opencl_vecadd PRIVATE c_std_11)
+  target_compile_definitions(
+    self_amdgpu_opencl_vecadd
+    PRIVATE
+      SAGR_OPENCL_VECADD_SOURCE_PATH="${CMAKE_INSTALL_FULL_DATADIR}/self-amdgpu-runtime/opencl/vecadd.cl")
+  target_link_libraries(
+    self_amdgpu_opencl_vecadd PRIVATE SelfAmdgpuRuntime::OpenCL)
+  if(MSVC)
+    target_compile_options(self_amdgpu_opencl_vecadd PRIVATE /W4 /WX)
+  else()
+    target_compile_options(
+      self_amdgpu_opencl_vecadd
+      PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+  endif()
+endif()
 
 if(SELF_AMDGPU_RUNTIME_BUILD_TOOLS)
   add_executable(sagr-handshake tools/sagr-handshake.c)
@@ -105,6 +195,17 @@ install(
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
   INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+if(SELF_AMDGPU_RUNTIME_BUILD_OPENCL)
+  install(
+    TARGETS self_amdgpu_opencl self_amdgpu_opencl_vecadd
+    EXPORT SelfAmdgpuRuntimeTargets
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+  install(
+    FILES examples/opencl/vecadd.cl
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/self-amdgpu-runtime/opencl")
+endif()
 install(
   DIRECTORY include/
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
