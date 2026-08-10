@@ -29,12 +29,18 @@
 #define SAGR_QUEUE_MAGIC UINT64_C(0x5341475251554555)
 #define SAGR_MEMORY_MAGIC UINT64_C(0x534147524d454d59)
 #define SAGR_SIGNAL_MAGIC UINT64_C(0x534147525349474e)
+#define SAGR_GENERIC_MAPPING_MAGIC UINT64_C(0x534147524d415056)
+#define SAGR_GENERIC_KERNARG_MAGIC UINT64_C(0x534147524b415247)
+#define SAGR_GENERIC_PENDING_MAGIC UINT64_C(0x5341475250563244)
 #define SAGR_MEMORY_SIMULATED_VA_BASE UINT64_C(0x0000100000000000)
 #define SAGR_MEMORY_SIMULATED_VA_STRIDE UINT64_C(2147483648)
 
 struct sagr_queue;
 struct sagr_memory;
 struct sagr_signal;
+struct sagr_generic_mapping;
+struct sagr_generic_kernarg;
+struct sagr_generic_pending;
 struct sagr_pending_dispatch;
 
 struct sagr_instance {
@@ -51,6 +57,11 @@ struct sagr_instance {
   uint32_t pending_signal_wait_count;
   uint64_t last_signal_generation;
   struct sagr_pending_dispatch *pending_dispatch;
+  struct sagr_generic_mapping *generic_mappings;
+  uint32_t generic_mapping_count;
+  struct sagr_generic_kernarg *generic_kernargs;
+  uint32_t generic_kernarg_count;
+  struct sagr_generic_pending *generic_pending;
   int operation_active;
   int transport_poisoned;
 };
@@ -121,6 +132,55 @@ struct sagr_pending_dispatch {
   int dispatch_completion_consumed;
   int signal_completion_consumed;
   sagr_wire_dispatch_response_t buffered_completion;
+};
+
+struct sagr_generic_mapping {
+  uint64_t magic;
+  struct sagr_instance *instance;
+  uint64_t object_id;
+  uint64_t object_generation;
+  uint64_t mapping_id;
+  uint64_t mapping_generation;
+  uint64_t mapped_base_va;
+  uint64_t mapped_end_va;
+  uint64_t descriptor_va;
+  uint64_t code_va;
+  uint64_t entry_va;
+  uint64_t mapped_bytes;
+  uint32_t kernel_index;
+  uint32_t segment_count;
+  uint32_t descriptor_preload_dwords;
+  uint8_t image_sha256[32];
+  char kernel_name[SAGR_GENERIC_KERNEL_NAME_BYTES];
+  struct sagr_generic_mapping *next;
+};
+
+struct sagr_generic_kernarg {
+  uint64_t magic;
+  struct sagr_instance *instance;
+  struct sagr_generic_mapping *mapping;
+  uint64_t allocation_id;
+  uint64_t generation;
+  uint64_t kernarg_va;
+  uint64_t size_bytes;
+  uint64_t alignment_bytes;
+  struct sagr_generic_kernarg *next;
+};
+
+struct sagr_generic_pending {
+  uint64_t magic;
+  struct sagr_instance *instance;
+  struct sagr_queue *queue;
+  struct sagr_generic_mapping *mapping;
+  struct sagr_generic_kernarg *kernarg;
+  struct sagr_signal *signal;
+  uint64_t request_id;
+  uint64_t kernarg_offset;
+  uint64_t kernarg_size;
+  sagr_wire_generic_response_t ack;
+  sagr_wire_generic_response_t completion;
+  int completion_buffered;
+  int completion_consumed;
 };
 
 typedef struct monotonic_deadline {
@@ -3184,6 +3244,8 @@ sagr_status_t sagr_instance_close(sagr_instance_t *instance) {
   struct sagr_queue *queue;
   struct sagr_memory *memory;
   struct sagr_signal *signal;
+  struct sagr_generic_mapping *mapping;
+  struct sagr_generic_kernarg *kernarg;
   if (instance == NULL) {
     return SAGR_STATUS_INVALID_ARGUMENT;
   }
@@ -3194,6 +3256,9 @@ sagr_status_t sagr_instance_close(sagr_instance_t *instance) {
   if (owned_instance->magic != SAGR_INSTANCE_MAGIC) {
     return SAGR_STATUS_INVALID_HANDLE;
   }
+  /* Closing the transport invalidates local leases.  We intentionally do not
+   * synthesize remote UNMAP/dispatch results here; daemon owner/epoch teardown
+   * remains authoritative for any abandoned generic resources. */
   *instance = NULL;
   owned_instance->magic = 0;
   if (owned_instance->socket_fd >= 0) {
@@ -3205,6 +3270,12 @@ sagr_status_t sagr_instance_close(sagr_instance_t *instance) {
            sizeof(*owned_instance->pending_dispatch));
     free(owned_instance->pending_dispatch);
     owned_instance->pending_dispatch = NULL;
+  }
+  if (owned_instance->generic_pending != NULL) {
+    memset(owned_instance->generic_pending, 0,
+           sizeof(*owned_instance->generic_pending));
+    free(owned_instance->generic_pending);
+    owned_instance->generic_pending = NULL;
   }
   queue = owned_instance->queues;
   while (queue != NULL) {
@@ -3240,6 +3311,29 @@ sagr_status_t sagr_instance_close(sagr_instance_t *instance) {
   owned_instance->signals = NULL;
   owned_instance->signal_count = 0;
   owned_instance->pending_signal_wait_count = 0;
+  kernarg = owned_instance->generic_kernargs;
+  while (kernarg != NULL) {
+    struct sagr_generic_kernarg *next = kernarg->next;
+    kernarg->magic = 0;
+    kernarg->instance = NULL;
+    kernarg->mapping = NULL;
+    memset(kernarg, 0, sizeof(*kernarg));
+    free(kernarg);
+    kernarg = next;
+  }
+  owned_instance->generic_kernargs = NULL;
+  owned_instance->generic_kernarg_count = 0;
+  mapping = owned_instance->generic_mappings;
+  while (mapping != NULL) {
+    struct sagr_generic_mapping *next = mapping->next;
+    mapping->magic = 0;
+    mapping->instance = NULL;
+    memset(mapping, 0, sizeof(*mapping));
+    free(mapping);
+    mapping = next;
+  }
+  owned_instance->generic_mappings = NULL;
+  owned_instance->generic_mapping_count = 0;
   memset(&owned_instance->info, 0, sizeof(owned_instance->info));
   free(owned_instance);
   return SAGR_STATUS_SUCCESS;
@@ -3458,6 +3552,11 @@ sagr_status_t sagr_queue_ring_doorbell(
     return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
                      "queue participates in a pinned dispatch");
   }
+  if (instance->generic_pending != NULL &&
+      instance->generic_pending->queue == queue) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "queue participates in a generic dispatch");
+  }
   if (queue->pending_count >= SAGR_QUEUE_MAX_INFLIGHT) {
     return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES, -1, 0,
                      "runtime queue in-flight limit reached");
@@ -3648,7 +3747,9 @@ sagr_status_t sagr_queue_destroy(
   }
   if (owned_queue->pending_count != 0 || owned_queue->buffered_count != 0 ||
       (instance->pending_dispatch != NULL &&
-       instance->pending_dispatch->queue == owned_queue)) {
+       instance->pending_dispatch->queue == owned_queue) ||
+      (instance->generic_pending != NULL &&
+       instance->generic_pending->queue == owned_queue)) {
     return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
                      "queue has pending completions");
   }
@@ -4257,6 +4358,12 @@ static int signal_handle_is_valid(const struct sagr_signal *signal) {
          signal->instance->magic == SAGR_INSTANCE_MAGIC;
 }
 
+static int queue_handle_is_valid(const struct sagr_queue *queue) {
+  return queue != NULL && queue->magic == SAGR_QUEUE_MAGIC &&
+         queue->instance != NULL &&
+         queue->instance->magic == SAGR_INSTANCE_MAGIC;
+}
+
 static void fill_signal_info(const struct sagr_signal *signal,
                              sagr_signal_info_t *info) {
   info->struct_size = (uint32_t)sizeof(*info);
@@ -4780,7 +4887,9 @@ sagr_status_t sagr_signal_destroy(
   if (owned_signal->wait_pending != 0 ||
       owned_signal->completion_buffered != 0 ||
       (instance->pending_dispatch != NULL &&
-       instance->pending_dispatch->signal == owned_signal)) {
+       instance->pending_dispatch->signal == owned_signal) ||
+      (instance->generic_pending != NULL &&
+       instance->generic_pending->signal == owned_signal)) {
     return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
                      "signal has a pending wait completion");
   }
@@ -5152,5 +5261,1655 @@ sagr_status_t sagr_queue_wait_pinned_dispatch(
   pending->dispatch_completion_consumed = 1;
   observe_dispatch_signal_mirror(pending);
   release_consumed_dispatch(instance);
+  return SAGR_STATUS_SUCCESS;
+}
+
+/* CP-0023 client-side payload-v2 state.  These helpers deliberately remain
+ * behind the existing v1 transport and never serialize a host pointer or an
+ * AQL packet supplied by the caller. */
+
+static int generic_capability_selected_instance(
+    const struct sagr_instance *instance) {
+  const uint64_t selected =
+      instance->info.negotiated_capabilities[SAGR_CAPABILITY_GENERIC_DISPATCH_WORD];
+  return (selected & SAGR_CAPABILITY_GENERIC_DISPATCH_MASK) != 0U &&
+         (selected & SAGR_CAPABILITY_TOPOLOGY_MASK) != 0U &&
+         (selected & SAGR_CAPABILITY_QUEUE_MASK) != 0U &&
+         (selected & SAGR_CAPABILITY_MEMORY_MASK) != 0U &&
+         (selected & SAGR_CAPABILITY_SIGNAL_MASK) != 0U &&
+         (selected & SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK) != 0U;
+}
+
+static sagr_status_t require_generic_transport(
+    const struct sagr_instance *instance, sagr_error_info_t *error,
+    uint32_t error_size) {
+  if (!generic_capability_selected_instance(instance)) {
+    return fail_open(error, error_size, SAGR_STATUS_NOT_SUPPORTED,
+                     SAGR_WIRE_STATUS_UNSUPPORTED_CAPABILITY, 0,
+                     "GENERIC_DISPATCH_V2 was not negotiated");
+  }
+  if (instance->transport_poisoned != 0 || instance->socket_fd < 0) {
+    return fail_open(error, error_size, SAGR_STATUS_CONNECTION_LOST, -1, 0,
+                     "generic dispatch transport is no longer reusable");
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static int generic_name_is_canonical(const char *name) {
+  size_t index;
+  int terminated = 0;
+  if (name == NULL) {
+    return 0;
+  }
+  for (index = 0; index < SAGR_GENERIC_KERNEL_NAME_BYTES; ++index) {
+    const unsigned char value = (unsigned char)name[index];
+    if (terminated != 0) {
+      if (value != 0U) {
+        return 0;
+      }
+    } else if (value == 0U) {
+      terminated = 1;
+    } else if (value < 0x20U || value > 0x7eU) {
+      return 0;
+    }
+  }
+  return terminated != 0 && name[0] != '\0';
+}
+
+static int generic_digest_is_nonzero(const uint8_t digest[32]) {
+  return !bytes_are_zero(digest, 32U);
+}
+
+static int generic_power_of_two_u64(uint64_t value) {
+  return value != 0U && (value & (value - UINT64_C(1))) == 0U;
+}
+
+static int generic_mapping_handle_is_valid(
+    const struct sagr_generic_mapping *mapping) {
+  return mapping != NULL && mapping->magic == SAGR_GENERIC_MAPPING_MAGIC &&
+         mapping->instance != NULL &&
+         mapping->instance->magic == SAGR_INSTANCE_MAGIC;
+}
+
+static int generic_kernarg_handle_is_valid(
+    const struct sagr_generic_kernarg *kernarg) {
+  return kernarg != NULL && kernarg->magic == SAGR_GENERIC_KERNARG_MAGIC &&
+         kernarg->instance != NULL &&
+         kernarg->instance->magic == SAGR_INSTANCE_MAGIC &&
+         generic_mapping_handle_is_valid(kernarg->mapping);
+}
+
+static int generic_mapping_owned_by_instance(
+    const struct sagr_generic_mapping *mapping,
+    const struct sagr_instance *instance) {
+  const struct sagr_generic_mapping *candidate;
+  if (!generic_mapping_handle_is_valid(mapping) ||
+      mapping->instance != instance) {
+    return 0;
+  }
+  for (candidate = instance->generic_mappings; candidate != NULL;
+       candidate = candidate->next) {
+    if (candidate == mapping) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int generic_kernarg_owned_by_instance(
+    const struct sagr_generic_kernarg *kernarg,
+    const struct sagr_instance *instance) {
+  const struct sagr_generic_kernarg *candidate;
+  if (!generic_kernarg_handle_is_valid(kernarg) ||
+      kernarg->instance != instance) {
+    return 0;
+  }
+  for (candidate = instance->generic_kernargs; candidate != NULL;
+       candidate = candidate->next) {
+    if (candidate == kernarg) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int generic_mapping_id_is_active(const struct sagr_instance *instance,
+                                        uint64_t mapping_id) {
+  const struct sagr_generic_mapping *mapping;
+  for (mapping = instance->generic_mappings; mapping != NULL;
+       mapping = mapping->next) {
+    if (generic_mapping_handle_is_valid(mapping) &&
+        mapping->mapping_id == mapping_id) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int generic_kernarg_id_is_active(const struct sagr_instance *instance,
+                                        uint64_t allocation_id) {
+  const struct sagr_generic_kernarg *kernarg;
+  for (kernarg = instance->generic_kernargs; kernarg != NULL;
+       kernarg = kernarg->next) {
+    if (generic_kernarg_handle_is_valid(kernarg) &&
+        kernarg->allocation_id == allocation_id) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static sagr_status_t validate_generic_map_options(
+    const sagr_generic_map_options_t *options) {
+  if (options == NULL || options->struct_size < sizeof(*options) ||
+      options->version != SAGR_GENERIC_RUNTIME_API_VERSION ||
+      options->flags != 0U || options->object_id == 0U ||
+      options->object_generation == 0U ||
+      options->kernel_index >= SAGR_CODE_OBJECT_MAX_KERNELS ||
+      options->gfx_target != SAGR_CODE_OBJECT_TARGET_GFX950 ||
+      options->relocation_count != 0U || options->kernarg_segment_size == 0U ||
+      options->kernarg_segment_size > SAGR_GENERIC_MAX_KERNARG_BYTES ||
+      options->kernarg_segment_align < 8U ||
+      options->kernarg_segment_align > SAGR_MEMORY_ALIGNMENT_64K ||
+      !generic_power_of_two_u64(options->kernarg_segment_align) ||
+      (options->page_size != SAGR_GENERIC_PAGE_SIZE_4K &&
+       options->page_size != SAGR_GENERIC_PAGE_SIZE_64K) ||
+      !generic_digest_is_nonzero(options->image_sha256) ||
+      !generic_name_is_canonical(options->kernel_name) ||
+      !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (options->descriptor_preload_dwords != 0U) {
+    return SAGR_STATUS_NOT_SUPPORTED;
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t validate_generic_kernarg_options(
+    const sagr_generic_kernarg_allocate_options_t *options) {
+  if (options == NULL || options->struct_size < sizeof(*options) ||
+      options->version != SAGR_GENERIC_RUNTIME_API_VERSION ||
+      options->flags != 0U || options->size_bytes == 0U ||
+      options->size_bytes > SAGR_GENERIC_MAX_KERNARG_BYTES ||
+      options->alignment_bytes < 8U ||
+      options->alignment_bytes > SAGR_MEMORY_ALIGNMENT_64K ||
+      !generic_power_of_two_u64(options->alignment_bytes) ||
+      !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t validate_generic_submit_options(
+    const sagr_generic_submit_options_t *options) {
+  uint64_t workgroup_size;
+  uint64_t expected_workgroup_size;
+  if (options == NULL || options->struct_size < sizeof(*options) ||
+      options->version != SAGR_GENERIC_RUNTIME_API_VERSION ||
+      options->flags != 0U || options->kernarg_size == 0U ||
+      options->kernarg_size > SAGR_GENERIC_MAX_KERNARG_BYTES ||
+      options->expected_signal_value_bits != UINT64_C(1) ||
+      options->grid_x == 0U || options->grid_y == 0U || options->grid_z == 0U ||
+      options->workgroup_x == 0U || options->workgroup_y == 0U ||
+      options->workgroup_z == 0U ||
+      options->workgroup_x > SAGR_GENERIC_MAX_WORKGROUP_DIMENSION ||
+      options->workgroup_y > SAGR_GENERIC_MAX_WORKGROUP_DIMENSION ||
+      options->workgroup_z > SAGR_GENERIC_MAX_WORKGROUP_DIMENSION ||
+      options->grid_x < options->workgroup_x ||
+      options->grid_y < options->workgroup_y ||
+      options->grid_z < options->workgroup_z || options->num_warps == 0U ||
+      options->num_warps > SAGR_GENERIC_MAX_WARPS || options->num_ctas == 0U ||
+      options->num_ctas > SAGR_GENERIC_MAX_CTAS ||
+      options->shared_memory_bytes > SAGR_GENERIC_MAX_SHARED_BYTES ||
+      options->wavefront_size != 64U || options->launch_flags != 0U ||
+      options->reserved0 != 0U ||
+      !reserved_is_zero(options->reserved, sizeof(options->reserved))) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (options->kernarg_offset >
+      SAGR_GENERIC_MAX_KERNARG_BYTES - options->kernarg_size) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  workgroup_size = (uint64_t)options->workgroup_x *
+                   (uint64_t)options->workgroup_y *
+                   (uint64_t)options->workgroup_z;
+  expected_workgroup_size = (uint64_t)options->num_warps *
+                            (uint64_t)options->wavefront_size;
+  return workgroup_size <= SAGR_GENERIC_MAX_WORKGROUP_DIMENSION &&
+                 workgroup_size == expected_workgroup_size
+             ? SAGR_STATUS_SUCCESS
+             : SAGR_STATUS_INVALID_ARGUMENT;
+}
+
+static void fill_generic_mapping_info(
+    const struct sagr_generic_mapping *mapping,
+    sagr_generic_mapping_info_t *info) {
+  memset(info, 0, sizeof(*info));
+  info->struct_size = (uint32_t)sizeof(*info);
+  info->version = SAGR_GENERIC_RUNTIME_API_VERSION;
+  info->object_id = mapping->object_id;
+  info->object_generation = mapping->object_generation;
+  info->mapping_id = mapping->mapping_id;
+  info->mapping_generation = mapping->mapping_generation;
+  info->mapped_base_va = mapping->mapped_base_va;
+  info->mapped_end_va = mapping->mapped_end_va;
+  info->descriptor_va = mapping->descriptor_va;
+  info->code_va = mapping->code_va;
+  info->entry_va = mapping->entry_va;
+  info->mapped_bytes = mapping->mapped_bytes;
+  info->kernel_index = mapping->kernel_index;
+  info->segment_count = mapping->segment_count;
+  info->descriptor_preload_dwords = mapping->descriptor_preload_dwords;
+  memcpy(info->image_sha256, mapping->image_sha256, sizeof(info->image_sha256));
+  info->connection_id = mapping->instance->info.connection_id;
+  info->epoch = mapping->instance->info.epoch;
+  memcpy(info->daemon_uuid, mapping->instance->info.daemon_uuid,
+         sizeof(info->daemon_uuid));
+}
+
+static void fill_generic_kernarg_info(
+    const struct sagr_generic_kernarg *kernarg,
+    sagr_generic_kernarg_info_t *info) {
+  memset(info, 0, sizeof(*info));
+  info->struct_size = (uint32_t)sizeof(*info);
+  info->version = SAGR_GENERIC_RUNTIME_API_VERSION;
+  info->object_id = kernarg->mapping->object_id;
+  info->object_generation = kernarg->mapping->object_generation;
+  info->mapping_id = kernarg->mapping->mapping_id;
+  info->mapping_generation = kernarg->mapping->mapping_generation;
+  info->allocation_id = kernarg->allocation_id;
+  info->generation = kernarg->generation;
+  info->kernarg_va = kernarg->kernarg_va;
+  info->size_bytes = kernarg->size_bytes;
+  info->alignment_bytes = kernarg->alignment_bytes;
+  memcpy(info->image_sha256, kernarg->mapping->image_sha256,
+         sizeof(info->image_sha256));
+  info->connection_id = kernarg->instance->info.connection_id;
+  info->epoch = kernarg->instance->info.epoch;
+  memcpy(info->daemon_uuid, kernarg->instance->info.daemon_uuid,
+         sizeof(info->daemon_uuid));
+}
+
+static void fill_generic_ticket(
+    const struct sagr_generic_pending *pending,
+    sagr_generic_dispatch_ticket_t *ticket) {
+  const sagr_wire_generic_response_t *ack = &pending->ack;
+  memset(ticket, 0, sizeof(*ticket));
+  ticket->struct_size = (uint32_t)sizeof(*ticket);
+  ticket->version = SAGR_GENERIC_RUNTIME_API_VERSION;
+  ticket->request_id = pending->request_id;
+  ticket->object_id = ack->object_id;
+  ticket->object_generation = ack->object_generation;
+  ticket->mapping_id = ack->mapping_id;
+  ticket->mapping_generation = ack->mapping_generation;
+  ticket->kernarg_allocation_id = ack->kernarg_allocation_id;
+  ticket->kernarg_generation = ack->kernarg_generation;
+  ticket->queue_id = ack->queue_id;
+  ticket->queue_generation = ack->queue_generation;
+  ticket->queue_sequence = ack->queue_sequence;
+  ticket->signal_id = ack->signal_id;
+  ticket->signal_generation = ack->signal_generation;
+  ticket->ticket_id = ack->ticket_id;
+  ticket->trace_id = ack->trace_id;
+  ticket->packet_va = ack->packet_va;
+  ticket->packet_crc32c = ack->packet_crc32c;
+  ticket->admission_tick = ack->admission_tick;
+  memcpy(ticket->image_sha256, ack->image_sha256,
+         sizeof(ticket->image_sha256));
+  ticket->connection_id = pending->instance->info.connection_id;
+  ticket->epoch = pending->instance->info.epoch;
+  memcpy(ticket->daemon_uuid, pending->instance->info.daemon_uuid,
+         sizeof(ticket->daemon_uuid));
+}
+
+static void fill_generic_completion(
+    const sagr_wire_generic_response_t *wire,
+    sagr_generic_dispatch_completion_t *completion, sagr_status_t status,
+    int32_t wire_status, const struct sagr_instance *instance) {
+  memset(completion, 0, sizeof(*completion));
+  completion->struct_size = (uint32_t)sizeof(*completion);
+  completion->version = SAGR_GENERIC_RUNTIME_API_VERSION;
+  completion->status = status;
+  completion->wire_status = wire_status;
+  completion->request_id = wire->request_id;
+  completion->object_id = wire->object_id;
+  completion->object_generation = wire->object_generation;
+  completion->mapping_id = wire->mapping_id;
+  completion->mapping_generation = wire->mapping_generation;
+  completion->kernarg_allocation_id = wire->kernarg_allocation_id;
+  completion->kernarg_generation = wire->kernarg_generation;
+  completion->kernarg_va = wire->kernarg_va;
+  completion->kernarg_size = wire->kernarg_size;
+  completion->kernarg_alignment = wire->kernarg_alignment;
+  completion->queue_id = wire->queue_id;
+  completion->queue_generation = wire->queue_generation;
+  completion->queue_sequence = wire->queue_sequence;
+  completion->signal_id = wire->signal_id;
+  completion->signal_generation = wire->signal_generation;
+  completion->signal_value_bits = wire->signal_value_bits;
+  completion->ticket_id = wire->ticket_id;
+  completion->trace_id = wire->trace_id;
+  completion->packet_va = wire->packet_va;
+  completion->packet_crc32c = wire->packet_crc32c;
+  completion->output_crc32c = wire->output_crc32c;
+  completion->sim_tick = wire->sim_tick;
+  completion->admission_tick = wire->admission_tick;
+  completion->start_tick = wire->start_tick;
+  completion->end_tick = wire->end_tick;
+  completion->retire_tick = wire->retire_tick;
+  memcpy(completion->image_sha256, wire->image_sha256,
+         sizeof(completion->image_sha256));
+  completion->connection_id = instance->info.connection_id;
+  completion->epoch = instance->info.epoch;
+  memcpy(completion->daemon_uuid, instance->info.daemon_uuid,
+         sizeof(completion->daemon_uuid));
+}
+
+static sagr_status_t generic_buffer_completion(
+    struct sagr_instance *instance, const uint8_t *frame, size_t frame_size,
+    const char **reason) {
+  struct sagr_generic_pending *pending = instance->generic_pending;
+  sagr_wire_generic_response_t completion;
+  int32_t wire_status = -1;
+  sagr_status_t status;
+  if (pending == NULL || pending->magic != SAGR_GENERIC_PENDING_MAGIC ||
+      pending->completion_buffered != 0) {
+    *reason = "generic completion arrived without a pending submission";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  status = sagr_protocol_decode_generic_dispatch_response(
+      frame, frame_size, &instance->info, 0,
+      SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_COMPLETION, &completion, &wire_status,
+      reason);
+  if (status != SAGR_STATUS_SUCCESS && wire_status < 0) {
+    return status;
+  }
+  /* Failed completion records intentionally carry only opcode, status, and
+   * error_code on the wire.  The request ID is the sole tuple anchor for that
+   * terminal path; successful records must carry the complete admitted tuple. */
+  if (completion.status != SAGR_WIRE_STATUS_OK) {
+    if (completion.request_id != pending->request_id ||
+        completion.opcode != SAGR_WIRE_GENERIC_OPCODE_SUBMIT_AQL) {
+      *reason = "generic failed completion request mismatch";
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+    pending->completion = completion;
+    pending->completion_buffered = 1;
+    /* The record itself is canonical and has been retained.  Let the receive
+     * helper return the mapped daemon status after publishing the tuple. */
+    return SAGR_STATUS_SUCCESS;
+  }
+  if (completion.request_id != pending->request_id ||
+      completion.opcode != SAGR_WIRE_GENERIC_OPCODE_SUBMIT_AQL ||
+      completion.object_id != pending->ack.object_id ||
+      completion.object_generation != pending->ack.object_generation ||
+      completion.mapping_id != pending->ack.mapping_id ||
+      completion.mapping_generation != pending->ack.mapping_generation ||
+      completion.kernarg_allocation_id != pending->ack.kernarg_allocation_id ||
+      completion.kernarg_generation != pending->ack.kernarg_generation ||
+      completion.queue_id != pending->ack.queue_id ||
+      completion.queue_generation != pending->ack.queue_generation ||
+      completion.queue_sequence != pending->ack.queue_sequence ||
+      completion.signal_id != pending->ack.signal_id ||
+      completion.signal_generation != pending->ack.signal_generation ||
+      completion.kernarg_va != pending->ack.kernarg_va ||
+      completion.kernarg_size != pending->ack.kernarg_size ||
+      completion.kernarg_alignment != pending->ack.kernarg_alignment ||
+      completion.ticket_id != pending->ack.ticket_id ||
+      completion.trace_id != pending->ack.trace_id ||
+      completion.packet_va != pending->ack.packet_va ||
+      completion.packet_crc32c != pending->ack.packet_crc32c ||
+      memcmp(completion.image_sha256, pending->ack.image_sha256,
+             sizeof(completion.image_sha256)) != 0) {
+    *reason = "generic completion identity mismatch";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  pending->completion = completion;
+  pending->completion_buffered = 1;
+  return status;
+}
+
+static sagr_status_t generic_exchange_ack(
+    struct sagr_instance *instance, const sagr_wire_generic_request_t *request,
+    const monotonic_deadline_t *deadline, int cancel_fd,
+    sagr_wire_generic_response_t *response, int32_t *wire_status,
+    int *native_errno, const char **reason, uint64_t *request_id_out) {
+  uint8_t request_frame[SAGR_WIRE_GENERIC_FRAME_BYTES];
+  uint8_t response_frame[SAGR_WIRE_MAX_RECORD_BYTES];
+  size_t request_size = 0U;
+  size_t response_size = 0U;
+  uint64_t request_id = 0U;
+  int record_sent = 0;
+  sagr_status_t status;
+  if (request_id_out != NULL) {
+    *request_id_out = 0U;
+  }
+  status = sagr_protocol_allocate_request_id(&instance->next_request_id,
+                                             &request_id);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = "generic dispatch request ID space exhausted";
+    return status;
+  }
+  status = sagr_protocol_encode_generic_dispatch_request(
+      &instance->info, request_id, request, request_frame,
+      sizeof(request_frame), &request_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = "could not encode generic dispatch request";
+    return status;
+  }
+  status = send_record(instance->socket_fd, request_frame, request_size,
+                       deadline, cancel_fd, native_errno, &record_sent);
+  if (status != SAGR_STATUS_SUCCESS) {
+    *reason = "generic dispatch request send failed";
+    if (record_sent != 0) {
+      poison_queue_transport(instance);
+    }
+    return status;
+  }
+  for (;;) {
+    uint16_t message_type;
+    int32_t decoded_wire_status = -1;
+    status = receive_record(instance->socket_fd, response_frame,
+                            sizeof(response_frame), &response_size, deadline,
+                            cancel_fd, native_errno);
+    if (status != SAGR_STATUS_SUCCESS) {
+      *reason = "generic dispatch ACK receive failed";
+      poison_queue_transport(instance);
+      return status;
+    }
+    message_type = queue_frame_type(response_frame, response_size);
+    if (message_type == SAGR_WIRE_MESSAGE_QUEUE_COMPLETION) {
+      sagr_wire_queue_response_t completion;
+      status = sagr_protocol_decode_queue_response(
+          response_frame, response_size, &instance->info, 0,
+          SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &completion,
+          &decoded_wire_status, reason);
+      if ((status != SAGR_STATUS_SUCCESS && decoded_wire_status < 0) ||
+          buffer_completion(instance, &completion) != SAGR_STATUS_SUCCESS) {
+        *reason = "invalid queue completion while waiting for generic ACK";
+        poison_queue_transport(instance);
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      continue;
+    }
+    if (message_type == SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION) {
+      status = decode_and_buffer_signal_completion(
+          instance, response_frame, response_size, request_id, 0, 0, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
+    if (message_type == SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION) {
+      status = decode_and_buffer_dispatch_completion(
+          instance, response_frame, response_size, request_id, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
+    if (message_type == SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_COMPLETION) {
+      status = generic_buffer_completion(instance, response_frame, response_size,
+                                         reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
+    if (message_type != SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_ACK) {
+      *reason = "unexpected record while waiting for generic ACK";
+      poison_queue_transport(instance);
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+    status = sagr_protocol_decode_generic_dispatch_response(
+        response_frame, response_size, &instance->info, request_id,
+        SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_ACK, response, wire_status, reason);
+    if (status != SAGR_STATUS_SUCCESS && *wire_status < 0) {
+      poison_queue_transport(instance);
+      return status;
+    }
+    if (response->opcode != request->opcode) {
+      *reason = "generic dispatch ACK opcode mismatch";
+      poison_queue_transport(instance);
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+    if (request_id_out != NULL) {
+      *request_id_out = request_id;
+    }
+    return status;
+  }
+}
+
+static sagr_status_t generic_receive_completion(
+    struct sagr_generic_pending *pending, const monotonic_deadline_t *deadline,
+    int cancel_fd, sagr_wire_generic_response_t *completion,
+    int32_t *wire_status, int *native_errno, const char **reason) {
+  struct sagr_instance *instance = pending->instance;
+  uint8_t frame[SAGR_WIRE_MAX_RECORD_BYTES];
+  sagr_status_t status;
+  if (pending->completion_buffered != 0) {
+    *completion = pending->completion;
+    *wire_status = (int32_t)completion->status;
+    pending->completion_buffered = 0;
+    return sagr_protocol_map_wire_status(completion->status);
+  }
+  for (;;) {
+    size_t frame_size = 0U;
+    uint16_t message_type;
+    int32_t decoded_wire_status = -1;
+    status = receive_record(instance->socket_fd, frame, sizeof(frame),
+                            &frame_size, deadline, cancel_fd, native_errno);
+    if (status != SAGR_STATUS_SUCCESS) {
+      *reason = "generic dispatch completion receive failed";
+      /* Once SUBMIT has been admitted, losing the completion stream makes the
+       * connection unusable: retrying could duplicate work. */
+      poison_queue_transport(instance);
+      return status;
+    }
+    message_type = queue_frame_type(frame, frame_size);
+    if (message_type == SAGR_WIRE_MESSAGE_QUEUE_COMPLETION) {
+      sagr_wire_queue_response_t queue_completion;
+      status = sagr_protocol_decode_queue_response(
+          frame, frame_size, &instance->info, 0,
+          SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &queue_completion,
+          &decoded_wire_status, reason);
+      if ((status != SAGR_STATUS_SUCCESS && decoded_wire_status < 0) ||
+          buffer_completion(instance, &queue_completion) !=
+              SAGR_STATUS_SUCCESS) {
+        *reason = "invalid queue completion while waiting for generic completion";
+        poison_queue_transport(instance);
+        return SAGR_STATUS_PROTOCOL_ERROR;
+      }
+      continue;
+    }
+    if (message_type == SAGR_WIRE_MESSAGE_SIGNAL_COMPLETION) {
+      status = decode_and_buffer_signal_completion(
+          instance, frame, frame_size, pending->request_id, 0, 0, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
+    if (message_type == SAGR_WIRE_MESSAGE_DISPATCH_COMPLETION) {
+      status = decode_and_buffer_dispatch_completion(
+          instance, frame, frame_size, pending->request_id, reason);
+      if (status != SAGR_STATUS_SUCCESS) {
+        poison_queue_transport(instance);
+        return status;
+      }
+      continue;
+    }
+    if (message_type != SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_COMPLETION) {
+      *reason = "unexpected record while waiting for generic completion";
+      poison_queue_transport(instance);
+      return SAGR_STATUS_PROTOCOL_ERROR;
+    }
+    status = generic_buffer_completion(instance, frame, frame_size, reason);
+    if (status != SAGR_STATUS_SUCCESS) {
+      poison_queue_transport(instance);
+      return status;
+    }
+    *completion = pending->completion;
+    *wire_status = (int32_t)completion->status;
+    pending->completion_buffered = 0;
+    return sagr_protocol_map_wire_status(completion->status);
+  }
+}
+
+static sagr_status_t generic_validate_common_outputs(
+    sagr_error_info_t *error, uint32_t error_size, void *output,
+    uint32_t output_size, size_t required_size, int required,
+    const char *message) {
+  sagr_status_t status = validate_error_output(error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = prepare_sized_output(output, output_size, required_size, required);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(error, error_size, status, -1, 0, message);
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static int generic_mapping_response_matches(
+    const sagr_wire_generic_response_t *response,
+    const sagr_wire_generic_request_t *request,
+    const sagr_generic_map_options_t *options) {
+  if (response->opcode != SAGR_WIRE_GENERIC_OPCODE_MAP_OBJECT ||
+      response->object_id != request->object_id ||
+      response->object_generation != request->object_generation ||
+      response->mapping_id == 0U || response->mapping_generation == 0U ||
+      response->mapping_id == request->mapping_id ||
+      response->mapped_base_va == 0U || response->mapped_end_va <= response->mapped_base_va ||
+      response->mapped_bytes == 0U ||
+      response->mapped_end_va - response->mapped_base_va < response->mapped_bytes ||
+      (response->mapped_bytes % (uint64_t)options->page_size) != 0U ||
+      (response->mapped_end_va % (uint64_t)options->page_size) != 0U ||
+      response->descriptor_va == 0U || response->code_va == 0U ||
+      response->entry_va == 0U || response->segment_count == 0U ||
+      response->kernel_index != request->kernel_index ||
+      response->descriptor_preload_dwords != options->descriptor_preload_dwords ||
+      memcmp(response->image_sha256, request->image_sha256,
+             sizeof(response->image_sha256)) != 0 ||
+      (response->mapped_base_va % (uint64_t)options->page_size) != 0U ||
+      response->descriptor_va < response->mapped_base_va ||
+      response->code_va < response->mapped_base_va ||
+      response->entry_va < response->mapped_base_va ||
+      response->descriptor_va >= response->mapped_end_va ||
+      response->code_va >= response->mapped_end_va ||
+      response->entry_va >= response->mapped_end_va) {
+    return 0;
+  }
+  return 1;
+}
+
+static int generic_kernarg_response_matches(
+    const sagr_wire_generic_response_t *response,
+    const sagr_wire_generic_request_t *request,
+    const sagr_generic_kernarg_allocate_options_t *options) {
+  return response->opcode == SAGR_WIRE_GENERIC_OPCODE_ALLOC_KERNARG &&
+         response->object_id == request->object_id &&
+         response->object_generation == request->object_generation &&
+         response->mapping_id == request->mapping_id &&
+         response->mapping_generation == request->mapping_generation &&
+         response->kernarg_allocation_id != 0U &&
+         response->kernarg_generation != 0U && response->kernarg_va != 0U &&
+         response->kernarg_size <= UINT64_MAX - response->kernarg_va &&
+         response->kernarg_size == options->size_bytes &&
+         response->kernarg_alignment == options->alignment_bytes;
+}
+
+static int generic_submit_response_matches(
+    const sagr_wire_generic_response_t *response,
+    const sagr_wire_generic_request_t *request,
+    const struct sagr_generic_kernarg *kernarg,
+    const struct sagr_queue *queue, const struct sagr_signal *signal) {
+  uint64_t effective_kernarg_va;
+  if (request->body.submit.kernarg_offset >
+      UINT64_MAX - kernarg->kernarg_va) {
+    return 0;
+  }
+  effective_kernarg_va =
+      kernarg->kernarg_va + request->body.submit.kernarg_offset;
+  return response->opcode == SAGR_WIRE_GENERIC_OPCODE_SUBMIT_AQL &&
+         response->object_id == request->object_id &&
+         response->object_generation == request->object_generation &&
+         response->mapping_id == request->mapping_id &&
+         response->mapping_generation == request->mapping_generation &&
+         response->kernarg_allocation_id == kernarg->allocation_id &&
+         response->kernarg_generation == kernarg->generation &&
+         response->kernarg_va == effective_kernarg_va &&
+         response->kernarg_size == request->body.submit.kernarg_size &&
+         response->kernarg_alignment == kernarg->alignment_bytes &&
+         response->queue_id == queue->queue_id &&
+         response->queue_generation == queue->generation &&
+         response->queue_sequence == request->queue_sequence &&
+         response->signal_id == signal->signal_id &&
+         response->signal_generation == signal->generation &&
+         response->signal_value_bits == UINT64_C(1) &&
+         response->ticket_id != 0U && response->trace_id != 0U &&
+         response->packet_va != 0U && (response->packet_va % 64U) == 0U &&
+         response->admission_tick != 0U &&
+         response->start_tick == 0U && response->end_tick == 0U &&
+         response->retire_tick == 0U && response->output_crc32c == 0U &&
+         memcmp(response->image_sha256, kernarg->mapping->image_sha256,
+                sizeof(response->image_sha256)) == 0;
+}
+
+static int generic_ticket_matches(
+    const struct sagr_generic_pending *pending,
+    const sagr_generic_dispatch_ticket_t *ticket) {
+  const sagr_wire_generic_response_t *ack = &pending->ack;
+  const struct sagr_instance *instance = pending->instance;
+  return ticket != NULL && ticket->struct_size >= sizeof(*ticket) &&
+         ticket->version == SAGR_GENERIC_RUNTIME_API_VERSION &&
+         ticket->flags == 0U && ticket->reserved0 == 0U &&
+         reserved_is_zero(ticket->reserved, sizeof(ticket->reserved)) &&
+         ticket->request_id == pending->request_id &&
+         ticket->object_id == ack->object_id &&
+         ticket->object_generation == ack->object_generation &&
+         ticket->mapping_id == ack->mapping_id &&
+         ticket->mapping_generation == ack->mapping_generation &&
+         ticket->kernarg_allocation_id == ack->kernarg_allocation_id &&
+         ticket->kernarg_generation == ack->kernarg_generation &&
+         ticket->queue_id == ack->queue_id &&
+         ticket->queue_generation == ack->queue_generation &&
+         ticket->queue_sequence == ack->queue_sequence &&
+         ticket->signal_id == ack->signal_id &&
+         ticket->signal_generation == ack->signal_generation &&
+         ticket->ticket_id == ack->ticket_id &&
+         ticket->trace_id == ack->trace_id &&
+         ticket->packet_va == ack->packet_va &&
+         ticket->packet_crc32c == ack->packet_crc32c &&
+         ticket->admission_tick == ack->admission_tick &&
+         ticket->connection_id == instance->info.connection_id &&
+         ticket->epoch == instance->info.epoch &&
+         memcmp(ticket->image_sha256, ack->image_sha256,
+                sizeof(ticket->image_sha256)) == 0 &&
+         memcmp(ticket->daemon_uuid, instance->info.daemon_uuid,
+                sizeof(ticket->daemon_uuid)) == 0;
+}
+
+static int generic_completion_success_matches(
+    const struct sagr_generic_pending *pending,
+    const sagr_wire_generic_response_t *completion) {
+  const sagr_wire_generic_response_t *ack = &pending->ack;
+  uint64_t expected_kernarg_va;
+  if (pending->kernarg_offset > pending->kernarg->size_bytes ||
+      pending->kernarg_size >
+          pending->kernarg->size_bytes - pending->kernarg_offset ||
+      pending->kernarg_offset > UINT64_MAX - pending->kernarg->kernarg_va) {
+    return 0;
+  }
+  expected_kernarg_va =
+      pending->kernarg->kernarg_va + pending->kernarg_offset;
+  if (completion->status != SAGR_WIRE_STATUS_OK ||
+      completion->opcode != SAGR_WIRE_GENERIC_OPCODE_SUBMIT_AQL ||
+      completion->object_id != ack->object_id ||
+      completion->object_generation != ack->object_generation ||
+      completion->mapping_id != ack->mapping_id ||
+      completion->mapping_generation != ack->mapping_generation ||
+      completion->kernarg_allocation_id != pending->kernarg->allocation_id ||
+      completion->kernarg_generation != pending->kernarg->generation ||
+      completion->kernarg_va != expected_kernarg_va ||
+      completion->kernarg_size != pending->kernarg_size ||
+      completion->kernarg_alignment != pending->kernarg->alignment_bytes ||
+      completion->queue_id != pending->queue->queue_id ||
+      completion->queue_generation != pending->queue->generation ||
+      completion->queue_sequence != ack->queue_sequence ||
+      completion->signal_id != pending->signal->signal_id ||
+      completion->signal_generation != pending->signal->generation ||
+      completion->signal_value_bits != UINT64_C(1) ||
+      completion->ticket_id != ack->ticket_id ||
+      completion->trace_id != ack->trace_id ||
+      completion->packet_va != ack->packet_va ||
+      completion->packet_crc32c != ack->packet_crc32c ||
+      memcmp(completion->image_sha256, ack->image_sha256,
+             sizeof(completion->image_sha256)) != 0 ||
+      completion->request_id != pending->request_id ||
+      completion->admission_tick != ack->admission_tick ||
+      completion->sim_tick < completion->admission_tick ||
+      completion->start_tick == 0U || completion->end_tick == 0U ||
+      completion->retire_tick == 0U ||
+      completion->start_tick < completion->admission_tick ||
+      completion->end_tick < completion->start_tick ||
+      completion->retire_tick < completion->end_tick) {
+    return 0;
+  }
+  return 1;
+}
+
+static void generic_publish_failure_identity(
+    const struct sagr_generic_pending *pending,
+    sagr_wire_generic_response_t *completion) {
+  const sagr_wire_generic_response_t *ack = &pending->ack;
+  completion->request_id = pending->request_id;
+  completion->object_id = ack->object_id;
+  completion->object_generation = ack->object_generation;
+  completion->mapping_id = ack->mapping_id;
+  completion->mapping_generation = ack->mapping_generation;
+  completion->kernarg_allocation_id = ack->kernarg_allocation_id;
+  completion->kernarg_generation = ack->kernarg_generation;
+  completion->kernarg_va = ack->kernarg_va;
+  completion->kernarg_size = ack->kernarg_size;
+  completion->kernarg_alignment = ack->kernarg_alignment;
+  completion->queue_id = ack->queue_id;
+  completion->queue_generation = ack->queue_generation;
+  completion->queue_sequence = ack->queue_sequence;
+  completion->signal_id = ack->signal_id;
+  completion->signal_generation = ack->signal_generation;
+  completion->ticket_id = ack->ticket_id;
+  completion->trace_id = ack->trace_id;
+  completion->packet_va = ack->packet_va;
+  completion->packet_crc32c = ack->packet_crc32c;
+  memcpy(completion->image_sha256, ack->image_sha256,
+         sizeof(completion->image_sha256));
+}
+
+static void generic_release_pending(struct sagr_instance *instance) {
+  struct sagr_generic_pending *pending = instance->generic_pending;
+  if (pending == NULL) {
+    return;
+  }
+  instance->generic_pending = NULL;
+  pending->magic = 0;
+  pending->instance = NULL;
+  pending->queue = NULL;
+  pending->mapping = NULL;
+  pending->kernarg = NULL;
+  pending->signal = NULL;
+  memset(pending, 0, sizeof(*pending));
+  free(pending);
+}
+
+static int generic_mapping_has_pending(
+    const struct sagr_instance *instance,
+    const struct sagr_generic_mapping *mapping) {
+  return instance->generic_pending != NULL &&
+         instance->generic_pending->mapping == mapping;
+}
+
+sagr_status_t sagr_generic_map_object(
+    sagr_instance_t opaque_instance, const sagr_generic_map_options_t *options,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_generic_mapping_t *out_mapping, sagr_generic_mapping_info_t *out_info,
+    uint32_t info_size, sagr_error_info_t *out_error, uint32_t error_size) {
+  struct sagr_instance *instance = (struct sagr_instance *)opaque_instance;
+  sagr_generic_map_options_t local_options;
+  sagr_queue_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_generic_request_t request;
+  sagr_wire_generic_response_t response;
+  struct sagr_generic_mapping *mapping = NULL;
+  sagr_status_t status;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  uint64_t request_id = 0U;
+  const char *reason = "generic MAP_OBJECT failed";
+
+  if (out_mapping != NULL) {
+    *out_mapping = NULL;
+  }
+  status = generic_validate_common_outputs(
+      out_error, error_size, out_info, info_size, sizeof(*out_info), 0,
+      "invalid generic mapping info output buffer");
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (instance == NULL || instance->magic != SAGR_INSTANCE_MAGIC ||
+      out_mapping == NULL || options == NULL) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
+                     "invalid instance, MAP options, or output");
+  }
+  status = validate_generic_map_options(options);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status,
+                     status == SAGR_STATUS_NOT_SUPPORTED
+                         ? SAGR_WIRE_STATUS_UNSUPPORTED_CAPABILITY
+                         : -1,
+                     0, status == SAGR_STATUS_NOT_SUPPORTED
+                            ? "descriptor preload is not supported by the v2 client"
+                            : "invalid generic MAP_OBJECT options");
+  }
+  memcpy(&local_options, options, sizeof(local_options));
+  status = require_generic_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = prepare_queue_operation(operation_options, &local_operation,
+                                   &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid generic MAP operation options");
+  }
+  if (instance->generic_pending != NULL || instance->operation_active != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "another generic transport operation is active");
+  }
+  memset(&request, 0, sizeof(request));
+  request.major = SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR;
+  request.minor = SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR;
+  request.opcode = SAGR_WIRE_GENERIC_OPCODE_MAP_OBJECT;
+  request.object_id = local_options.object_id;
+  request.object_generation = local_options.object_generation;
+  request.kernel_index = local_options.kernel_index;
+  memcpy(request.image_sha256, local_options.image_sha256,
+         sizeof(request.image_sha256));
+  memcpy(request.kernel_name, local_options.kernel_name,
+         sizeof(request.kernel_name));
+  request.body.map.gfx_target = local_options.gfx_target;
+  request.body.map.relocation_count = local_options.relocation_count;
+  request.body.map.kernarg_segment_size = local_options.kernarg_segment_size;
+  request.body.map.kernarg_segment_align = local_options.kernarg_segment_align;
+  request.body.map.descriptor_preload_dwords =
+      local_options.descriptor_preload_dwords;
+  request.body.map.page_size = local_options.page_size;
+  memset(&response, 0, sizeof(response));
+  instance->operation_active = 1;
+  status = generic_exchange_ack(instance, &request, &deadline,
+                                local_operation.cancel_fd, &response,
+                                &wire_status, &native_errno, &reason,
+                                &request_id);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (!generic_mapping_response_matches(&response, &request, &local_options) ||
+      generic_mapping_id_is_active(instance, response.mapping_id)) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0, "invalid successful MAP_OBJECT ACK");
+  }
+  mapping = (struct sagr_generic_mapping *)calloc(1, sizeof(*mapping));
+  if (mapping == NULL) {
+    /* The daemon has already granted a remote mapping lease.  Without local
+     * ownership state, fail closed so no later call can claim it is tracked. */
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES,
+                     wire_status, errno, "could not allocate mapping handle");
+  }
+  mapping->magic = SAGR_GENERIC_MAPPING_MAGIC;
+  mapping->instance = instance;
+  mapping->object_id = response.object_id;
+  mapping->object_generation = response.object_generation;
+  mapping->mapping_id = response.mapping_id;
+  mapping->mapping_generation = response.mapping_generation;
+  mapping->mapped_base_va = response.mapped_base_va;
+  mapping->mapped_end_va = response.mapped_end_va;
+  mapping->descriptor_va = response.descriptor_va;
+  mapping->code_va = response.code_va;
+  mapping->entry_va = response.entry_va;
+  mapping->mapped_bytes = response.mapped_bytes;
+  mapping->kernel_index = response.kernel_index;
+  mapping->segment_count = response.segment_count;
+  mapping->descriptor_preload_dwords = response.descriptor_preload_dwords;
+  memcpy(mapping->image_sha256, response.image_sha256,
+         sizeof(mapping->image_sha256));
+  memcpy(mapping->kernel_name, local_options.kernel_name,
+         sizeof(mapping->kernel_name));
+  mapping->next = instance->generic_mappings;
+  instance->generic_mappings = mapping;
+  ++instance->generic_mapping_count;
+  if (out_info != NULL) {
+    fill_generic_mapping_info(mapping, out_info);
+  }
+  *out_mapping = mapping;
+  if (out_error != NULL && error_size >= sizeof(*out_error)) {
+    out_error->status = SAGR_STATUS_SUCCESS;
+    out_error->wire_status = wire_status;
+    (void)snprintf(out_error->message, sizeof(out_error->message), "%s",
+                   "generic object mapping admitted");
+  }
+  (void)request_id;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_generic_mapping_get_info(
+    sagr_generic_mapping_t opaque_mapping, sagr_generic_mapping_info_t *out_info,
+    uint32_t info_size) {
+  struct sagr_generic_mapping *mapping =
+      (struct sagr_generic_mapping *)opaque_mapping;
+  if (out_info == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (info_size < sizeof(*out_info)) {
+    if (info_size >= sizeof(out_info->struct_size)) {
+      out_info->struct_size = (uint32_t)sizeof(*out_info);
+    }
+    return SAGR_STATUS_BUFFER_TOO_SMALL;
+  }
+  if (!generic_mapping_handle_is_valid(mapping) ||
+      !generic_mapping_owned_by_instance(mapping, mapping->instance)) {
+    return SAGR_STATUS_INVALID_HANDLE;
+  }
+  fill_generic_mapping_info(mapping, out_info);
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_generic_alloc_kernarg(
+    sagr_generic_mapping_t opaque_mapping,
+    const sagr_generic_kernarg_allocate_options_t *options,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_generic_kernarg_t *out_kernarg,
+    sagr_generic_kernarg_info_t *out_info, uint32_t info_size,
+    sagr_error_info_t *out_error, uint32_t error_size) {
+  struct sagr_generic_mapping *mapping =
+      (struct sagr_generic_mapping *)opaque_mapping;
+  struct sagr_instance *instance;
+  sagr_generic_kernarg_allocate_options_t local_options;
+  sagr_queue_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_generic_request_t request;
+  sagr_wire_generic_response_t response;
+  struct sagr_generic_kernarg *kernarg = NULL;
+  sagr_status_t status;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  const char *reason = "generic ALLOC_KERNARG failed";
+
+  if (out_kernarg != NULL) {
+    *out_kernarg = NULL;
+  }
+  status = generic_validate_common_outputs(
+      out_error, error_size, out_info, info_size, sizeof(*out_info), 0,
+      "invalid generic kernarg info output buffer");
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (!generic_mapping_handle_is_valid(mapping) || options == NULL ||
+      out_kernarg == NULL) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "invalid generic mapping or kernarg output");
+  }
+  instance = mapping->instance;
+  if (!generic_mapping_owned_by_instance(mapping, instance)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "generic mapping is not owned by this instance");
+  }
+  status = validate_generic_kernarg_options(options);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, 0,
+                     "invalid generic ALLOC_KERNARG options");
+  }
+  memcpy(&local_options, options, sizeof(local_options));
+  status = require_generic_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = prepare_queue_operation(operation_options, &local_operation,
+                                   &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid generic ALLOC operation options");
+  }
+  if (instance->generic_pending != NULL || instance->operation_active != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "another generic transport operation is active");
+  }
+  memset(&request, 0, sizeof(request));
+  request.major = SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR;
+  request.minor = SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR;
+  request.opcode = SAGR_WIRE_GENERIC_OPCODE_ALLOC_KERNARG;
+  request.object_id = mapping->object_id;
+  request.object_generation = mapping->object_generation;
+  request.mapping_id = mapping->mapping_id;
+  request.mapping_generation = mapping->mapping_generation;
+  request.body.alloc_kernarg.size_bytes = local_options.size_bytes;
+  request.body.alloc_kernarg.alignment_bytes = local_options.alignment_bytes;
+  instance->operation_active = 1;
+  status = generic_exchange_ack(instance, &request, &deadline,
+                                local_operation.cancel_fd, &response,
+                                &wire_status, &native_errno, &reason, NULL);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (!generic_kernarg_response_matches(&response, &request, &local_options) ||
+      generic_kernarg_id_is_active(instance, response.kernarg_allocation_id)) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0, "invalid successful ALLOC_KERNARG ACK");
+  }
+  if (memcmp(response.image_sha256, mapping->image_sha256,
+             sizeof(response.image_sha256)) != 0) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0, "ALLOC_KERNARG image identity mismatch");
+  }
+  kernarg = (struct sagr_generic_kernarg *)calloc(1, sizeof(*kernarg));
+  if (kernarg == NULL) {
+    /* The daemon has already granted a remote allocation lease; do not leave
+     * an admitted resource behind on a reusable client connection. */
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES,
+                     wire_status, errno,
+                     "could not allocate kernarg handle");
+  }
+  kernarg->magic = SAGR_GENERIC_KERNARG_MAGIC;
+  kernarg->instance = instance;
+  kernarg->mapping = mapping;
+  kernarg->allocation_id = response.kernarg_allocation_id;
+  kernarg->generation = response.kernarg_generation;
+  kernarg->kernarg_va = response.kernarg_va;
+  kernarg->size_bytes = response.kernarg_size;
+  kernarg->alignment_bytes = response.kernarg_alignment;
+  kernarg->next = instance->generic_kernargs;
+  instance->generic_kernargs = kernarg;
+  ++instance->generic_kernarg_count;
+  if (out_info != NULL) {
+    fill_generic_kernarg_info(kernarg, out_info);
+  }
+  *out_kernarg = kernarg;
+  if (out_error != NULL && error_size >= sizeof(*out_error)) {
+    out_error->status = SAGR_STATUS_SUCCESS;
+    out_error->wire_status = wire_status;
+    (void)snprintf(out_error->message, sizeof(out_error->message), "%s",
+                   "generic kernarg allocation admitted");
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_generic_kernarg_get_info(
+    sagr_generic_kernarg_t opaque_kernarg,
+    sagr_generic_kernarg_info_t *out_info, uint32_t info_size) {
+  struct sagr_generic_kernarg *kernarg =
+      (struct sagr_generic_kernarg *)opaque_kernarg;
+  if (out_info == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (info_size < sizeof(*out_info)) {
+    if (info_size >= sizeof(out_info->struct_size)) {
+      out_info->struct_size = (uint32_t)sizeof(*out_info);
+    }
+    return SAGR_STATUS_BUFFER_TOO_SMALL;
+  }
+  if (!generic_kernarg_handle_is_valid(kernarg) ||
+      !generic_kernarg_owned_by_instance(kernarg, kernarg->instance)) {
+    return SAGR_STATUS_INVALID_HANDLE;
+  }
+  fill_generic_kernarg_info(kernarg, out_info);
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_generic_kernarg_copy_from_host(
+    sagr_generic_kernarg_t opaque_kernarg, uint64_t offset,
+    const void *source, uint64_t byte_count,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_error_info_t *out_error, uint32_t error_size) {
+  struct sagr_generic_kernarg *kernarg =
+      (struct sagr_generic_kernarg *)opaque_kernarg;
+  struct sagr_instance *instance;
+  sagr_queue_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_memory_request_t request;
+  sagr_wire_memory_response_t response;
+  sagr_status_t status;
+  int staging_fd = -1;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  uint32_t content_crc = 0U;
+  const char *reason = "generic kernarg H2D copy failed";
+
+  status = validate_error_output(out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (!generic_kernarg_handle_is_valid(kernarg) || source == NULL ||
+      byte_count == 0U) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1,
+                     0, "invalid generic kernarg copy arguments");
+  }
+  instance = kernarg->instance;
+  if (!generic_kernarg_owned_by_instance(kernarg, instance)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "generic kernarg is not owned by this instance");
+  }
+  if (offset > kernarg->size_bytes ||
+      byte_count > kernarg->size_bytes - offset) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1,
+                     0, "generic kernarg copy range exceeds allocation");
+  }
+  if (byte_count > SAGR_MEMORY_MAX_TRANSFER_BYTES) {
+    return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES, -1,
+                     0, "generic kernarg copy exceeds transfer ceiling");
+  }
+  status = require_generic_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = prepare_queue_operation(operation_options, &local_operation,
+                                   &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid generic kernarg copy operation options");
+  }
+  if (instance->generic_pending != NULL || instance->operation_active != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "generic kernarg participates in pending work");
+  }
+  status = create_staging_fd(byte_count, 0, source, &staging_fd,
+                             &content_crc, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "could not prepare sealed kernarg staging");
+  }
+  status = check_operation_state(&deadline, local_operation.cancel_fd,
+                                 &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    (void)close(staging_fd);
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "generic kernarg copy cancelled or expired before send");
+  }
+  memset(&request, 0, sizeof(request));
+  request.major = SAGR_MEMORY_PROTOCOL_MAJOR;
+  request.minor = SAGR_MEMORY_PROTOCOL_MINOR;
+  request.opcode = SAGR_WIRE_MEMORY_OPCODE_COPY_H2D;
+  request.allocation_id = kernarg->allocation_id;
+  request.generation = kernarg->generation;
+  request.offset = offset;
+  request.byte_count = byte_count;
+  request.argument = content_crc;
+  instance->operation_active = 1;
+  status = exchange_memory_request(
+      instance, &request, staging_fd, &deadline, local_operation.cancel_fd,
+      &response, &wire_status, &native_errno, &reason);
+  instance->operation_active = 0;
+  (void)close(staging_fd);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (response.allocation_id != kernarg->allocation_id ||
+      response.generation != kernarg->generation || response.value0 != offset ||
+      response.value1 != byte_count || response.value2 != content_crc) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0,
+                     "invalid successful generic kernarg H2D ACK");
+  }
+  if (out_error != NULL && error_size >= sizeof(*out_error)) {
+    out_error->status = SAGR_STATUS_SUCCESS;
+    out_error->wire_status = wire_status;
+    (void)snprintf(out_error->message, sizeof(out_error->message), "%s",
+                   "generic kernarg bytes published through v1 carrier");
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_queue_submit_generic_dispatch(
+    sagr_queue_t opaque_queue, sagr_generic_mapping_t opaque_mapping,
+    sagr_generic_kernarg_t opaque_kernarg, sagr_signal_t opaque_signal,
+    const sagr_generic_submit_options_t *options,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_generic_dispatch_ticket_t *out_ticket, uint32_t ticket_size,
+    sagr_error_info_t *out_error, uint32_t error_size) {
+  struct sagr_queue *queue = (struct sagr_queue *)opaque_queue;
+  struct sagr_generic_mapping *mapping =
+      (struct sagr_generic_mapping *)opaque_mapping;
+  struct sagr_generic_kernarg *kernarg =
+      (struct sagr_generic_kernarg *)opaque_kernarg;
+  struct sagr_signal *signal = (struct sagr_signal *)opaque_signal;
+  struct sagr_instance *instance;
+  sagr_generic_submit_options_t local_options;
+  sagr_queue_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_generic_request_t request;
+  sagr_wire_generic_response_t response;
+  struct sagr_generic_pending *pending = NULL;
+  sagr_status_t status;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  uint64_t request_id = 0U;
+  const char *reason = "generic SUBMIT_AQL failed";
+
+  status = generic_validate_common_outputs(
+      out_error, error_size, out_ticket, ticket_size, sizeof(*out_ticket), 1,
+      "invalid generic dispatch ticket output buffer");
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (!queue_handle_is_valid(queue) ||
+      !generic_mapping_handle_is_valid(mapping) ||
+      !generic_kernarg_handle_is_valid(kernarg) ||
+      !signal_handle_is_valid(signal) || options == NULL) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "invalid generic dispatch resource handle or options");
+  }
+  instance = queue->instance;
+  if (mapping->instance != instance || kernarg->instance != instance ||
+      signal->instance != instance || kernarg->mapping != mapping ||
+      !generic_mapping_owned_by_instance(mapping, instance) ||
+      !generic_kernarg_owned_by_instance(kernarg, instance)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INSTANCE_MISMATCH, -1,
+                     0, "generic dispatch resources have different owners");
+  }
+  status = validate_generic_submit_options(options);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, 0,
+                     "invalid generic SUBMIT_AQL options");
+  }
+  memcpy(&local_options, options, sizeof(local_options));
+  if (local_options.kernarg_offset > kernarg->size_bytes ||
+      local_options.kernarg_size >
+          kernarg->size_bytes - local_options.kernarg_offset) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1,
+                     0, "generic kernarg range exceeds allocation");
+  }
+  status = require_generic_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = prepare_queue_operation(operation_options, &local_operation,
+                                   &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid generic SUBMIT operation options");
+  }
+  if (instance->generic_pending != NULL || instance->operation_active != 0 ||
+      instance->pending_dispatch != NULL || queue->pending_count != 0U ||
+      queue->buffered_count != 0U || signal->wait_pending != 0 ||
+      signal->completion_buffered != 0 || signal->value != INT64_C(1)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "generic dispatch resources have pending work");
+  }
+  if (queue->next_sequence == 0U) {
+    return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES, -1,
+                     0, "generic queue sequence space exhausted");
+  }
+
+  memset(&request, 0, sizeof(request));
+  request.major = SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR;
+  request.minor = SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR;
+  request.opcode = SAGR_WIRE_GENERIC_OPCODE_SUBMIT_AQL;
+  request.object_id = mapping->object_id;
+  request.object_generation = mapping->object_generation;
+  request.mapping_id = mapping->mapping_id;
+  request.mapping_generation = mapping->mapping_generation;
+  request.queue_id = queue->queue_id;
+  request.queue_generation = queue->generation;
+  request.queue_sequence = queue->next_sequence;
+  request.kernel_index = mapping->kernel_index;
+  memcpy(request.image_sha256, mapping->image_sha256,
+         sizeof(request.image_sha256));
+  memcpy(request.kernel_name, mapping->kernel_name,
+         sizeof(request.kernel_name));
+  request.body.submit.kernarg_allocation_id = kernarg->allocation_id;
+  request.body.submit.kernarg_generation = kernarg->generation;
+  request.body.submit.kernarg_offset = local_options.kernarg_offset;
+  request.body.submit.kernarg_size = local_options.kernarg_size;
+  request.body.submit.signal_id = signal->signal_id;
+  request.body.submit.signal_generation = signal->generation;
+  request.body.submit.expected_signal_value_bits =
+      local_options.expected_signal_value_bits;
+  request.body.submit.grid_x = local_options.grid_x;
+  request.body.submit.grid_y = local_options.grid_y;
+  request.body.submit.grid_z = local_options.grid_z;
+  request.body.submit.workgroup_x = local_options.workgroup_x;
+  request.body.submit.workgroup_y = local_options.workgroup_y;
+  request.body.submit.workgroup_z = local_options.workgroup_z;
+  request.body.submit.num_warps = local_options.num_warps;
+  request.body.submit.num_ctas = local_options.num_ctas;
+  request.body.submit.shared_memory_bytes = local_options.shared_memory_bytes;
+  request.body.submit.wavefront_size = local_options.wavefront_size;
+  request.body.submit.launch_flags = local_options.launch_flags;
+  request.body.submit.reserved0 = local_options.reserved0;
+
+  memset(&response, 0, sizeof(response));
+  instance->operation_active = 1;
+  status = generic_exchange_ack(instance, &request, &deadline,
+                                local_operation.cancel_fd, &response,
+                                &wire_status, &native_errno, &reason,
+                                &request_id);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (!generic_submit_response_matches(&response, &request, kernarg, queue,
+                                       signal)) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0, "invalid successful SUBMIT_AQL ACK");
+  }
+  pending = (struct sagr_generic_pending *)calloc(1, sizeof(*pending));
+  if (pending == NULL) {
+    /* The daemon has admitted a ticket but the client cannot retain its
+     * identity.  Poison the stream rather than risk an untracked launch. */
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES,
+                     wire_status, errno,
+                     "could not allocate generic dispatch ticket state");
+  }
+  pending->magic = SAGR_GENERIC_PENDING_MAGIC;
+  pending->instance = instance;
+  pending->queue = queue;
+  pending->mapping = mapping;
+  pending->kernarg = kernarg;
+  pending->signal = signal;
+  pending->request_id = request_id;
+  pending->kernarg_offset = local_options.kernarg_offset;
+  pending->kernarg_size = local_options.kernarg_size;
+  pending->ack = response;
+  instance->generic_pending = pending;
+  queue->next_sequence = request.queue_sequence == UINT64_MAX
+                             ? 0U
+                             : request.queue_sequence + UINT64_C(1);
+  signal->value = INT64_C(1);
+  fill_generic_ticket(pending, out_ticket);
+  if (out_error != NULL && error_size >= sizeof(*out_error)) {
+    out_error->status = SAGR_STATUS_SUCCESS;
+    out_error->wire_status = wire_status;
+    (void)snprintf(out_error->message, sizeof(out_error->message), "%s",
+                   "generic dispatch admitted; execution remains daemon-owned");
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_queue_wait_generic_dispatch(
+    sagr_queue_t opaque_queue, const sagr_generic_dispatch_ticket_t *ticket,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_generic_dispatch_completion_t *out_completion,
+    uint32_t completion_size, sagr_error_info_t *out_error,
+    uint32_t error_size) {
+  struct sagr_queue *queue = (struct sagr_queue *)opaque_queue;
+  struct sagr_instance *instance;
+  struct sagr_generic_pending *pending;
+  sagr_queue_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_generic_response_t completion;
+  sagr_status_t status;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  const char *reason = "generic dispatch completion failed";
+
+  status = generic_validate_common_outputs(
+      out_error, error_size, out_completion, completion_size,
+      sizeof(*out_completion), 1,
+      "invalid generic dispatch completion output buffer");
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (!queue_handle_is_valid(queue) || ticket == NULL) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "invalid generic dispatch queue or ticket");
+  }
+  instance = queue->instance;
+  status = require_generic_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  pending = instance->generic_pending;
+  if (pending == NULL || pending->magic != SAGR_GENERIC_PENDING_MAGIC ||
+      pending->queue != queue) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1,
+                     0, "generic dispatch ticket is not pending on this queue");
+  }
+  if (!generic_ticket_matches(pending, ticket)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "generic dispatch ticket identity mismatch");
+  }
+  status = prepare_queue_operation(operation_options, &local_operation,
+                                   &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid generic wait operation options");
+  }
+  if (instance->operation_active != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "another instance operation is active");
+  }
+  memset(&completion, 0, sizeof(completion));
+  instance->operation_active = 1;
+  status = generic_receive_completion(pending, &deadline,
+                                      local_operation.cancel_fd, &completion,
+                                      &wire_status, &native_errno, &reason);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS && wire_status < 0) {
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (status == SAGR_STATUS_SUCCESS) {
+    if (!generic_completion_success_matches(pending, &completion)) {
+      poison_queue_transport(instance);
+      return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                       wire_status, 0,
+                       "generic dispatch completion result mismatch");
+    }
+    fill_generic_completion(&completion, out_completion, status, wire_status,
+                            instance);
+    pending->completion_consumed = 1;
+    pending->signal->value = INT64_C(1);
+    generic_release_pending(instance);
+    return SAGR_STATUS_SUCCESS;
+  }
+
+  /* A canonical daemon rejection is terminal for this ticket but does not
+   * poison an otherwise synchronized connection.  Publish the admitted tuple
+   * locally so callers can correlate the failure without inventing execution. */
+  if (completion.status == SAGR_WIRE_STATUS_OK ||
+      completion.opcode != SAGR_WIRE_GENERIC_OPCODE_SUBMIT_AQL ||
+      completion.request_id != pending->request_id) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0,
+                     "noncanonical generic dispatch failure completion");
+  }
+  generic_publish_failure_identity(pending, &completion);
+  fill_generic_completion(&completion, out_completion, status, wire_status,
+                          instance);
+  pending->completion_consumed = 1;
+  generic_release_pending(instance);
+  return fail_open(out_error, error_size, status, wire_status, native_errno,
+                   "daemon rejected generic dispatch execution");
+}
+
+sagr_status_t sagr_generic_unmap_object(
+    sagr_generic_mapping_t *mapping,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_error_info_t *out_error, uint32_t error_size) {
+  struct sagr_generic_mapping *owned_mapping;
+  struct sagr_instance *instance;
+  struct sagr_generic_kernarg **kernarg_link;
+  struct sagr_generic_mapping **mapping_link;
+  sagr_queue_operation_options_t local_operation;
+  monotonic_deadline_t deadline;
+  sagr_wire_generic_request_t request;
+  sagr_wire_generic_response_t response;
+  sagr_status_t status;
+  int native_errno = 0;
+  int32_t wire_status = -1;
+  const char *reason = "generic UNMAP_OBJECT failed";
+
+  status = validate_error_output(out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  if (mapping == NULL) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1,
+                     0, "generic mapping pointer is null");
+  }
+  if (*mapping == NULL) {
+    return SAGR_STATUS_SUCCESS;
+  }
+  owned_mapping = *mapping;
+  if (!generic_mapping_handle_is_valid(owned_mapping)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "invalid generic mapping handle");
+  }
+  instance = owned_mapping->instance;
+  if (!generic_mapping_owned_by_instance(owned_mapping, instance)) {
+    return fail_open(out_error, error_size, SAGR_STATUS_INVALID_HANDLE, -1, 0,
+                     "generic mapping is not owned by this instance");
+  }
+  status = require_generic_transport(instance, out_error, error_size);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = prepare_queue_operation(operation_options, &local_operation,
+                                   &deadline, &native_errno);
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, -1, native_errno,
+                     "invalid generic UNMAP operation options");
+  }
+  if (generic_mapping_has_pending(instance, owned_mapping) ||
+      instance->operation_active != 0) {
+    return fail_open(out_error, error_size, SAGR_STATUS_BUSY, -1, 0,
+                     "generic mapping has pending work");
+  }
+  memset(&request, 0, sizeof(request));
+  request.major = SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR;
+  request.minor = SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR;
+  request.opcode = SAGR_WIRE_GENERIC_OPCODE_UNMAP_OBJECT;
+  request.object_id = owned_mapping->object_id;
+  request.object_generation = owned_mapping->object_generation;
+  request.mapping_id = owned_mapping->mapping_id;
+  request.mapping_generation = owned_mapping->mapping_generation;
+  memset(&response, 0, sizeof(response));
+  instance->operation_active = 1;
+  status = generic_exchange_ack(instance, &request, &deadline,
+                                local_operation.cancel_fd, &response,
+                                &wire_status, &native_errno, &reason, NULL);
+  instance->operation_active = 0;
+  if (status != SAGR_STATUS_SUCCESS) {
+    return fail_open(out_error, error_size, status, wire_status, native_errno,
+                     reason);
+  }
+  if (response.opcode != SAGR_WIRE_GENERIC_OPCODE_UNMAP_OBJECT ||
+      response.object_id != owned_mapping->object_id ||
+      response.object_generation != owned_mapping->object_generation ||
+      response.mapping_id != owned_mapping->mapping_id ||
+      response.mapping_generation != owned_mapping->mapping_generation ||
+      (bytes_are_zero(response.image_sha256, sizeof(response.image_sha256)) ==
+           0 &&
+       memcmp(response.image_sha256, owned_mapping->image_sha256,
+              sizeof(response.image_sha256)) != 0)) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_PROTOCOL_ERROR,
+                     wire_status, 0, "invalid successful UNMAP_OBJECT ACK");
+  }
+
+  kernarg_link = &instance->generic_kernargs;
+  while (*kernarg_link != NULL) {
+    struct sagr_generic_kernarg *kernarg = *kernarg_link;
+    if (kernarg->mapping != owned_mapping) {
+      kernarg_link = &kernarg->next;
+      continue;
+    }
+    /* Retain a zero-magic tombstone until instance close.  This makes copied
+     * child aliases fail as INVALID_HANDLE instead of becoming use-after-free
+     * pointers, while active counts and IDs are removed immediately. */
+    if (instance->generic_kernarg_count != 0U) {
+      --instance->generic_kernarg_count;
+    }
+    kernarg->magic = 0U;
+    kernarg->mapping = NULL;
+    kernarg->allocation_id = 0U;
+    kernarg->generation = 0U;
+    kernarg->kernarg_va = 0U;
+    kernarg->size_bytes = 0U;
+    kernarg->alignment_bytes = 0U;
+    kernarg_link = &kernarg->next;
+  }
+  mapping_link = &instance->generic_mappings;
+  while (*mapping_link != NULL && *mapping_link != owned_mapping) {
+    mapping_link = &(*mapping_link)->next;
+  }
+  if (*mapping_link != owned_mapping || instance->generic_mapping_count == 0U) {
+    poison_queue_transport(instance);
+    return fail_open(out_error, error_size, SAGR_STATUS_INTERNAL_ERROR,
+                     wire_status, 0, "generic mapping ownership list is inconsistent");
+  }
+  --instance->generic_mapping_count;
+  *mapping = NULL;
+  /* Keep a zero-magic mapping tombstone in the ownership list until close so
+   * stale aliases can be rejected without dereferencing freed storage. */
+  owned_mapping->magic = 0U;
+  owned_mapping->object_id = 0U;
+  owned_mapping->object_generation = 0U;
+  owned_mapping->mapping_id = 0U;
+  owned_mapping->mapping_generation = 0U;
+  owned_mapping->mapped_base_va = 0U;
+  owned_mapping->mapped_end_va = 0U;
+  owned_mapping->descriptor_va = 0U;
+  owned_mapping->code_va = 0U;
+  owned_mapping->entry_va = 0U;
+  owned_mapping->mapped_bytes = 0U;
+  owned_mapping->kernel_index = 0U;
+  owned_mapping->segment_count = 0U;
+  owned_mapping->descriptor_preload_dwords = 0U;
+  memset(owned_mapping->image_sha256, 0, sizeof(owned_mapping->image_sha256));
+  memset(owned_mapping->kernel_name, 0, sizeof(owned_mapping->kernel_name));
+  if (out_error != NULL && error_size >= sizeof(*out_error)) {
+    out_error->status = SAGR_STATUS_SUCCESS;
+    out_error->wire_status = wire_status;
+    (void)snprintf(out_error->message, sizeof(out_error->message), "%s",
+                   "generic object unmapped");
+  }
   return SAGR_STATUS_SUCCESS;
 }

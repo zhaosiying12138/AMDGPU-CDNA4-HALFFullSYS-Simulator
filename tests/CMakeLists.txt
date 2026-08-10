@@ -384,6 +384,35 @@ add_test(
   COMMAND self_amdgpu_runtime_dispatch_test)
 set_tests_properties(self_amdgpu_runtime.dispatch PROPERTIES TIMEOUT 30)
 
+# CP-0023 client lease/lifecycle gate.  The mock daemon exercises the public
+# v2 API and the existing v1 queue/memory/signal carrier, but never executes a
+# kernel or claims a normal launcher result.
+add_executable(
+  self_amdgpu_runtime_generic_dispatch_v2_client_test
+  generic_dispatch_v2_client_test.c
+  ../src/transport_codec.c)
+target_compile_features(
+  self_amdgpu_runtime_generic_dispatch_v2_client_test PRIVATE c_std_11)
+target_include_directories(
+  self_amdgpu_runtime_generic_dispatch_v2_client_test
+  PRIVATE ../src ../include)
+target_link_libraries(
+  self_amdgpu_runtime_generic_dispatch_v2_client_test
+  PRIVATE SelfAmdgpuRuntime::runtime Threads::Threads)
+if(MSVC)
+  target_compile_options(
+    self_amdgpu_runtime_generic_dispatch_v2_client_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    self_amdgpu_runtime_generic_dispatch_v2_client_test
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(
+  NAME self_amdgpu_runtime.generic_dispatch_v2_client
+  COMMAND self_amdgpu_runtime_generic_dispatch_v2_client_test)
+set_tests_properties(
+  self_amdgpu_runtime.generic_dispatch_v2_client PROPERTIES TIMEOUT 30)
+
 add_executable(self_amdgpu_runtime_cli_test cli_test.c)
 target_compile_features(self_amdgpu_runtime_cli_test PRIVATE c_std_11)
 target_link_libraries(

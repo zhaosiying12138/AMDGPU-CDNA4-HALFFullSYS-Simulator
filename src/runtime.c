@@ -206,3 +206,62 @@ sagr_status_t sagr_pinned_dispatch_options_init(
   options->fixture_id = SAGR_DISPATCH_FIXTURE_GFX950_XOR_U8_V1;
   return SAGR_STATUS_SUCCESS;
 }
+
+sagr_status_t sagr_generic_map_options_init(
+    sagr_generic_map_options_t *options, uint32_t options_size) {
+  if (options == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (options_size < sizeof(*options)) {
+    if (options_size >= sizeof(options->struct_size)) {
+      options->struct_size = (uint32_t)sizeof(*options);
+    }
+    return SAGR_STATUS_BUFFER_TOO_SMALL;
+  }
+  memset(options, 0, options_size);
+  options->struct_size = options_size;
+  options->version = SAGR_GENERIC_RUNTIME_API_VERSION;
+  options->gfx_target = UINT32_C(950);
+  options->relocation_count = 0U;
+  options->descriptor_preload_dwords = 0U;
+  options->page_size = SAGR_GENERIC_PAGE_SIZE_4K;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_generic_kernarg_allocate_options_init(
+    sagr_generic_kernarg_allocate_options_t *options, uint32_t options_size) {
+  if (options == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (options_size < sizeof(*options)) {
+    if (options_size >= sizeof(options->struct_size)) {
+      options->struct_size = (uint32_t)sizeof(*options);
+    }
+    return SAGR_STATUS_BUFFER_TOO_SMALL;
+  }
+  memset(options, 0, options_size);
+  options->struct_size = options_size;
+  options->version = SAGR_GENERIC_RUNTIME_API_VERSION;
+  options->alignment_bytes = UINT64_C(8);
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_generic_submit_options_init(
+    sagr_generic_submit_options_t *options, uint32_t options_size) {
+  if (options == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (options_size < sizeof(*options)) {
+    if (options_size >= sizeof(options->struct_size)) {
+      options->struct_size = (uint32_t)sizeof(*options);
+    }
+    return SAGR_STATUS_BUFFER_TOO_SMALL;
+  }
+  memset(options, 0, options_size);
+  options->struct_size = options_size;
+  options->version = SAGR_GENERIC_RUNTIME_API_VERSION;
+  options->expected_signal_value_bits = UINT64_C(1);
+  options->num_ctas = 1U;
+  options->wavefront_size = UINT32_C(64);
+  return SAGR_STATUS_SUCCESS;
+}

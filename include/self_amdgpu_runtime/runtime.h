@@ -101,11 +101,22 @@ enum {
  * GENERIC_DISPATCH_V2 capability is negotiated. */
 #define SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR UINT16_C(2)
 #define SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR UINT16_C(0)
+#define SAGR_GENERIC_RUNTIME_API_VERSION UINT32_C(1)
+#define SAGR_GENERIC_KERNEL_NAME_BYTES UINT32_C(128)
+#define SAGR_GENERIC_PAGE_SIZE_4K UINT32_C(4096)
+#define SAGR_GENERIC_PAGE_SIZE_64K UINT32_C(65536)
+#define SAGR_GENERIC_MAX_KERNARG_BYTES UINT64_C(16777216)
+#define SAGR_GENERIC_MAX_SHARED_BYTES UINT32_C(65536)
+#define SAGR_GENERIC_MAX_WORKGROUP_DIMENSION UINT32_C(1024)
+#define SAGR_GENERIC_MAX_WARPS UINT32_C(32)
+#define SAGR_GENERIC_MAX_CTAS UINT32_C(8)
 
 typedef struct sagr_instance *sagr_instance_t;
 typedef struct sagr_queue *sagr_queue_t;
 typedef struct sagr_memory *sagr_memory_t;
 typedef struct sagr_signal *sagr_signal_t;
+typedef struct sagr_generic_mapping *sagr_generic_mapping_t;
+typedef struct sagr_generic_kernarg *sagr_generic_kernarg_t;
 
 /*
  * All public structures contain fixed-width fields only. Callers initialize
@@ -356,6 +367,174 @@ typedef struct sagr_dispatch_completion {
   uint8_t reserved[16];
 } sagr_dispatch_completion_t;
 
+/*
+ * Generic payload-v2 mapping options.  These are metadata values copied from
+ * a committed code object and its selected kernel; no host pointer or packet
+ * bytes are accepted.  The daemon remains authoritative for object ownership
+ * and all returned GPU virtual addresses.
+ */
+typedef struct sagr_generic_map_options {
+  uint32_t struct_size;
+  uint32_t version;
+  uint32_t flags;
+  uint64_t object_id;
+  uint64_t object_generation;
+  uint32_t kernel_index;
+  uint32_t gfx_target;
+  uint32_t relocation_count;
+  uint32_t kernarg_segment_size;
+  uint32_t kernarg_segment_align;
+  uint32_t descriptor_preload_dwords;
+  uint32_t page_size;
+  uint8_t image_sha256[32];
+  char kernel_name[SAGR_GENERIC_KERNEL_NAME_BYTES];
+  uint8_t reserved[16];
+} sagr_generic_map_options_t;
+
+typedef struct sagr_generic_mapping_info {
+  uint32_t struct_size;
+  uint32_t version;
+  uint32_t flags;
+  uint64_t object_id;
+  uint64_t object_generation;
+  uint64_t mapping_id;
+  uint64_t mapping_generation;
+  uint64_t mapped_base_va;
+  uint64_t mapped_end_va;
+  uint64_t descriptor_va;
+  uint64_t code_va;
+  uint64_t entry_va;
+  uint64_t mapped_bytes;
+  uint32_t kernel_index;
+  uint32_t segment_count;
+  uint32_t descriptor_preload_dwords;
+  uint32_t reserved0;
+  uint8_t image_sha256[32];
+  uint64_t connection_id;
+  uint64_t epoch;
+  uint8_t daemon_uuid[SAGR_UUID_SIZE];
+  uint8_t reserved[16];
+} sagr_generic_mapping_info_t;
+
+typedef struct sagr_generic_kernarg_allocate_options {
+  uint32_t struct_size;
+  uint32_t version;
+  uint32_t flags;
+  uint64_t size_bytes;
+  uint64_t alignment_bytes;
+  uint8_t reserved[16];
+} sagr_generic_kernarg_allocate_options_t;
+
+typedef struct sagr_generic_kernarg_info {
+  uint32_t struct_size;
+  uint32_t version;
+  uint32_t flags;
+  uint64_t object_id;
+  uint64_t object_generation;
+  uint64_t mapping_id;
+  uint64_t mapping_generation;
+  uint64_t allocation_id;
+  uint64_t generation;
+  uint64_t kernarg_va;
+  uint64_t size_bytes;
+  uint64_t alignment_bytes;
+  uint8_t image_sha256[32];
+  uint64_t connection_id;
+  uint64_t epoch;
+  uint8_t daemon_uuid[SAGR_UUID_SIZE];
+  uint8_t reserved[16];
+} sagr_generic_kernarg_info_t;
+
+typedef struct sagr_generic_submit_options {
+  uint32_t struct_size;
+  uint32_t version;
+  uint32_t flags;
+  uint64_t kernarg_offset;
+  uint64_t kernarg_size;
+  uint64_t expected_signal_value_bits;
+  uint32_t grid_x;
+  uint32_t grid_y;
+  uint32_t grid_z;
+  uint32_t workgroup_x;
+  uint32_t workgroup_y;
+  uint32_t workgroup_z;
+  uint32_t num_warps;
+  uint32_t num_ctas;
+  uint32_t shared_memory_bytes;
+  uint32_t wavefront_size;
+  uint32_t launch_flags;
+  uint32_t reserved0;
+  uint8_t reserved[16];
+} sagr_generic_submit_options_t;
+
+typedef struct sagr_generic_dispatch_ticket {
+  uint32_t struct_size;
+  uint32_t version;
+  uint32_t flags;
+  uint64_t request_id;
+  uint64_t object_id;
+  uint64_t object_generation;
+  uint64_t mapping_id;
+  uint64_t mapping_generation;
+  uint64_t kernarg_allocation_id;
+  uint64_t kernarg_generation;
+  uint64_t queue_id;
+  uint64_t queue_generation;
+  uint64_t queue_sequence;
+  uint64_t signal_id;
+  uint64_t signal_generation;
+  uint64_t ticket_id;
+  uint64_t trace_id;
+  uint64_t packet_va;
+  uint32_t packet_crc32c;
+  uint32_t reserved0;
+  uint64_t admission_tick;
+  uint8_t image_sha256[32];
+  uint64_t connection_id;
+  uint64_t epoch;
+  uint8_t daemon_uuid[SAGR_UUID_SIZE];
+  uint8_t reserved[16];
+} sagr_generic_dispatch_ticket_t;
+
+typedef struct sagr_generic_dispatch_completion {
+  uint32_t struct_size;
+  uint32_t version;
+  uint32_t flags;
+  sagr_status_t status;
+  int32_t wire_status;
+  uint64_t request_id;
+  uint64_t object_id;
+  uint64_t object_generation;
+  uint64_t mapping_id;
+  uint64_t mapping_generation;
+  uint64_t kernarg_allocation_id;
+  uint64_t kernarg_generation;
+  uint64_t kernarg_va;
+  uint64_t kernarg_size;
+  uint64_t kernarg_alignment;
+  uint64_t queue_id;
+  uint64_t queue_generation;
+  uint64_t queue_sequence;
+  uint64_t signal_id;
+  uint64_t signal_generation;
+  uint64_t signal_value_bits;
+  uint64_t ticket_id;
+  uint64_t trace_id;
+  uint64_t packet_va;
+  uint32_t packet_crc32c;
+  uint32_t output_crc32c;
+  uint64_t sim_tick;
+  uint64_t admission_tick;
+  uint64_t start_tick;
+  uint64_t end_tick;
+  uint64_t retire_tick;
+  uint8_t image_sha256[32];
+  uint64_t connection_id;
+  uint64_t epoch;
+  uint8_t daemon_uuid[SAGR_UUID_SIZE];
+  uint8_t reserved[16];
+} sagr_generic_dispatch_completion_t;
+
 SAGR_API uint32_t sagr_abi_version(void);
 SAGR_API const char *sagr_version_string(void);
 SAGR_API const char *sagr_status_string(sagr_status_t status);
@@ -378,6 +557,12 @@ SAGR_API sagr_status_t sagr_signal_operation_options_init(
     sagr_signal_operation_options_t *options, uint32_t options_size);
 SAGR_API sagr_status_t sagr_pinned_dispatch_options_init(
     sagr_pinned_dispatch_options_t *options, uint32_t options_size);
+SAGR_API sagr_status_t sagr_generic_map_options_init(
+    sagr_generic_map_options_t *options, uint32_t options_size);
+SAGR_API sagr_status_t sagr_generic_kernarg_allocate_options_init(
+    sagr_generic_kernarg_allocate_options_t *options, uint32_t options_size);
+SAGR_API sagr_status_t sagr_generic_submit_options_init(
+    sagr_generic_submit_options_t *options, uint32_t options_size);
 
 /*
  * Open performs exactly one AF_UNIX SOCK_SEQPACKET handshake attempt. When no
@@ -450,6 +635,61 @@ SAGR_API sagr_status_t sagr_queue_wait_pinned_dispatch(
     sagr_queue_t queue, const sagr_dispatch_ticket_t *ticket,
     const sagr_queue_operation_options_t *operation_options,
     sagr_dispatch_completion_t *out_completion, uint32_t completion_size,
+    sagr_error_info_t *out_error, uint32_t error_size);
+
+/*
+ * Generic payload-v2 stages are synchronous and caller-serialized on the
+ * owning instance.  A successful MAP creates an owner-bound mapping lease;
+ * ALLOC creates a child kernarg lease; SUBMIT returns an admission ticket and
+ * WAIT consumes its matching completion.  No client packet bytes or host
+ * pointers cross the wire.  UNMAP consumes the mapping and its child leases
+ * only after no submission remains pending.  Instance close is local-only:
+ * it drops local lease state after closing the transport and does not claim a
+ * remote UNMAP or execution result; daemon owner/epoch teardown is
+ * authoritative for abandoned remote leases.
+ */
+SAGR_API sagr_status_t sagr_generic_map_object(
+    sagr_instance_t instance, const sagr_generic_map_options_t *options,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_generic_mapping_t *out_mapping, sagr_generic_mapping_info_t *out_info,
+    uint32_t info_size, sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_generic_mapping_get_info(
+    sagr_generic_mapping_t mapping, sagr_generic_mapping_info_t *out_info,
+    uint32_t info_size);
+SAGR_API sagr_status_t sagr_generic_alloc_kernarg(
+    sagr_generic_mapping_t mapping,
+    const sagr_generic_kernarg_allocate_options_t *options,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_generic_kernarg_t *out_kernarg,
+    sagr_generic_kernarg_info_t *out_info, uint32_t info_size,
+    sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_generic_kernarg_get_info(
+    sagr_generic_kernarg_t kernarg, sagr_generic_kernarg_info_t *out_info,
+    uint32_t info_size);
+/* Publishes bytes through the existing sealed v1 MEMORY_COPY_H2D carrier.
+ * The destination is the daemon-owned allocation returned by ALLOC_KERNARG;
+ * no host pointer is serialized and the daemon must echo the range and CRC. */
+SAGR_API sagr_status_t sagr_generic_kernarg_copy_from_host(
+    sagr_generic_kernarg_t kernarg, uint64_t offset, const void *source,
+    uint64_t byte_count,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_queue_submit_generic_dispatch(
+    sagr_queue_t queue, sagr_generic_mapping_t mapping,
+    sagr_generic_kernarg_t kernarg, sagr_signal_t signal,
+    const sagr_generic_submit_options_t *options,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_generic_dispatch_ticket_t *out_ticket, uint32_t ticket_size,
+    sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_queue_wait_generic_dispatch(
+    sagr_queue_t queue, const sagr_generic_dispatch_ticket_t *ticket,
+    const sagr_queue_operation_options_t *operation_options,
+    sagr_generic_dispatch_completion_t *out_completion,
+    uint32_t completion_size, sagr_error_info_t *out_error,
+    uint32_t error_size);
+SAGR_API sagr_status_t sagr_generic_unmap_object(
+    sagr_generic_mapping_t *mapping,
+    const sagr_queue_operation_options_t *operation_options,
     sagr_error_info_t *out_error, uint32_t error_size);
 
 /*

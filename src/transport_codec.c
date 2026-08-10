@@ -3033,7 +3033,9 @@ generic_response_success_valid(const sagr_wire_generic_response_t *response,
       response->reserved0 != 0U || response->object_id == 0U ||
       response->object_generation == 0U || response->mapping_id == 0U ||
       response->mapping_generation == 0U ||
-      bytes_are_zero(response->image_sha256, sizeof(response->image_sha256))) {
+      (response->opcode != SAGR_WIRE_GENERIC_OPCODE_UNMAP_OBJECT &&
+       bytes_are_zero(response->image_sha256,
+                      sizeof(response->image_sha256)))) {
     return 0;
   }
   switch (response->opcode) {
