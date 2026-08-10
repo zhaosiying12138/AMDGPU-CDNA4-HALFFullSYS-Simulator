@@ -1,0 +1,27 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_connection_state.hh",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_socket_utils.test.cc",
+    "projects/self-amdgpu-runtime/tests/generic_dispatch_v2_endpoint_test.c",
+    "docs/host-transport-v2.md",
+    "protocol/host-transport-v2.json"
+  ],
+  "checkpoint_id": "CP-0025",
+  "conclusion": "A successful type-19 ACK becomes durable before type-20 is scheduled, and the nonzero, nondecreasing admission/start/end/retire ticks describe native control-processor admission and bookkeeping retirement only. Disconnect cleanup is proven by generation-advanced slot and VA reuse plus a complete second owner lifecycle, not by unobserved remote counters or GPU execution.",
+  "confidence": "high",
+  "decision": "Keep ACK durability, type-20 retirement, tick ordering, targeted disconnect reuse, remote counter observation, and GPU execution as separate claims. Advertise bit 8 for the complete bounded control lifecycle, but leave GPUDispatcher, ComputeUnit, kernel execution, output correctness, launcher, compiler/JIT, fallback, Triton, and Qwen false until separate evidence connects them.",
+  "evidence_ids": ["EV-0058", "EV-0059"],
+  "id": "BL-0101",
+  "invalidated_assumptions": [
+    "Receiving MessageType 20 proves that GPU instructions executed and kernel output is correct.",
+    "Nonzero lifecycle ticks necessarily come from GPUDispatcher or ComputeUnit activity.",
+    "A successful reconnect alone proves every remote resource counter reached zero rather than targeted leases being reclaimed and safely reused."
+  ],
+  "observation": "The final live capture records a nonzero packet CRC and admission tick with admission <= start <= end <= retire; start, end, and retire may share the bookkeeping tick after the ACK is durably committed. Generation one disconnects with live leases, generation two reuses the slot and VA under new generations and completes the lifecycle. remote_resource_counters_observed=false, while the focused native test independently reports zero_resources=true.",
+  "question_or_symptom": "What exactly do a durable type-19 ACK, type-20 completion, lifecycle ticks, and reconnect prove before the daemon reaches the GPU execution pipeline?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

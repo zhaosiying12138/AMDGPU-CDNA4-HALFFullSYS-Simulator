@@ -32,9 +32,13 @@ accepted for parsing. CP-0022 freezes the generic payload-v2 codec. CP-0023
 adds the append-only runtime client contract and a separate local
 `HostNativeDispatchStateV2`/bridge-adapter admission lifecycle. CP-0024 adds an
 owner-bound MessageType 18 handler and MessageType 19 output plumbing to the
-VEGA_X86 bridge plus a shared route-policy harness, but production capability
-bit 8 remains clear and the retained live probe exercises only the negative
-hello path, not a type-18 request or GPU execution pipeline.
+VEGA_X86 bridge plus a shared route-policy harness. CP-0025 completes the
+positive owner-bound daemon control lifecycle: bit 8 is advertised with its
+dependencies, logical alignment 8 is separated from hidden page backing, v1
+`MEMORY_COPY_H2D` publishes the full allocation subrange, and native queue,
+signal, packet CRC, type-19 ACK, type-20 retirement, cleanup, and reconnect are
+live. That path still does not issue the packet to GPUDispatcher/ComputeUnit or
+validate kernel output.
 
 The host-native process must preserve the CP8/CP13 fixed-width transport and
 the runtime ownership/generation rules. It must not introduce a second wire
@@ -116,8 +120,18 @@ hello and baseline reconnect only; it does not send MessageType 18. A daemon
 H2D route is also unproven: kernarg bytes retain the existing v1
 `MEMORY_COPY_H2D` carrier rather than gaining a new v2 opcode. Normal alignment
 8, positive type-18 routing, SUBMIT ACK, MessageType 20, queue/signal/packet/
-ticks, launcher, compiler/JIT, execution, and fallback are still false.
-CP-0025 / `P5-TRITON-VECADD-04-DAEMON-LIFECYCLE` is the next gate.
+ticks, launcher, compiler/JIT, execution, and fallback are still false at the
+historical CP24 boundary. CP-0025 accepts the positive two-generation daemon
+control lifecycle. The wire alignment remains the kernel ABI contract while
+4096-byte backing stays private; page size remains owner-session-fixed, and v1
+`MEMORY_COPY_H2D` is the only kernarg byte carrier. A durable type-19 ACK is
+followed by a type-20 bookkeeping retirement with nonzero, nondecreasing ticks;
+disconnect cleanup is verified by generation-advanced slot/VA reuse. Direct
+remote counters are not exposed, although the focused native test reaches zero
+resources. GPUDispatcher, ComputeUnit, kernel execution, output correctness,
+launcher, compiler/JIT, and fallback remain false. CP-0026 /
+`P5-TRITON-VECADD-05-GPU-EXECUTION` is the next gate; Triton preload/launcher
+support remains later.
 
 ## Non-goals
 

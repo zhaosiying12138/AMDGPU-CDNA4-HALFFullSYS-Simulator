@@ -1,0 +1,768 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0059",
+  "checkpoint_id": "CP-0025",
+  "type": "cp25-root-umbrella",
+  "claim": "EV-0059 binds byte-exact EV-0058, the CP24 root anchor and active CP25 prepare journal, clean final gem5 and runtime child commits and trailers, post-commit focused validation, the canonical linked binaries, and a fresh real two-generation runtime-to-gem5 Unix-socket lifecycle. Required generic capability bit 8 and its dependencies are selected; the owner lifecycle completes MAP, logical-align-8 ALLOC over hidden page backing, existing v1 MEMORY_COPY_H2D, daemon-built AQL admission, type-19 ACK, type-20 retirement, UNMAP, disconnect cleanup, and reconnect. This is bounded native control admission and retirement only; GPU execution and the launcher/compiler stack remain false.",
+  "command_argv": [
+    [
+      "python3",
+      "artifacts/evidence/CP-0025/verify_ev0059_inputs.py",
+      "children"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0025/verify_ev0059_inputs.py",
+      "ev0058"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0025/verify_ev0059_inputs.py",
+      "journal"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0025/verify_ev0059_inputs.py",
+      "binary"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0025/verify_ev0059_inputs.py",
+      "gem5-postcommit"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0025/verify_ev0059_inputs.py",
+      "live"
+    ]
+  ],
+  "command_results": [
+    {
+      "id": "final-child-identities",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0025/verify_ev0059_inputs.py",
+        "children"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T04:16:57+00:00",
+      "ended_at": "2026-08-10T04:16:57+00:00",
+      "exit_code": 0,
+      "result": "Both CP25 children are clean at the exact final heads, trees, and CP24 parents; their bounded path inventories and exact EV-0058 trailers pass.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/final-child-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "fb05f842fb4d5a259a9424fbd967ebcd0caaf9bb4ec3b03b57ea39ab56a4e37f",
+        "size": 651,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/final-child-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0497550d015a7652f0717ff01e11e0d200744330cf8604b8737d11360ce2c9a4",
+        "size": 2025,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/final-child-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "recursive-ev0058",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0025/verify_ev0059_inputs.py",
+        "ev0058"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T04:16:57+00:00",
+      "ended_at": "2026-08-10T04:16:57+00:00",
+      "exit_code": 0,
+      "result": "Byte-exact EV-0058 passes evidence policy, all 65 retained external hashes, and command-capture semantic validation.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/recursive-ev0058.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "511885fc9e1ee738cb1f3c64c21288d5041341f07350ab50d86863158ed48062",
+        "size": 636,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/recursive-ev0058.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "60c3ad0c09fd0cbfb88ee9bb55c9b6176c57b0cb1fb99379142b15efb4857c9d",
+        "size": 623,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/recursive-ev0058.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "transaction-journal",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0025/verify_ev0059_inputs.py",
+        "journal"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T04:17:47+00:00",
+      "ended_at": "2026-08-10T04:17:47+00:00",
+      "exit_code": 0,
+      "result": "The active CP25 prepare journal binds the CP24 root anchor, exact final children, locked participants, and the 14-path root allowlist with empty root staging.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/transaction-journal.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5167bcb67cd459a9302d3e24cbe63b55f441a8970fbae792896de53fda13ec5a",
+        "size": 644,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/transaction-journal.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ebd0a51b9c79bfd372ec33281a15344a862db3b39a7b4324da755024d07588cc",
+        "size": 1007,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/transaction-journal.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "final-binary-identity",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0025/verify_ev0059_inputs.py",
+        "binary"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T04:16:57+00:00",
+      "ended_at": "2026-08-10T04:16:57+00:00",
+      "exit_code": 0,
+      "result": "The final linked gem5, endpoint probe, and zero-preload HSACO identities match the binaries used by the post-commit lifecycle.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/final-binary-identity.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8939085885292e51a6c6ec10faabebddc39dfbaef41e9e1db96fa64fb5f9f467",
+        "size": 646,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/final-binary-identity.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5c4d015c77f90d3cd369295acde2f4c726d70634000331b961708dded9a897de",
+        "size": 491,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/final-binary-identity.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "postcommit-gem5-focused",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0025/verify_ev0059_inputs.py",
+        "gem5-postcommit"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T04:16:57+00:00",
+      "ended_at": "2026-08-10T04:16:57+00:00",
+      "exit_code": 0,
+      "result": "The clean final gem5 child passes route/native lifecycle checks and queue 13/13, signal 13/13, socket 25/25, and protocol 47/47 tests without rebuilding.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/postcommit-gem5-focused.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8c7ede683c64e37bb14c2383647bd7c07d726c9408ee116ef7c875a4589d4950",
+        "size": 660,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/postcommit-gem5-focused.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d637455efb051064bf2038c336835378ad1642a1ccdf34c614c227b07757eb4e",
+        "size": 1357,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/postcommit-gem5-focused.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "postcommit-live-lifecycle",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0025/verify_ev0059_inputs.py",
+        "live"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T04:16:57+00:00",
+      "ended_at": "2026-08-10T04:16:57+00:00",
+      "exit_code": 0,
+      "result": "The clean final children complete a fresh two-generation required-generic daemon lifecycle plus runtime CTest 20/20, with child and binary identities stable before and after.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/postcommit-live-lifecycle.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "37e362e7bcbf867cc057b93cf3cbe81b01bdad51de931792f6bb7da03c6b1e1c",
+        "size": 653,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/postcommit-live-lifecycle.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "73211676076d8b20e097bfae4b08b005de78569bdae8676b96f1fa0fb1cf54ed",
+        "size": 2344,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/postcommit-live-lifecycle.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "includes": {
+    "EV-0058": "6b911ed3b5df86ea0d028a0c760b0c82c100adb74d7f297f1660c7c6a478a23a"
+  },
+  "cwd": ".",
+  "started_at": "2026-08-10T04:16:57+00:00",
+  "ended_at": "2026-08-10T04:17:47+00:00",
+  "exit_code": 0,
+  "environment_fingerprint": {
+    "root_anchor_head": "9ec5f344a448c3b90d857fa01cd2f1271150fa62",
+    "root_anchor_tree": "146081e01bb7d0a4032d65babec74caeffe24f1e",
+    "transaction_phase": "prepare",
+    "transaction_journal_sha256": "eaeb9e1c49b5b58820ddf5305c8be2aad832286ec4a17cfa543f62de8fc20dba",
+    "root_allowlist_count": 14,
+    "root_staging_empty": true,
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "child_evidence_manifest_sha256": "6b911ed3b5df86ea0d028a0c760b0c82c100adb74d7f297f1660c7c6a478a23a",
+    "child_evidence_policy": true,
+    "child_evidence_external_artifacts": 65,
+    "gem5_head": "bc63345542950293182bf951b61f26ede32e6974",
+    "gem5_tree": "50cc72d82cc77d2390837f9d65ab1889f2acfad9",
+    "gem5_parent": "7d52923899d9017c8ee318aa27dae5229b282a26",
+    "gem5_clean": true,
+    "gem5_changed_paths": 17,
+    "runtime_head": "24ce696911e28e4afaeabd8dbdf266b7097aed06",
+    "runtime_tree": "288d2d8cf11277a373ffc30a106e864384c3311f",
+    "runtime_parent": "497092b7696bf4454eacca850b033e3760f53375",
+    "runtime_clean": true,
+    "runtime_changed_paths": 3,
+    "gem5_postcommit_manifest_sha256": "578f9234d92e7d1a7794ec280a1a93aa8c61663dc34220a4a335d00d8b9e7cca",
+    "gem5_binary_sha256": "4c175adcccdc8ffc0d6f64ddbd41379cf4a9d5de4c870f5e7b327ba4054e58ed",
+    "gem5_build_id": "1920c1daca920c7e40af07ee7cf6c460b80b64a0",
+    "runtime_endpoint_sha256": "1766fe6fffb36e37837b311527659afeede5744a92e7a6df5fdca0a94a4ac2f1",
+    "zero_preload_hsaco_sha256": "7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56",
+    "gem5_protocol_gtest": "47/47",
+    "gem5_queue_gtest": "13/13",
+    "gem5_signal_gtest": "13/13",
+    "gem5_socket_gtest": "25/25",
+    "runtime_ctest": "20 total; 19 passed; 1 expected endpoint skip; 0 failed",
+    "payload_version": "2.0 over framing 1.0",
+    "message_types": "18/19/20",
+    "generic_capability_bit": 8,
+    "daemon_socket_route": true,
+    "generic_capability_advertised": true,
+    "generic_capability_selected": true,
+    "dependencies_selected": true,
+    "unnegotiated_type18_policy_rejected": true,
+    "raw18_negative_socket_capture": false,
+    "map": true,
+    "alloc": true,
+    "logical_alignment_8": true,
+    "backing_alignment_hidden": true,
+    "page_size_lifetime": "owner-session-fixed",
+    "h2d_carrier": "v1 MEMORY_COPY_H2D",
+    "h2d_daemon_route": true,
+    "kernarg_v2_opcode": false,
+    "kernarg_subrange_offset": 64,
+    "kernarg_manifest_bytes": 280,
+    "publication_order": "MAP_OBJECT -> ALLOC_KERNARG -> v1 MEMORY_COPY_H2D -> SUBMIT_AQL -> type-20 completion -> UNMAP_OBJECT",
+    "submit_ack": true,
+    "generic_completion_type20": true,
+    "packet_crc_nonzero": true,
+    "admission_tick_nonzero": true,
+    "completion_ticks_nondecreasing": true,
+    "completion_tick_order": "admission <= start <= end <= retire",
+    "owner_generation_guards": true,
+    "disconnect_cleanup": true,
+    "reconnect_cleanup": true,
+    "remote_cleanup_verified": true,
+    "remote_resource_counters_observed": false,
+    "focused_native_zero_resources": true,
+    "native_cp_admission": true,
+    "native_retire": true,
+    "descriptor_preload_dwords": 0,
+    "gpu_dispatcher": false,
+    "compute_unit": false,
+    "kernel_executed": false,
+    "output_correctness": false,
+    "normal_launcher": false,
+    "normal_triton_launcher": false,
+    "compiler_invoked": false,
+    "jit": false,
+    "execution": false,
+    "fallback": false,
+    "triton": false,
+    "qwen": false
+  },
+  "limitations": [
+    "The accepted live lifecycle uses the locked 5528-byte gpuReadWrite gfx950 fixture with descriptor preload zero. The retained Triton vecadd image has 12 DWORD preload and remains unsupported.",
+    "Successful type-19/type-20 records prove daemon packet construction, native command-processor admission, bookkeeping ticks, and retirement only. GPUDispatcher, ComputeUnit, kernel instructions, and output correctness are not exercised.",
+    "Disconnect cleanup is verified by generation-advanced slot and VA reuse plus a complete next owner lifecycle. Direct remote counters are not exposed, so remote_resource_counters_observed remains false; the focused native state test separately reports zero_resources=true.",
+    "Canonical unnegotiated type-18 rejection is covered by the shared route harness. EV-0059 does not add a second raw negative socket request against the bit-8-advertising daemon.",
+    "No KERNARG v2 opcode exists. Existing v1 MEMORY_COPY_H2D is the only live kernarg byte carrier and is ordered between ALLOC_KERNARG and SUBMIT_AQL.",
+    "The canonical binaries were linked from the frozen source immediately before child commits. Clean final trees, exact child path inventories, stable binary identities, focused post-commit tests, and a fresh post-commit live run bind those identical source bytes to the committed children.",
+    "The normal Triton launcher, compiler/JIT transport, GPU execution, output validation, fallback, performance, and Qwen paths remain outside CP25 and false."
+  ],
+  "redactions": [],
+  "result": "CP25 accepts the clean committed positive generic daemon control lifecycle through native admission and retirement, with owner cleanup and reconnect complete and every GPU execution, output, launcher, compiler/JIT, fallback, Triton, and Qwen claim false.",
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0025/build_ev0059.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1212681b94fb4008d104e84131668475a68bd1810b304aeac4e1d5c8f91106d7",
+      "size": 15886,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/verify_ev0059_inputs.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "c6f33c3c45071dc456969cb4802c8706b40e75ecdc300e875ac4b9dd84a3c9d3",
+      "size": 16690,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/EV-0058-draft.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6b911ed3b5df86ea0d028a0c760b0c82c100adb74d7f297f1660c7c6a478a23a",
+      "size": 36959,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/aggregate.sha256",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "20aa8756546e95c72b24a454d8951dead7f71b969c5b4794535276b0aa24acf2",
+      "size": 79,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/binary.file.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/binary.file.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "9818cc0ff75ca5b26fb7ae1f1f1c028b83375f9733466e8bee7aa90fca78c752",
+      "size": 297,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/binary.sha256.post",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "3653dca8468c1cdfa3d916ce8b7e29627834ccd1172bc1f413f56dc8809fe02b",
+      "size": 132,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/binary.sha256.pre",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "3653dca8468c1cdfa3d916ce8b7e29627834ccd1172bc1f413f56dc8809fe02b",
+      "size": 132,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/commands.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "461efb90c72ffab9004d78fde685ff971185beb93709d4b7a7d2c33c114603e2",
+      "size": 737,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/commit-diff-check.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/commit-diff-check.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/commit-message.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "bfc25f1112d661dddd744c6a33bf514f39668c85ba556fa25a5961279aace4fd",
+      "size": 640,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/exit-status.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "4fbe38445b907b24530a8dd36437ed625215897b4b385ad7b278cff92dcee9c0",
+      "size": 233,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/files.sha256",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "578f9234d92e7d1a7794ec280a1a93aa8c61663dc34220a4a335d00d8b9e7cca",
+      "size": 2709,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/head.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/head.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "61756973682e1048ae560cbbb3ceee615f4d99fb014718168c4b64e796398bdc",
+      "size": 41,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/native.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/native.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "72ce83bf6262855e4d9010746f77a49bf27e98299ed137822e39ea8524eba37f",
+      "size": 500,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/parent.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/parent.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "af9af2aa92b8f4fa18ab7b4aead0e9201401182784ba56fa3cb7a4d6ec4c7c09",
+      "size": 41,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/protocol.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/protocol.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e113d780d3dc090febdb2c0a8bb708a8a185df599254ea67cf8ea95c07179c4e",
+      "size": 145,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/queue.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/queue.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a06a3a96b01eba7b08c927d36324347e1480d4e2f9449d86fb3019384033364d",
+      "size": 145,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/route.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/route.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e0be95e3fa61f2425a35e382be87c6ab6e256ba673d2847e404436334b0aabd6",
+      "size": 344,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/signal.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/signal.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a06a3a96b01eba7b08c927d36324347e1480d4e2f9449d86fb3019384033364d",
+      "size": 145,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/socket.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/socket.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "3fa4af5e4bdec0d442a6d766964cf6a19af530bc97bf8e933e6d02f7a5b8afa5",
+      "size": 146,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/status.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/status.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/trailers.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/trailers.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "4eaeeb78a98dfd236eb8075d55b94db626c4abb30077ac3cc11b39539a452d1d",
+      "size": 310,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/tree.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/tree.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "f4091a5d7fc414825de534f243d71f23d80bf9dedfed86ca5eaa2fac8396d52f",
+      "size": 41,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/worktree-diff-check.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-postcommit/worktree-diff-check.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-final-commit/child-identity.post.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "0f21134a43d348669181e9ca6127704d6bae2ab22e8e6dfa35b076ca6d069207",
+      "size": 238,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-final-commit/child-identity.pre.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "0f21134a43d348669181e9ca6127704d6bae2ab22e8e6dfa35b076ca6d069207",
+      "size": 238,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-final-commit/commands.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "cbdf5c7d3e0bf48b00775ba3f6d389c7cb73b6ca5e4ee908a5d9293c73f7db7b",
+      "size": 1651,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-final-commit/exit-status.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5d32430bcdd4fd23dbdc8308de4ce783ae5bddbe39904126fdbb6cd5838c3274",
+      "size": 135,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-final-commit/gem5.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "11f19d0edaf78d811d05b238c45568cd92ce9701cf31646c59d4b33080a5a659",
+      "size": 510,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-final-commit/gem5.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "106ff70e99bb830037178c640b6cc4ab4425e2f8576c39bfcf76bbb7302de960",
+      "size": 689,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-final-commit/probe.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-final-commit/probe.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "eabae4267de913c1742c84f2d5c0bba61d6b4f7e7e52e8cbf0f58e3f940f246a",
+      "size": 1006,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-final-commit/runtime-ctest.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-final-commit/runtime-ctest.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1a3f94a742a2ec006726df90b36f8004045a28341271a5794cae1bff388692e3",
+      "size": 3124,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-final-commit/sha256.post.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "38d997129945b08a184c03e8f12003780fd112a05903104a01d08ae9f5a37011",
+      "size": 491,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-final-commit/sha256.pre.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "38d997129945b08a184c03e8f12003780fd112a05903104a01d08ae9f5a37011",
+      "size": 491,
+      "tracked": false
+    }
+  ]
+}

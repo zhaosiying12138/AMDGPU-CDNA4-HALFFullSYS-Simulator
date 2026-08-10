@@ -1,0 +1,210 @@
+{
+  "baseline_commit_marker": "N/A",
+  "bitlesson_ids": [
+    "BL-0100",
+    "BL-0101"
+  ],
+  "bitlesson_sha256": {
+    "BL-0100": "c53a2e277067e4909a0ddefb150c95f2f2c41a1a5c254907791acc4108ebee59",
+    "BL-0101": "7d8d37d27e922a9f7fafd1d7bf16894ce9009c89a0a92430b2b4eb2ec0d5ff18"
+  },
+  "blockers": [
+    {
+      "id": "TRITON-B003",
+      "severity": "blocking",
+      "statement": "The retained Triton descriptor carries 12 DWORD (48-byte) kernarg preload and preload-aware native mapping plus entry-offset semantics remain unimplemented; the image must continue to fail closed."
+    },
+    {
+      "id": "EXEC-B004",
+      "severity": "blocking",
+      "statement": "No GPUDispatcher/ComputeUnit kernel execution, output differential, normal Triton launcher, compiler/JIT transport, fallback, or Qwen inference has been demonstrated through the CP25 daemon control path."
+    }
+  ],
+  "change_kind": "code",
+  "changes": [
+    "Completed the owner/generation-bound gem5 MessageType 18 route and advertises bit 8 only with all required dependencies and the bounded lifecycle gates.",
+    "Separated logical alignment 8 from hidden 4096-byte page backing, retained page_size_lifetime=owner-session-fixed, and bound the existing v1 MEMORY_COPY_H2D carrier to the exact owner allocation subrange.",
+    "Completed daemon-built AQL admission, nonzero packet CRC, durable MessageType 19 ACK, nonzero nondecreasing lifecycle ticks, MessageType 20 native retirement, UNMAP, disconnect cleanup, and reconnect; runtime CTest is 20 total/19 pass/one expected endpoint skip/zero fail.",
+    "Retained no KERNARG v2 opcode and kept the 12-DWORD Triton preload fail-closed; GPUDispatcher/ComputeUnit, kernel execution, output correctness, normal launcher, compiler/JIT, fallback, Triton, and Qwen remain false."
+  ],
+  "created_at": "2026-08-10T12:20:00+08:00",
+  "evidence_ids": [
+    "EV-0058",
+    "EV-0059"
+  ],
+  "evidence_manifest_id": "EV-0059",
+  "evidence_manifest_sha256": "4cb708f59f8be0a80ad27066a5cf716346d208e86201f4043ac36216821fe0a7",
+  "evidence_sha256": {
+    "EV-0058": "6b911ed3b5df86ea0d028a0c760b0c82c100adb74d7f297f1660c7c6a478a23a",
+    "EV-0059": "4cb708f59f8be0a80ad27066a5cf716346d208e86201f4043ac36216821fe0a7"
+  },
+  "goal_id": "GSIM-001",
+  "goal_sha256": "e2901a422e81aac297979d68f4e1e8e4961bd75b5f55730b1f471a981176e305",
+  "id": "CP-0025",
+  "limitations": [
+    "CP25 accepts only the bounded generic daemon control lifecycle. MessageType 19 and type-20 records prove native control-processor admission, durable bookkeeping, and retirement; they do not prove GPUDispatcher, ComputeUnit, kernel instructions, or output correctness.",
+    "The positive live fixture is the locked 5528-byte gpuReadWrite gfx950 image with descriptor preload zero. The retained Triton vecadd image carries 12 DWORD (48-byte) preload and remains NOT_SUPPORTED until preload-aware mapping and entry-offset semantics are implemented.",
+    "Logical alignment 8 is wire-visible while 4096-byte backing is private and page_size_lifetime remains owner-session-fixed. Direct remote resource counters are not exposed; cleanup is verified by targeted generation-advanced slot/VA reuse, with zero_resources=true only in the focused native test.",
+    "The existing v1 MEMORY_COPY_H2D carrier is proven through the positive owner-bound daemon route; no KERNARG v2 opcode, raw client AQL packet, host pointer, or FD field is introduced.",
+    "The shared route harness retains canonical unnegotiated type-18 rejection, but CP25 does not add a second raw negative socket request against the bit-8-advertising daemon.",
+    "The normal Triton launcher, compiler/JIT transport, GPU execution, output differential, fallback, performance, and Qwen inference remain outside CP25 and false."
+  ],
+  "next_action": {
+    "id": "P5-TRITON-VECADD-05-GPU-EXECUTION",
+    "argv": [
+      "python3",
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0026",
+      "--intent",
+      "Connect the committed generic daemon control lifecycle to GPUDispatcher and ComputeUnit execution and prove output correctness for the locked zero-preload fixture; keep Triton preload and the normal launcher separate",
+      "--participant",
+      "gem5=projects/gem5",
+      "--participant",
+      "self-amdgpu-runtime=projects/self-amdgpu-runtime"
+    ],
+    "cwd": ".",
+    "expected": "CP-0026 must take the committed, positively negotiated owner-bound control lifecycle and issue the locked zero-preload packet through GPUDispatcher/ComputeUnit, proving instruction execution and output correctness with no CPU or fallback path. The 12-DWORD Triton preload and normal launcher remain separate later gates.",
+    "prerequisites": [
+      "CP-0025 root checkpoint, EV-0058, and EV-0059 are accepted and scripts/resume.sh --verify passes offline.",
+      "Gem5 child bc63345542950293182bf951b61f26ede32e6974/tree 50cc72d82cc77d2390837f9d65ab1889f2acfad9 and runtime child 24ce696911e28e4afaeabd8dbdf266b7097aed06/tree 288d2d8cf11277a373ffc30a106e864384c3311f are clean and trailer-bound to EV-0058.",
+      "The v1 envelope and records, payload-v2 codec, no-fallback policy, CP20 locked functional fixture, CP21 Triton identities, and word-0-bit-8 to wire-byte-1-mask-0x01 mapping remain immutable.",
+      "The CP25 logical/backing alignment contract, v1 H2D carrier, durable ACK/type-20 bookkeeping, owner cleanup, and all false execution fields remain explicit; GPU execution must be proven separately."
+    ],
+    "rollback_boundary": "Keep CP25 child commits, positive control lifecycle, v1 byte compatibility, owner cleanup, capability bit 8 bound to the complete control contract, native admission/retire true, GPU execution/output/launcher/compiler/JIT/fallback false, and Triton E2E=0/1 if the GPU execution gate cannot be implemented safely."
+  },
+  "parent_checkpoint": "CP-0024",
+  "phase_id": "P5",
+  "plan_sha256": "87be10a860ed1db65ea97b1c7ba20832af2657ed04be0e15dec9fe0196438e8d",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "administrative_git_dir": "modules/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "clean": true,
+      "head": "bc63345542950293182bf951b61f26ede32e6974",
+      "id": "gem5",
+      "path": "projects/gem5",
+      "tree": "50cc72d82cc77d2390837f9d65ab1889f2acfad9"
+    },
+    {
+      "administrative_git_dir": "modules/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "clean": true,
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58"
+    },
+    {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "clean": true,
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489"
+    },
+    {
+      "administrative_git_dir": "modules/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "clean": true,
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "id": "triton",
+      "path": "projects/triton",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1"
+    },
+    {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "clean": true,
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315"
+    },
+    {
+      "administrative_git_dir": "modules/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "clean": true,
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "id": "vllm",
+      "path": "projects/vllm",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb"
+    },
+    {
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "clean": true,
+      "head": "24ce696911e28e4afaeabd8dbdf266b7097aed06",
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "tree": "288d2d8cf11277a373ffc30a106e864384c3311f"
+    }
+  ],
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "root_parent_commit": "9ec5f344a448c3b90d857fa01cd2f1271150fa62",
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "sequence": 25,
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "status": "accepted",
+  "validation": [
+    {
+      "command": "CP25 final child identities and exact commit trailers",
+      "cwd": ".",
+      "evidence_id": "EV-0059",
+      "exit_code": 0,
+      "result": "Gem5 bc633455/tree 50cc72d8 and runtime 24ce6969/tree 288d2d8c are clean at the exact CP24 parents, 17/3 scoped paths, and one exact EV-0058 trailer set."
+    },
+    {
+      "command": "CP25 recursive EV-0058 policy and retained artifact validation",
+      "cwd": ".",
+      "evidence_id": "EV-0059",
+      "exit_code": 0,
+      "result": "Byte-exact EV-0058 SHA 6b911ed3 passes policy, 65 external descriptor hashes, capture semantics, and includes linkage."
+    },
+    {
+      "command": "CP25 post-commit gem5 focused lifecycle and regression gates",
+      "cwd": "projects/gem5",
+      "evidence_id": "EV-0059",
+      "exit_code": 0,
+      "result": "The clean final child passes route/native positive control checks, queue 13/13, signal 13/13, socket 25/25, and protocol 47/47 without rebuilding; canonical binary identity is stable."
+    },
+    {
+      "command": "CP25 fresh post-commit runtime-to-gem5 lifecycle and CTest",
+      "cwd": ".",
+      "evidence_id": "EV-0059",
+      "exit_code": 0,
+      "result": "Two owner generations complete required-generic MAP/ALLOC/logical-align-8/v1-H2D/SUBMIT/type-19/type-20/UNMAP with cleanup and reconnect; runtime CTest is 20 total, 19 passed, one expected endpoint skip, zero failed."
+    },
+    {
+      "command": "CP25 evidence policy, external artifact, capture semantics, and boundary verification",
+      "cwd": ".",
+      "evidence_id": "EV-0059",
+      "exit_code": 0,
+      "result": "EV-0058 and EV-0059 pass JSON/evidence policy, exact external-artifact hashes, retained command captures, child/journal identity, and explicit false GPU execution/output/launcher/compiler/JIT/fallback fields."
+    }
+  ]
+}

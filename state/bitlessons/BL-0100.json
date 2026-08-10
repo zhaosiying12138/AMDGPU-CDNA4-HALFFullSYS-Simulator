@@ -1,0 +1,26 @@
+{
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "projects/gem5/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc",
+    "projects/self-amdgpu-runtime/tests/generic_dispatch_v2_client_test.c",
+    "projects/self-amdgpu-runtime/tests/generic_dispatch_v2_endpoint_test.c",
+    "docs/host-transport-v2.md",
+    "protocol/host-transport-v2.json"
+  ],
+  "checkpoint_id": "CP-0025",
+  "conclusion": "Logical kernarg alignment is a wire-visible kernel ABI contract, while page alignment is private allocator backing. CP25 can therefore accept logical alignment 8, retain owner-session-fixed 4096/65536 backing, and return 8 honestly. Existing v1 MEMORY_COPY_H2D publishes bytes to the exact owner/allocation subrange; no KERNARG v2 opcode is needed or permitted.",
+  "confidence": "high",
+  "decision": "Store logical and backing alignment separately, validate that the daemon-issued VA satisfies the requested logical alignment, keep backing alignment out of the ACK, and bind v1 MEMORY_COPY_H2D to the same owner and allocation generation before SUBMIT_AQL. Preserve page_size_lifetime=owner-session-fixed until a later checkpoint deliberately changes and tests it.",
+  "evidence_ids": ["EV-0058", "EV-0059"],
+  "id": "BL-0100",
+  "invalidated_assumptions": [
+    "A public logical alignment must equal the allocator's page-backed alignment.",
+    "Accepting alignment 8 requires either abandoning page backing or reporting 4096 in the wire ACK.",
+    "Generic kernarg publication needs a new payload-v2 KERNARG opcode instead of the existing v1 MEMORY_COPY_H2D carrier."
+  ],
+  "observation": "The fresh two-generation live probe allocates 512 bytes with logical alignment 8 over hidden 4096-byte backing, publishes the complete 280-byte kernarg manifest at offset 64 through v1 MEMORY_COPY_H2D, and completes SUBMIT and UNMAP with owner and generation checks. The response retains logical alignment 8 and never exposes backing alignment as the ABI value.",
+  "question_or_symptom": "How can the daemon accept the runtime's ordinary alignment 8 while preserving honest page-backed allocation and the existing memory carrier?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

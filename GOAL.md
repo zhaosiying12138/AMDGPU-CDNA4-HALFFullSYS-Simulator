@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0024-bounded-daemon-handler-boundary-accepted; bit8-positive-route-submit-and-normal-launcher-blocked; next-CP-0025-P5-TRITON-VECADD-04-DAEMON-LIFECYCLE`
+**Current state:** `CP-0025-positive-generic-control-lifecycle-accepted; bit8-advertised-native-admission-retire; gpu-execution-output-and-triton-launcher-blocked; next-CP-0026-P5-TRITON-VECADD-05-GPU-EXECUTION`
 
 **Current phase:** `P5`
 
@@ -124,14 +124,16 @@ gfx950 gpuReadWrite 的 4 个 256-item workgroup、16 个 wave64、每 wave 19
 支持。CP-0021/CP-0022/CP-0023 已依次冻结 Triton provenance、payload-v2 wire
 codec 和 runtime client/local native admission 边界。CP-0024 又增加了
 owner-bound type-18 handler 源码、type-19 ACK 出站 plumbing 和共享 route-policy
-harness；真实 runtime-to-gem5 probe 只证明 bit 8 未广告时 canonical reject，且
-随后 baseline reconnect 成功，没有发送或证明 type-18 socket/H2D daemon route。
-当前唯一 next_action 是 CP-0025 的
-`P5-TRITON-VECADD-04-DAEMON-LIFECYCLE`：先解决正常 alignment 8 与 page-backed
-ALLOC 的契约差异，把既有 v1 `MEMORY_COPY_H2D` carrier 绑定到同一 owner session，
-再补齐 queue/signal/AQL packet/tick、SUBMIT ACK 和 type-20 completion；完整
-lifecycle 通过前仍不得广告 capability bit 8，也不得把 handler/admission 当作
-正常 Triton launcher 或 GPU 执行成功。
+harness，并保留 bit 8 未广告时的 canonical reject。CP-0025 现已完成真实
+runtime-to-gem5 两代 owner control lifecycle：依赖与 bit 8 正向选择，MAP、逻辑
+alignment 8 ALLOC（page backing 隐藏）、既有 v1 `MEMORY_COPY_H2D`、daemon-built
+AQL admission、type-19 ACK、type-20 retire、UNMAP、disconnect cleanup 和 reconnect
+都通过。这里 start/end/retire bookkeeping 不连接 GPUDispatcher/ComputeUnit，
+execution/output/launcher/compiler/JIT/fallback 仍全部为 false。当前唯一 next_action
+是 CP-0026 的 `P5-TRITON-VECADD-05-GPU-EXECUTION`：先把已经提交的 daemon
+control lifecycle 接到真实 GPUDispatcher/CU 指令执行，并对锁定的 zero-preload
+fixture 证明输出正确；12-DWORD Triton preload 和正常 launcher 继续留给后续独立
+门禁，不能借 CP25 的 admission/retire 结果提前宣称成功。
 在 Triton 用户命令 `tutorial/01-vecadd.py`（当前 pinned checkout 中对应未修改的
 `python/tutorials/01-vector-add.py`）首次透明通过后，先完成可复现的 gem5
 算子 profile、80/20 优化和 threadblock host-parallel 正确性/可行性门禁，再
@@ -273,3 +275,17 @@ alignment is 8, and the page-size policy is fixed for the owner session.
 SUBMIT ACK, MessageType 20 completion, launcher, compiler/JIT, GPU execution,
 and fallback remain false. The next unique action is CP-0025 /
 `P5-TRITON-VECADD-04-DAEMON-LIFECYCLE`.
+
+`CP-0025` accepts the bounded positive generic daemon control lifecycle. The
+current daemon advertises capability bit 8 with all dependencies, and a fresh
+two-generation runtime-to-gem5 run completes MAP, logical-alignment-8 ALLOC
+over hidden page backing, existing v1 `MEMORY_COPY_H2D`, daemon-built AQL
+admission, a durable MessageType 19 ACK, MessageType 20 retirement, UNMAP,
+disconnect cleanup, and reconnect. Packet CRC is nonzero and the recorded
+ticks are nonzero and nondecreasing. This proves native control-processor
+admission and retirement only: GPUDispatcher, ComputeUnit, kernel execution,
+output correctness, normal Triton launcher, compiler/JIT, fallback, and Qwen
+remain false. The next unique action is CP-0026 /
+`P5-TRITON-VECADD-05-GPU-EXECUTION`; it must connect the committed control
+lifecycle to actual GPU execution and output correctness for the locked
+zero-preload fixture before later preload-aware Triton launcher work.

@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-10`
 
-**State at this commit:** `CP-0024 bounded daemon-handler boundary accepted; bit8 positive route, submit lifecycle, and normal launcher blocked; next-CP-0025 P5-TRITON-VECADD-04-DAEMON-LIFECYCLE`
+**State at this commit:** `CP-0025 positive generic daemon control lifecycle accepted; bit8 advertised and native admission/retire live; GPU execution, output, and normal launcher blocked; next-CP-0026 P5-TRITON-VECADD-05-GPU-EXECUTION`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -498,7 +498,8 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | CP-0022 | P5 | Generic payload-v2 codec/admission boundary; daemon mapping and launcher handoff remain blocked |
 | CP-0023 / P5-TRITON-VECADD-02-RUNTIME | P5 | Owner-bound runtime client plus local native MAP/ALLOC/publish/fetch/CP-admission/retire/unmap; daemon route remains blocked |
 | CP-0024 / P5-TRITON-VECADD-03-DAEMON-ROUTE | P5 | Bounded handler source/type-19 plumbing, route-policy harness, and live canonical negative handshake; bit 8 and positive type-18/H2D/SUBMIT route remain blocked |
-| CP-0025 / P5-TRITON-VECADD-04-DAEMON-LIFECYCLE | P5 | Resolve alignment and owner-bound v1 H2D, then wire queue/signal/AQL packet/ticks, SUBMIT ACK, and type-20 completion before reconsidering bit 8 |
+| CP-0025 / P5-TRITON-VECADD-04-DAEMON-LIFECYCLE | P5 | Accepted positive bit-8 daemon control lifecycle through logical-align-8 ALLOC, v1 H2D, native CP admission/type-19 ACK/type-20 retire, cleanup, and reconnect; no GPU execution |
+| CP-0026 / P5-TRITON-VECADD-05-GPU-EXECUTION | P5 | Connect the committed daemon lifecycle to GPUDispatcher/CU execution and prove output correctness for the locked zero-preload fixture |
 | P5-PROFILE-01 | P5A | Retained profile, ranked 80/20 bottlenecks, and at least one measured optimization with before/after evidence |
 | P5-PARALLEL-TB-01 | P5B | Safe serial-versus-parallel threadblock experiment |
 | P5-OPS-01 | P5C | Broader model-operator manifest and differential gates |
@@ -816,11 +817,16 @@ fallback. The 12-DWORD descriptor preload remains an explicit NOT_SUPPORTED
    boundary. CP-0024 adds an owner-bound MessageType 18 handler source path,
    MessageType 19 response plumbing, and a shared route-policy harness. Its
    live runtime-to-gem5 probe proves only the canonical unsupported-capability
-   handshake and baseline reconnect while bit 8 remains unadvertised; it does
-   not send MessageType 18. A positive socket/H2D route, normal alignment 8,
-   SUBMIT ACK, MessageType 20 completion, launcher, compiler/JIT, execution,
-   and fallback remain false. The next unique action is CP-0025 /
-   `P5-TRITON-VECADD-04-DAEMON-LIFECYCLE`.
+   handshake and baseline reconnect while bit 8 remains unadvertised. CP-0025
+   closes the positive control lifecycle: the daemon advertises and selects
+   bit 8 with its dependencies, accepts logical alignment 8 over hidden page
+   backing, binds existing v1 MEMORY_COPY_H2D to the owner allocation, builds
+   and admits the AQL packet, sends a durable type-19 ACK, emits type-20
+   retirement, unmaps, reclaims disconnected leases, and accepts a new owner.
+   Packet CRC and nondecreasing lifecycle ticks are retained. This is native
+   CP admission/retire only; launcher, compiler/JIT, GPUDispatcher/CU execution,
+   output correctness, and fallback remain false. The next unique action is
+   CP-0026 / `P5-TRITON-VECADD-05-GPU-EXECUTION`.
 
 ### P3H - host-native simulator and first Triton gate
 
@@ -871,10 +877,12 @@ The work is staged as follows:
    adapter/admission lifecycle, but no daemon advertises bit 8 or routes
    MessageType 18 and no GPU execution is claimed. CP-0024 adds the bounded
    handler/policy source and a negative live capability probe without selecting
-   bit 8 or sending type 18. CP-0025 /
-   `P5-TRITON-VECADD-04-DAEMON-LIFECYCLE` is the next coordinated daemon gate:
-   resolve ALLOC alignment and owner-bound v1 H2D, then implement queue/signal/
-   packet/tick submission and type-20 completion before advertisement.
+   bit 8 or sending type 18. CP-0025 then accepts the real positive owner-bound
+   daemon control lifecycle through bit-8 selection, logical-align-8 ALLOC,
+   v1 H2D, native CP admission, type-19 ACK, type-20 retirement, cleanup, and
+   reconnect. It does not issue work to GPUDispatcher/CU or validate output.
+   CP-0026 / `P5-TRITON-VECADD-05-GPU-EXECUTION` is the next coordinated gate;
+   preload-aware Triton mapping and the normal launcher remain later work.
 
 This workstream is not a cycle-accurate replacement. Timing, wider operator
 coverage, host-parallel threadblocks, HIP/OpenCL CTS, PyTorch, vLLM, and Qwen

@@ -4,7 +4,9 @@ CP-0022 froze the payload-v2 codec for a future generic code-object launch.
 CP-0023 accepts the bounded client/adapter/admission layer: an append-only
 runtime API and a separate owner-bound native gem5 state machine. CP-0024 adds
 an owner-bound type-18 handler source path, type-19 response plumbing, a shared
-route-policy harness, and an opt-in live endpoint probe. The authority is
+route-policy harness, and an opt-in live endpoint probe. CP-0025 completes the
+positive negotiated daemon control lifecycle through native admission and
+retirement. The authority is
 `protocol/host-transport-v2.json`; the implementations are in
 `projects/self-amdgpu-runtime` and `projects/gem5`.
 
@@ -14,12 +16,11 @@ minor `0`. Existing v1 queue, memory, signal, pinned-dispatch, and A1
 code-object records are unchanged. The new runtime capability is word 0 bit 8,
 `GENERIC_DISPATCH_V2`; on the 32-byte wire bitmap this is byte 1 bit 0,
 mask `0x01`. It is valid only with topology, queue, memory, signal, and
-code-object transport capabilities. The current daemon does not advertise the
-bit. CP-0024's live runtime-to-gem5 probe therefore observes a canonical
-unsupported-capability hello and then reconnects with the baseline capability
-set. It never sends MessageType 18, so the positive socket route remains
-unproven. Codec or handler source presence must not cause advertisement before
-the complete session lifecycle exists.
+code-object transport capabilities. The current daemon advertises bit 8 only
+with that complete dependency set. CP-0025 retains both the canonical
+unnegotiated rejection policy and a fresh positive two-generation socket run;
+the latter selects bit 8 and completes every bounded owner stage. Capability
+advertisement proves this control contract, not GPU execution.
 
 ## Records
 
@@ -58,11 +59,12 @@ accept queue or signal identities. Byte publication remains a separate v1
 memory carrier operation; no new KERNARG opcode exists. The CP23 runtime client
 exercises a sealed-memfd v1
 `MEMORY_COPY_H2D` publication against its mock transport, while the native
-selftest calls an owner-bound `publishKernarg` adapter. Those two local tests
-are not connected by a proven daemon route. CP24's handler policy accepts only
-page-backed ALLOC alignments 4096 and 65536; the normal runtime/Triton logical
-alignment 8 remains incompatible and is rejected before mutation. The first
-MAP also fixes page size for that owner session.
+selftest calls an owner-bound `publishKernarg` adapter. CP25 connects those
+halves through the live daemon. The wire value 8 is the logical kernel ABI
+alignment; the allocator privately uses the owner session's 4096- or
+65536-byte page backing and returns the logical alignment in the ACK. The first
+MAP still fixes page size for that owner session. The retained positive fixture
+allocates 512 bytes and publishes the complete 280-byte manifest at offset 64.
 
 `SUBMIT_AQL` uses offsets 232 through 332 for the kernarg allocation and range,
 signal identity and expected value, grid/workgroup dimensions, Triton launch
@@ -73,9 +75,11 @@ as their workgroup dimensions, and bounded sizes. It carries no raw packet.
 The wire contract requires the daemon to construct the 64-byte AQL packet after
 validating ownership. CP23 proves the corresponding operations locally by
 materializing, publishing, and fetching a packet before extracted CP-core
-admission. CP24's handler rejects SUBMIT_AQL as unsupported because queue,
-signal, packet, admission/start/end/retire tick, and type-20 completion
-ownership are not yet wired end to end.
+admission. CP25's handler validates the queue and signal owners, constructs and
+publishes the packet, binds its nonzero CRC, performs native CP admission,
+durably sends the type-19 ACK, and only then emits type-20 retirement. Admission
+is nonzero; start, end, and retire are nondecreasing and may share the
+bookkeeping tick. No raw client packet or GPU execution claim is introduced.
 
 `UNMAP_OBJECT` carries only object and mapping identity. All queue, signal,
 kernel, hash/name, body, and tail bytes are zero.
@@ -153,19 +157,35 @@ Accordingly `handler_source_present` and `route_policy_harness` are true, while
 remain false. The v1 `MEMORY_COPY_H2D` record remains the sole kernarg byte
 carrier; the v2 opcode set is unchanged.
 
+## CP25 accepted positive control boundary
+
+The clean final gem5 and runtime children pass a fresh required-generic live
+run with two sequential owner generations. Generation one disconnects with
+live leases; the daemon reclaims its owner-scoped resources, clears the active
+session latch, and accepts generation two. Generation two completes MAP,
+logical-align-8 ALLOC over hidden page backing, v1 `MEMORY_COPY_H2D` at offset
+64 for the full 280-byte manifest, SUBMIT, type-19 ACK, type-20 retirement, and
+UNMAP. Slot and VA reuse with new generations verifies targeted cleanup;
+`remote_resource_counters_observed` remains false, while the focused native
+state test separately reports `zero_resources=true`.
+
+The packet CRC and admission tick are nonzero, and
+`admission <= start <= end <= retire`. Completion is scheduled only after the
+ACK has been durably committed. These timestamps are daemon bookkeeping for
+native CP admission and retirement: `gpu_dispatcher`, `compute_unit`,
+`kernel_executed`, `execution`, and `output_correctness` all remain false.
+
 ## Triton boundary and non-claims
 
 The CP-0021 retained Triton tutorial and HSACO identities are recorded in the
 authority JSON. The codec can represent its 48-byte kernarg and 24832-by-256
 work-item/workgroup geometry, but the 12-DWORD (48-byte) descriptor preload is
-rejected until preload-aware mapping and entry semantics exist. CP24 continues
+rejected until preload-aware mapping and entry semantics exist. CP25 continues
 to return NOT_SUPPORTED instead of stripping or reinterpreting that field.
 
-The next implementation checkpoint is CP-0025 /
-`P5-TRITON-VECADD-04-DAEMON-LIFECYCLE`. It must reconcile logical alignment 8
-with the page-backed native allocation contract, bind v1 MEMORY_COPY_H2D to the
-same owner/session, and implement queue/signal ownership, daemon-built AQL,
-packet CRC, nonzero admission/start/end/retire ticks, SUBMIT ACK, and type-20
-completion. Only after a live positive lifecycle and disconnect/cancellation
-tests pass may capability bit 8 be reconsidered. GPU execution and the normal
-Triton launcher remain later gates unless separately proven.
+The next implementation checkpoint is CP-0026 /
+`P5-TRITON-VECADD-05-GPU-EXECUTION`. It must connect the committed control
+lifecycle to GPUDispatcher/ComputeUnit execution and validate output for the
+locked zero-preload fixture. The retained 12-DWORD Triton preload, normal
+launcher, compiler/JIT integration, broader execution, and performance remain
+later gates unless separately proven.

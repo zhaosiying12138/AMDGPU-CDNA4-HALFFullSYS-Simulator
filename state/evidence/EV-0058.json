@@ -1,0 +1,979 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0058",
+  "checkpoint_id": "CP-0025",
+  "type": "cp25-child-positive-daemon-lifecycle",
+  "claim": "EV-0058 binds the frozen pre-commit gem5 and runtime child source, focused tests, fresh linked VEGA_X86 binary, and a real two-connection runtime-to-gem5 Unix-socket lifecycle. Required generic capability bit 8 and all dependencies are selected; abandoned owner leases are reclaimed; the next owner completes MAP, logical-align-8 ALLOC over hidden page backing, existing v1 MEMORY_COPY_H2D, daemon-built AQL admission, successful type-19 ACK, type-20 retirement, and UNMAP. This is native control-processor admission/retire only and does not claim GPUDispatcher, ComputeUnit, kernel execution, output correctness, a launcher, compiler/JIT, fallback, Triton, or Qwen.",
+  "command_argv": [
+    [
+      "python3",
+      "artifacts/evidence/CP-0025/verify_ev0058_inputs.py",
+      "source",
+      "gem5"
+    ],
+    [
+      "git",
+      "diff",
+      "--binary",
+      "--no-ext-diff"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0025/verify_ev0058_inputs.py",
+      "source",
+      "runtime"
+    ],
+    [
+      "git",
+      "diff",
+      "--binary",
+      "--no-ext-diff"
+    ],
+    [
+      "git",
+      "diff",
+      "--check"
+    ],
+    [
+      "git",
+      "diff",
+      "--check"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0025/verify_ev0058_inputs.py",
+      "focused-build"
+    ],
+    [
+      "./build/VEGA_X86/dev/amdgpu/host_gpu_generic_dispatch_route_core.opt"
+    ],
+    [
+      "./build/VEGA_X86/dev/amdgpu/host_gpu_native_dispatch_state_v2_core.opt",
+      "/home/zhaosiying/amdgpu-sim/projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco"
+    ],
+    [
+      "./build/VEGA_X86/dev/amdgpu/host_gpu_queue_state.test.opt",
+      "--gtest_color=no",
+      "--gtest_brief=1"
+    ],
+    [
+      "./build/VEGA_X86/dev/amdgpu/host_gpu_signal_state.test.opt",
+      "--gtest_color=no",
+      "--gtest_brief=1"
+    ],
+    [
+      "./build/VEGA_X86/dev/amdgpu/host_gpu_socket_utils.test.opt",
+      "--gtest_color=no",
+      "--gtest_brief=1"
+    ],
+    [
+      "./build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt",
+      "--gtest_color=no",
+      "--gtest_brief=1"
+    ],
+    [
+      "cmake",
+      "--build",
+      "/tmp/amdgpu-sim-cp25-runtime-build",
+      "-j4"
+    ],
+    [
+      "ctest",
+      "--test-dir",
+      "/tmp/amdgpu-sim-cp25-runtime-build",
+      "--output-on-failure"
+    ],
+    [
+      "/tmp/amdgpu-sim-cp25-runtime-build/tests/self_amdgpu_runtime_generic_dispatch_v2_client_test"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0025/verify_ev0058_inputs.py",
+      "live-positive"
+    ],
+    [
+      "python3",
+      "artifacts/evidence/CP-0025/verify_ev0058_inputs.py",
+      "binary-identity"
+    ]
+  ],
+  "command_results": [
+    {
+      "id": "gem5-source-inventory",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0025/verify_ev0058_inputs.py",
+        "source",
+        "gem5"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T03:52:59+00:00",
+      "ended_at": "2026-08-10T03:52:59+00:00",
+      "exit_code": 0,
+      "result": "The frozen gem5 dirty inventory is exactly 17 scoped files over the CP24 head and tree, with no staged content.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/gem5-source-inventory.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2abb41d066b6e150e261e1ad808b2ef2948fbd114baa8ef7811a73d1bac4e9dc",
+        "size": 659,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/gem5-source-inventory.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9e737de83ec49f831264041cae664514d9777aeae33ed45ede94d6777c509d25",
+        "size": 1075,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/gem5-source-inventory.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "gem5-source-diff",
+      "argv": [
+        "git",
+        "diff",
+        "--binary",
+        "--no-ext-diff"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-10T03:53:00+00:00",
+      "ended_at": "2026-08-10T03:53:00+00:00",
+      "exit_code": 0,
+      "result": "The complete frozen gem5 binary diff is retained byte-for-byte.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/gem5-source-diff.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "51b9368d0d6578d6aecfd7f95bea077fd1d0a4086410d46525be9ddc6a88a3dd",
+        "size": 623,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/gem5-source-diff.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e212dc964e76095fcd4278ab668103a2a9c70d61dcb3c9e9a73aeee1bd844451",
+        "size": 72643,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/gem5-source-diff.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-source-inventory",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0025/verify_ev0058_inputs.py",
+        "source",
+        "runtime"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T03:52:59+00:00",
+      "ended_at": "2026-08-10T03:53:00+00:00",
+      "exit_code": 0,
+      "result": "The frozen runtime dirty inventory is exactly three test files over the CP24 head and tree, with no staged content.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/runtime-source-inventory.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f2141fba57669768d935291da564d740e4b314a9d506e0b1c193c0f70feaf2a7",
+        "size": 667,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/runtime-source-inventory.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3edce5d7b1f53e78da3dd5b7636d05feebd8e445d8f898bfda83418666e0c50f",
+        "size": 399,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/runtime-source-inventory.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-source-diff",
+      "argv": [
+        "git",
+        "diff",
+        "--binary",
+        "--no-ext-diff"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-10T03:53:00+00:00",
+      "ended_at": "2026-08-10T03:53:00+00:00",
+      "exit_code": 0,
+      "result": "The complete frozen runtime binary diff is retained byte-for-byte.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/runtime-source-diff.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f178b57f52ea2de6424a1738fef2afd30a91c346a4cef5600577aa77c89a9d80",
+        "size": 644,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/runtime-source-diff.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "feb40113982940fbdd79ce8cb1c2ea783d582aaee7c1a264705327f2f29dbf81",
+        "size": 39094,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/runtime-source-diff.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "gem5-diff-check",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-10T03:53:00+00:00",
+      "ended_at": "2026-08-10T03:53:00+00:00",
+      "exit_code": 0,
+      "result": "The frozen gem5 source diff passes whitespace validation.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/gem5-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8e1896fdb388ab05f865d9960f18f502097cf86e6395e1a437a9b9c2498324d7",
+        "size": 595,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/gem5-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/gem5-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-diff-check",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-10T03:53:00+00:00",
+      "ended_at": "2026-08-10T03:53:00+00:00",
+      "exit_code": 0,
+      "result": "The frozen runtime source diff passes whitespace validation.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/runtime-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ef936405aa5e585752f381ba44bf88e232acc37154f3896bf3229da2dd2e3e5b",
+        "size": 616,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/runtime-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/runtime-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "gem5-focused-build",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0025/verify_ev0058_inputs.py",
+        "focused-build"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T04:07:52+00:00",
+      "ended_at": "2026-08-10T04:07:53+00:00",
+      "exit_code": 0,
+      "result": "The fresh VEGA_X86 gem5.opt and all CP25 focused targets are present and up to date after the final source freeze.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/gem5-focused-build.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8724ced7c4a1beb49c1be3ee56b6105d9777665b0cf8ad832e308dffb158b882",
+        "size": 647,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/gem5-focused-build.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3bf1dc3d115c5b5fefa25c11e7cdce0005085f73594ef0c73473590865343c34",
+        "size": 894,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/gem5-focused-build.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "gem5-route-lifecycle",
+      "argv": [
+        "./build/VEGA_X86/dev/amdgpu/host_gpu_generic_dispatch_route_core.opt"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-10T04:07:52+00:00",
+      "ended_at": "2026-08-10T04:07:52+00:00",
+      "exit_code": 0,
+      "result": "The route harness proves bit-8 selection, logical alignment 8, the bounded SUBMIT subset, type-19/type-20 encoding, tick ordering, packet CRC binding, and no execution claims.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/gem5-route-lifecycle.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "cd4b97826bb86ea2473a00b571c66e9d0f62c50017364176e84d98c55587d8dc",
+        "size": 645,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/gem5-route-lifecycle.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e0be95e3fa61f2425a35e382be87c6ab6e256ba673d2847e404436334b0aabd6",
+        "size": 344,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/gem5-route-lifecycle.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "gem5-native-state-lifecycle",
+      "argv": [
+        "./build/VEGA_X86/dev/amdgpu/host_gpu_native_dispatch_state_v2_core.opt",
+        "/home/zhaosiying/amdgpu-sim/projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-10T04:07:52+00:00",
+      "ended_at": "2026-08-10T04:07:52+00:00",
+      "exit_code": 0,
+      "result": "The native state harness proves logical alignment 8 over 4K backing, offset-64 publication, admission, retire, disconnect cleanup, zero resources, and no execution.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/gem5-native-state-lifecycle.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4b8f98ac6105635ac39e278e09efe828879485a94337b5f5059fce8ad3356a4a",
+        "size": 800,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/gem5-native-state-lifecycle.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "72ce83bf6262855e4d9010746f77a49bf27e98299ed137822e39ea8524eba37f",
+        "size": 500,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/gem5-native-state-lifecycle.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "gem5-queue-gtest",
+      "argv": [
+        "./build/VEGA_X86/dev/amdgpu/host_gpu_queue_state.test.opt",
+        "--gtest_color=no",
+        "--gtest_brief=1"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-10T04:07:52+00:00",
+      "ended_at": "2026-08-10T04:07:52+00:00",
+      "exit_code": 0,
+      "result": "The queue suite passes 13/13 including generic pin cancel/commit ownership.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/gem5-queue-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "cbf2cae339227fcef03d11693593095ccfb84c3491401e9a6fccf4944aac9b63",
+        "size": 673,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/gem5-queue-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a06a3a96b01eba7b08c927d36324347e1480d4e2f9449d86fb3019384033364d",
+        "size": 145,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/gem5-queue-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "gem5-signal-gtest",
+      "argv": [
+        "./build/VEGA_X86/dev/amdgpu/host_gpu_signal_state.test.opt",
+        "--gtest_color=no",
+        "--gtest_brief=1"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-10T04:07:52+00:00",
+      "ended_at": "2026-08-10T04:07:52+00:00",
+      "exit_code": 0,
+      "result": "The signal suite passes 13/13 including value-one generic signal pinning.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/gem5-signal-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "bc6ac914a82bf826693a4a2a18fd2998b4401aa333f54a290be08616da21e913",
+        "size": 676,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/gem5-signal-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a06a3a96b01eba7b08c927d36324347e1480d4e2f9449d86fb3019384033364d",
+        "size": 145,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/gem5-signal-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "gem5-socket-gtest",
+      "argv": [
+        "./build/VEGA_X86/dev/amdgpu/host_gpu_socket_utils.test.opt",
+        "--gtest_color=no",
+        "--gtest_brief=1"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-10T04:07:52+00:00",
+      "ended_at": "2026-08-10T04:07:52+00:00",
+      "exit_code": 0,
+      "result": "The socket/connection suite passes 25/25 including sequential-session recovery after active disconnect.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/gem5-socket-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "414f844be44e98447e8cca1870d3d3dc3a95998eb55da3f640bfedea14cdf0a5",
+        "size": 676,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/gem5-socket-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3fa4af5e4bdec0d442a6d766964cf6a19af530bc97bf8e933e6d02f7a5b8afa5",
+        "size": 146,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/gem5-socket-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "gem5-protocol-gtest",
+      "argv": [
+        "./build/VEGA_X86/dev/amdgpu/host_gpu_protocol.test.opt",
+        "--gtest_color=no",
+        "--gtest_brief=1"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-10T04:07:52+00:00",
+      "ended_at": "2026-08-10T04:07:52+00:00",
+      "exit_code": 0,
+      "result": "The generic payload-v2 and v1 compatibility protocol suite passes 47/47.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/gem5-protocol-gtest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "cc8b2d422bf7ffe2825aced711d3b25d5b957c308a2d7e2b1690bbd3410743b5",
+        "size": 676,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/gem5-protocol-gtest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e113d780d3dc090febdb2c0a8bb708a8a185df599254ea67cf8ea95c07179c4e",
+        "size": 145,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/gem5-protocol-gtest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-build",
+      "argv": [
+        "cmake",
+        "--build",
+        "/tmp/amdgpu-sim-cp25-runtime-build",
+        "-j4"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T03:53:00+00:00",
+      "ended_at": "2026-08-10T03:53:00+00:00",
+      "exit_code": 0,
+      "result": "The frozen runtime test package, including the real endpoint probe, builds successfully.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/runtime-build.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2349c826000b7efa75acc263c6e20afa71f0ddad65fbf3266e2d9f1fe8811e50",
+        "size": 625,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/runtime-build.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "84e333d4863057b5a22514fe76d486e905ac7701d45756d6b72214934e12d45e",
+        "size": 1185,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/runtime-build.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-ctest",
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "/tmp/amdgpu-sim-cp25-runtime-build",
+        "--output-on-failure"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-10T04:04:32+00:00",
+      "ended_at": "2026-08-10T04:04:36+00:00",
+      "exit_code": 0,
+      "result": "The runtime suite has 20 total tests, 19 passes, one expected environment-gated endpoint skip, and zero failures.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/runtime-ctest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "750e639e58103d205fcc5b734b525cef84c4c5523da60380a74398b2849ffa3b",
+        "size": 671,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/runtime-ctest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d6b46502225e71497580f7a3e14d408301771a03120b39cc354a04d490dde343",
+        "size": 3124,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/runtime-ctest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-client-manifest",
+      "argv": [
+        "/tmp/amdgpu-sim-cp25-runtime-build/tests/self_amdgpu_runtime_generic_dispatch_v2_client_test"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T04:04:43+00:00",
+      "ended_at": "2026-08-10T04:04:43+00:00",
+      "exit_code": 0,
+      "result": "The runtime mock proves full-manifest subrange publication with nonzero H2D offset while execution and fallback remain false.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/runtime-client-manifest.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "964098c202b899fafbdba057294281da51776104dc95112bf067137f43a3193d",
+        "size": 663,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/runtime-client-manifest.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "90bcd74ed1e8c36ac3971ce65665a168a7e1dd7d1ff6c843f5487528875d94ef",
+        "size": 228,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/runtime-client-manifest.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "live-positive-lifecycle",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0025/verify_ev0058_inputs.py",
+        "live-positive"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T04:05:21+00:00",
+      "ended_at": "2026-08-10T04:05:21+00:00",
+      "exit_code": 0,
+      "result": "The final working-tree gem5 binary completes two required-generic owner sessions: abandoned live leases are reclaimed, then MAP/ALLOC/v1 H2D/SUBMIT/type-20/UNMAP succeeds without GPU execution.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/live-positive-lifecycle.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8c27b50fd1f146490b578d7b490e93a3364b7220bf5e87180e8a7b7075c6ecf6",
+        "size": 658,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/live-positive-lifecycle.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "608933a839492e517911291ecfcf9efcd13a84fb24a3bb4f3ffa371c878a64bb",
+        "size": 1913,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/live-positive-lifecycle.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "binary-identity",
+      "argv": [
+        "python3",
+        "artifacts/evidence/CP-0025/verify_ev0058_inputs.py",
+        "binary-identity"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-10T04:05:21+00:00",
+      "ended_at": "2026-08-10T04:05:21+00:00",
+      "exit_code": 0,
+      "result": "The live gem5, runtime endpoint, and locked zero-preload HSACO identities match their retained hashes.",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0025/binary-identity.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a0dd983bae3f4ae4dce09f3a397b379269db2b1a15adcedb3263e552b9613a0d",
+        "size": 643,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0025/binary-identity.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a7c5a851fcbe65543d82c4b147a7fe15c3de2f59b7e295ba710bfb689cbdb19a",
+        "size": 362,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0025/binary-identity.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "started_at": "2026-08-10T03:52:59+00:00",
+  "ended_at": "2026-08-10T04:07:53+00:00",
+  "exit_code": 0,
+  "environment_fingerprint": {
+    "checkpoint": "CP-0025",
+    "transaction_phase": "prepare",
+    "root_anchor": "9ec5f344a448c3b90d857fa01cd2f1271150fa62",
+    "gem5_head": "7d52923899d9017c8ee318aa27dae5229b282a26",
+    "gem5_tree": "32ef31e6ae861fd3e6855437d97b0293075cb87d",
+    "gem5_dirty_paths": [
+      "src/dev/amdgpu/SConscript",
+      "src/dev/amdgpu/amdgpu_device.cc",
+      "src/dev/amdgpu/host_gpu_bridge.cc",
+      "src/dev/amdgpu/host_gpu_bridge.hh",
+      "src/dev/amdgpu/host_gpu_connection_state.hh",
+      "src/dev/amdgpu/host_gpu_generic_dispatch_route.cc",
+      "src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc",
+      "src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc",
+      "src/dev/amdgpu/host_gpu_native_dispatch_state_v2.hh",
+      "src/dev/amdgpu/host_gpu_native_dispatch_state_v2_main.cc",
+      "src/dev/amdgpu/host_gpu_native_queue_core.cc",
+      "src/dev/amdgpu/host_gpu_native_queue_core.hh",
+      "src/dev/amdgpu/host_gpu_queue_state.test.cc",
+      "src/dev/amdgpu/host_gpu_signal_state.cc",
+      "src/dev/amdgpu/host_gpu_signal_state.hh",
+      "src/dev/amdgpu/host_gpu_signal_state.test.cc",
+      "src/dev/amdgpu/host_gpu_socket_utils.test.cc"
+    ],
+    "gem5_diff_sha256": "e212dc964e76095fcd4278ab668103a2a9c70d61dcb3c9e9a73aeee1bd844451",
+    "runtime_head": "497092b7696bf4454eacca850b033e3760f53375",
+    "runtime_tree": "9b2e65a4e62dee32b378a177359cd76f890ba757",
+    "runtime_dirty_paths": [
+      "tests/CMakeLists.txt",
+      "tests/generic_dispatch_v2_client_test.c",
+      "tests/generic_dispatch_v2_endpoint_test.c"
+    ],
+    "runtime_diff_sha256": "feb40113982940fbdd79ce8cb1c2ea783d582aaee7c1a264705327f2f29dbf81",
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+    "gem5_binary_sha256": "4c175adcccdc8ffc0d6f64ddbd41379cf4a9d5de4c870f5e7b327ba4054e58ed",
+    "gem5_build_id": "1920c1daca920c7e40af07ee7cf6c460b80b64a0",
+    "runtime_endpoint_sha256": "1766fe6fffb36e37837b311527659afeede5744a92e7a6df5fdca0a94a4ac2f1",
+    "zero_preload_hsaco_sha256": "7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56",
+    "runtime_ctest": "20 total; 19 passed; 1 expected endpoint skip; 0 failed",
+    "gem5_protocol_gtest": "47/47",
+    "gem5_queue_gtest": "13/13",
+    "gem5_signal_gtest": "13/13",
+    "gem5_socket_gtest": "25/25",
+    "payload_version": "2.0 over framing 1.0",
+    "message_types": "18/19/20",
+    "generic_capability_bit": 8,
+    "daemon_socket_route": true,
+    "generic_capability_advertised": true,
+    "generic_capability_selected": true,
+    "dependencies_selected": true,
+    "unnegotiated_type18_policy_rejected": true,
+    "raw18_negative_socket_capture": false,
+    "map": true,
+    "alloc": true,
+    "logical_alignment_8": true,
+    "backing_alignment_hidden": true,
+    "page_size_lifetime": "owner-session-fixed",
+    "h2d_carrier": "v1 MEMORY_COPY_H2D",
+    "h2d_daemon_route": true,
+    "kernarg_v2_opcode": false,
+    "kernarg_subrange_offset": 64,
+    "submit_ack": true,
+    "generic_completion_type20": true,
+    "packet_crc_nonzero": true,
+    "admission_tick_nonzero": true,
+    "completion_ticks_monotonic": true,
+    "owner_generation_guards": true,
+    "disconnect_cleanup": true,
+    "reconnect_cleanup": true,
+    "remote_resource_counters_observed": false,
+    "native_cp_admission": true,
+    "native_retire": true,
+    "descriptor_preload_dwords": 0,
+    "gpu_dispatcher": false,
+    "compute_unit": false,
+    "kernel_executed": false,
+    "output_correctness": false,
+    "normal_launcher": false,
+    "normal_triton_launcher": false,
+    "compiler_invoked": false,
+    "jit": false,
+    "execution": false,
+    "fallback": false,
+    "triton": false,
+    "qwen": false
+  },
+  "limitations": [
+    "EV-0058 is pre-commit child evidence over frozen dirty trees; EV-0059 must bind the clean final child commits and rerun the fresh final-commit binary lifecycle.",
+    "The positive lifecycle uses the locked 5528-byte gpuReadWrite gfx950 fixture with descriptor preload zero. The retained Triton vecadd image has 12 DWORD preload and remains unsupported.",
+    "Successful type-19/type-20 records prove only daemon-native packet construction, command-processor admission, bookkeeping ticks, and retirement. GPUDispatcher, ComputeUnit, kernel instructions, and output correctness are not exercised.",
+    "Disconnect cleanup is verified by successful generation-advanced resource reuse and the next complete owner lifecycle; the endpoint does not expose direct daemon resource counters and remote_resource_counters_observed remains false.",
+    "The canonical unnegotiated type-18 policy rejection is covered by the shared route harness, not by a second raw negative socket capture against the bit-8-advertising final daemon.",
+    "The normal Triton launcher, compiler/JIT transport, fallback, performance, and Qwen paths remain outside CP25 and false.",
+    "The gem5 child includes a two-line pointer-member compile repair in amdgpu_device.cc required to produce the fresh full VEGA_X86 binary; it does not add lifecycle or execution semantics."
+  ],
+  "redactions": [],
+  "result": "The frozen CP25 child source and fresh working-tree binaries pass the bounded positive daemon control lifecycle, owner/disconnect cleanup, protocol, queue, signal, socket, and runtime gates with all GPU execution, output, launcher, compiler/JIT, fallback, Triton, and Qwen claims false.",
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0025/build_ev0058.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "c8088dbffd11da8d4b48302aa345a79c3967c14f64044a8d3e4bb8bf6d50d2c9",
+      "size": 15644,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/verify_ev0058_inputs.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "f037c3dc62decd991bce935a4e3aed66a7ae765d4312830e0884fefc36ad3893",
+      "size": 11214,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/gem5-canonical-records.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d5496cfb7130829c66c45b2055210c813c1d16559bcded08389e964b59db618a",
+      "size": 4797,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-positive/commands.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "3b8507f8dfd5dfcec010a0b87606299f7d020c686e6fa5402a0eb3458d3b9938",
+      "size": 868,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-positive/exit-status.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "85a6d2fd53d9a2790268f48a6e703c03f10bd01ffb48cc8e8239c1446c4bd607",
+      "size": 102,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-positive/probe.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "eabae4267de913c1742c84f2d5c0bba61d6b4f7e7e52e8cbf0f58e3f940f246a",
+      "size": 1006,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-positive/probe.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-positive/gem5.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "dfa543f4f6f414ae49c3fc5a1ae3303e243f6f010860e5fb8174b7824640d9ed",
+      "size": 697,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-positive/gem5.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6e38081279edc235bacc671f2f88d52f093a8ca80c6d35f2c2dbf9f6a91e07a2",
+      "size": 514,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-positive/sha256.pre.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "38d997129945b08a184c03e8f12003780fd112a05903104a01d08ae9f5a37011",
+      "size": 491,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0025/live-positive/sha256.post.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "38d997129945b08a184c03e8f12003780fd112a05903104a01d08ae9f5a37011",
+      "size": 491,
+      "tracked": false
+    }
+  ]
+}

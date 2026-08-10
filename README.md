@@ -233,4 +233,17 @@ logical alignment 8, SUBMIT ACK, type-20 completion, launcher, compiler/JIT,
 GPU execution, and fallback remain false. CP-0025 /
 `P5-TRITON-VECADD-04-DAEMON-LIFECYCLE` is the next unique action.
 
+CP-0025 accepts the bounded positive generic daemon control lifecycle. A fresh
+two-owner runtime-to-gem5 run selects capability bit 8 and all dependencies,
+then completes MAP, logical-alignment-8 ALLOC over hidden page backing, the
+existing v1 `MEMORY_COPY_H2D` carrier, daemon-built AQL admission, type-19 ACK,
+type-20 retirement, UNMAP, disconnect cleanup, and reconnect. Packet CRC is
+nonzero and lifecycle ticks are nonzero and nondecreasing. This remains native
+control-processor admission/retire only: GPUDispatcher/CU execution, kernel
+output correctness, normal Triton launcher, compiler/JIT, fallback, and Qwen
+are false. CP-0026 / `P5-TRITON-VECADD-05-GPU-EXECUTION` is the next unique
+action; it must connect this control path to real GPU execution and validate
+the locked zero-preload fixture output before later Triton preload/launcher
+work.
+
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.
