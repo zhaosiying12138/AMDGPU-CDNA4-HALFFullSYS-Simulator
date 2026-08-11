@@ -261,8 +261,11 @@ static int handle_failed_create(queue_server_t *server, int peer,
   } else if (server->behavior == QUEUE_SERVER_FAILED_ACK_BAD_ERROR) {
     response.error_code = 1;
   }
-  return send_queue_response(peer, info, request_id,
-                             SAGR_WIRE_MESSAGE_QUEUE_ACK, &response);
+  if (send_queue_response(peer, info, request_id,
+                          SAGR_WIRE_MESSAGE_QUEUE_ACK, &response) != 0) {
+    return -1;
+  }
+  return expect_peer_close(peer);
 }
 
 static int handle_successful_create(int peer,
@@ -324,17 +327,17 @@ static int handle_doorbell(int peer, const sagr_instance_info_t *info,
                             &response) != 0) {
       return -1;
     }
-    response.value = 0;
-    --response.sim_tick;
+    return expect_peer_close(peer);
   }
   if (send_queue_response(peer, info, request_id,
                           SAGR_WIRE_MESSAGE_QUEUE_ACK, &response) != 0) {
     return -1;
   }
   if (behavior == QUEUE_SERVER_DOORBELL_ACK_BAD_VALUE ||
-      behavior == QUEUE_SERVER_DOORBELL_ACK_MAX_TICK ||
-      behavior == QUEUE_SERVER_INFLIGHT_LIMIT ||
-      behavior == QUEUE_SERVER_COMPLETION_BEFORE_ACK) {
+      behavior == QUEUE_SERVER_DOORBELL_ACK_MAX_TICK) {
+    return expect_peer_close(peer);
+  }
+  if (behavior == QUEUE_SERVER_INFLIGHT_LIMIT) {
     return 0;
   }
   if (behavior == QUEUE_SERVER_NO_COMPLETION) {
@@ -350,11 +353,19 @@ static int handle_doorbell(int peer, const sagr_instance_info_t *info,
     response.error_code =
         behavior == QUEUE_SERVER_CONTROL_ERROR ? UINT64_C(1) : 0;
   }
-  return send_queue_response(
-      peer, info,
-      behavior == QUEUE_SERVER_COMPLETION_BAD_REQUEST ? request_id + 1
-                                                      : request_id,
-      SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &response);
+  if (send_queue_response(
+          peer, info,
+          behavior == QUEUE_SERVER_COMPLETION_BAD_REQUEST ? request_id + 1
+                                                          : request_id,
+          SAGR_WIRE_MESSAGE_QUEUE_COMPLETION, &response) != 0) {
+    return -1;
+  }
+  if (behavior == QUEUE_SERVER_COMPLETION_BAD_REQUEST ||
+      behavior == QUEUE_SERVER_COMPLETION_BAD_TICK ||
+      behavior == QUEUE_SERVER_NONCANONICAL_ERROR_COMPLETION) {
+    return expect_peer_close(peer);
+  }
+  return 0;
 }
 
 static int handle_interleaved_doorbells(
@@ -422,8 +433,11 @@ static int handle_destroy(int peer, const sagr_instance_info_t *info,
   response.queue_id = request.queue_id;
   response.generation = request.generation;
   response.sim_tick = UINT64_C(200);
-  return send_queue_response(peer, info, request_id,
-                             SAGR_WIRE_MESSAGE_QUEUE_ACK, &response);
+  if (send_queue_response(peer, info, request_id,
+                          SAGR_WIRE_MESSAGE_QUEUE_ACK, &response) != 0) {
+    return -1;
+  }
+  return expect_peer_close(peer);
 }
 
 static int withhold_ack_until_disconnect(
@@ -473,6 +487,9 @@ static void *queue_server_main(void *argument) {
     return NULL;
   }
   if (server->behavior == QUEUE_SERVER_NO_CAPABILITY) {
+    if (expect_peer_close(peer) != 0) {
+      server->thread_error = EPROTO;
+    }
     (void)close(peer);
     return NULL;
   }
@@ -532,6 +549,9 @@ static void *queue_server_main(void *argument) {
         server->thread_error = EPROTO;
         break;
       }
+    }
+    if (server->thread_error == 0 && expect_peer_close(peer) != 0) {
+      server->thread_error = EPROTO;
     }
     (void)close(peer);
     return NULL;
