@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0029-schema8-repository-local-install-accepted; exact-float32-contiguous-Triton-vecadd-only; queue-mock-serial-and-18-worker-stability-proven; next-CP-0030-minimum-SiluAndMul-operator-gate; model-operator-matrix-before-performance-work`
+**Current state:** `CP-0030-minimum-BF16-SiluAndMul-subgate-accepted; decode-and-masked-prefill-normal-Triton-execution-proven; complete-model-contracts-still-0-of-15; next-P5-OPS-01-broader-operator-matrix; model-operator-work-before-performance`
 
 **Current phase:** `P5`
 
@@ -135,11 +135,13 @@ root coordinator commit.
 继续执行 amdgpu-sim 计划。当前目录是 /home/zhaosiying/amdgpu-sim。
 先读取 PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、其引用的
 最新 checkpoint/bitlesson/evidence，运行 scripts/resume.sh --verify。
-CP-0028 normal-Python Triton vecadd boundary 已 accepted；CP-0029 已完成
-queue mock determinism test-only 修复、GCC/Clang 串行与 18-worker 稳定性和
-全新 schema-8 repository-local prefix 验收。从唯一 next_action
-`P5-OPS-00-SILU-AND-MUL-MINIMUM` 继续，先进入模型所需的最小 SiluAndMul
-算子门禁，再扩展算子矩阵。不要重做
+	CP-0028 normal-Python Triton vecadd boundary 已 accepted；CP-0029 已完成
+	queue mock determinism test-only 修复、GCC/Clang 串行与 18-worker 稳定性和
+	全新 schema-8 repository-local prefix 验收；CP-0030 已接受 BF16
+	SiluAndMul decode `[1,7168] -> [1,3584]` 和 masked-prefill
+	`[7,7168] -> [7,3584]` 子门禁。从唯一 next_action `P5-OPS-01` 继续扩展
+	模型算子 manifest 和 differential gates。不要把这个子门禁称为完整 MLP
+	contract；15 个完整 Qwen runtime contracts 仍为 0/15。不要重做
 bootstrap、source freeze、CP26/CP27/CP28 已通过的执行门禁，也不要修改已冻结的
 SOURCE_LOCK.json 或已登记的 PROJECT_LANES baseline。以下 CP10-CP27 描述都是
 历史边界，不是当前 next action。CP-0010 只实现 18 个 typed KMT
@@ -192,8 +194,11 @@ float32 vecadd（98,432 elements、BLOCK_SIZE 1,024），不覆盖任意 Triton 
 被 `/opt/rocm` 默认路径污染后中止，v7 因 queue mock 的 pre-ACK 测试竞态
 fail closed；它们不能作为安装 authority。CP-0029 已用 test-only 修改稳定
 queue gate，并从空 schema-8 prefix 完成安装、OpenCL/Triton、污染和
-active-isolation 验证；它不扩大 Triton vecadd 的算子边界。CP-0030 从
-Qwen3.5 所需的 BF16 SiluAndMul 最小 gate 开始，随后继续模型所需算子矩阵、
+	active-isolation 验证；它不扩大 Triton vecadd 的算子边界。CP-0030 随后接受
+	Qwen3.5 所需的 BF16 SiluAndMul 最小子门禁：normal Triton decode 和
+	masked-prefill 两种形状均以 fresh/repeat 执行、精确 trace、零 mismatch、零
+	nonfinite 和零 fallback 通过；它仍未完成 gate/up 与 down GEMM，因此不接受
+	完整 MLP contract。下一步继续模型所需算子矩阵、
 单卡完整模型稳定多 token，再实现 CCL 和多 TP 完整模型稳定多 token。只有真实
 算子/层/模型的耗时阻塞该主线时才开启
 可复现 profile、80/20 优化或 threadblock host-parallel 门禁；不安全或不可证明
@@ -383,8 +388,12 @@ is still only contiguous float32 vecadd; broadcast, cast, reduction, norm,
 GEMM, RoPE, cache, GDN, attention, full-model, TP, and CCL execution remain
 false. Its v6/v7 final-prefix attempts are retained only as NON-PASSING
 evidence. CP-0029 stabilizes the queue test and accepts the fresh schema-8
-repository-local prefix. It remains bounded to the exact contiguous float32
-Triton vecadd product path. CP-0030 starts the first model-required operator
-gate: BF16 SiluAndMul for decode and masked-prefill shapes. Profiling is
-deferred until a real workload demonstrates a material operator-, layer-, or
-model-level bottleneck.
+repository-local prefix. CP-0030 accepts the first model-required subgate:
+the exact BF16 SiluAndMul image executes normal-Python decode and masked-prefill
+shapes twice with exact PC/lifecycle evidence, zero mismatch, zero nonfinite
+values, and zero fallback while CP26/CP27/CP29 regressions remain green. This is
+only the activation/multiply part of `mlp.gate_up_silu_down`; gate/up and down
+GEMM, every complete model contract (still 0/15), a complete layer, and the
+model remain unaccepted. P5-OPS-01 expands the operator matrix next. Profiling
+is deferred until a real workload demonstrates a material operator-, layer-,
+or model-level bottleneck.

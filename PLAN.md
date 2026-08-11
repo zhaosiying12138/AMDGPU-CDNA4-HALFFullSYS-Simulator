@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-11`
 
-**State at this commit:** `CP-0029 accepts the schema-8 repository-local prefix after queue serial/concurrent stability, OpenCL/Triton, provenance, pollution, and active-isolation gates; broader operators remain unaccepted; CP-0030 starts the minimum BF16 SiluAndMul gate`
+**State at this commit:** `CP-0030 accepts the bounded BF16 SiluAndMul decode and masked-prefill subgate through normal Triton with exact trace/oracle and zero fallback; complete model contracts remain 0/15; P5-OPS-01 expands the operator matrix next`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -448,6 +448,16 @@ CP-0028's pure-b010 compiler path produces the accepted 5,384-byte gfx950
 It has an exact 48-byte kernarg, 12-DWORD preload, and 256-thread workgroup;
 normal Python execution validates it twice. Earlier 5,408/5,736-byte artifacts
 are historical compile-only or mixed-toolchain evidence and are not authority.
+CP-0030 adds the first model-required runtime subgate: the exact 6,672-byte
+gfx950 BF16 `silu_and_mul_kernel` image with SHA-256
+`2db0d67ff6903a737f3a4d40cf67e2a2cbbacc8b605863d31b7c90386ccb357e`.
+Normal Python executes decode `[1,7168] -> [1,3584]` and masked-prefill
+`[7,7168] -> [7,3584]` in fresh and repeat runs with exact PC/memory/lifecycle
+traces, finite outputs, zero mismatch, and zero fallback. This accepts only the
+activation/multiply subgate inside `mlp.gate_up_silu_down`; gate/up projection,
+down projection, the full MLP contract, and all 15 complete runtime contracts
+remain unaccepted. P5-OPS-01 must preserve that distinction while adding exact
+dtype/shape/stride/state/oracle records for broader operators.
 
 ### P6 — PyTorch integration
 
@@ -546,7 +556,7 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | CP-0026 / P5-TRITON-VECADD-05-GPU-EXECUTION | P5 | Connect the committed daemon lifecycle to GPUDispatcher/CU execution and prove output correctness for the locked zero-preload fixture |
 | CP-0028 / P5-TRITON-VECADD-06-NORMAL-PYTHON | P5A | Ordinary Python/Triton compiles and executes exact contiguous float32 vecadd twice in one managed session with resource reuse, exact output, and zero fallback; broader operators and final repo-local install remain bounded |
 | CP-0029 / P5-TRITON-VECADD-07-FRESH-SCHEMA8 | P5A | Accepted: test-only queue ordering fix, GCC/Clang serial and 18-worker stability, fresh schema-8 repository-local prefix, independent verify-only, OpenCL/Triton, provenance, pollution, and active-isolation gates |
-| CP-0030 / P5-OPS-00-SILU-AND-MUL-MINIMUM | P5C | First model-required BF16 SiluAndMul contract: decode `[1,7168] -> [1,3584]` and masked-prefill `[7,7168] -> [7,3584]`, exact image/trace/oracle and zero fallback; does not accept the full operator matrix |
+| CP-0030 / P5-OPS-00-SILU-AND-MUL-MINIMUM | P5C | Accepted bounded BF16 SiluAndMul subgate: decode `[1,7168] -> [1,3584]` and masked-prefill `[7,7168] -> [7,3584]`, fresh/repeat exact image/trace/oracle, finite outputs and zero fallback; complete MLP/model contracts remain unaccepted |
 | P5-PROFILE-ON-BLOCKER | P5A | Conditional retained profile and measured 80/20 optimization only after a real operator/layer/model bottleneck is demonstrated |
 | P5-PARALLEL-TB-ON-BLOCKER | P5B | Conditional safe serial-versus-parallel threadblock experiment justified by a retained profile |
 | P5-OPS-01 | P5C | Broader model-operator manifest and differential gates |
@@ -901,12 +911,15 @@ fallback. The 12-DWORD descriptor preload remains an explicit NOT_SUPPORTED
    managed session, queue, signal, packet VA, and allocation IDs, and both
    produce bit-exact float32 `C=A+B` with zero fallback. The stable image hash,
    packet VA/CRC, trace, ticket, and dispatch IDs support an inference of the
-   same kernel source packet; the trace exposes no kernel mapping ID. No other Triton operator is
-	   accepted. The v6/v7 final-prefix attempts remain NON-PASSING; CP-0029 fixes
-	   the queue mock race and accepts a fresh schema-8 repository-local prefix after
-	   independent installation, workload, provenance, pollution, and active-isolation
-	   gates. CP-0030 starts the minimum BF16 SiluAndMul model operator gate before the
-	   broader operator matrix. Profiling is conditional on a demonstrated
+	   same kernel source packet; the trace exposes no kernel mapping ID. The v6/v7
+	   final-prefix attempts remain NON-PASSING; CP-0029 fixes the queue mock race and
+	   accepts a fresh schema-8 repository-local prefix after independent installation,
+	   workload, provenance, pollution, and active-isolation gates. CP-0030 accepts the
+	   minimum BF16 SiluAndMul subgate for decode and masked-prefill with fresh/repeat
+	   normal-Python execution, exact traces, finite output, zero mismatch, and zero
+	   fallback. It does not accept either projection GEMM, a complete MLP contract, or
+	   any complete model contract; P5-OPS-01 expands the broader operator matrix next.
+	   Profiling is conditional on a demonstrated
 operator-, layer-, or model-level bottleneck.
 
 ### P3H - host-native simulator and first Triton gate
@@ -970,8 +983,9 @@ The work is staged as follows:
 	   operator family. CP-0029 is accepted: it stabilizes the queue mock test and
 	   produces a fresh schema-8 repository-local prefix with independent runtime,
 	   OpenCL, Triton, provenance, pollution, and active-isolation evidence. CP-0030
-	   is the next coordinated gate and begins with the model-required BF16
-	   SiluAndMul decode and masked-prefill contracts.
+	   accepts the model-required BF16 SiluAndMul decode and masked-prefill subgate;
+	   P5-OPS-01 is the next coordinated gate for the broader model-operator manifest
+	   and differential coverage.
 
 This workstream is not a cycle-accurate replacement. Timing, wider operator
 coverage, host-parallel threadblocks, HIP/OpenCL CTS, PyTorch, vLLM, and Qwen

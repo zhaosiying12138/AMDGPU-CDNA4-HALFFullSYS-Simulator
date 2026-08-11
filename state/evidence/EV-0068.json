@@ -1,0 +1,1696 @@
+{
+  "checkpoint_id": "CP-0030",
+  "claim": "EV-0068 binds the exact 15-path gem5 candidate tree, final ccache/Clang/LLD/-j24 VEGA_X86 binary, canonical gfx950 BF16 SiluAndMul HSACO, normal-Python decode and masked-prefill fresh/repeat executions, exact reusable-session traces, and CP26/CP27/CP29 regressions. It accepts only a bounded SiluAndMul subgate inside the dense MLP contract; no complete Qwen operator contract, layer, model, PyTorch/vLLM path, multi-token result, TP, CCL, profiling, or performance claim is made.",
+  "command_argv": [
+    [
+      "/usr/bin/env",
+      "PATH=/home/zhaosiying/amdgpu-sim/env/gem5-build/sysroot/usr/bin:/home/zhaosiying/miniforge3/envs/triton-dev/bin:/home/zhaosiying/.local/bin:/usr/local/bin:/usr/bin:/bin",
+      "CCACHE_DIR=/home/zhaosiying/.cache/amdgpu-sim/ccache",
+      "CCACHE_COMPILERCHECK=content",
+      "CCACHE_BASEDIR=/home/zhaosiying/amdgpu-sim",
+      "CCACHE_MAXSIZE=50G",
+      "CC=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang",
+      "CXX=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang++",
+      "/home/zhaosiying/.local/bin/scons",
+      "--linker=lld",
+      "-j24",
+      "build/VEGA_X86/gem5.opt"
+    ],
+    [
+      "/usr/bin/bash",
+      "-c",
+      "set -euo pipefail; test \"$(git write-tree)\" = 74d5b144a810dc86d298b262b99fdb18fc9801e9; test \"$(git diff --cached --binary | sha256sum | cut -d\" \" -f1)\" = 387df26bc792aa137b6f0b9b7f88ebfa5fec7054390c07be4d9d30c6a7118b40; test \"$(git diff --cached --name-only | wc -l)\" -eq 15; test -z \"$(git diff --name-only)\"; test -z \"$(git ls-files --others --exclude-standard)\"; git diff --cached --check; git diff --cached --name-status; printf \"candidate_tree=%s\\nstaged_diff_sha256=%s\\n\" \"$(git write-tree)\" \"$(git diff --cached --binary | sha256sum | cut -d\" \" -f1)\""
+    ],
+    [
+      "/usr/bin/bash",
+      "-c",
+      "set -euo pipefail; git diff --check; git -C projects/gem5 diff --check; for f in examples/triton/silu_and_mul_correctness.py; do out=$(mktemp /tmp/cp30-diff-check.XXXXXX); rc=0; git diff --no-index --check --no-patch /dev/null \"$f\" >\"$out\" 2>&1 || rc=$?; test \"$rc\" -eq 1; test ! -s \"$out\"; rm -f \"$out\"; done; for f in src/arch/amdgpu/vega/insts/vop_semantics.hh src/arch/amdgpu/vega/insts/vop_semantics.test.cc src/dev/amdgpu/host_gpu_triton_silu_and_mul_fixture.hh; do out=$(mktemp /tmp/cp30-diff-check.XXXXXX); rc=0; git -C projects/gem5 diff --no-index --check --no-patch /dev/null \"$f\" >\"$out\" 2>&1 || rc=$?; test \"$rc\" -eq 1; test ! -s \"$out\"; rm -f \"$out\"; done; /usr/bin/python3 -m py_compile examples/triton/silu_and_mul_correctness.py artifacts/evidence/CP-0030/validate_dual_triton_trace.py; printf \"root_and_gem5_diff_check=clean python_compile=pass\\n\""
+    ],
+    [
+      "/usr/bin/bash",
+      "-c",
+      "set -euo pipefail; bin=projects/gem5/build/VEGA_X86/gem5.opt; hsaco=artifacts/evidence/CP-0030/runtime-triton-cache-checkpoint-v3-fresh/6GVBF5AR4QVF3OSZPXCPHX63PE62RBYD2GEAFUYVKJ4IPLN3PZUA/silu_and_mul_kernel.hsaco; test \"$(sha256sum \"$bin\" | cut -d\" \" -f1)\" = 1384eacc573ff75904a7cec872e7b2a56119fb6bf4b7eb4afbc5590429b36a23; test \"$(sha256sum \"$hsaco\" | cut -d\" \" -f1)\" = 2db0d67ff6903a737f3a4d40cf67e2a2cbbacc8b605863d31b7c90386ccb357e; test \"$(stat -c %s \"$hsaco\")\" -eq 6672; sha256sum \"$bin\" \"$hsaco\"; stat -c \"%n size=%s\" \"$bin\" \"$hsaco\""
+    ],
+    [
+      "/usr/bin/env",
+      "CCACHE_DIR=/home/zhaosiying/.cache/amdgpu-sim/ccache",
+      "CCACHE_MAXSIZE=50G",
+      "/usr/bin/ccache",
+      "-s"
+    ],
+    [
+      "projects/gem5/build/VEGA_X86/arch/amdgpu/vega/insts/vop_semantics.test.opt"
+    ],
+    [
+      "projects/gem5/build/VEGA_X86/arch/amdgpu/common/dtype/mxfp.test.opt"
+    ],
+    [
+      "projects/gem5/build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt"
+    ],
+    [
+      "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_generic_dispatch_route_core.opt"
+    ],
+    [
+      "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_triton_code_object_core.opt",
+      "artifacts/evidence/CP-0030/runtime-triton-cache-final-fresh/6GVBF5AR4QVF3OSZPXCPHX63PE62RBYD2GEAFUYVKJ4IPLN3PZUA/silu_and_mul_kernel.hsaco"
+    ],
+    [
+      "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_code_object_state.test.opt"
+    ],
+    [
+      "/usr/bin/test",
+      "!",
+      "-e",
+      "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/runtime-triton-cache-checkpoint-v3-fresh"
+    ],
+    [
+      "/usr/bin/timeout",
+      "--signal=TERM",
+      "--kill-after=10s",
+      "600",
+      "/usr/bin/env",
+      "-i",
+      "HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/home",
+      "TMPDIR=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/tmp",
+      "XDG_CACHE_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/cache",
+      "XDG_CONFIG_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/config",
+      "XDG_DATA_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/data",
+      "SOURCE_DATE_EPOCH=0",
+      "PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/venv/bin:/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/bin:/usr/bin:/bin",
+      "LD_LIBRARY_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/lib:/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/lib64",
+      "ROCM_SIM_ROOT=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+      "ROCM_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+      "HIP_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+      "HSA_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+      "CMAKE_PREFIX_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+      "LLVM_SYSPATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b648cab83c83967ff26b8fde11acdc6",
+      "TRITON_DEFAULT_BACKEND=gemsim_amd",
+      "TRITON_OFFLINE_BUILD=1",
+      "TRITON_CACHE_DIR=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/runtime-triton-cache-checkpoint-v3-fresh",
+      "PYTHONNOUSERSITE=1",
+      "MAX_JOBS=24",
+      "CCACHE_DIR=/home/zhaosiying/.cache/amdgpu-sim/ccache",
+      "CCACHE_COMPILERCHECK=content",
+      "CCACHE_BASEDIR=/home/zhaosiying/amdgpu-sim",
+      "CCACHE_MAXSIZE=50G",
+      "CC=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang",
+      "CXX=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang++",
+      "AR=/usr/bin/llvm-ar-21",
+      "RANLIB=/usr/bin/llvm-ranlib-21",
+      "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/venv/bin/python",
+      "-I",
+      "/home/zhaosiying/amdgpu-sim/examples/triton/silu_and_mul_correctness.py"
+    ],
+    [
+      "/usr/bin/python3",
+      "artifacts/evidence/CP-0030/validate_dual_triton_trace.py",
+      "silu",
+      "artifacts/evidence/CP-0030/normal-silu-checkpoint-v3-fresh-run",
+      "artifacts/evidence/CP-0030/tests/normal-silu-runtime-checkpoint-v3-fresh.stdout"
+    ],
+    [
+      "/usr/bin/timeout",
+      "--signal=TERM",
+      "--kill-after=10s",
+      "600",
+      "/usr/bin/env",
+      "-i",
+      "HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/home",
+      "TMPDIR=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/tmp",
+      "XDG_CACHE_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/cache",
+      "XDG_CONFIG_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/config",
+      "XDG_DATA_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/data",
+      "SOURCE_DATE_EPOCH=0",
+      "PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/venv/bin:/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/bin:/usr/bin:/bin",
+      "LD_LIBRARY_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/lib:/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/lib64",
+      "ROCM_SIM_ROOT=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+      "ROCM_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+      "HIP_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+      "HSA_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+      "CMAKE_PREFIX_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+      "LLVM_SYSPATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b648cab83c83967ff26b8fde11acdc6",
+      "TRITON_DEFAULT_BACKEND=gemsim_amd",
+      "TRITON_OFFLINE_BUILD=1",
+      "TRITON_CACHE_DIR=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/runtime-triton-cache-checkpoint-v3-fresh",
+      "PYTHONNOUSERSITE=1",
+      "MAX_JOBS=24",
+      "CCACHE_DIR=/home/zhaosiying/.cache/amdgpu-sim/ccache",
+      "CCACHE_COMPILERCHECK=content",
+      "CCACHE_BASEDIR=/home/zhaosiying/amdgpu-sim",
+      "CCACHE_MAXSIZE=50G",
+      "CC=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang",
+      "CXX=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang++",
+      "AR=/usr/bin/llvm-ar-21",
+      "RANLIB=/usr/bin/llvm-ranlib-21",
+      "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/venv/bin/python",
+      "-I",
+      "/home/zhaosiying/amdgpu-sim/examples/triton/silu_and_mul_correctness.py"
+    ],
+    [
+      "/usr/bin/python3",
+      "artifacts/evidence/CP-0030/validate_dual_triton_trace.py",
+      "silu",
+      "artifacts/evidence/CP-0030/normal-silu-checkpoint-v3-repeat-run",
+      "artifacts/evidence/CP-0030/tests/normal-silu-runtime-checkpoint-v3-repeat.stdout"
+    ],
+    [
+      "/usr/bin/test",
+      "!",
+      "-e",
+      "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-triton-vecadd-final-cache"
+    ],
+    [
+      "/usr/bin/timeout",
+      "--signal=TERM",
+      "--kill-after=10s",
+      "600",
+      "/usr/bin/env",
+      "-i",
+      "HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/home",
+      "TMPDIR=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/tmp",
+      "XDG_CACHE_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/cache",
+      "XDG_CONFIG_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/config",
+      "XDG_DATA_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/data",
+      "SOURCE_DATE_EPOCH=0",
+      "PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/venv/bin:/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/bin:/usr/bin:/bin",
+      "LD_LIBRARY_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/lib:/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/lib64",
+      "ROCM_SIM_ROOT=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+      "ROCM_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+      "HIP_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+      "HSA_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+      "CMAKE_PREFIX_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b648cab83c83967ff26b8fde11acdc6",
+      "LLVM_SYSPATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b648cab83c83967ff26b8fde11acdc6",
+      "TRITON_DEFAULT_BACKEND=gemsim_amd",
+      "TRITON_OFFLINE_BUILD=1",
+      "TRITON_CACHE_DIR=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-triton-vecadd-final-cache",
+      "PYTHONNOUSERSITE=1",
+      "MAX_JOBS=24",
+      "CCACHE_DIR=/home/zhaosiying/.cache/amdgpu-sim/ccache",
+      "CCACHE_COMPILERCHECK=content",
+      "CCACHE_BASEDIR=/home/zhaosiying/amdgpu-sim",
+      "CCACHE_MAXSIZE=50G",
+      "CC=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang",
+      "CXX=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang++",
+      "AR=/usr/bin/llvm-ar-21",
+      "RANLIB=/usr/bin/llvm-ranlib-21",
+      "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/venv/bin/python",
+      "-I",
+      "/home/zhaosiying/amdgpu-sim/examples/triton/vecadd_correctness.py"
+    ],
+    [
+      "/usr/bin/python3",
+      "artifacts/evidence/CP-0030/validate_dual_triton_trace.py",
+      "vecadd",
+      "artifacts/evidence/CP-0030/regression-triton-vecadd-final-run",
+      "artifacts/evidence/CP-0030/tests/regression-triton-vecadd-final.stdout"
+    ],
+    [
+      "/usr/bin/timeout",
+      "--signal=TERM",
+      "--kill-after=10s",
+      "600",
+      "/usr/bin/env",
+      "-i",
+      "HOME=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-opencl/work/home",
+      "TMPDIR=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-opencl/work/tmp",
+      "XDG_CACHE_HOME=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-opencl/work/cache",
+      "XDG_CONFIG_HOME=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-opencl/work/config",
+      "XDG_DATA_HOME=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-opencl/work/data",
+      "LC_ALL=C",
+      "PATH=/usr/bin:/bin",
+      "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/bin/opencl-vecadd",
+      "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/share/self-amdgpu-runtime/opencl/vecadd.cl"
+    ],
+    [
+      "/usr/bin/python3",
+      "artifacts/evidence/CP-0027/validate_opencl_trace.py",
+      "artifacts/evidence/CP-0030/regression-opencl-installed-final-run/dispatch-trace.jsonl",
+      "artifacts/evidence/CP-0030/regression-opencl-installed-final-run/gem5.log",
+      "artifacts/evidence/CP-0030/regression-opencl-installed-final-run/m5out/stats.txt",
+      "artifacts/evidence/CP-0030/tests/regression-opencl-installed-final.stdout"
+    ],
+    [
+      "/usr/bin/timeout",
+      "--signal=TERM",
+      "--kill-after=10s",
+      "180",
+      "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/run_cp26_regression.sh",
+      "positive",
+      "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-cp26-positive-final"
+    ],
+    [
+      "/usr/bin/python3",
+      "artifacts/evidence/CP-0027/validate_cp26_regression.py",
+      "positive",
+      "artifacts/evidence/CP-0030/regression-cp26-positive-final/dispatch-trace.jsonl",
+      "artifacts/evidence/CP-0030/regression-cp26-positive-final/endpoint.stdout",
+      "artifacts/evidence/CP-0030/regression-cp26-positive-final/gem5.stdout",
+      "artifacts/evidence/CP-0030/regression-cp26-positive-final/gem5.stderr",
+      "artifacts/evidence/CP-0030/regression-cp26-positive-final/m5out/stats.txt"
+    ],
+    [
+      "/usr/bin/timeout",
+      "--signal=TERM",
+      "--kill-after=10s",
+      "180",
+      "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/run_cp26_regression.sh",
+      "disconnect",
+      "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-cp26-disconnect-final"
+    ],
+    [
+      "/usr/bin/python3",
+      "artifacts/evidence/CP-0027/validate_cp26_regression.py",
+      "disconnect",
+      "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/dispatch-trace.jsonl",
+      "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/endpoint.stdout",
+      "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/gem5.stdout",
+      "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/gem5.stderr",
+      "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/m5out/stats.txt"
+    ],
+    [
+      "/usr/bin/python3",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-p",
+      "test_*.py",
+      "-v"
+    ]
+  ],
+  "command_results": [
+    {
+      "argv": [
+        "/usr/bin/env",
+        "PATH=/home/zhaosiying/amdgpu-sim/env/gem5-build/sysroot/usr/bin:/home/zhaosiying/miniforge3/envs/triton-dev/bin:/home/zhaosiying/.local/bin:/usr/local/bin:/usr/bin:/bin",
+        "CCACHE_DIR=/home/zhaosiying/.cache/amdgpu-sim/ccache",
+        "CCACHE_COMPILERCHECK=content",
+        "CCACHE_BASEDIR=/home/zhaosiying/amdgpu-sim",
+        "CCACHE_MAXSIZE=50G",
+        "CC=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang",
+        "CXX=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang++",
+        "/home/zhaosiying/.local/bin/scons",
+        "--linker=lld",
+        "-j24",
+        "build/VEGA_X86/gem5.opt"
+      ],
+      "cwd": "projects/gem5",
+      "exit_code": 0,
+      "id": "gem5-final-build",
+      "raw_streams_limitation": "GNU time metadata with the exact argv, resource use, and exit status is retained, but the incremental SCons stdout/stderr streams were not separately captured.",
+      "raw_streams_retained": false,
+      "result": "The reusable VEGA_X86 tree rebuilt with ccache, Clang, LLD, and -j24; the final bridge ordering build exited zero."
+    },
+    {
+      "argv": [
+        "/usr/bin/bash",
+        "-c",
+        "set -euo pipefail; test \"$(git write-tree)\" = 74d5b144a810dc86d298b262b99fdb18fc9801e9; test \"$(git diff --cached --binary | sha256sum | cut -d\" \" -f1)\" = 387df26bc792aa137b6f0b9b7f88ebfa5fec7054390c07be4d9d30c6a7118b40; test \"$(git diff --cached --name-only | wc -l)\" -eq 15; test -z \"$(git diff --name-only)\"; test -z \"$(git ls-files --others --exclude-standard)\"; git diff --cached --check; git diff --cached --name-status; printf \"candidate_tree=%s\\nstaged_diff_sha256=%s\\n\" \"$(git write-tree)\" \"$(git diff --cached --binary | sha256sum | cut -d\" \" -f1)\""
+      ],
+      "cwd": "projects/gem5",
+      "ended_at": "2026-08-11T09:32:34+00:00",
+      "exit_code": 0,
+      "id": "gem5-source-freeze",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/gem5-source-freeze-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "290317f40767712be1e08112b92d7c338f26fa576b6c99dc6e21a2fed0e9e058",
+        "size": 1208,
+        "tracked": false
+      },
+      "result": "The exact 15-path staged gem5 source lane is clean, policy-valid, and frozen at tree 74d5b144a810dc86d298b262b99fdb18fc9801e9 with binary-diff SHA-256 387df26bc792aa137b6f0b9b7f88ebfa5fec7054390c07be4d9d30c6a7118b40.",
+      "started_at": "2026-08-11T09:32:34+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/gem5-source-freeze-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/gem5-source-freeze-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9a73cbee76b6a4df5fa9f348c53063b92b5e20aefe83de2559330d69472bde64",
+        "size": 832,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/bash",
+        "-c",
+        "set -euo pipefail; git diff --check; git -C projects/gem5 diff --check; for f in examples/triton/silu_and_mul_correctness.py; do out=$(mktemp /tmp/cp30-diff-check.XXXXXX); rc=0; git diff --no-index --check --no-patch /dev/null \"$f\" >\"$out\" 2>&1 || rc=$?; test \"$rc\" -eq 1; test ! -s \"$out\"; rm -f \"$out\"; done; for f in src/arch/amdgpu/vega/insts/vop_semantics.hh src/arch/amdgpu/vega/insts/vop_semantics.test.cc src/dev/amdgpu/host_gpu_triton_silu_and_mul_fixture.hh; do out=$(mktemp /tmp/cp30-diff-check.XXXXXX); rc=0; git -C projects/gem5 diff --no-index --check --no-patch /dev/null \"$f\" >\"$out\" 2>&1 || rc=$?; test \"$rc\" -eq 1; test ! -s \"$out\"; rm -f \"$out\"; done; /usr/bin/python3 -m py_compile examples/triton/silu_and_mul_correctness.py artifacts/evidence/CP-0030/validate_dual_triton_trace.py; printf \"root_and_gem5_diff_check=clean python_compile=pass\\n\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:29:54+00:00",
+      "exit_code": 0,
+      "id": "source-static",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/source-static-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "048da6fc0c6cb512cca964ecb58235870fe2d4bd60faefb460189143f08825eb",
+        "size": 1493,
+        "tracked": false
+      },
+      "result": "Tracked and newly added root/gem5 sources pass diff checks, and the Python runner plus trace validator compile.",
+      "started_at": "2026-08-11T09:29:54+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/source-static-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/source-static-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "23ac7c463fc4fa27c861e258a701f1fec617d317f0adbd51ee3efc9053502d67",
+        "size": 51,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/bash",
+        "-c",
+        "set -euo pipefail; bin=projects/gem5/build/VEGA_X86/gem5.opt; hsaco=artifacts/evidence/CP-0030/runtime-triton-cache-checkpoint-v3-fresh/6GVBF5AR4QVF3OSZPXCPHX63PE62RBYD2GEAFUYVKJ4IPLN3PZUA/silu_and_mul_kernel.hsaco; test \"$(sha256sum \"$bin\" | cut -d\" \" -f1)\" = 1384eacc573ff75904a7cec872e7b2a56119fb6bf4b7eb4afbc5590429b36a23; test \"$(sha256sum \"$hsaco\" | cut -d\" \" -f1)\" = 2db0d67ff6903a737f3a4d40cf67e2a2cbbacc8b605863d31b7c90386ccb357e; test \"$(stat -c %s \"$hsaco\")\" -eq 6672; sha256sum \"$bin\" \"$hsaco\"; stat -c \"%n size=%s\" \"$bin\" \"$hsaco\""
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:32:36+00:00",
+      "exit_code": 0,
+      "id": "product-identities",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/product-identities-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "8c99e1e19d268d287aedfbee9994031a4563208e14c15e333118e00942b62ec8",
+        "size": 1185,
+        "tracked": false
+      },
+      "result": "The final VEGA_X86 binary and canonical 6672-byte SiluAndMul HSACO match their frozen SHA-256 identities.",
+      "started_at": "2026-08-11T09:32:34+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/product-identities-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/product-identities-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4973d5a3a4698425bc78c56856ba2116688fbfae823402233dc3d2d0f388b019",
+        "size": 527,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/env",
+        "CCACHE_DIR=/home/zhaosiying/.cache/amdgpu-sim/ccache",
+        "CCACHE_MAXSIZE=50G",
+        "/usr/bin/ccache",
+        "-s"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:32:34+00:00",
+      "exit_code": 0,
+      "id": "ccache-stats",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/ccache-stats-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b9ff88f3d0b8c8760c9fd3dc5a29fe440b58f24669235293b01e6b591b92abf5",
+        "size": 704,
+        "tracked": false
+      },
+      "result": "The project ccache contains 730 hits in the persistent 50 GB cache used by the Clang builds.",
+      "started_at": "2026-08-11T09:32:34+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/ccache-stats-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/ccache-stats-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "864f0c9e54b919cab30f93efea374808e8b638e961fd42143faa3721d41c20a1",
+        "size": 375,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/VEGA_X86/arch/amdgpu/vega/insts/vop_semantics.test.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:11:50+00:00",
+      "exit_code": 0,
+      "id": "vop-semantics",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/vop-semantics-hardening-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6e2e08f4ceebd450aaf9b28c752d2226ce5f74d2dbefc2a31933c73e599733a9",
+        "size": 670,
+        "tracked": false
+      },
+      "result": "Five focused VOP semantic tests pass for packed per-source modifiers, clamp ordering, divide FMA modifiers, and FP16/BF16 packing.",
+      "started_at": "2026-08-11T09:11:50+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/vop-semantics-hardening-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/vop-semantics-hardening-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5bcaec6a845e89d613ba8c33dc7a39515b8f9b749c1418f9849b5d6ddae005d8",
+        "size": 1104,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/VEGA_X86/arch/amdgpu/common/dtype/mxfp.test.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:11:50+00:00",
+      "exit_code": 0,
+      "id": "mxfp-bf16-pack",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/mxfp-bf16-pack-hardening-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b57b9b0bab1518de8a518e4d49f314e0c60245a3a868d247448095c32405b049",
+        "size": 664,
+        "tracked": false
+      },
+      "result": "The mxfp suite passes the left-aligned BF16 storage and packed-word regression.",
+      "started_at": "2026-08-11T09:11:50+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/mxfp-bf16-pack-hardening-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/mxfp-bf16-pack-hardening-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f60a0dbd5a49c579e098949da26c39d23a9d301b47f3116748d604c2b9d71d36",
+        "size": 969,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/VEGA_X86/arch/amdgpu/vega/gpu_decoder.test.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:11:50+00:00",
+      "exit_code": 0,
+      "id": "gpu-decoder",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/gpu-decoder-silu-isa-hardening-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b2a36293dea526b04a2445d175a642a9ea70544fc030507611eb7bf33ab79793",
+        "size": 675,
+        "tracked": false
+      },
+      "result": "The VEGA decoder suite passes the SiluAndMul instruction layout and operand-size regressions.",
+      "started_at": "2026-08-11T09:11:50+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/gpu-decoder-silu-isa-hardening-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/gpu-decoder-silu-isa-hardening-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b4ca549680eae10a9c879fee95b87c6e2e70e848d934adbda80b3dc5e826dfe9",
+        "size": 857,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_generic_dispatch_route_core.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:11:50+00:00",
+      "exit_code": 0,
+      "id": "route-core",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/hostgpu-route-core-hardening-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "16a543acf307cde2f517894f1465c85bfcc04cde7a935ff81509ec0519cd8107",
+        "size": 699,
+        "tracked": false
+      },
+      "result": "The generic route core accepts only the exact SiluAndMul descriptor/shape contract and rejects overflow-producing finite BF16 inputs.",
+      "started_at": "2026-08-11T09:11:50+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/hostgpu-route-core-hardening-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/hostgpu-route-core-hardening-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "df77d72c02d5401dfdebfd9e5396332df37455eefde67a22dbf73dfea54928ae",
+        "size": 762,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_triton_code_object_core.opt",
+        "artifacts/evidence/CP-0030/runtime-triton-cache-final-fresh/6GVBF5AR4QVF3OSZPXCPHX63PE62RBYD2GEAFUYVKJ4IPLN3PZUA/silu_and_mul_kernel.hsaco"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:11:50+00:00",
+      "exit_code": 0,
+      "id": "code-object-core",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/hostgpu-triton-code-object-core-hardening-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c00bc3f3acfc7657654cb5812af292819de8199313f03115d4fb2e1772e9c554",
+        "size": 867,
+        "tracked": false
+      },
+      "result": "The code-object core accepts the exact canonical SiluAndMul image and rejects non-matching identities.",
+      "started_at": "2026-08-11T09:11:50+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/hostgpu-triton-code-object-core-hardening-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/hostgpu-triton-code-object-core-hardening-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "cab0313621dda653da241a70fa8ec3ab1f4995ac0fdd524b90de95c953b71946",
+        "size": 111,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "projects/gem5/build/VEGA_X86/dev/amdgpu/host_gpu_code_object_state.test.opt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:11:50+00:00",
+      "exit_code": 0,
+      "id": "code-object-state",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/vega-code-object-state-hardening-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4a00f8d4be3b87410016aaf0c86432e8df9ac89ae40595741fff20f2b8d6817f",
+        "size": 689,
+        "tracked": false
+      },
+      "result": "The VEGA code-object state suite passes exact image commit and route admission.",
+      "started_at": "2026-08-11T09:11:50+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/vega-code-object-state-hardening-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/vega-code-object-state-hardening-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "b4f3c814c665dc47fdd032203688e9547f30d96fb47c0076f1313e667619f834",
+        "size": 2782,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/test",
+        "!",
+        "-e",
+        "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/runtime-triton-cache-checkpoint-v3-fresh"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:16:03+00:00",
+      "exit_code": 0,
+      "id": "silu-cache-prerun",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/runtime-triton-cache-checkpoint-v3-prerun.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9f2a32eba29e6e7ba71f18623507791d8d59d7b051f8c72bb8bf34d5947a7f05",
+        "size": 752,
+        "tracked": false
+      },
+      "result": "The accepted SiluAndMul runtime cache did not exist before the fresh compile/run.",
+      "started_at": "2026-08-11T09:16:03+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/runtime-triton-cache-checkpoint-v3-prerun.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/runtime-triton-cache-checkpoint-v3-prerun.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/timeout",
+        "--signal=TERM",
+        "--kill-after=10s",
+        "600",
+        "/usr/bin/env",
+        "-i",
+        "HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/home",
+        "TMPDIR=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/tmp",
+        "XDG_CACHE_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/cache",
+        "XDG_CONFIG_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/config",
+        "XDG_DATA_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/data",
+        "SOURCE_DATE_EPOCH=0",
+        "PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/venv/bin:/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/bin:/usr/bin:/bin",
+        "LD_LIBRARY_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/lib:/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/lib64",
+        "ROCM_SIM_ROOT=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+        "ROCM_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+        "HIP_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+        "HSA_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+        "CMAKE_PREFIX_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+        "LLVM_SYSPATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b648cab83c83967ff26b8fde11acdc6",
+        "TRITON_DEFAULT_BACKEND=gemsim_amd",
+        "TRITON_OFFLINE_BUILD=1",
+        "TRITON_CACHE_DIR=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/runtime-triton-cache-checkpoint-v3-fresh",
+        "PYTHONNOUSERSITE=1",
+        "MAX_JOBS=24",
+        "CCACHE_DIR=/home/zhaosiying/.cache/amdgpu-sim/ccache",
+        "CCACHE_COMPILERCHECK=content",
+        "CCACHE_BASEDIR=/home/zhaosiying/amdgpu-sim",
+        "CCACHE_MAXSIZE=50G",
+        "CC=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang",
+        "CXX=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang++",
+        "AR=/usr/bin/llvm-ar-21",
+        "RANLIB=/usr/bin/llvm-ranlib-21",
+        "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/venv/bin/python",
+        "-I",
+        "/home/zhaosiying/amdgpu-sim/examples/triton/silu_and_mul_correctness.py"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:16:45+00:00",
+      "exit_code": 0,
+      "id": "silu-fresh",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/normal-silu-runtime-checkpoint-v3-fresh.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3bb48e67804b4058f146dcad69e057d15e7197e9e87542e976d65d2cf9a9fa5f",
+        "size": 4369,
+        "tracked": false
+      },
+      "result": "A clean-environment normal Python launch passes BF16 decode and masked-prefill SiluAndMul with zero mismatches, nonfinite values, and fallback.",
+      "started_at": "2026-08-11T09:16:43+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/normal-silu-runtime-checkpoint-v3-fresh.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/normal-silu-runtime-checkpoint-v3-fresh.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a2ebf30b17900e841a490067e87d3d4aa9f577bb64388c60b79ac96dca5dd9d6",
+        "size": 915,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/python3",
+        "artifacts/evidence/CP-0030/validate_dual_triton_trace.py",
+        "silu",
+        "artifacts/evidence/CP-0030/normal-silu-checkpoint-v3-fresh-run",
+        "artifacts/evidence/CP-0030/tests/normal-silu-runtime-checkpoint-v3-fresh.stdout"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:24:18+00:00",
+      "exit_code": 0,
+      "id": "silu-fresh-trace",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/normal-silu-checkpoint-v3-fresh-trace-validation.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "25a3daa9a1ee3611b5d92d42b48675641b11578e3e023138487a16ce61ca5eec",
+        "size": 882,
+        "tracked": false
+      },
+      "result": "The fresh six-event simulator trace proves exact PC/count coverage, first-launch reuse durability, final D2H durability, unmap, and cleanup.",
+      "started_at": "2026-08-11T09:24:18+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/normal-silu-checkpoint-v3-fresh-trace-validation.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/normal-silu-checkpoint-v3-fresh-trace-validation.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "568a4b4ff81908090b3cb99b99301415502d1a573c5e373cde28a50db43bef7c",
+        "size": 574,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/timeout",
+        "--signal=TERM",
+        "--kill-after=10s",
+        "600",
+        "/usr/bin/env",
+        "-i",
+        "HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/home",
+        "TMPDIR=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/tmp",
+        "XDG_CACHE_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/cache",
+        "XDG_CONFIG_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/config",
+        "XDG_DATA_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/data",
+        "SOURCE_DATE_EPOCH=0",
+        "PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/venv/bin:/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/bin:/usr/bin:/bin",
+        "LD_LIBRARY_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/lib:/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/lib64",
+        "ROCM_SIM_ROOT=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+        "ROCM_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+        "HIP_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+        "HSA_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+        "CMAKE_PREFIX_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+        "LLVM_SYSPATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b648cab83c83967ff26b8fde11acdc6",
+        "TRITON_DEFAULT_BACKEND=gemsim_amd",
+        "TRITON_OFFLINE_BUILD=1",
+        "TRITON_CACHE_DIR=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/runtime-triton-cache-checkpoint-v3-fresh",
+        "PYTHONNOUSERSITE=1",
+        "MAX_JOBS=24",
+        "CCACHE_DIR=/home/zhaosiying/.cache/amdgpu-sim/ccache",
+        "CCACHE_COMPILERCHECK=content",
+        "CCACHE_BASEDIR=/home/zhaosiying/amdgpu-sim",
+        "CCACHE_MAXSIZE=50G",
+        "CC=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang",
+        "CXX=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang++",
+        "AR=/usr/bin/llvm-ar-21",
+        "RANLIB=/usr/bin/llvm-ranlib-21",
+        "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/venv/bin/python",
+        "-I",
+        "/home/zhaosiying/amdgpu-sim/examples/triton/silu_and_mul_correctness.py"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:16:55+00:00",
+      "exit_code": 0,
+      "id": "silu-repeat",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/normal-silu-runtime-checkpoint-v3-repeat.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "14fde291f0556c27551f8e4430ccddd92edc27876ef8d0a24ca78939fc362e4e",
+        "size": 4371,
+        "tracked": false
+      },
+      "result": "The retained cache repeat reproduces the two exact SiluAndMul launch results with zero mismatch and fallback.",
+      "started_at": "2026-08-11T09:16:53+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/normal-silu-runtime-checkpoint-v3-repeat.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/normal-silu-runtime-checkpoint-v3-repeat.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a2ebf30b17900e841a490067e87d3d4aa9f577bb64388c60b79ac96dca5dd9d6",
+        "size": 915,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/python3",
+        "artifacts/evidence/CP-0030/validate_dual_triton_trace.py",
+        "silu",
+        "artifacts/evidence/CP-0030/normal-silu-checkpoint-v3-repeat-run",
+        "artifacts/evidence/CP-0030/tests/normal-silu-runtime-checkpoint-v3-repeat.stdout"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:24:18+00:00",
+      "exit_code": 0,
+      "id": "silu-repeat-trace",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/normal-silu-checkpoint-v3-repeat-trace-validation.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1d1ccdf137c12e2327da25ffb0c459c7e62dd3eb79378602e4da9bd966d810e7",
+        "size": 886,
+        "tracked": false
+      },
+      "result": "The repeat six-event trace independently passes the exact lifecycle and counter validator.",
+      "started_at": "2026-08-11T09:24:18+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/normal-silu-checkpoint-v3-repeat-trace-validation.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/normal-silu-checkpoint-v3-repeat-trace-validation.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "568a4b4ff81908090b3cb99b99301415502d1a573c5e373cde28a50db43bef7c",
+        "size": 574,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/test",
+        "!",
+        "-e",
+        "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-triton-vecadd-final-cache"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:17:43+00:00",
+      "exit_code": 0,
+      "id": "vecadd-cache-prerun",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-triton-vecadd-final-cache-prerun.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "29fbbcf2ec5b91b25f3a21de0a3679ca337a8b48e4f3a1b6316f7137205078cd",
+        "size": 752,
+        "tracked": false
+      },
+      "result": "The CP-0029 Triton vecadd regression used an absent fresh cache.",
+      "started_at": "2026-08-11T09:17:43+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-triton-vecadd-final-cache-prerun.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-triton-vecadd-final-cache-prerun.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/timeout",
+        "--signal=TERM",
+        "--kill-after=10s",
+        "600",
+        "/usr/bin/env",
+        "-i",
+        "HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/home",
+        "TMPDIR=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/tmp",
+        "XDG_CACHE_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/cache",
+        "XDG_CONFIG_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/config",
+        "XDG_DATA_HOME=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/data",
+        "SOURCE_DATE_EPOCH=0",
+        "PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/venv/bin:/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/bin:/usr/bin:/bin",
+        "LD_LIBRARY_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/lib:/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/lib64",
+        "ROCM_SIM_ROOT=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+        "ROCM_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+        "HIP_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+        "HSA_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+        "CMAKE_PREFIX_PATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b648cab83c83967ff26b8fde11acdc6",
+        "LLVM_SYSPATH=/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b648cab83c83967ff26b8fde11acdc6",
+        "TRITON_DEFAULT_BACKEND=gemsim_amd",
+        "TRITON_OFFLINE_BUILD=1",
+        "TRITON_CACHE_DIR=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-triton-vecadd-final-cache",
+        "PYTHONNOUSERSITE=1",
+        "MAX_JOBS=24",
+        "CCACHE_DIR=/home/zhaosiying/.cache/amdgpu-sim/ccache",
+        "CCACHE_COMPILERCHECK=content",
+        "CCACHE_BASEDIR=/home/zhaosiying/amdgpu-sim",
+        "CCACHE_MAXSIZE=50G",
+        "CC=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang",
+        "CXX=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/gem5-build/ccache-clang++",
+        "AR=/usr/bin/llvm-ar-21",
+        "RANLIB=/usr/bin/llvm-ranlib-21",
+        "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/venv/bin/python",
+        "-I",
+        "/home/zhaosiying/amdgpu-sim/examples/triton/vecadd_correctness.py"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:18:03+00:00",
+      "exit_code": 0,
+      "id": "vecadd-regression",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-triton-vecadd-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1a162c4ddca2a06a79f813c0594a1b9c3b1711074ae560cd9b0684977374669e",
+        "size": 4331,
+        "tracked": false
+      },
+      "result": "Two normal Python 98432-element float32 vecadd launches remain bit exact with zero fallback.",
+      "started_at": "2026-08-11T09:18:00+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-triton-vecadd-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-triton-vecadd-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "651424713746a52dd3ee087912738ba5ef7b2365664bf7955fe457cb9af8c618",
+        "size": 511,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/python3",
+        "artifacts/evidence/CP-0030/validate_dual_triton_trace.py",
+        "vecadd",
+        "artifacts/evidence/CP-0030/regression-triton-vecadd-final-run",
+        "artifacts/evidence/CP-0030/tests/regression-triton-vecadd-final.stdout"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:24:18+00:00",
+      "exit_code": 0,
+      "id": "vecadd-trace",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-triton-vecadd-trace-validation-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "22a4b4946bed3168daa4b91b3bbe83e559f593d6e4a2762c54e3225155df9210",
+        "size": 872,
+        "tracked": false
+      },
+      "result": "The vecadd six-event trace passes exact execution, reuse-D2H, final-D2H, unmap, and cleanup checks.",
+      "started_at": "2026-08-11T09:24:18+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-triton-vecadd-trace-validation-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-triton-vecadd-trace-validation-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "4b6f55b50b5f17048256f353f7e1762719fabe882dc8913a8b9c66e812250505",
+        "size": 576,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/timeout",
+        "--signal=TERM",
+        "--kill-after=10s",
+        "600",
+        "/usr/bin/env",
+        "-i",
+        "HOME=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-opencl/work/home",
+        "TMPDIR=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-opencl/work/tmp",
+        "XDG_CACHE_HOME=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-opencl/work/cache",
+        "XDG_CONFIG_HOME=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-opencl/work/config",
+        "XDG_DATA_HOME=/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-opencl/work/data",
+        "LC_ALL=C",
+        "PATH=/usr/bin:/bin",
+        "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/bin/opencl-vecadd",
+        "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb/share/self-amdgpu-runtime/opencl/vecadd.cl"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:18:19+00:00",
+      "exit_code": 0,
+      "id": "opencl-regression",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-opencl-installed-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "a711afdacbee194870dfb8b982370156ad67e1c92266319892214a24316e25d1",
+        "size": 1651,
+        "tracked": false
+      },
+      "result": "The CP-0027 installed OpenCL source-compile path remains correct through the final gem5 binary with zero fallback.",
+      "started_at": "2026-08-11T09:18:17+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-opencl-installed-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-opencl-installed-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "eef144e589d3ddd650244f6ed9050b398130c1cd42ab5bb7518f758e2482c217",
+        "size": 293,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/python3",
+        "artifacts/evidence/CP-0027/validate_opencl_trace.py",
+        "artifacts/evidence/CP-0030/regression-opencl-installed-final-run/dispatch-trace.jsonl",
+        "artifacts/evidence/CP-0030/regression-opencl-installed-final-run/gem5.log",
+        "artifacts/evidence/CP-0030/regression-opencl-installed-final-run/m5out/stats.txt",
+        "artifacts/evidence/CP-0030/tests/regression-opencl-installed-final.stdout"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:22:27+00:00",
+      "exit_code": 0,
+      "id": "opencl-trace",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-opencl-trace-validation-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "ff5d2e475c0685209856717af30bfd99aab070154a86446103388681a245af86",
+        "size": 1035,
+        "tracked": false
+      },
+      "result": "The installed OpenCL trace passes exact execution and cleanup validation.",
+      "started_at": "2026-08-11T09:22:27+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-opencl-trace-validation-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-opencl-trace-validation-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "652fafbc237e98c416daa8e7ec1b888519bd7cef6cc487d1eb313ec4742aead6",
+        "size": 661,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/timeout",
+        "--signal=TERM",
+        "--kill-after=10s",
+        "180",
+        "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/run_cp26_regression.sh",
+        "positive",
+        "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-cp26-positive-final"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:21:05+00:00",
+      "exit_code": 0,
+      "id": "cp26-positive",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-cp26-positive-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "eabb77348438beba240c4afd14d0fa40f51556e8f0020a6215ebd81a367348a1",
+        "size": 863,
+        "tracked": false
+      },
+      "result": "The CP-0026 locked gpuReadWrite positive lifecycle exits zero on the final gem5 binary.",
+      "started_at": "2026-08-11T09:21:04+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-cp26-positive-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-cp26-positive-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "37abdebc3c6dd665fdeaea5a9f936abcaea0ca1b1dcaa2fe9507cf36a5174566",
+        "size": 117,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/python3",
+        "artifacts/evidence/CP-0027/validate_cp26_regression.py",
+        "positive",
+        "artifacts/evidence/CP-0030/regression-cp26-positive-final/dispatch-trace.jsonl",
+        "artifacts/evidence/CP-0030/regression-cp26-positive-final/endpoint.stdout",
+        "artifacts/evidence/CP-0030/regression-cp26-positive-final/gem5.stdout",
+        "artifacts/evidence/CP-0030/regression-cp26-positive-final/gem5.stderr",
+        "artifacts/evidence/CP-0030/regression-cp26-positive-final/m5out/stats.txt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:21:34+00:00",
+      "exit_code": 0,
+      "id": "cp26-positive-trace",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-cp26-positive-validation-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0387df329d93f551fd1b214147417263bd930dcf397f0d0d1c9901225b1fa6f4",
+        "size": 1115,
+        "tracked": false
+      },
+      "result": "The CP-0026 positive trace retains exact workgroup/wave/instruction/read/write/store and durable type-20 evidence.",
+      "started_at": "2026-08-11T09:21:34+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-cp26-positive-validation-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-cp26-positive-validation-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "58f67d17d1184d587104349a68250e20bcbfcaa5116e62f5c07d7312eae9cf39",
+        "size": 566,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/timeout",
+        "--signal=TERM",
+        "--kill-after=10s",
+        "180",
+        "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/run_cp26_regression.sh",
+        "disconnect",
+        "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0030/regression-cp26-disconnect-final"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:21:17+00:00",
+      "exit_code": 0,
+      "id": "cp26-disconnect",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-cp26-disconnect-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "aeb29f2f64fcecd3ea66e3f62392cc1bcaf52843c2e85a4ce6d855cc909fa066",
+        "size": 871,
+        "tracked": false
+      },
+      "result": "The CP-0026 disconnected-owner path exits zero on the final gem5 binary.",
+      "started_at": "2026-08-11T09:21:16+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-cp26-disconnect-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-cp26-disconnect-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "85ce3f876c4bba14f8440749d306186175ce717832c552eb3043473483b64b10",
+        "size": 119,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/python3",
+        "artifacts/evidence/CP-0027/validate_cp26_regression.py",
+        "disconnect",
+        "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/dispatch-trace.jsonl",
+        "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/endpoint.stdout",
+        "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/gem5.stdout",
+        "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/gem5.stderr",
+        "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/m5out/stats.txt"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:21:34+00:00",
+      "exit_code": 0,
+      "id": "cp26-disconnect-trace",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-cp26-disconnect-validation-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "6fb959f54a5ba4e296bdbdef4a8fd536994cfcaa5acae1b28857dbc425ca4d5f",
+        "size": 1131,
+        "tracked": false
+      },
+      "result": "The disconnected-owner trace proves quarantine cleanup without type-20 leakage.",
+      "started_at": "2026-08-11T09:21:34+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-cp26-disconnect-validation-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/regression-cp26-disconnect-validation-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "98c262ae1795f0d341dc6995ddc752c33fe689f853a3d21b58bcc3bacdc64b47",
+        "size": 505,
+        "tracked": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_*.py",
+        "-v"
+      ],
+      "cwd": ".",
+      "ended_at": "2026-08-11T09:29:57+00:00",
+      "exit_code": 0,
+      "id": "root-python-suite",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0030/tests/root-python-suite-final.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "88342ad54558bfa0e3cfd941afe635d456d7667defde83a2314e2cf66e3781d3",
+        "size": 704,
+        "tracked": false
+      },
+      "result": "All 238 root Python policy, protocol, transaction, manifest, and workspace tests pass.",
+      "started_at": "2026-08-11T09:29:54+00:00",
+      "stderr": {
+        "path": "artifacts/evidence/CP-0030/tests/root-python-suite-final.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "31a4a36c79304a021ee6a0466f85ebe338ddbb12f0f4f2179c3545da1b6d80e6",
+        "size": 43568,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0030/tests/root-python-suite-final.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "35b1a747b15631480e6cb9d46c70ce56fb50a5d26b7b0c0f9ec50a41ff4784cb",
+        "size": 68,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "ended_at": "2026-08-11T09:32:36+00:00",
+  "environment_fingerprint": {
+    "build_policy": "persistent ccache + clang + lld + -j24; reuse compatible build/cache trees",
+    "gem5_binary_sha256": "1384eacc573ff75904a7cec872e7b2a56119fb6bf4b7eb4afbc5590429b36a23",
+    "gem5_candidate_tree": "74d5b144a810dc86d298b262b99fdb18fc9801e9",
+    "gem5_initial_head": "82eab7b4888c2b414031ceaaa5fe142263cd3d90",
+    "gem5_initial_tree": "27b224d5a4dcee75366b013785723f395a937855",
+    "gem5_staged_diff_sha256": "387df26bc792aa137b6f0b9b7f88ebfa5fec7054390c07be4d9d30c6a7118b40",
+    "inherited_schema8_prefix": "env/rocm/gfx950-v8-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-f9ef490668eb",
+    "silu_hsaco_sha256": "2db0d67ff6903a737f3a4d40cf67e2a2cbbacc8b605863d31b7c90386ccb357e",
+    "silu_hsaco_size": 6672,
+    "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4"
+  },
+  "excluded_nonpassing_records": [
+    {
+      "classification": "NON-PASSING_WRONG_CLEAN_ENV_BACKEND_SELECTION",
+      "exit_code": 1,
+      "path": "artifacts/evidence/CP-0030/tests/normal-silu-runtime-checkpoint-fresh.json"
+    },
+    {
+      "classification": "NON-PASSING_REUSE_TRACE_EMITTED_AFTER_STATE_RESET",
+      "exit_code": 1,
+      "path": "artifacts/evidence/CP-0030/tests/normal-silu-runtime-checkpoint-v2-fresh.json"
+    },
+    {
+      "classification": "NON-PASSING_PRE_PACKED_INLINE_CONSTANT_FIX",
+      "exit_code": 1,
+      "path": "artifacts/evidence/CP-0030/tests/normal-silu-runtime-bf16-isa-warm.json"
+    },
+    {
+      "classification": "NON-PASSING_MISSING_REQUIRED_IMAGE_ARGUMENT",
+      "exit_code": 2,
+      "path": "artifacts/evidence/CP-0030/tests/hostgpu-triton-code-object-core-final.json"
+    }
+  ],
+  "exit_code": 0,
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0030/products/gem5.opt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1384eacc573ff75904a7cec872e7b2a56119fb6bf4b7eb4afbc5590429b36a23",
+      "size": 463994608,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/runtime-triton-cache-checkpoint-v3-fresh/6GVBF5AR4QVF3OSZPXCPHX63PE62RBYD2GEAFUYVKJ4IPLN3PZUA/silu_and_mul_kernel.hsaco",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "2db0d67ff6903a737f3a4d40cf67e2a2cbbacc8b605863d31b7c90386ccb357e",
+      "size": 6672,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/gem5-build/scons-semantic-hardening-j24.time",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "55ef3b4e1ce888dcbedccb53d6620ee79e9cda45c490f64b0be4f430f9e6f89d",
+      "size": 1534,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/gem5-build/scons-reuse-trace-order-j24.time",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "20383d609b97313a7fdcc617159bc2dd84c264d9229ce75cf7fecd4c89f628b6",
+      "size": 1302,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/gem5-build/ccache-clang",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "9eeddec46ffb4423d6ad4c34670f633deaa9c3e0b938aa7a1a530f7570f9a7d8",
+      "size": 51,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/gem5-build/ccache-clang++",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "dc8caf41004b2e6d6d4530bdf848c4eef5148bc0bd11e0cd45c05000cb37394f",
+      "size": 53,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/validate_dual_triton_trace.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "987f9a00911ebed708056761b401852ac9674a46e93de6460577935fbe6095a7",
+      "size": 8181,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/run_cp26_regression.sh",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "39b2632beaca588218f8af77d66c300a9f6bd2ac21fe06f407737aff4638b729",
+      "size": 3165,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/normal-silu-checkpoint-v3-fresh-run/dispatch-trace.jsonl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "aa419030ab785eacbe14b7160fccf10112571d6d581e50bb5e8cab0feaef357f",
+      "size": 12257,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/normal-silu-checkpoint-v3-fresh-run/gem5.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "aacdf50809313e735543d77e62137e68454f319d9269fa2290442c94595f4a41",
+      "size": 2488,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/normal-silu-checkpoint-v3-repeat-run/dispatch-trace.jsonl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "91ab9fc69bfacc3818293019bdde6442e2f2d8f8e31bac666f18b749a61f237f",
+      "size": 12263,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/normal-silu-checkpoint-v3-repeat-run/gem5.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "57ad5d168e0e00cbeaf902f5ab3e665803f6c8ac4144ce59d73fdc7ba4652a3e",
+      "size": 2488,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/regression-triton-vecadd-final-run/dispatch-trace.jsonl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "847c3531b327eec69c74f835ec4a877f16eb0b63c399e83a6caf923af800fe7b",
+      "size": 11011,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/regression-triton-vecadd-final-run/gem5.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b54e333847a76ed862b511cab021bb6d78134c01362452f5ad0fa955ffbbf401",
+      "size": 2488,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/regression-opencl-installed-final-run/dispatch-trace.jsonl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "5dd6dbe00f1fe452b5ce659424ec523b4df9fab062fc2c843c35c00792e9fc82",
+      "size": 5425,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/regression-opencl-installed-final-run/gem5.log",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6dc73945c847536e7e5a8b27cf3ca2174b7e3a2d0e074537a2cb36ca0b546d10",
+      "size": 2486,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/regression-cp26-positive-final/dispatch-trace.jsonl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "189af4a3249dab8702fd328c9e6208093c96e81c6fc05615d891de52e5d027e9",
+      "size": 5424,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/regression-cp26-positive-final/endpoint.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "21ad57edf35325039289785915a93d42b42e0ae3dcf6e7e088b07f1493a0bae6",
+      "size": 1571,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/regression-cp26-positive-final/endpoint.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/regression-cp26-positive-final/gem5.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "7fcb806f5fc41305fca27bc7378e874e34d11f649cae4b6a4a2e1477eb258014",
+      "size": 1328,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/regression-cp26-positive-final/gem5.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b8c773bcbde0ee54ddfb4820261259ef91231eb01f0f9b6342e5a4ca8db5d904",
+      "size": 1387,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/dispatch-trace.jsonl",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e718b9406931827107493a6dfe25c7c70ed2d4f2dac9045cb206a8a1b2d22664",
+      "size": 1817,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/endpoint.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d1f908c578afbdea994bfb78bcfd8fae3ebd82deff4589837f670e10ecd0f904",
+      "size": 1127,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/endpoint.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/gem5.stdout",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a28b36d07628f43d294970ac37c344f6d58f6f2881c33482b730591e11df747d",
+      "size": 1336,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0030/regression-cp26-disconnect-final/gem5.stderr",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "ebde55d4d019206b714a4e8951fe4853f11002e160c5527e11ae65856e7ba89c",
+      "size": 1389,
+      "tracked": false
+    }
+  ],
+  "id": "EV-0068",
+  "includes": {},
+  "limitations": [
+    "This is precommit evidence over the staged gem5 candidate tree. The CP-0030 root checkpoint must later bind the clean child commit carrying this manifest SHA in its trailer.",
+    "The accepted schema-8 compiler/runtime/plugin prefix is inherited from CP-0029, but its live manifest pins the older CP-0029 gem5 binary. CP-0030 classifies the final gem5 binary as an explicit superseding execution input and does not claim that CP-0029 verify-only still passes.",
+    "SiluAndMul is only the elementwise activation/multiply subgate of mlp.gate_up_silu_down. Gate/up projection GEMM, down projection GEMM, a complete MLP contract, and all other 14 model contracts remain unaccepted.",
+    "The accepted shapes are exactly BF16 decode [1,7168] to [1,3584] and masked prefill [7,7168] to [7,3584], block size 1024, with finite-input and finite-output admission. Other shapes, dtypes, strides, offsets, aliases, and mutation forms remain unproven.",
+    "The VOP fixes are proven for the canonical kernel and focused helper cases. This is not a claim of complete VOP3/VOP3P mode, denormal, modifier, or IEEE conformance across all encodings.",
+    "The final incremental SCons stdout/stderr streams were not retained separately; exact GNU time metadata, source tree, binary identity, focused tests, and end-to-end execution results are retained.",
+    "No official PyTorch/vLLM layer execution, full Qwen layer/model, stable multi-token decode, tensor parallelism, CCL, profiling, or performance result is accepted."
+  ],
+  "redactions": [],
+  "result": {
+    "accepted_runs": 2,
+    "bounded_model_subgate_accepted": true,
+    "complete_qwen_contract_count": 15,
+    "complete_qwen_contracts_accepted": 0,
+    "complete_qwen_layer_accepted": false,
+    "cp26_regression": true,
+    "cp27_opencl_regression": true,
+    "cp29_triton_vecadd_regression": true,
+    "decode_shape": [
+      [
+        1,
+        7168
+      ],
+      [
+        1,
+        3584
+      ]
+    ],
+    "dtype": "bf16",
+    "fallback_count": 0,
+    "final_launch_d2h_unmap_cleanup_durable": true,
+    "first_launch_reuse_d2h_durable": true,
+    "full_model_accepted": false,
+    "launches_per_run": 2,
+    "masked_prefill_shape": [
+      [
+        7,
+        7168
+      ],
+      [
+        7,
+        3584
+      ]
+    ],
+    "mismatch_count": 0,
+    "nonfinite_count": 0,
+    "operator": "SiluAndMul",
+    "pc_coverage_exact": true,
+    "root_python_tests_passed": 238
+  },
+  "schema": "amdgpu-sim.evidence.v1",
+  "started_at": "2026-08-11T09:11:50+00:00",
+  "type": "cp30-precommit-bf16-silu-and-mul-execution"
+}

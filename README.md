@@ -299,8 +299,12 @@ The CP-0028 v6/v7 final-prefix attempts are retained as NON-PASSING evidence:
 v6 was stopped after detecting a baked `/opt/rocm` default, and v7 failed a
 deterministic queue mock test race. CP-0029 fixes that test-only race and accepts
 a fresh schema-8 repository-local prefix after independent verify-only, OpenCL,
-Triton, provenance, pollution, and active-isolation gates. The accepted Triton
-boundary remains the exact contiguous float32 vecadd path. CP-0030 begins the
-minimum BF16 SiluAndMul model-operator gate.
+Triton, provenance, pollution, and active-isolation gates. CP-0030 then accepts
+the first bounded model-required subgate: the exact BF16 SiluAndMul image runs
+decode `[1,7168] -> [1,3584]` and masked-prefill `[7,7168] -> [7,3584]` twice
+through normal Python/Triton with finite output, exact traces, zero mismatch,
+and zero fallback. This is not a complete MLP contract: the gate/up and down
+projection GEMMs, all 15 complete model contracts, a complete layer, and the
+model remain unaccepted. P5-OPS-01 expands the operator matrix next.
 
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

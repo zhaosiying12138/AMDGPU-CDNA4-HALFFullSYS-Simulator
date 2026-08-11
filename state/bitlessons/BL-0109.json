@@ -1,0 +1,30 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0109",
+  "checkpoint_id": "CP-0030",
+  "status": "active",
+  "confidence": "high",
+  "supersedes": [],
+  "evidence_ids": [
+    "EV-0068"
+  ],
+  "applies_to": [
+    "projects/gem5/src/arch/amdgpu/common/dtype/mxfp_types.hh",
+    "projects/gem5/src/arch/amdgpu/vega/insts/instructions.hh",
+    "projects/gem5/src/arch/amdgpu/vega/insts/vop3.cc",
+    "projects/gem5/src/arch/amdgpu/vega/insts/vop3p.cc",
+    "projects/gem5/src/arch/amdgpu/vega/insts/vop_semantics.hh",
+    "projects/gem5/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc",
+    "examples/triton/silu_and_mul_correctness.py"
+  ],
+  "question_or_symptom": "Why did an exact, descriptor-valid gfx950 SiluAndMul image execute to completion but fail its BF16 differential oracle?",
+  "observation": "Decoder and route admission proved the instruction encodings and image identity, but not their numerical effects. Gem5 stores BF16 values left-aligned in a 32-bit mxfp container; packing the raw storage without shifting lost one half and misplaced the other. Packed F32 inline constants also require broadcast of the exact 32-bit float bits, and V_DIV_FMAS_F32 previously used F64 operands without committing its destination. These defects survived code-object and decode tests but were exposed by the first end-to-end BF16 oracle.",
+  "conclusion": "Exact image identity, metadata, decoding, PC coverage, and complete memory coverage are necessary but insufficient operator evidence. Numerical acceptance requires executable instruction semantics and an application-visible differential oracle over the real dtype and layout.",
+  "decision": "Keep exact image/descriptor/PC admission, add pure execute-semantic tests for packed modifiers, clamp ordering, divide FMA, and FP16/BF16 packing, reject finite inputs whose rounded oracle is nonfinite, and require fresh plus repeat normal-Python results with zero mismatch, nonfinite values, and fallback. Do not generalize the bounded canonical-kernel result into complete VOP conformance.",
+  "invalidated_assumptions": [
+    "A decoder test plus exact code-object admission proves the arithmetic semantics needed by the kernel.",
+    "The low 16 bits of the mxbfloat16 data member contain the BF16 payload.",
+    "Correct load/store coverage means the returned BF16 values are numerically correct.",
+    "A finite BF16 input set necessarily produces a finite BF16 SiluAndMul oracle."
+  ]
+}

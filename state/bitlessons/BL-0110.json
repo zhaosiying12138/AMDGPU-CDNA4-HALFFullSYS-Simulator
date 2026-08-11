@@ -1,0 +1,25 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0110",
+  "checkpoint_id": "CP-0030",
+  "status": "active",
+  "confidence": "high",
+  "supersedes": [],
+  "evidence_ids": [
+    "EV-0068"
+  ],
+  "applies_to": [
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "artifacts/evidence/CP-0030/validate_dual_triton_trace.py",
+    "artifacts/evidence/CP-0030/normal-silu-checkpoint-v3-fresh-run/dispatch-trace.jsonl"
+  ],
+  "question_or_symptom": "How can a reusable two-launch session return correct first-launch data while its retained trace cannot prove first-launch D2H durability?",
+  "observation": "The reusable bridge originally reset the completed execution state when the next SUBMIT arrived. The first implementation of a reuse-complete trace wrote the record after that reset, so it either observed cleared state or lost the prior launch evidence. The application oracle could still see correct data, but the daemon trace had no durable boundary tying the first launch to its D2H ACK before reuse.",
+  "conclusion": "A successful next launch does not retroactively prove the previous launch's retained completion state. Lifecycle evidence must be emitted while the completed state and its D2H acknowledgement are still authoritative.",
+  "decision": "Before resetExecutionForReuse, persist a generic_execution_reuse_complete record containing the prior request, exact counters, output CRC, required D2H mask, and durable D2H state. Validate a six-event dual-launch sequence whose first launch ends in reuse_complete and whose second ends in session_complete with D2H, unmap, and cleanup durability.",
+  "invalidated_assumptions": [
+    "The next SUBMIT implicitly proves that the previous launch's D2H completion was durably recorded.",
+    "A reuse-complete event may be generated after clearing the completed session without changing its evidentiary meaning.",
+    "The application tensor oracle alone proves every daemon-side lifecycle durability boundary."
+  ]
+}
