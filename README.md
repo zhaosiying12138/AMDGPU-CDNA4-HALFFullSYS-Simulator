@@ -34,11 +34,12 @@ capture: revision `2fc06364715b967f1860aea9cf38778875588b17`, one
 `04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696`.
 
 The product order is explicit in plan revision 2: first a normal OpenCL
-executable that compiles `.cl` and transparently runs through gem5, then the
-user's unmodified Triton `tutorial/01-vecadd.py` request (the pinned checkout's
-`python/tutorials/01-vector-add.py`) through the normal Python driver/runtime,
+executable that compiles `.cl` and transparently runs through gem5, then an
+ordinary Triton Python correctness request through the normal driver/runtime,
 then every model-required operator, one-device stable multi-token inference,
-and finally CCL-backed multi-TP stable inference. Profiling and simulator
+and finally CCL-backed multi-TP stable inference. The complete unmodified
+upstream tutorial file, including its benchmark sweep, is a later scale gate
+rather than a prerequisite for the model-specific operator matrix. Profiling and simulator
 optimization are scheduled only when a real operator, layer, or model run
 materially blocks that correctness path. After the model path is usable, a
 low-priority simulator-aware `rocm-smi` client will report the ON/OFF state of
@@ -134,9 +135,9 @@ The standalone gem5 target uses `BUILD_ISA=n`, `USE_X86_ISA=n`, and
 `BUILD_GPU=y`; its ELF/dependency audit and protocol/memory/queue/signal
 self-tests pass, and the existing eight legacy state regression binaries remain
 green. This is a control-plane boundary, not HSACO mapping or execution: no
-GPU pipeline, Triton E2E, hardware, timing, or performance claim is made. The
-next action is `P3-HOST-NATIVE-03`, the pinned gfx950 loader/dispatch parity
-gate between the host-native and gem5 front-ends.
+GPU pipeline, Triton E2E, hardware, timing, or performance claim is made. Its
+historical next action was `P3-HOST-NATIVE-03`, the pinned gfx950
+loader/dispatch parity gate later split across CP16-CP20.
 
 `CP-0016` is accepted at the first functional-parity sub-gate of that
 workstream. It adds a standalone `host_gpu_native_fixture_core` that reuses the
@@ -145,8 +146,8 @@ GPU-VA range access and page-lifetime leases. The gfx950 XOR fixture, negative
 access checks, and lifetime cleanup pass with `USE_X86_ISA=n`; the runtime probe
 recognizes the pinned HSACO metadata. This is not PT_LOAD mapping, dynamic
 AQL/kernarg construction, GPU pipeline execution, hardware validation, or
-Triton E2E. Triton remains 0/1, and the next action is
-`P3-HOST-NATIVE-03-A` for bounded loader/translation/AQL parity.
+Triton E2E. At that boundary Triton remained 0/1, and the historical next
+action was `P3-HOST-NATIVE-03-A` for bounded loader/translation/AQL parity.
 
 `CP-0017` is accepted at the bounded host-native PT_LOAD staging boundary.
 The no-x86 target stages the locked gfx950 `gpuReadWrite` image, checks exact
@@ -154,7 +155,8 @@ PT_LOAD tuples, copies file bytes, zero-fills BSS, binds descriptor/entry
 addresses, and preserves page leases across Busy/unmap cases.  This is a
 fixture-scoped staging gate only: no segment permissions, relocations, dynamic
 kernarg/AQL, queue submission, GPU instruction execution, or Triton E2E is
-claimed.  The next action is native translation plus dynamic AQL/kernarg parity.
+claimed. Its historical next action was native translation plus dynamic
+AQL/kernarg parity.
 
 `CP-0018` is accepted at the host-native dispatch-admission B0 boundary. The
 no-x86 target reuses the staged gfx950 image and shared host state to load the
@@ -176,12 +178,12 @@ it in order, reads the locked descriptor/MQD/kernarg/completion-signal object,
 and reuses `HSAQueueEntry` for one native CP-core admission. Here
 `aql_submitted=true` means accepted by the extracted native core only: legacy
 HSAPP and GPUCommandProcessor SimObjects are neither linked nor instantiated.
-GPUDispatcher/CU connection, host read-index update, packet retirement, signal
-decrement, instruction fetch/retirement, ISA execution, and kernel output all
-remain false. The next action is `P3-HOST-NATIVE-03-B2` for the no-x86
-GPUDispatcher/CU four-workgroup/sixteen-wave output/trace differential, followed by Triton vecadd.
-The Qwen model and static 15-contract gate remain ready, but strict AMD
-execution is still blocked and Qwen inference remains `0/1`.
+At the historical CP19 boundary, GPUDispatcher/CU connection, host read-index
+update, packet retirement, signal decrement, instruction fetch/retirement, ISA
+execution, and kernel output were all false. Its next action was
+`P3-HOST-NATIVE-03-B2`, later accepted by CP20. The Qwen model and static
+15-contract gate were ready, but strict AMD execution and Qwen inference were
+still blocked at that boundary.
 
 `CP-0020` is accepted at the bounded no-x86 B2 execution boundary. The locked
 5,528-byte `gfx950` `gpuReadWrite` image travels from the native queue/CP core
@@ -196,19 +198,19 @@ Process, Ruby, TLB, HSAPP, or GPUCommandProcessor objects; generic
 `BaseCPU`/`System` symbols retained in the monolithic ELF are not runtime
 instantiations. This is one locked functional case only: generic gfx950,
 arbitrary HSACO, timing accuracy, fences/barriers, atomics, LDS/scratch,
-GPU-TLB/Ruby/coherence, HIP/OpenCL, and performance remain unproven. Triton
-and Qwen remain `0/1`; the next action is the unmodified Triton vecadd through
-the normal launcher with simulator device selection only.
+GPU-TLB/Ruby/coherence, HIP/OpenCL, and performance remain unproven. At the
+historical CP20 boundary, Triton and Qwen remained `0/1`; its then-next action
+was the Triton vecadd launcher gate later bounded and accepted by CP28.
 
 The Qwen smoke now also supports importlib-loaded source-contract tests by
 explicitly adding the repository and `tools/` roots; this fixes test loading only
 and does not change the no-fallback execution policy.
 
-The pinned Triton/LLVM overlay currently reaches gfx950 HSACO compilation only
+At the historical CP21 boundary, the pinned Triton/LLVM overlay reached gfx950 HSACO compilation only
 (vecadd SHA-256
 `ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e`); no
-Triton request has executed in GemSim yet, so the user-facing Triton count is
-still `0/1`. CP-0021 now records that provenance boundary explicitly: the
+Triton request had executed in GemSim, so the user-facing Triton count was
+`0/1`. CP-0021 records that provenance boundary explicitly: the
 unmodified tutorial hash is
 `842430949e0ccde4fbce07606cce3ac4bac36bf21b2b12619a31b795ca4029b3`, the
 HSACO target is `amdgcn-amd-amdhsa-unknown-gfx950`, and its descriptor preload
@@ -233,8 +235,8 @@ runtime-to-gem5 result is a canonical unsupported-capability handshake followed
 by a successful baseline reconnect; bit 8 is still unadvertised and no type-18
 request is sent. A positive socket route, daemon H2D publication, normal
 logical alignment 8, SUBMIT ACK, type-20 completion, launcher, compiler/JIT,
-GPU execution, and fallback remain false. CP-0025 /
-`P5-TRITON-VECADD-04-DAEMON-LIFECYCLE` is the next unique action.
+GPU execution, and fallback remain false. Its historical next unique action was
+CP-0025 / `P5-TRITON-VECADD-04-DAEMON-LIFECYCLE`.
 
 CP-0025 accepts the bounded positive generic daemon control lifecycle. A fresh
 two-owner runtime-to-gem5 run selects capability bit 8 and all dependencies,
@@ -278,8 +280,24 @@ instructions through GPUDispatcher/CU, copies only C back, validates bit-exact
 `C=A+B`, and exits with zero CPU/NVIDIA fallback. The retained direct run is
 about 0.94 seconds wall on this checkout, so profiling is not a prerequisite
 to the next gate. This is still one exact vecadd and one execution per OpenCL
-context; multi-dispatch, general OpenCL, normal Triton Python, model operators,
-multi-token inference, TP, and CCL remain unaccepted. The next product gate is
-the normal Triton Python vecadd driver/runtime path.
+context; multi-dispatch and general OpenCL remain unaccepted.
+
+CP-0028 accepts the first normal Triton Python product path. The external
+`gemsim_amd` backend uses Triton's normal driver, JIT, and launcher to compile
+the exact 5,384-byte pure-b010 gfx950 `add_kernel` (SHA-256
+`7308427e69dea6f320178c55863291d4d615338eb295a422a5ff7a2c2b8afa95`), starts
+managed gem5 implicitly, and runs two deterministic launches in one Python
+process. The same session, queue, signal, packet VA, and allocation IDs are
+observed across launches; stable image/packet/trace identifiers infer reuse of
+the kernel source packet because the trace has no mapping ID. Both float32
+`C=A+B` results are bit-exact and fallback remains zero. This proves only
+contiguous float32 vector add at 98,432 elements with `BLOCK_SIZE=1024`.
+Broadcast, cast, reduction, softmax, norm, GEMM, RoPE, cache, GDN, attention,
+full-model, multi-token, TP, and CCL execution are not accepted.
+
+The CP-0028 v6/v7 final-prefix attempts are retained as NON-PASSING evidence:
+v6 was stopped after detecting a baked `/opt/rocm` default, and v7 failed a
+deterministic queue mock test race. CP-0029 fixes that test-only race and builds
+a fresh schema-8 repository-local prefix before operator-matrix expansion.
 
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

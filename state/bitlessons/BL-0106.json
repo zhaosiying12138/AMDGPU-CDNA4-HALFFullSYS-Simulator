@@ -1,0 +1,31 @@
+{
+  "applies_to": [
+    "examples/triton/vecadd_correctness.py",
+    "plugins/triton/gemsim_amd/backend/driver.py",
+    "plugins/triton/gemsim_amd/triton_gemsim_amd.cc",
+    "projects/self-amdgpu-runtime/src/managed_session.c",
+    "projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc",
+    "protocol/host-transport-v2.json",
+    "docs/triton-environment.md"
+  ],
+  "checkpoint_id": "CP-0028",
+  "conclusion": "Normal Triton product evidence is a cross-process proof: ordinary Python plus the external backend establishes driver, fresh compiler/JIT, launcher, loaded runtime, returned tensors, and fallback state, while the fsynced daemon trace establishes GPUDispatcher/ComputeUnit execution and lifecycle. Neither side alone proves the end-to-end result.",
+  "confidence": "high",
+  "decision": "Require an ordinary Python entry, fresh Triton compilation, exact package and loaded-DSO provenance, implicitly managed gem5, trace-authoritative simulated execution, client-authoritative returned-tensor oracles, complete cleanup, and zero CPU/NVIDIA fallback. Treat the daemon launcher/compiler/jit/triton fields as daemon-local observations, not as a contradiction of the client-side proof.",
+  "evidence_ids": [
+    "EV-0064",
+    "EV-0065"
+  ],
+  "id": "BL-0106",
+  "invalidated_assumptions": [
+    "A successful daemon trace alone proves that a normal Triton Python program compiled and launched the kernel.",
+    "Daemon-local launcher/compiler/jit/triton false fields disprove client-side Triton execution.",
+    "One returned tensor oracle without a simulator trace proves GPUDispatcher or ComputeUnit execution.",
+    "Two launches in one Python process necessarily create independent simulator sessions and device resources."
+  ],
+  "observation": "The ordinary Python correctness entry selects gemsim_amd, freshly compiles the pure-b010 5384-byte gfx950 add_kernel, loads the isolated runtime, and implicitly supervises gem5. Two 98432-element launches in one managed session reuse the observed queue, signal, packet VA, and allocation IDs while generations advance. Both returned float32 C=A+B tensors are bit-exact; the daemon records 10476 instruction starts per launch, and fallback remains zero.",
+  "question_or_symptom": "What evidence proves a normal Triton Python end-to-end launch when the client and daemon observe different parts of the path?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

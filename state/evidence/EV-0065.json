@@ -1,0 +1,1452 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0065",
+  "checkpoint_id": "CP-0028",
+  "type": "cp28-bounded-root-umbrella",
+  "claim": "EV-0065 recursively validates the accepted EV-0064 ordinary-Python Triton dual-launch result, binds the exact clean CP28 gem5 and runtime child commits plus the settled pre-metadata root candidate, and permanently classifies the schema-6 signal-2 prefix and schema-7 queue-CTest prefix as NON-PASSING. It does not accept a repository-local ROCm install or any postinstall OpenCL/Triton execution; the test-harness stabilization and a fresh schema-8 install are deferred to CP-0029. EV-0065 exit code 0 means only that classification, hashes, identities, and evidence-policy checks pass.",
+  "cwd": ".",
+  "started_at": "2026-08-11T01:21:47.855092Z",
+  "ended_at": "2026-08-11T01:21:53.535254Z",
+  "exit_code": 0,
+  "command_argv": [
+    [
+      "/usr/bin/python3",
+      "-I",
+      "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+      "--internal-check",
+      "ev0064-recursive"
+    ],
+    [
+      "/usr/bin/python3",
+      "-I",
+      "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+      "--internal-check",
+      "ev0064-reservation-resolution"
+    ],
+    [
+      "/usr/bin/python3",
+      "-I",
+      "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+      "--internal-check",
+      "child-identities"
+    ],
+    [
+      "/usr/bin/python3",
+      "-I",
+      "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+      "--internal-check",
+      "root-candidate"
+    ],
+    [
+      "/usr/bin/python3",
+      "-I",
+      "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+      "--internal-check",
+      "transaction-prepare"
+    ],
+    [
+      "/usr/bin/python3",
+      "-I",
+      "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+      "--internal-check",
+      "excluded-schema6"
+    ],
+    [
+      "/usr/bin/python3",
+      "-I",
+      "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+      "--internal-check",
+      "excluded-schema7"
+    ],
+    [
+      "/usr/bin/python3",
+      "-I",
+      "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+      "--internal-check",
+      "scope-boundary"
+    ],
+    [
+      "/usr/bin/git",
+      "diff",
+      "--check",
+      "HEAD",
+      "--"
+    ],
+    [
+      "/usr/bin/git",
+      "diff",
+      "--check",
+      "HEAD",
+      "--"
+    ],
+    [
+      "/usr/bin/git",
+      "diff",
+      "--check",
+      "HEAD",
+      "--"
+    ],
+    [
+      "/usr/bin/bash",
+      "-n",
+      "/home/zhaosiying/amdgpu-sim/scripts/setup_rocm_env.sh"
+    ]
+  ],
+  "command_results": [
+    {
+      "id": "ev0064-recursive",
+      "argv": [
+        "/usr/bin/python3",
+        "-I",
+        "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+        "--internal-check",
+        "ev0064-recursive"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-11T01:21:47.855092Z",
+      "ended_at": "2026-08-11T01:21:48.469720Z",
+      "exit_code": 0,
+      "result": "pass",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/ev0064-recursive.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "5b1fa24ffc66f80a7de2fbaf398d94042792428c9259bce4dc657d371c4c9c95",
+        "size": 749,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/ev0064-recursive.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "703604292d1d22b97ab3e35cab826de98ec37e0e163532aaf15aab92effaae19",
+        "size": 416,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/ev0064-recursive.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "ev0064-reservation-resolution",
+      "argv": [
+        "/usr/bin/python3",
+        "-I",
+        "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+        "--internal-check",
+        "ev0064-reservation-resolution"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-11T01:21:48.485992Z",
+      "ended_at": "2026-08-11T01:21:49.110768Z",
+      "exit_code": 0,
+      "result": "pass",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/ev0064-reservation-resolution.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f10d9107459c27db5f533ee41ad3d228b815ed41d0db7822006dc01f7d1efff1",
+        "size": 789,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/ev0064-reservation-resolution.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "3bbd54bafc7ada6aff8a3ebc7747fda09b4c5d2becd869a64befde084bb9f6ec",
+        "size": 1493,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/ev0064-reservation-resolution.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "child-identities",
+      "argv": [
+        "/usr/bin/python3",
+        "-I",
+        "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+        "--internal-check",
+        "child-identities"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-11T01:21:49.126258Z",
+      "ended_at": "2026-08-11T01:21:49.791937Z",
+      "exit_code": 0,
+      "result": "pass",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/child-identities.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "2cbd7f46a3cf72c6e6da9cef4b3f8b7e1f8faa62e7a1615cd613f9fc1e693ed8",
+        "size": 749,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/child-identities.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "338cf8ccc13909b632f02765fe6d4a4dd0992dbd60b313666e2ca6bf86c2aab6",
+        "size": 746,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/child-identities.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "root-candidate",
+      "argv": [
+        "/usr/bin/python3",
+        "-I",
+        "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+        "--internal-check",
+        "root-candidate"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-11T01:21:49.809265Z",
+      "ended_at": "2026-08-11T01:21:50.880320Z",
+      "exit_code": 0,
+      "result": "pass",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/root-candidate.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9cba800c28468e65139b41282dd02ad36e8ddc54209fe77e9a902edf65795b22",
+        "size": 744,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/root-candidate.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "fc6ded1dd63226f24e44b6fd876c997e5c999b49d4e2d2735ed79af8089b9397",
+        "size": 7946,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/root-candidate.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "transaction-prepare",
+      "argv": [
+        "/usr/bin/python3",
+        "-I",
+        "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+        "--internal-check",
+        "transaction-prepare"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-11T01:21:50.897268Z",
+      "ended_at": "2026-08-11T01:21:51.507926Z",
+      "exit_code": 0,
+      "result": "pass",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/transaction-prepare.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "9e21f725ba85ef6ac2429207d1f0595c0c3f1059a830145c215bcce811e5619e",
+        "size": 758,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/transaction-prepare.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "12a6c30cbb4b5fdddafde53cfa55825a8e7a42d6fdd87e8c836dde798f6d6b66",
+        "size": 454,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/transaction-prepare.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "excluded-schema6",
+      "argv": [
+        "/usr/bin/python3",
+        "-I",
+        "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+        "--internal-check",
+        "excluded-schema6"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-11T01:21:51.523272Z",
+      "ended_at": "2026-08-11T01:21:52.131227Z",
+      "exit_code": 0,
+      "result": "pass",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/excluded-schema6.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d917d166b689dc13b3d02ee0e1d817d71bbe3426b7e632b0336cd0d669d83959",
+        "size": 749,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/excluded-schema6.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "f313ca8596f3cb5b4bca11ec235cf265d9296edbbc58cd2843379d2dbe9a245c",
+        "size": 544,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/excluded-schema6.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "excluded-schema7",
+      "argv": [
+        "/usr/bin/python3",
+        "-I",
+        "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+        "--internal-check",
+        "excluded-schema7"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-11T01:21:52.147283Z",
+      "ended_at": "2026-08-11T01:21:52.755866Z",
+      "exit_code": 0,
+      "result": "pass",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/excluded-schema7.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "c2c872799eb5a718ae6c6603b3953bd78296c2425dedcf4e88b5b8b757ad4706",
+        "size": 749,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/excluded-schema7.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "283667919b1351f58051661cd3aaa0e19e9de7a80f3d02fcefd0452a0ce5a16e",
+        "size": 636,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/excluded-schema7.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "scope-boundary",
+      "argv": [
+        "/usr/bin/python3",
+        "-I",
+        "/home/zhaosiying/amdgpu-sim/artifacts/evidence/CP-0028/build_ev0065.py",
+        "--internal-check",
+        "scope-boundary"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-11T01:21:52.773225Z",
+      "ended_at": "2026-08-11T01:21:53.400426Z",
+      "exit_code": 0,
+      "result": "pass",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/scope-boundary.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b3e626751284652f25cbc1d03a94b787033b973a1ef069372113bf6d07340f",
+        "size": 743,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/scope-boundary.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "0515093e2a4cc358c13aee575f7aad1a5b9c143f49d97b23bc536dfef8e314fc",
+        "size": 570,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/scope-boundary.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "root-diff-check",
+      "argv": [
+        "/usr/bin/git",
+        "diff",
+        "--check",
+        "HEAD",
+        "--"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-11T01:21:53.416260Z",
+      "ended_at": "2026-08-11T01:21:53.483087Z",
+      "exit_code": 0,
+      "result": "pass",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/root-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "1b2cff0f5d96b7a61038b25f4cdc88167ebddcb0fa5198ae83949f13a6a56f9e",
+        "size": 654,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/root-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/root-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "gem5-diff-check",
+      "argv": [
+        "/usr/bin/git",
+        "diff",
+        "--check",
+        "HEAD",
+        "--"
+      ],
+      "cwd": "projects/gem5",
+      "started_at": "2026-08-11T01:21:53.499338Z",
+      "ended_at": "2026-08-11T01:21:53.504464Z",
+      "exit_code": 0,
+      "result": "pass",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/gem5-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "7c6dc4b6451ef29f30a53acd1e6d71489405ebedfa88ca6959233bb37bb4618e",
+        "size": 666,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/gem5-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/gem5-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-diff-check",
+      "argv": [
+        "/usr/bin/git",
+        "diff",
+        "--check",
+        "HEAD",
+        "--"
+      ],
+      "cwd": "projects/self-amdgpu-runtime",
+      "started_at": "2026-08-11T01:21:53.518306Z",
+      "ended_at": "2026-08-11T01:21:53.519792Z",
+      "exit_code": 0,
+      "result": "pass",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/runtime-diff-check.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "d81f4b3bdceafb7d41c80d774ec7cb3c0542fbcd7f9526dac96aca3ee933e80b",
+        "size": 687,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/runtime-diff-check.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/runtime-diff-check.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    },
+    {
+      "id": "setup-bash-syntax",
+      "argv": [
+        "/usr/bin/bash",
+        "-n",
+        "/home/zhaosiying/amdgpu-sim/scripts/setup_rocm_env.sh"
+      ],
+      "cwd": ".",
+      "started_at": "2026-08-11T01:21:53.533283Z",
+      "ended_at": "2026-08-11T01:21:53.535254Z",
+      "exit_code": 0,
+      "result": "pass",
+      "raw_streams_retained": true,
+      "record": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/setup-bash-syntax.json",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "61470e53e6a7d7b93d63737633289e3e4a466e9f7c7a35bec20f6d3bd2772a8e",
+        "size": 681,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/setup-bash-syntax.stdout",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0028/umbrella/commands/setup-bash-syntax.stderr",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0,
+        "tracked": false
+      }
+    }
+  ],
+  "environment_fingerprint": {
+    "ev0064_recursive_validation": "pass",
+    "normal_python_triton_dual_launch_accepted": true,
+    "normal_python_triton_authority": "EV-0064",
+    "gem5_child_head": "82eab7b4888c2b414031ceaaa5fe142263cd3d90",
+    "runtime_child_head": "7c91133410ce42e4a0a14928fea64c2a89a549e0",
+    "root_candidate_content_snapshot_sha256": "25e246ddd2e13afa4db6ff6ea95339bb467a75ea16e8f670c1ff2ba5ff371db3",
+    "schema6_install": "NON-PASSING_SIGNAL_2",
+    "schema7_install": "NON-PASSING_QUEUE_CTEST_EXIT_8",
+    "repository_local_product_install": false,
+    "ev0064_final_v6_requirement_satisfied": false,
+    "ev0065_exit_zero_semantics": "classification-hash-policy-identity-success-only",
+    "deferred_checkpoint": "CP-0029"
+  },
+  "includes": {
+    "EV-0064": "157156755f5f697c35906c929b10bd497ec668df6f341f1d7fbac56a46d02ff9"
+  },
+  "ev0064_reservation_resolution": {
+    "ev0064_exact_bytes": {
+      "draft": {
+        "path": "artifacts/evidence/CP-0028/EV-0064-draft.json",
+        "size": 102938,
+        "sha256": "157156755f5f697c35906c929b10bd497ec668df6f341f1d7fbac56a46d02ff9",
+        "mode": 420
+      },
+      "validation": {
+        "path": "artifacts/evidence/CP-0028/EV-0064-validation.json",
+        "size": 354,
+        "sha256": "8c7cdabd366745ffa9920b38145bba3229995c5bfb6c9682f3fd2fc2a857244f",
+        "mode": 420
+      }
+    },
+    "original_ev0064_reservation": {
+      "v6_prefix_reserved_for": "EV-0065",
+      "repository_local_product_install_authority": "EV-0065",
+      "ev0065_runtime_soname_target_digest_required": true,
+      "ev0065_loaded_runtime_map_target_required": true,
+      "required_install_schema": 6
+    },
+    "cp28_resolution": {
+      "disposition": "explicit-scope-deviation-requirement-not-satisfied",
+      "schema6_attempt": "NON-PASSING_SIGNAL_2",
+      "schema7_attempt": "NON-PASSING_QUEUE_CTEST_EXIT_8",
+      "repository_local_install_accepted": false,
+      "repository_local_install_authority_checkpoint": "CP-0029",
+      "fresh_required_install_schema": 8,
+      "partial_prefix_reuse_allowed": false
+    },
+    "ev0065_exit_zero_semantics": {
+      "classification": "classification-hash-policy-identity-success-only",
+      "means_ev0064_exact_bytes_recursively_validated": true,
+      "means_nonpassing_attempts_exactly_classified": true,
+      "means_root_and_child_identities_exactly_bound": true,
+      "means_evidence_policy_and_capture_validation_pass": true,
+      "means_repository_local_install_accepted": false,
+      "means_postinstall_opencl_or_triton_accepted": false,
+      "means_ev0064_final_v6_requirement_satisfied": false
+    }
+  },
+  "source_locks": {
+    "children": {
+      "gem5": {
+        "path": "projects/gem5",
+        "head": "82eab7b4888c2b414031ceaaa5fe142263cd3d90",
+        "tree": "27b224d5a4dcee75366b013785723f395a937855",
+        "clean": true,
+        "subject": "CP28: execute reusable Triton vecadd",
+        "checkpoint_trailer": "CP-0028",
+        "evidence_manifest_sha256": "157156755f5f697c35906c929b10bd497ec668df6f341f1d7fbac56a46d02ff9"
+      },
+      "self-amdgpu-runtime": {
+        "path": "projects/self-amdgpu-runtime",
+        "head": "7c91133410ce42e4a0a14928fea64c2a89a549e0",
+        "tree": "fbc873266dee2d2b1be8682860ed28a9503eefe5",
+        "clean": true,
+        "subject": "CP28: add reusable managed Triton launch",
+        "checkpoint_trailer": "CP-0028",
+        "evidence_manifest_sha256": "157156755f5f697c35906c929b10bd497ec668df6f341f1d7fbac56a46d02ff9"
+      }
+    },
+    "root_candidate": {
+      "schema": "amdgpu-sim.cp28-root-candidate.v1",
+      "head": "cc252bab0b86f004b898924dce003578e101d040",
+      "head_tree": "dbde7dabbacc899183b800be4b725f55fe3c331f",
+      "status": [
+        {
+          "code": " M",
+          "path": "GOAL.md"
+        },
+        {
+          "code": " M",
+          "path": "PLAN.md"
+        },
+        {
+          "code": " M",
+          "path": "README.md"
+        },
+        {
+          "code": " M",
+          "path": "docs/host-native-architecture.md"
+        },
+        {
+          "code": " M",
+          "path": "docs/host-transport-v2.md"
+        },
+        {
+          "code": " M",
+          "path": "docs/rocm-environment.md"
+        },
+        {
+          "code": " M",
+          "path": "projects/gem5"
+        },
+        {
+          "code": " M",
+          "path": "projects/self-amdgpu-runtime"
+        },
+        {
+          "code": " M",
+          "path": "protocol/host-transport-v2.json"
+        },
+        {
+          "code": " M",
+          "path": "scripts/setup_rocm_env.sh"
+        },
+        {
+          "code": "??",
+          "path": "docs/triton-environment.md"
+        },
+        {
+          "code": "??",
+          "path": "examples/triton/vecadd_correctness.py"
+        },
+        {
+          "code": "??",
+          "path": "plugins/triton/gemsim_amd/.gitignore"
+        },
+        {
+          "code": "??",
+          "path": "plugins/triton/gemsim_amd/CMakeLists.txt"
+        },
+        {
+          "code": "??",
+          "path": "plugins/triton/gemsim_amd/backend/__init__.py"
+        },
+        {
+          "code": "??",
+          "path": "plugins/triton/gemsim_amd/backend/compiler.py"
+        },
+        {
+          "code": "??",
+          "path": "plugins/triton/gemsim_amd/backend/driver.py"
+        },
+        {
+          "code": "??",
+          "path": "plugins/triton/gemsim_amd/backend/name.conf"
+        },
+        {
+          "code": "??",
+          "path": "plugins/triton/gemsim_amd/tests/test_driver.py"
+        },
+        {
+          "code": "??",
+          "path": "plugins/triton/gemsim_amd/triton_gemsim_amd.cc"
+        }
+      ],
+      "status_sha256": "31f5f1c5fad3db9709674d8a2bf48aaf54bfdc2927e914d5f5f9f5747ce7a846",
+      "status_paths": [
+        "GOAL.md",
+        "PLAN.md",
+        "README.md",
+        "docs/host-native-architecture.md",
+        "docs/host-transport-v2.md",
+        "docs/rocm-environment.md",
+        "docs/triton-environment.md",
+        "examples/triton/vecadd_correctness.py",
+        "plugins/triton/gemsim_amd/.gitignore",
+        "plugins/triton/gemsim_amd/CMakeLists.txt",
+        "plugins/triton/gemsim_amd/backend/__init__.py",
+        "plugins/triton/gemsim_amd/backend/compiler.py",
+        "plugins/triton/gemsim_amd/backend/driver.py",
+        "plugins/triton/gemsim_amd/backend/name.conf",
+        "plugins/triton/gemsim_amd/tests/test_driver.py",
+        "plugins/triton/gemsim_amd/triton_gemsim_amd.cc",
+        "projects/gem5",
+        "projects/self-amdgpu-runtime",
+        "protocol/host-transport-v2.json",
+        "scripts/setup_rocm_env.sh"
+      ],
+      "staged_paths": [],
+      "index_equals_head": true,
+      "transaction_allowlist": [
+        "GOAL.md",
+        "PLAN.md",
+        "README.md",
+        "docs/host-native-architecture.md",
+        "docs/host-transport-v2.md",
+        "docs/rocm-environment.md",
+        "docs/triton-environment.md",
+        "examples/triton/vecadd_correctness.py",
+        "plugins/triton/gemsim_amd/.gitignore",
+        "plugins/triton/gemsim_amd/CMakeLists.txt",
+        "plugins/triton/gemsim_amd/backend/__init__.py",
+        "plugins/triton/gemsim_amd/backend/compiler.py",
+        "plugins/triton/gemsim_amd/backend/driver.py",
+        "plugins/triton/gemsim_amd/backend/name.conf",
+        "plugins/triton/gemsim_amd/tests/test_driver.py",
+        "plugins/triton/gemsim_amd/triton_gemsim_amd.cc",
+        "projects/gem5",
+        "projects/self-amdgpu-runtime",
+        "protocol/host-transport-v2.json",
+        "scripts/setup_rocm_env.sh",
+        "state/bitlessons/BL-0106.json",
+        "state/bitlessons/BL-0107.json",
+        "state/checkpoints/CP-0028.json",
+        "state/current.json",
+        "state/evidence/EV-0064.json",
+        "state/evidence/EV-0065.json"
+      ],
+      "entries": [
+        {
+          "path": "GOAL.md",
+          "status": " M",
+          "type": "file",
+          "mode": 420,
+          "size": 25774,
+          "sha256": "f1d6bf1f64a8b2ce2362f5007b78b71ad03ab5866bf955f9beeecaebf48ec055"
+        },
+        {
+          "path": "PLAN.md",
+          "status": " M",
+          "type": "file",
+          "mode": 420,
+          "size": 63689,
+          "sha256": "e77467d01d4a51e4da24512f04512293921c4a59d0eef8393c92552187a764ee"
+        },
+        {
+          "path": "README.md",
+          "status": " M",
+          "type": "file",
+          "mode": 420,
+          "size": 19718,
+          "sha256": "51a6f596644c16f491b0d6a093fcc806157ae16e932453941f31a6f9d0d8d623"
+        },
+        {
+          "path": "docs/host-native-architecture.md",
+          "status": " M",
+          "type": "file",
+          "mode": 420,
+          "size": 13061,
+          "sha256": "b7d03f455c33cc041db73dd0ff651fe083d9d9ba1a7f523f21b9d716fed46f87"
+        },
+        {
+          "path": "docs/host-transport-v2.md",
+          "status": " M",
+          "type": "file",
+          "mode": 420,
+          "size": 15864,
+          "sha256": "0abfbfeec104fc6487503c430619b15b374a6b7bc4ddb429abae273276d8bf32"
+        },
+        {
+          "path": "docs/rocm-environment.md",
+          "status": " M",
+          "type": "file",
+          "mode": 420,
+          "size": 6905,
+          "sha256": "4c445da184ec673773aa4f902a3c279169952e105dd3eb44b89fece59d57af54"
+        },
+        {
+          "path": "docs/triton-environment.md",
+          "status": "??",
+          "type": "file",
+          "mode": 420,
+          "size": 3487,
+          "sha256": "d74cf2e5e4b00920db1de71634ad1aac5c7cc9d8504d77954d4d5daf54585161"
+        },
+        {
+          "path": "examples/triton/vecadd_correctness.py",
+          "status": "??",
+          "type": "file",
+          "mode": 420,
+          "size": 4619,
+          "sha256": "9523cc1553af670d1373a9307332e15c816050ecef975c7b4fbc29a0157ec84d"
+        },
+        {
+          "path": "plugins/triton/gemsim_amd/.gitignore",
+          "status": "??",
+          "type": "file",
+          "mode": 420,
+          "size": 23,
+          "sha256": "6feaded4e28ea86e001a6751b4e3d960e8b7c31b9616ff9936b79297086e809b"
+        },
+        {
+          "path": "plugins/triton/gemsim_amd/CMakeLists.txt",
+          "status": "??",
+          "type": "file",
+          "mode": 420,
+          "size": 469,
+          "sha256": "de684c7b0308944614680fb47c5e4aa48ee7cb20e6bbbe86adae9bbd92166ca3"
+        },
+        {
+          "path": "plugins/triton/gemsim_amd/backend/__init__.py",
+          "status": "??",
+          "type": "file",
+          "mode": 420,
+          "size": 67,
+          "sha256": "dbca66f8e1d643a0ba354195f47761edfb3c1fcb1a00c5bcb7174e83a76d450b"
+        },
+        {
+          "path": "plugins/triton/gemsim_amd/backend/compiler.py",
+          "status": "??",
+          "type": "file",
+          "mode": 420,
+          "size": 475,
+          "sha256": "54e6a6902b019118844ed3fe2924de0d77d3db7348567427a47ec2d537780f8f"
+        },
+        {
+          "path": "plugins/triton/gemsim_amd/backend/driver.py",
+          "status": "??",
+          "type": "file",
+          "mode": 420,
+          "size": 29072,
+          "sha256": "cc5c97973a9560d3d45ddb42998d9ed47f6fc40cdeedca9d978310cc05bb3bfa"
+        },
+        {
+          "path": "plugins/triton/gemsim_amd/backend/name.conf",
+          "status": "??",
+          "type": "file",
+          "mode": 420,
+          "size": 11,
+          "sha256": "4b73660c13a63b76218ccb86baaaa6f13a0f1dee90cb0690d5447febd2ceeafc"
+        },
+        {
+          "path": "plugins/triton/gemsim_amd/tests/test_driver.py",
+          "status": "??",
+          "type": "file",
+          "mode": 420,
+          "size": 13239,
+          "sha256": "9e8e14b0289867f9447615d493dc2a1d71bea56195f0339be121420565ce771a"
+        },
+        {
+          "path": "plugins/triton/gemsim_amd/triton_gemsim_amd.cc",
+          "status": "??",
+          "type": "file",
+          "mode": 420,
+          "size": 91,
+          "sha256": "c38ec519c7b421e22b4d9674c8ea845f3a6f14e75bd72b9eafbfe9e1956e0d96"
+        },
+        {
+          "path": "projects/gem5",
+          "status": " M",
+          "type": "gitlink",
+          "mode": 57344,
+          "head": "82eab7b4888c2b414031ceaaa5fe142263cd3d90",
+          "tree": "27b224d5a4dcee75366b013785723f395a937855"
+        },
+        {
+          "path": "projects/self-amdgpu-runtime",
+          "status": " M",
+          "type": "gitlink",
+          "mode": 57344,
+          "head": "7c91133410ce42e4a0a14928fea64c2a89a549e0",
+          "tree": "fbc873266dee2d2b1be8682860ed28a9503eefe5"
+        },
+        {
+          "path": "protocol/host-transport-v2.json",
+          "status": " M",
+          "type": "file",
+          "mode": 420,
+          "size": 40493,
+          "sha256": "e8116a982f64e5a7e18e7511956a8b0b9f6c95a25180e43cfd4e4d66b2f4ff2e"
+        },
+        {
+          "path": "scripts/setup_rocm_env.sh",
+          "status": " M",
+          "type": "file",
+          "mode": 493,
+          "size": 103126,
+          "sha256": "770bd67d3f2a4f7f01e1d12d48f07126e061829c3ff1296fd81a8beb17787857"
+        }
+      ],
+      "children": {
+        "gem5": {
+          "path": "projects/gem5",
+          "head": "82eab7b4888c2b414031ceaaa5fe142263cd3d90",
+          "tree": "27b224d5a4dcee75366b013785723f395a937855",
+          "clean": true,
+          "subject": "CP28: execute reusable Triton vecadd",
+          "checkpoint_trailer": "CP-0028",
+          "evidence_manifest_sha256": "157156755f5f697c35906c929b10bd497ec668df6f341f1d7fbac56a46d02ff9"
+        },
+        "self-amdgpu-runtime": {
+          "path": "projects/self-amdgpu-runtime",
+          "head": "7c91133410ce42e4a0a14928fea64c2a89a549e0",
+          "tree": "fbc873266dee2d2b1be8682860ed28a9503eefe5",
+          "clean": true,
+          "subject": "CP28: add reusable managed Triton launch",
+          "checkpoint_trailer": "CP-0028",
+          "evidence_manifest_sha256": "157156755f5f697c35906c929b10bd497ec668df6f341f1d7fbac56a46d02ff9"
+        }
+      },
+      "setup": {
+        "path": "scripts/setup_rocm_env.sh",
+        "size": 103126,
+        "sha256": "770bd67d3f2a4f7f01e1d12d48f07126e061829c3ff1296fd81a8beb17787857",
+        "mode": 493
+      },
+      "diff_check": "pass",
+      "untracked_diff_check_count": 10,
+      "diff_sha256": "46139b6f88576cb22ff1bc7b4c1bc12bdc0e59f85c59fab3645686fb568e3734",
+      "classification": "settled-pre-metadata-root-candidate",
+      "content_snapshot_sha256": "25e246ddd2e13afa4db6ff6ea95339bb467a75ea16e8f670c1ff2ba5ff371db3"
+    },
+    "setup": {
+      "path": "scripts/setup_rocm_env.sh",
+      "size": 103126,
+      "sha256": "770bd67d3f2a4f7f01e1d12d48f07126e061829c3ff1296fd81a8beb17787857",
+      "mode": 493
+    },
+    "transaction": {
+      "identity": {
+        "path": ".git/amdgpu-sim/txn/CP-0028.json",
+        "size": 2579,
+        "sha256": "d4d7b0157759778f056fa8b1d9824146dca3b57f33557fad343a2bdd7c2c05ba",
+        "mode": 384
+      },
+      "document_sha256": "62a44d45ebec49bdd4c25012d8a0b784cb064a945e953e767218f29ca86d2a8a",
+      "phase": "prepare",
+      "recovery_identity": {
+        "path": ".git/amdgpu-sim/txn/recovery/CP-0028-directory-allowlist-0f3d620c920f8df27326fc4c6789eeb4621b75b4764b2e59a644218655443136.json",
+        "size": 2052,
+        "sha256": "0f3d620c920f8df27326fc4c6789eeb4621b75b4764b2e59a644218655443136",
+        "mode": 420
+      },
+      "recovery_document_sha256": "e76efec8c08933eccf24ee86b339c06bac5159378c8b0d93360f6be5e457b23e",
+      "allowlist_repair": "directory-entry-to-exact-eight-plugin-files"
+    }
+  },
+  "excluded_attempts": {
+    "schema6": {
+      "classification": "NON-PASSING_SIGNAL_2",
+      "acceptance_authority": false,
+      "setup_schema": 6,
+      "setup_sha256": "41918696dac30f6f91a4022b52f22174251310b9bf4d569de6aed74eda8666e7",
+      "prefix": "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v6-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-7c91133410ce",
+      "signal": 2,
+      "outer_wrapper_exit_code_reported": 130,
+      "outer_wrapper_exit_code_directly_retained": false,
+      "default_rocm_path": "/opt/rocm",
+      "manifest_present": false,
+      "activate_present": false
+    },
+    "schema7": {
+      "classification": "NON-PASSING_QUEUE_CTEST_EXIT_8",
+      "acceptance_authority": false,
+      "setup_schema": 7,
+      "setup_sha256": "770bd67d3f2a4f7f01e1d12d48f07126e061829c3ff1296fd81a8beb17787857",
+      "prefix": "/home/zhaosiying/amdgpu-sim/env/rocm/gfx950-v7-llvm-73f2a21fe16b-rocm-92115a294198-triton-cd513e2798db-tllvm-b010a18d2b64-sim-82eab7b4888c-runtime-7c91133410ce",
+      "exit_code": 8,
+      "ctest_total": 22,
+      "ctest_failed": 1,
+      "failed_test": "self_amdgpu_runtime.queue",
+      "diagnostic": "pre-ACK completion was accepted or did not poison",
+      "manifest_present": false,
+      "activate_present": false,
+      "last_test_log_present_but_rejected_as_authority": true
+    },
+    "locked_input_count": 20,
+    "all_inputs_exact": true
+  },
+  "scope_boundary": {
+    "normal_python_triton_dual_launch_accepted": true,
+    "normal_python_triton_authority": "EV-0064",
+    "child_commits_recorded": true,
+    "repository_local_install_accepted": false,
+    "schema6_prefix_accepted": false,
+    "schema7_prefix_accepted": false,
+    "postinstall_opencl_e2e_accepted": false,
+    "postinstall_triton_e2e_accepted": false,
+    "operator_matrix_accepted": false,
+    "full_model_inference_accepted": false,
+    "stable_multi_token_inference_accepted": false,
+    "tensor_parallel_accepted": false,
+    "ccl_accepted": false,
+    "deferred_checkpoint": "CP-0029",
+    "deferred_install_schema": 8
+  },
+  "limitations": [
+    "EV-0064 remains immutable; its repository-local v6 reservation is superseded by the observed schema-6 and schema-7 NON-PASSING attempts recorded here.",
+    "This is an explicit CP28 scope deviation with the EV-0064 final-v6 requirement left unsatisfied, not evidence that the reserved requirement passed.",
+    "EV-0065 exit code 0 is classification/hash/identity/evidence-policy success only and never means that a repository-local install or postinstall OpenCL/Triton route passed.",
+    "The accepted normal-Python Triton dual launch is inherited from EV-0064 and used an external isolated precommit prefix, not either rejected repository-local prefix.",
+    "The schema-6 attempt was interrupted by signal 2 and baked DEFAULT_ROCM_PATH=/opt/rocm; its reported outer rc130 was not retained as a dedicated exit-code file.",
+    "The schema-7 attempt exited 8 after one queue CTest failure. The failure is diagnosed as a test-harness send-after-poison race; no CP28 product-failure or passing-install claim is made from that diagnosis.",
+    "The schema-7 build-local LastTest.log was rewritten by a later ctest -N -V audit and is explicitly excluded from authority.",
+    "No schema-6/schema-7 manifest or activation script exists, and neither partial prefix may be resumed, reused, or promoted to acceptance authority.",
+    "CP-0029 must commit the queue mock stabilization, update child/setup locks, use a fresh schema-8 prefix, and independently prove --all/--verify, OpenCL, Triton, process maps, and FD isolation.",
+    "Operator matrix coverage, full-model inference, stable multi-token inference, tensor parallelism, and CCL remain false."
+  ],
+  "external_artifacts": [
+    {
+      "path": "artifacts/evidence/CP-0028/build_ev0065.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b30a5697290c00be8f3dab543111e6730ad49a4124e401bc409fd8abc161e33e",
+      "size": 63326,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/EV-0065-freeze-inputs.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d47ca9c347ca9c1f60dd428b437c88c7b69f66df02dc4045a099d7b7bbd55e03",
+      "size": 17374,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/EV-0064-draft.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "157156755f5f697c35906c929b10bd497ec668df6f341f1d7fbac56a46d02ff9",
+      "size": 102938,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/EV-0064-validation.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "8c7cdabd366745ffa9920b38145bba3229995c5bfb6c9682f3fd2fc2a857244f",
+      "size": 354,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-candidate.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "826277f1c420a184a1d7ecd95b4b556e359cac2914c0652ec8b73f1733fc0e08",
+      "size": 9635,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-candidate.diff",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "46139b6f88576cb22ff1bc7b4c1bc12bdc0e59f85c59fab3645686fb568e3734",
+      "size": 196348,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/CP-0028.transaction.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d4d7b0157759778f056fa8b1d9824146dca3b57f33557fad343a2bdd7c2c05ba",
+      "size": 2579,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/CP-0028.transaction-recovery.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "0f3d620c920f8df27326fc4c6789eeb4621b75b4764b2e59a644218655443136",
+      "size": 2052,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/EV-0065-cross-review.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "4f4164ef287c1086cf3bed30b7694cad04e8a7ea57b03501c6e1716ad14f9226",
+      "size": 967,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/GOAL.md",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "f1d6bf1f64a8b2ce2362f5007b78b71ad03ab5866bf955f9beeecaebf48ec055",
+      "size": 25774,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/PLAN.md",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e77467d01d4a51e4da24512f04512293921c4a59d0eef8393c92552187a764ee",
+      "size": 63689,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/README.md",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "51a6f596644c16f491b0d6a093fcc806157ae16e932453941f31a6f9d0d8d623",
+      "size": 19718,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/docs/host-native-architecture.md",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "b7d03f455c33cc041db73dd0ff651fe083d9d9ba1a7f523f21b9d716fed46f87",
+      "size": 13061,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/docs/host-transport-v2.md",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "0abfbfeec104fc6487503c430619b15b374a6b7bc4ddb429abae273276d8bf32",
+      "size": 15864,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/docs/rocm-environment.md",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "4c445da184ec673773aa4f902a3c279169952e105dd3eb44b89fece59d57af54",
+      "size": 6905,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/docs/triton-environment.md",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d74cf2e5e4b00920db1de71634ad1aac5c7cc9d8504d77954d4d5daf54585161",
+      "size": 3487,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/examples/triton/vecadd_correctness.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "9523cc1553af670d1373a9307332e15c816050ecef975c7b4fbc29a0157ec84d",
+      "size": 4619,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/plugins/triton/gemsim_amd/.gitignore",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6feaded4e28ea86e001a6751b4e3d960e8b7c31b9616ff9936b79297086e809b",
+      "size": 23,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/plugins/triton/gemsim_amd/CMakeLists.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "de684c7b0308944614680fb47c5e4aa48ee7cb20e6bbbe86adae9bbd92166ca3",
+      "size": 469,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/plugins/triton/gemsim_amd/backend/__init__.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "dbca66f8e1d643a0ba354195f47761edfb3c1fcb1a00c5bcb7174e83a76d450b",
+      "size": 67,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/plugins/triton/gemsim_amd/backend/compiler.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "54e6a6902b019118844ed3fe2924de0d77d3db7348567427a47ec2d537780f8f",
+      "size": 475,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/plugins/triton/gemsim_amd/backend/driver.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "cc5c97973a9560d3d45ddb42998d9ed47f6fc40cdeedca9d978310cc05bb3bfa",
+      "size": 29072,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/plugins/triton/gemsim_amd/backend/name.conf",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "4b73660c13a63b76218ccb86baaaa6f13a0f1dee90cb0690d5447febd2ceeafc",
+      "size": 11,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/plugins/triton/gemsim_amd/tests/test_driver.py",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "9e8e14b0289867f9447615d493dc2a1d71bea56195f0339be121420565ce771a",
+      "size": 13239,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/plugins/triton/gemsim_amd/triton_gemsim_amd.cc",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "c38ec519c7b421e22b4d9674c8ea845f3a6f14e75bd72b9eafbfe9e1956e0d96",
+      "size": 91,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/protocol/host-transport-v2.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "e8116a982f64e5a7e18e7511956a8b0b9f6c95a25180e43cfd4e4d66b2f4ff2e",
+      "size": 40493,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/fixture/root-files/scripts/setup_rocm_env.sh",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "770bd67d3f2a4f7f01e1d12d48f07126e061829c3ff1296fd81a8beb17787857",
+      "size": 103126,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v6/setup-script.cmdline.bin",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "1b1e5ae0033b0bb9cef0655248170a2e126235c84c684583f7a2920d580ead39",
+      "size": 80,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v6/setup-script.environ.bin",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "70e9b52914f840a07daf8abc1cbec176a92e603ec8968aa77da66cd22f3102a2",
+      "size": 85,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v6/setup-script.exe.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "82794de5df2a04fc2d1672e7faab8d1a133a693e2b5ffec9fa3f115adb9a1d96",
+      "size": 14,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v6/setup-script.process.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "2224036137e12af719cd5f4698aa46c205fd0e8d6c0c92d3673f71559d4fd1c5",
+      "size": 138,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v6/setup-script.sha256",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "42e3c340f2ae25094ae0fe18910891d51daa469a84cf812edd22b5617d5a2ef9",
+      "size": 65,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v6/setup.stderr.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "9a3725babf5b7029c70b647ac88c02044ac2388ec6118dc953dd8dead4620796",
+      "size": 10700,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v6/setup.stdout.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "d0b78461517080df807eb857fb0769fe636eeae05fda2af97b9c307dd12e0fe0",
+      "size": 665634,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v6/setup.time.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "0733aa8c415e87619ee3020bb92f6d6f0741ac76883f94b294fcdf410f56ad73",
+      "size": 852,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v6/triton-llvm.CMakeCache.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "117639fcb0ffd2d6e38a66549fb4aaf2c530f4cbfdf7b4ab8dfc81a3233c547a",
+      "size": 101183,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v7/runtime.CMakeCache.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "f572c4d25a9ade045396c55dc0f8a90cc22d6e17e20206d70dde2cf250ec054c",
+      "size": 20327,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v7/setup-prerun.json",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "c3accc9f7494ad7b6bf9a41a0f92642ef450e03d03267a88d0ad6976292fef1d",
+      "size": 952,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v7/setup-script.cmdline.bin",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "a64ffbafbe50e33f4e2374617d254c0d3aaec2e7c56ac16c0b29e5f08b7c6c5b",
+      "size": 84,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v7/setup-script.environ.bin",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "70e9b52914f840a07daf8abc1cbec176a92e603ec8968aa77da66cd22f3102a2",
+      "size": 85,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v7/setup-script.exe.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "82794de5df2a04fc2d1672e7faab8d1a133a693e2b5ffec9fa3f115adb9a1d96",
+      "size": 14,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v7/setup-script.process.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "adc7f0cc909d37b57c2571310472893ef538cd79d5f0be0e78931a24c2db7612",
+      "size": 130,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v7/setup-script.sha256",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "6df532a0af2cb81d8c5b2f32d0fda6d85a256f27558a96d1179a4c2d04add5f0",
+      "size": 65,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v7/setup.exit-code.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "aa67a169b0bba217aa0aa88a65346920c84c42447c36ba5f7ea65f422c1fe5d8",
+      "size": 2,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v7/setup.stderr.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "c2c05a46e755fa33b4712f53a30c694280f10d1d19540d59c0cdc9cd13192228",
+      "size": 1358,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v7/setup.stdout.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "038c7ee596170dc1975659c6a6f13b425aaa722fd473a79aafb7701e95e1b224",
+      "size": 479492,
+      "tracked": false
+    },
+    {
+      "path": "artifacts/evidence/CP-0028/umbrella/excluded/v7/setup.time.txt",
+      "required_at_acceptance": true,
+      "required_for_resume": false,
+      "sha256": "bd51ba5cf0a94a1de80707067ef136fddc1031f3fb5e33f01852371715cff6be",
+      "size": 872,
+      "tracked": false
+    }
+  ]
+}

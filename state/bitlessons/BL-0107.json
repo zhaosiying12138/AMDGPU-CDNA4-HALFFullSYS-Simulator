@@ -1,0 +1,31 @@
+{
+  "applies_to": [
+    "scripts/setup_rocm_env.sh",
+    "projects/self-amdgpu-runtime/tests/queue_test.c",
+    "artifacts/evidence/CP-0028/build_ev0065.py",
+    "GOAL.md",
+    "PLAN.md",
+    "docs/rocm-environment.md",
+    "docs/triton-environment.md"
+  ],
+  "checkpoint_id": "CP-0028",
+  "conclusion": "A bounded operator result may remain accepted while a stronger packaging requirement fails, but the unmet requirement must remain explicit. Evidence-validation success classifies the boundary; it cannot convert a failed installation into a passing one.",
+  "confidence": "high",
+  "decision": "Keep EV-0064 immutable and accept only its isolated ordinary-Python dual-launch result. Use EV-0065 to bind the committed children/root and permanently classify schema 6 and 7 as NON-PASSING, with the final-v6 reservation unsatisfied. Do not reuse either partial prefix. In CP-0029, apply only the queue-mock test fix, prove serial and concurrent stability, update locks, and build a fresh schema-8 prefix before expanding the model operator matrix.",
+  "evidence_ids": [
+    "EV-0064",
+    "EV-0065"
+  ],
+  "id": "BL-0107",
+  "invalidated_assumptions": [
+    "EV-0065 exit code zero means the repository-local install or postinstall Triton route passed.",
+    "A partially built schema-6 or schema-7 prefix may be resumed and promoted after a later fix.",
+    "The schema-7 queue-test failure invalidates the separately frozen ordinary-Python execution evidence.",
+    "Diagnosing a test-harness race is equivalent to producing a passing installation."
+  ],
+  "observation": "The schema-6 install was interrupted after DEFAULT_ROCM_PATH=/opt/rocm contamination was found, and the fresh schema-7 install exited 8 on one pre-ACK queue mock test. Neither prefix has a manifest or activation script. EV-0065 recursively validates EV-0064 and the committed source identities, but explicitly records repository_local_install_accepted=false, postinstall OpenCL/Triton=false, and a fresh schema-8 install deferred to CP-0029.",
+  "question_or_symptom": "How should acceptance be recorded when the normal Triton operator path passes but the reserved final repository-local install does not?",
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "status": "active",
+  "supersedes": []
+}

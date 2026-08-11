@@ -1,0 +1,216 @@
+{
+  "baseline_commit_marker": "N/A",
+  "bitlesson_ids": [
+    "BL-0106",
+    "BL-0107"
+  ],
+  "bitlesson_sha256": {
+    "BL-0106": "aa439200590e652805bcefbbc59a94de2d4d25ca3a7d8e6c3f7ea78ca0c75323",
+    "BL-0107": "e28e7803e06418b1d2e666524c58a5b80619bbf9bcde467fdc7e0e0471254c32"
+  },
+  "blockers": [
+    {
+      "id": "ENV-B001",
+      "severity": "blocking",
+      "statement": "No final repository-local Triton prefix is accepted. The schema-6 and schema-7 partial prefixes are permanently NON-PASSING and must not be reused; CP29 must prove a fresh schema-8 install."
+    },
+    {
+      "id": "TRITON-B005",
+      "severity": "blocking",
+      "statement": "CP28 accepts only the exact contiguous float32 vecadd profile. Broadcast, cast, reduction, softmax, norm, GEMM, RoPE, cache, GDN, attention, full-model execution, stable multi-token inference, TP, and CCL remain unproven."
+    }
+  ],
+  "change_kind": "code",
+  "changes": [
+    "Added a normal Python Triton backend/driver that compiles and launches the tutorial-equivalent add_kernel through the self runtime and implicitly managed gem5, then validates application-visible tensors with zero fallback.",
+    "Added preload-aware generic kernel mapping and launch support, reusable managed sessions, buffers, queue, signal, packet resources, and exact canonical pure-b010 Triton artifact admission.",
+    "Executed two 98432-element contiguous float32 vector-add launches in one Python process and session with bit-exact returned tensors, stable observed resource identities, advancing generations, complete cleanup, and strict simulator trace validation.",
+    "Recorded the schema-6 and schema-7 repository-local install attempts as permanently NON-PASSING and deferred a fresh schema-8 install plus broader operator coverage to CP29."
+  ],
+  "created_at": "2026-08-11T09:32:02+08:00",
+  "evidence_ids": [
+    "EV-0064",
+    "EV-0065"
+  ],
+  "evidence_manifest_id": "EV-0065",
+  "evidence_manifest_sha256": "72496ee904336a591700349dfa2993b01340c8d3b4f30cf79bffa5c4b9016084",
+  "evidence_sha256": {
+    "EV-0064": "157156755f5f697c35906c929b10bd497ec668df6f341f1d7fbac56a46d02ff9",
+    "EV-0065": "72496ee904336a591700349dfa2993b01340c8d3b4f30cf79bffa5c4b9016084"
+  },
+  "goal_id": "GSIM-001",
+  "goal_sha256": "f1d6bf1f64a8b2ce2362f5007b78b71ad03ab5866bf955f9beeecaebf48ec055",
+  "id": "CP-0028",
+  "limitations": [
+    "The accepted Triton image is exactly 5384 bytes with SHA-256 7308427e69dea6f320178c55863291d4d615338eb295a422a5ff7a2c2b8afa95, kernel add_kernel, 12-DWORD preload, 48-byte kernarg, 98432 float32 elements, BLOCK_SIZE 1024, and 97 programs/workgroups per launch.",
+    "The two-launch result uses an external isolated precommit package and runtime, not an accepted repository-local prefix. EV-0064's reserved final-v6 requirement is explicitly unsatisfied and EV-0065 does not convert it into a passing install.",
+    "The schema-6 install was interrupted after a baked DEFAULT_ROCM_PATH=/opt/rocm was detected; the schema-7 install exited 8 on one queue CTest. Neither partial prefix has a manifest or activation script, and neither may be resumed or promoted.",
+    "Kernel source-packet reuse is inferred from the stable image hash, packet VA/CRC, trace, ticket, and dispatch identifiers because the trace has no kernel mapping ID; no same-kernel-mapping-handle claim is made.",
+    "The trace emits D2H durability only on the final session-complete event. First-launch correctness is supported by its retired output CRC and exact ordinary-Python returned-tensor oracle, not an independent first-launch D2H durability event.",
+    "Only base-pointer contiguous tensors are accepted. Nonzero storage-offset views, a second operator family, persistent model allocations, PyTorch/vLLM execution, multi-token inference, TP, and CCL remain false.",
+    "Profiling and performance optimization remain deferred until a retained operator, layer, or model run demonstrates a material bottleneck."
+  ],
+  "next_action": {
+    "id": "P5-TRITON-VECADD-07-FRESH-SCHEMA8",
+    "argv": [
+      "python3",
+      "scripts/transaction.py",
+      "begin",
+      "--checkpoint",
+      "CP-0029",
+      "--intent",
+      "Stabilize the queue mock ordering with a test-only runtime change, prove serial and concurrent queue behavior, and build a fresh schema-8 repository-local prefix with complete OpenCL, Triton, and isolation evidence",
+      "--participant",
+      "self-amdgpu-runtime=projects/self-amdgpu-runtime"
+    ],
+    "cwd": ".",
+    "expected": "CP-0029 will apply only the queue mock test fix, prove serial and concurrent queue stability plus full GCC/Clang runtime coverage, commit the runtime child, update repository locks, and build a fresh schema-8 prefix whose verify-only, OpenCL, Triton dual-launch, provenance, pollution, and active-isolation gates all pass.",
+    "prerequisites": [
+      "CP-0028 root checkpoint, EV-0064, and EV-0065 are accepted and scripts/resume.sh --verify passes offline.",
+      "The runtime child is clean at 7c91133410ce42e4a0a14928fea64c2a89a549e0 / fbc873266dee2d2b1be8682860ed28a9503eefe5, and gem5 remains a clean fixed input at 82eab7b4888c2b414031ceaaa5fe142263cd3d90 / 27b224d5a4dcee75366b013785723f395a937855.",
+      "The schema-6 and schema-7 partial prefixes and their failure evidence remain preserved as NON-PASSING and are not reused.",
+      "Production queue transport poison and connection-loss behavior remains unchanged; only the mock ordering test may change."
+    ],
+    "rollback_boundary": "Keep the CP28 isolated normal-Python dual-launch vecadd result accepted but repository_local_install_accepted=false. Do not weaken queue protocol semantics, reuse either partial prefix, or claim broader operators, models, multi-token inference, TP, or CCL if the test-only stabilization or fresh schema-8 installation cannot be completed."
+  },
+  "parent_checkpoint": "CP-0027",
+  "phase_id": "P5A",
+  "plan_sha256": "e77467d01d4a51e4da24512f04512293921c4a59d0eef8393c92552187a764ee",
+  "project_lanes_sha256": "a5a7a5a3fa0abb0aa9c7dffd11d8823293de7bba7c5f97a7fd0b83d8d69260f2",
+  "repositories": [
+    {
+      "administrative_git_dir": "modules/gem5",
+      "baseline_commit": "cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag": "upstream-baseline/gem5/cbf0eae213c5e39c727172b546434287d47b5bbe",
+      "baseline_tag_object": "1b1592ddc443d227438906d8bfd04c7cacb17896",
+      "baseline_tree": "d6527ec47acf018cb89afab496b974bda79eaa36",
+      "clean": true,
+      "head": "82eab7b4888c2b414031ceaaa5fe142263cd3d90",
+      "id": "gem5",
+      "path": "projects/gem5",
+      "tree": "27b224d5a4dcee75366b013785723f395a937855"
+    },
+    {
+      "administrative_git_dir": "modules/rocm-systems",
+      "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
+      "baseline_tag_object": "f405c041405f5aa26c524ecd5d0d605f7adc22dd",
+      "baseline_tree": "28bf42b65f7aad25167180543dda69b5fc6caf58",
+      "clean": true,
+      "head": "92115a2941982a384de161be3f78cf9bff547027",
+      "id": "rocm-systems",
+      "path": "projects/rocm-systems",
+      "tree": "28bf42b65f7aad25167180543dda69b5fc6caf58"
+    },
+    {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "clean": true,
+      "head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "id": "llvm-project",
+      "path": "projects/llvm-project",
+      "tree": "d589480097e8a30fd1df38435ccc9a9fca71f489"
+    },
+    {
+      "administrative_git_dir": "modules/triton",
+      "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "baseline_tag_object": "e133ad4ad5a99b1c2cea118e3353d96d0d55ee2e",
+      "baseline_tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1",
+      "clean": true,
+      "head": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "id": "triton",
+      "path": "projects/triton",
+      "tree": "944754ed44b5414f2b72fed267455abc9f6fc8c1"
+    },
+    {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "clean": true,
+      "head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "id": "pytorch",
+      "path": "projects/pytorch",
+      "tree": "b742566ccb3cc783c2c99176939076831f4e8315"
+    },
+    {
+      "administrative_git_dir": "modules/vllm",
+      "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "baseline_tag_object": "24fcef0e85c60f91f5e4822448e591769fc1a1fb",
+      "baseline_tree": "d7f16cac8369098d7fde19003ab2577171116ecb",
+      "clean": true,
+      "head": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "id": "vllm",
+      "path": "projects/vllm",
+      "tree": "d7f16cac8369098d7fde19003ab2577171116ecb"
+    },
+    {
+      "administrative_git_dir": "modules/self-amdgpu-runtime",
+      "baseline_commit": "54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag": "project-baseline/self-amdgpu-runtime/54f0badb0a30c486334f15daea252ab6b55dd9a5",
+      "baseline_tag_object": "32598aa92562ee3c05786e91fc5ed47cf17c0c4a",
+      "baseline_tree": "836b7af8027396f7296b385e7105246d8dabafda",
+      "clean": true,
+      "head": "7c91133410ce42e4a0a14928fea64c2a89a549e0",
+      "id": "self-amdgpu-runtime",
+      "path": "projects/self-amdgpu-runtime",
+      "tree": "fbc873266dee2d2b1be8682860ed28a9503eefe5"
+    }
+  ],
+  "root_commit": "self-described-by-checkpoint-trailer",
+  "root_parent_commit": "cc252bab0b86f004b898924dce003578e101d040",
+  "schema": "amdgpu-sim.checkpoint.v1",
+  "sequence": 28,
+  "source_lock_sha256": "8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4",
+  "status": "accepted",
+  "validation": [
+    {
+      "command": "CP28 recursive EV-0064 policy and retained artifact validation",
+      "cwd": ".",
+      "evidence_id": "EV-0065",
+      "exit_code": 0,
+      "result": "EV-0064 SHA 157156755f5f697c35906c929b10bd497ec668df6f341f1d7fbac56a46d02ff9 and 36 command results/216 verified artifacts pass policy, external hashes, and capture semantics."
+    },
+    {
+      "command": "CP28 normal Python Triton dual-launch execution and oracle validation",
+      "cwd": ".",
+      "evidence_id": "EV-0064",
+      "exit_code": 0,
+      "result": "One ordinary Python process uses the gemsim_amd backend and managed gem5 for two 98432-element add_kernel launches in one session; both float32 C=A+B outputs are bit-exact, output CRC32Cs are 60522842 and 2306964961, and fallback is zero."
+    },
+    {
+      "command": "CP28 reusable-session simulator trace validation",
+      "cwd": ".",
+      "evidence_id": "EV-0064",
+      "exit_code": 0,
+      "result": "Each launch records 97 workgroups, 388 waves, 10476 instruction starts, 196864 reads, 98432 writes, 385 store events, durable type-20, and complete cleanup; observed queue, signal, packet VA, and allocation IDs persist while generations advance."
+    },
+    {
+      "command": "CP28 child identity, regression, and focused-test validation",
+      "cwd": ".",
+      "evidence_id": "EV-0064",
+      "exit_code": 0,
+      "result": "Gem5 82eab7b4888c2b414031ceaaa5fe142263cd3d90/tree27b224d5 and runtime 7c91133410ce42e4a0a14928fea64c2a89a549e0/treefbc87326 are clean and EV-0064 trailer-bound; focused gem5/plugin/runtime tests and CP26/CP27 execution regressions pass."
+    },
+    {
+      "command": "CP28 bounded EV-0065 umbrella, root candidate, and transaction validation",
+      "cwd": ".",
+      "evidence_id": "EV-0065",
+      "exit_code": 0,
+      "result": "EV-0065 SHA 72496ee904336a591700349dfa2993b01340c8d3b4f30cf79bffa5c4b9016084 has 12 command results and 83 verified artifacts; it binds both clean child commits, the exact 20-path pre-metadata root candidate, and the prepare journal."
+    },
+    {
+      "command": "CP28 excluded-install classification and scope validation",
+      "cwd": ".",
+      "evidence_id": "EV-0065",
+      "exit_code": 0,
+      "result": "Schema 6 is NON-PASSING_SIGNAL_2 and schema 7 is NON-PASSING_QUEUE_CTEST_EXIT_8; repository-local install, postinstall OpenCL/Triton, operator matrix, full model, multi-token, TP, and CCL acceptance are all false and a fresh schema-8 install is deferred to CP29."
+    }
+  ]
+}

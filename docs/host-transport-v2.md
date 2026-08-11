@@ -9,7 +9,8 @@ positive negotiated daemon control lifecycle through native admission and
 retirement. CP-0026 adds a separate locked execution extension and a
 trace-authoritative disconnect quarantine boundary. CP-0027 reuses that wire
 unchanged for the first direct OpenCL executable and a second exact execution
-variant. The authority is
+variant. CP-0028 adds preload-aware execution and reusable sessions for one
+exact normal-Python Triton vecadd without changing the wire. The authority is
 `protocol/host-transport-v2.json`; the implementations are in
 `projects/self-amdgpu-runtime` and `projects/gem5`.
 
@@ -245,17 +246,28 @@ Triton Python, model operators, multi-token inference, TP, and CCL remain
 unaccepted. The CP26 `gpuReadWrite` profile and its three-buffer D2H/quarantine
 rules remain unchanged.
 
-## Triton boundary and non-claims
+## CP28 accepted normal Triton Python boundary
 
-The CP-0021 retained Triton tutorial and HSACO identities are recorded in the
-authority JSON. The codec can represent its 48-byte kernarg and 24832-by-256
-work-item/workgroup geometry, but the 12-DWORD (48-byte) descriptor preload is
-rejected until preload-aware mapping and entry semantics exist. CP25 continues
-to return NOT_SUPPORTED instead of stripping or reinterpreting that field.
+CP-0028 accepts the pure-b010 5,384-byte gfx950 `add_kernel`, SHA-256
+`7308427e69dea6f320178c55863291d4d615338eb295a422a5ff7a2c2b8afa95`, through
+the external `gemsim_amd` backend and Triton's normal driver/JIT/launcher path.
+The runtime and daemon preserve the 12-DWORD descriptor preload, execute from
+the descriptor entry plus 256 bytes, and pack the exact 48-byte kernarg. The
+launch has 98,432 float32 elements, 97 programs/workgroups, local size 256, and
+388 waves.
 
-CP-0027 does not promote the retained 5,408-byte Triton image with 12-DWORD
-preload, and it does not exercise a normal launcher, compiler/JIT transport,
-performance path, arbitrary gfx950 HSACO, Triton end-to-end, CPU/NVIDIA
-fallback, or Qwen inference. The next product gate is the normal Triton Python
-vecadd driver/runtime path. Profiling remains conditional on a measured real
-operator, layer, or model bottleneck.
+One Python process performs two launches with independent seeds. The same
+kernarg allocation, queue, completion signal, packet VA, and simulated buffer
+IDs are observed while generations advance between launches. Stable image
+hash, packet VA/CRC, trace, ticket, and dispatch identifiers infer reuse of the
+kernel source packet; the trace has no kernel mapping ID. Each
+trace reports 10,476 instruction starts, 196,864 reads, 98,432 writes, 385
+store events, and exact output. The output CRC-32Cs are `60522842` and
+`2306964961`; both CPU differential oracles pass and fallback is zero.
+
+This is exact contiguous float32 vector add only. Arbitrary Triton kernels,
+broadcast/cast/reduction/norm/GEMM/RoPE/cache/GDN/attention, persistent model
+allocation semantics, PyTorch/vLLM model execution, stable multi-token decode,
+TP, CCL, and performance remain unaccepted. The v6/v7 final repository-local
+prefix attempts are retained as NON-PASSING evidence; CP-0029 stabilizes the
+queue mock test and creates a fresh schema-8 prefix before operator expansion.

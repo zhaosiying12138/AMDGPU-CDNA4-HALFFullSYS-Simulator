@@ -11,10 +11,18 @@ libraries, `self-amdgpu-runtime`, the bounded local `libOpenCL.so.1`, and the
 `opencl-vecadd` example. Production `libhsa-runtime64`, `libhsakmt`, and
 `libamdhip64` are rejected. `/dev/kfd` and `/dev/dri` are not required or
 opened by the accepted route. The simulator runtime replaces those host
-KMD/UMD entry points with the GemSim transport. HIP, normal Triton Python, and
-general OpenCL compatibility remain later product gates.
+KMD/UMD entry points with the GemSim transport. CP-0028 accepts one normal
+Triton Python float32 vecadd through an isolated package proof; HIP, broader
+Triton operators, and general OpenCL compatibility remain later product gates.
 
 ## Prepare
+
+The command below describes the intended final repository-local route. No
+CP-0028 prefix is currently accepted: the v6 attempt was interrupted after a
+baked `/opt/rocm` default was detected, and the clean v7 attempt failed closed
+on a queue-test mock race. Both partial prefixes are NON-PASSING and must not be
+reused. CP-0029 applies the test-only fix and starts from a fresh schema-8
+prefix before this command becomes accepted installation authority.
 
 Run from the repository root. A full build creates only the repository-local
 prefix:
@@ -133,10 +141,11 @@ that profiling is not a prerequisite to the next operator gate.
 
 This gate proves one direct `vecadd` dispatch per OpenCL context. The local API
 is intentionally synchronous, 1D, explicit-local-size, buffer-only, and
-event-free. A second kernel submit on the same simulator connection, arbitrary
-OpenCL code objects, normal Triton Python, model operators, multi-token
-inference, TP, and CCL are not yet accepted. The older `gpuReadWrite` endpoint
-remains a regression test, not the user command.
+event-free. A second kernel submit on the same OpenCL connection and arbitrary
+OpenCL code objects are not accepted. CP-0028 separately accepts reusable
+same-process dispatch for one exact Triton vecadd, but no additional operator,
+model, multi-token, TP, or CCL path. The older `gpuReadWrite` endpoint remains
+a regression test, not the user command.
 
 ## Isolation checks
 

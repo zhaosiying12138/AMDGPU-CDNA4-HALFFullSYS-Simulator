@@ -175,10 +175,21 @@ fallback remain false. The runtime supervisor uses a private job UUID/socket,
 launches and joins gem5, and cleans the owner session automatically.
 
 This remains one exact kernel and one execution per OpenCL context. Reusable
-multi-dispatch sessions, arbitrary OpenCL images, normal Triton Python,
-model-operator coverage, stable multi-token inference, TP, and CCL remain
-future gates. The next product gate is the normal Triton Python vecadd path;
-profiling is deferred unless a real workload becomes a material blocker.
+multi-dispatch sessions and arbitrary OpenCL images remain future OpenCL gates.
+
+CP-0028 accepts the separate `TritonVecAdd` variant through an ordinary Python
+process and Triton's normal external-backend driver/JIT/launcher path. The
+pure-b010 artifact is 5,384 bytes with SHA-256
+`7308427e69dea6f320178c55863291d4d615338eb295a422a5ff7a2c2b8afa95`, a
+48-byte kernarg, 12-DWORD preload, 97 workgroups, and 388 waves. Two launches
+in one managed session observe the same queue, signal, packet VA, and allocation
+IDs while advancing their generations; stable image/packet/trace identifiers
+infer reuse of the kernel source packet because no kernel mapping ID is emitted. Both bit-exact
+float32 vector-add oracles pass with no fallback. This remains an exact
+contiguous vecadd profile, not general Triton or model-operator support. The
+v6/v7 final-prefix attempts are NON-PASSING; CP-0029 stabilizes the queue test
+and creates a fresh accepted prefix before broader operators. Profiling is
+deferred unless a real workload becomes a material blocker.
 
 ## Non-goals
 

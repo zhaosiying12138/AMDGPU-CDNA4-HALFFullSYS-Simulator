@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-11`
 
-**State at this commit:** `CP-0027 direct OpenCL vecadd accepted in a repository-local ROCm prefix; one submit per context remains bounded; next CP-0028 normal Triton Python vecadd; model operators precede conditional performance work`
+**State at this commit:** `CP-0028 normal Triton Python float32 vecadd accepted with two same-process launches and managed-session reuse; broader operators remain unaccepted; CP-0029 stabilizes the queue test and builds a fresh schema-8 prefix before the model operator matrix`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -381,19 +381,22 @@ production runtime/device opens absent.
 Keep AMD TTIR/TTGIR/LLVM lowering; add an out-of-tree `gemsim_amd` backend and
 launcher linked only to the stable runtime ABI. Cache keys contain gem5/runtime/
 ISA/LLVM/Triton/device-lib revisions and capability bits. The first gate is
-unmodified execution of Triton's tutorial vecadd with no fallback. After that,
+ordinary Python execution of the tutorial-equivalent vecadd correctness path
+with no fallback. The complete upstream tutorial file, including its benchmark
+block and large-size sweep, remains a later scale gate. After that,
 expand the model-required operator matrix immediately. Profiling and P5B
 parallelism do not block coverage unless measured end-to-end evidence identifies
 a material simulator bottleneck.
 
 ### P5A — transparent Triton Python vecadd
 
-The first Triton usability checkpoint is unmodified user execution of the
-`python tutorial/01-vecadd.py` request through `gemsim_amd`. In the pinned
-Triton checkout this request maps to `python/tutorials/01-vector-add.py`; the
-upstream file is not edited. The ordinary Triton driver/launcher selection path
-must be used, with no application-specific import, source, or environment
-rewrite beyond selecting the simulator device. After that gate is accepted,
+The first Triton usability checkpoint is ordinary user execution of
+`examples/triton/vecadd_correctness.py` through `gemsim_amd`. Its `add_kernel`
+and `add()` preserve the pinned `python/tutorials/01-vector-add.py` correctness
+semantics, while intentionally omitting the upstream benchmark block and its
+large-size sweep. The ordinary Triton driver/launcher selection path must be
+used, with no application-specific C endpoint or source-overlay import. After
+that gate is accepted,
 the next default action is model-operator coverage, not profiling. Always record
 basic elapsed time and work counts. If a real operator/layer/model run is slow
 enough to block progress, open a bounded profiling checkpoint spanning host
@@ -439,10 +442,12 @@ not an acceptance prerequisite. The offline model preparation is pinned to
 revision `2fc06364715b967f1860aea9cf38778875588b17`; the single safetensors
 weight is `1,746,942,600` bytes with SHA-256
 `04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696`.
-The temporary pinned Triton/LLVM overlay has compile-only gfx950 vecadd
-HSACO SHA-256
-`ee8b0f892da7ab1886f17ee66f88de5c23e05a48f7f361e02bd0707c9a11826e`;
-this artifact is not an execution result.
+CP-0028's pure-b010 compiler path produces the accepted 5,384-byte gfx950
+`add_kernel` HSACO with SHA-256
+`7308427e69dea6f320178c55863291d4d615338eb295a422a5ff7a2c2b8afa95`.
+It has an exact 48-byte kernarg, 12-DWORD preload, and 256-thread workgroup;
+normal Python execution validates it twice. Earlier 5,408/5,736-byte artifacts
+are historical compile-only or mixed-toolchain evidence and are not authority.
 
 ### P6 — PyTorch integration
 
@@ -533,17 +538,19 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | P3-HOST-NATIVE-03-B1 | P3H | No-x86 native queue/CP-core address resolution, AQL publication/fetch, and admission without legacy SimObjects or CU execution |
 | P3-HOST-NATIVE-03-B2 | P3H | No-x86 GPUDispatcher/CU functional output/trace differential for the locked 4-WG/16-wave gfx950 dispatch |
 | CP-0027 / P4-OPENCL-E2E-01 | P4 | User `.cl` plus host program builds into a normal executable that transparently runs on gem5 and validates output; low-level endpoint remains regression-only |
-| P5-TRITON-VECADD-01 | P5 | Unmodified Triton tutorial vecadd through GemSim |
 | CP-0021 | P5 | Hash-bound Triton vecadd compile/provenance prerequisite; normal launcher remains blocked |
 | CP-0022 | P5 | Generic payload-v2 codec/admission boundary; daemon mapping and launcher handoff remain blocked |
 | CP-0023 / P5-TRITON-VECADD-02-RUNTIME | P5 | Owner-bound runtime client plus local native MAP/ALLOC/publish/fetch/CP-admission/retire/unmap; daemon route remains blocked |
 | CP-0024 / P5-TRITON-VECADD-03-DAEMON-ROUTE | P5 | Bounded handler source/type-19 plumbing, route-policy harness, and live canonical negative handshake; bit 8 and positive type-18/H2D/SUBMIT route remain blocked |
 | CP-0025 / P5-TRITON-VECADD-04-DAEMON-LIFECYCLE | P5 | Accepted positive bit-8 daemon control lifecycle through logical-align-8 ALLOC, v1 H2D, native CP admission/type-19 ACK/type-20 retire, cleanup, and reconnect; no GPU execution |
 | CP-0026 / P5-TRITON-VECADD-05-GPU-EXECUTION | P5 | Connect the committed daemon lifecycle to GPUDispatcher/CU execution and prove output correctness for the locked zero-preload fixture |
+| CP-0028 / P5-TRITON-VECADD-06-NORMAL-PYTHON | P5A | Ordinary Python/Triton compiles and executes exact contiguous float32 vecadd twice in one managed session with resource reuse, exact output, and zero fallback; broader operators and final repo-local install remain bounded |
+| CP-0029 / P5-TRITON-VECADD-07-FRESH-SCHEMA8 | P5A | Remove the deterministic queue-test mock race with a test-only change, prove serial/concurrent stability, and build/verify a fresh schema-8 repository-local prefix before operator expansion |
 | P5-PROFILE-ON-BLOCKER | P5A | Conditional retained profile and measured 80/20 optimization only after a real operator/layer/model bottleneck is demonstrated |
 | P5-PARALLEL-TB-ON-BLOCKER | P5B | Conditional safe serial-versus-parallel threadblock experiment justified by a retained profile |
 | P5-OPS-01 | P5C | Broader model-operator manifest and differential gates |
 | P5-QWEN35-OPS-01 | P5C | All 15 text-only Qwen3.5-0.8B operator contracts execute on AMD with no fallback |
+| P5-TRITON-VECADD-UPSTREAM-SCALE | P5C+ | Deferred full unmodified upstream tutorial file, benchmark block, and large-size sweep; not a prerequisite for the model-specific operator matrix |
 | P6-PYTORCH-01 | P6 | PyTorch eager/compile device foundation |
 | P7-VLLM-SINGLE-01 | P7 | Single-daemon Qwen model path |
 | P8-COLLECTIVE-01 | P8 | N-rank functional collective semantics |
@@ -830,10 +837,9 @@ oracle is A unchanged, B=gid, C=A over all 1024 elements; packet retirement,
 MQD read-index 0->1, direct-u64 signal 1->0, and pin release are ordered and
 validated. This is one locked functional case only: general gfx950/arbitrary
 HSACO, timing accuracy, fences/barriers, atomics, LDS/scratch, GPU TLB,
-Ruby/coherence, HIP/OpenCL, and performance remain unproven. Triton E2E and
-Qwen inference remain 0/1. The next unique action is
-`P5-TRITON-VECADD-01`, the unmodified Triton tutorial through the normal
-launcher with simulator device selection only.
+Ruby/coherence, HIP/OpenCL, and performance remain unproven. At the historical
+CP20 boundary, Triton E2E and Qwen inference remained 0/1. Its next action was
+the Triton vecadd launcher gate later bounded and accepted by CP28.
 
 `CP-0021` accepts a narrower child-side prerequisite for that launcher gate.
 The pinned unmodified tutorial and retained vecadd HSACO identities match, the
@@ -882,15 +888,22 @@ fallback. The 12-DWORD descriptor preload remains an explicit NOT_SUPPORTED
    and post-ACK quarantine cleanup. The wire signal field remains expected `1`;
    trace `1 -> 0` is the private native completion signal. This is a fixture and
    VEGA_X86 bridge proof, not generic gfx950/arbitrary HSACO or standalone
-   no-x86 daemon proof. The 5,408-byte 12-DWORD Triton preload, normal launcher,
-   compiler/JIT, fallback, performance, Triton E2E, and Qwen remain false. The
+   no-x86 daemon proof. The historical 5,408-byte Triton artifact remains
+   compile-only at this boundary. The
    CP-0027 then accepts `P4-OPENCL-E2E-01`: a normal executable linked only to
    the repository-local OpenCL/runtime stack compiles the exact 5,160-byte
    gfx950 `vecadd`, automatically manages gem5, executes four workgroups and
    sixteen waves, receives C-only D2H, validates bit-exact `C=A+B`, and exits
-   cleanly without fallback. It remains one submit per OpenCL context. The next
-   product gate is CP-0028, the normal Triton Python vecadd path, followed by the
-   model-required operator matrix. Profiling is conditional on a demonstrated
+   cleanly without fallback. It remains one submit per OpenCL context. CP-0028
+   then accepts the normal Triton Python path for the exact 5,384-byte pure-b010
+   `add_kernel`: two deterministic launches in one process observe the same
+   managed session, queue, signal, packet VA, and allocation IDs, and both
+   produce bit-exact float32 `C=A+B` with zero fallback. The stable image hash,
+   packet VA/CRC, trace, ticket, and dispatch IDs support an inference of the
+   same kernel source packet; the trace exposes no kernel mapping ID. No other Triton operator is
+   accepted. The v6/v7 final-prefix attempts remain NON-PASSING; CP-0029 fixes
+   the queue mock race and builds a fresh schema-8 prefix before the model-
+   required operator matrix. Profiling is conditional on a demonstrated
    operator-, layer-, or model-level bottleneck.
 
 ### P3H - host-native simulator and first Triton gate
@@ -928,14 +941,14 @@ The work is staged as follows:
    output coverage, packet retirement, MQD update, and native signal completion.
    It does not establish generic gfx950, timing, fence/atomic, TLB/Ruby, or
    arbitrary HSACO semantics.
-4. `P5-TRITON-VECADD-01` runs the pinned, unmodified Triton tutorial request
-   (`python/tutorials/01-vector-add.py`) through the normal Triton launcher,
+4. `P5-TRITON-VECADD-01` runs the tutorial-equivalent correctness path
+   (`examples/triton/vecadd_correctness.py`) through the normal Triton launcher,
    with simulator device selection only. It retains compiler, HSACO digest,
    transport, dispatch, output, and CPU-fallback evidence. CP-0021 accepts
    only the compile/provenance prerequisite: the exact tutorial and HSACO
    identities, metadata, and caller-local materialization pass, while
    compiler/JIT, launcher, transport, execution, and fallback remain false.
-   Triton end-to-end is still 0/1. The exact LLVM/Triton pair has a temporary
+   Triton end-to-end is still 0/1 at CP-0021. The exact LLVM/Triton pair has a temporary
    AMD-only overlay that produced the retained compile artifact; it is not yet
    a committed launcher or device execution path. CP-0022 freezes the wire-v2
    codec. CP-0023 adds the runtime client contract and local owner-bound native
@@ -948,9 +961,12 @@ The work is staged as follows:
    reconnect. It does not issue work to GPUDispatcher/CU or validate output.
    CP-0026 then connects the locked `gpuReadWrite` route to GPUDispatcher/CU,
    and CP-0027 accepts the separate direct OpenCL `vecadd` executable with a
-   managed gem5 lifecycle and output oracle. CP-0028 is the next coordinated
-   gate: normal Triton Python driver/runtime launch. Preload-aware Triton mapping
-   and reusable multi-dispatch are part of that bounded work, not OpenCL claims.
+   managed gem5 lifecycle and output oracle. CP-0028 accepts normal Triton
+   Python driver/JIT/launcher execution for one exact float32 vecadd, including
+   preload-aware mapping and two-launch reuse. It does not accept a second
+   operator family. CP-0029 is the next coordinated gate: stabilize the queue
+   mock test, produce a fresh schema-8 repository-local prefix, and then enter
+   the model-required operator matrix.
 
 This workstream is not a cycle-accurate replacement. Timing, wider operator
 coverage, host-parallel threadblocks, HIP/OpenCL CTS, PyTorch, vLLM, and Qwen

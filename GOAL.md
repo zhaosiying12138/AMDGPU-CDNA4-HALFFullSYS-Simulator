@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `2`
 
-**Current state:** `CP-0027-direct-opencl-vecadd-accepted; repository-local-ROCm-prefix; one-shot-context-boundary; next-CP-0028-normal-Triton-Python-vecadd; model-operators-before-performance-work`
+**Current state:** `CP-0028-normal-Triton-Python-vecadd-accepted; exact-float32-contiguous-only; same-process-two-launch-reuse; final-repository-local-install-not-yet-accepted; next-CP-0029-queue-test-stabilization-and-fresh-prefix; model-operator-matrix-before-performance-work`
 
 **Current phase:** `P5`
 
@@ -135,11 +135,12 @@ root coordinator commit.
 继续执行 amdgpu-sim 计划。当前目录是 /home/zhaosiying/amdgpu-sim。
 先读取 PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、其引用的
 最新 checkpoint/bitlesson/evidence，运行 scripts/resume.sh --verify。
-CP-0019 host-native queue/command-processor-core B1 boundary 已 accepted；从唯一
-next_action `P3-HOST-NATIVE-03-B2` 继续，不要再次
-begin CP-0014，也不要重做 bootstrap、source freeze、authored runtime
-baseline 或已通过的 CP4-CP9 gates，也不要修改已冻结的 SOURCE_LOCK.json
-或已登记的 PROJECT_LANES baseline。CP-0010 只实现 18 个 typed KMT
+CP-0028 normal-Python Triton vecadd boundary 已 accepted；从唯一 next_action
+`P5-TRITON-VECADD-07-FRESH-SCHEMA8` 继续：先完成 CP-0029 的 queue mock
+determinism test-only 修复和全新 schema-8 prefix，再进入模型算子矩阵。不要重做
+bootstrap、source freeze、CP26/CP27/CP28 已通过的执行门禁，也不要修改已冻结的
+SOURCE_LOCK.json 或已登记的 PROJECT_LANES baseline。以下 CP10-CP27 描述都是
+历史边界，不是当前 next action。CP-0010 只实现 18 个 typed KMT
 操作的固定宽度 shim、版本化 daemon envelope、模拟资源生命周期和
 no-device 证据；它不是完整 124-PFN ROCr/libhsakmt provider，也不宣称
 KFD attach、HIP、OpenCL、Triton、PyTorch 或 vLLM 能力。CP-0011 已冻结
@@ -147,7 +148,7 @@ KFD attach、HIP、OpenCL、Triton、PyTorch 或 vLLM 能力。CP-0011 已冻结
 gem5 gfx950 decoder、unsupported opcode、pinned device-libs/toolchain proof
 已完成；CP-0013 A1 仅完成 versioned HSACO fixed-record transport/staging，
 不包含 PT_LOAD mapping、动态 AQL/kernarg 或真实 code-object execution。
-当前还没有任何 Triton 端到端通过案例。CP-0015 已完成 no-VEGA_X86
+在该历史边界尚无 Triton 端到端通过案例；当前 CP28 结论见下文。CP-0015 已完成 no-VEGA_X86
 control-core/build/audit 边界，CP-0016 又完成了复用既有 memory/queue/signal/dispatch
 state 的 functional parity adapter。CP-0017-A 进一步完成了锁定 gfx950 HSACO 的
 CP13 staging、PT_LOAD 文件复制/BSS 清零、descriptor/entry 绑定和 page-lifetime
@@ -180,11 +181,17 @@ AQL admission、type-19 ACK、type-20 retire、UNMAP、disconnect cleanup 和 re
 程序链接本仓库的 `libOpenCL.so.1` 成为可直接执行的二进制；该进程自动启动
 gem5、编译并提交 exact `vecadd`、回读 C、校验 `C=A+B` 并清理退出，零
 CPU/NVIDIA fallback。它当前仍限制为一个 OpenCL context 一次 submit。
-下一产品门禁不是 profile，而是让 Triton 用户命令
-`tutorial/01-vecadd.py`（当前 pinned checkout 中对应未修改的
-`python/tutorials/01-vector-add.py`）通过正常 Python driver/runtime 路径透明
-执行。随后优先跑通模型所需全部算子、单卡完整模型稳定多 token，再实现 CCL
-和多 TP 完整模型稳定多 token。只有真实算子/层/模型的耗时阻塞该主线时才开启
+CP-0028 又完成普通 Python/Triton 产品入口：外部 `gemsim_amd` backend 通过
+Triton 正常 driver/JIT/launcher 路径生成并加载 pure-b010 gfx950 `add_kernel`，
+在同一 Python 进程、同一 managed gem5 session 中以两组独立输入连续 launch，
+两次 bit-exact `float32 C=A+B` 都通过且 fallback 为零。该结论只覆盖连续
+float32 vecadd（98,432 elements、BLOCK_SIZE 1,024），不覆盖任意 Triton kernel
+或模型算子。CP-0028 的 v6/v7 最终仓库本地安装尝试均明确 NON-PASSING：v6
+被 `/opt/rocm` 默认路径污染后中止，v7 因 queue mock 的 pre-ACK 测试竞态
+fail closed；它们不能作为安装 authority。CP-0029 先用 test-only 修改稳定该
+queue gate，再从空 schema-8 prefix 完成安装验证，随后立即跑模型所需算子矩阵、
+单卡完整模型稳定多 token，再实现 CCL 和多 TP 完整模型稳定多 token。只有真实
+算子/层/模型的耗时阻塞该主线时才开启
 可复现 profile、80/20 优化或 threadblock host-parallel 门禁；不安全或不可证明
 独立的 workgroup 必须保留串行执行。模型路径和 N-rank registry 可用后，再实现只观察模拟 daemon
 lease/epoch 的 `rocm-smi` ON/OFF 工具，绝不探测物理卡。
@@ -360,13 +367,18 @@ expected value `1` and no wire after-value is observed; trace `1 -> 0` is the
 private native AQL completion signal. A separate post-ACK disconnect sample
 proves daemon quarantine cleanup with no type-20, D2H, UNMAP, or client output;
 normal completed disconnect cleanup and pre-SUBMIT live-lease cleanup remain
-separate boundaries. Triton's 5,408-byte image with 12-DWORD preload, the
-normal launcher, compiler/JIT, performance, CPU/NVIDIA fallback, and Qwen all
-remain false. CP-0027 separately accepts one direct OpenCL executable and one
+separate boundaries. The historical CP-0021 5,408-byte Triton image remains
+compile-only evidence. CP-0027 separately accepts one direct OpenCL executable and one
 exact 5,160-byte `vecadd` image: the executable manages gem5, reaches
 GPUDispatcher/CU, receives C-only D2H, validates bit-exact `C=A+B`, and exits
 cleanly without fallback. Reusable multi-dispatch and arbitrary OpenCL remain
-false. The next product action is the normal Triton Python vecadd gate,
-followed by the model-required operator matrix. Profiling is deferred until a
+false. CP-0028 accepts one exact 5,384-byte pure-b010 Triton `add_kernel`
+image through the normal Python driver/JIT/launcher path, including two
+same-process launches with session/resource reuse and bit-exact output. This
+is still only contiguous float32 vecadd; broadcast, cast, reduction, norm,
+GEMM, RoPE, cache, GDN, attention, full-model, TP, and CCL execution remain
+false. Its v6/v7 final-prefix attempts are retained only as NON-PASSING
+evidence. CP-0029 stabilizes the queue test and produces a fresh accepted
+prefix before the model-required operator matrix. Profiling is deferred until a
 real workload demonstrates a material operator-, layer-, or model-level
 bottleneck.
