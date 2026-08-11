@@ -1,9 +1,9 @@
 {
-  "checkpoint_id": "CP-0028",
-  "checkpoint_sha256": "b0e12a14c99f0dc1eb4fd4dfb3f7d9124fb1acd4f666e7ec151dec76d06d8b7c",
+  "checkpoint_id": "CP-0029",
+  "checkpoint_sha256": "769efaf48ccfd8567a97e882fc5a492bbc3580180607365620a4d4535e01cf73",
   "goal_id": "GSIM-001",
-  "next_action_id": "P5-TRITON-VECADD-07-FRESH-SCHEMA8",
-  "next_action_summary": "Begin CP-0029, apply only the queue-mock ordering fix, prove serial and concurrent stability, and build a fresh schema-8 repository-local prefix before expanding the Triton operator matrix.",
+  "next_action_id": "P5-OPS-00-SILU-AND-MUL-MINIMUM",
+  "next_action_summary": "Begin CP-0030 and validate the minimum Qwen3.5 BF16 SiluAndMul decode and masked-prefill contracts through the normal Triton simulator path before expanding the operator matrix.",
   "phase_id": "P5A",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,

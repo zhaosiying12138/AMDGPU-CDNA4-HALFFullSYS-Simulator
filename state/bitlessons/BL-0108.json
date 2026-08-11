@@ -1,0 +1,25 @@
+{
+  "schema": "amdgpu-sim.bitlesson.v1",
+  "id": "BL-0108",
+  "checkpoint_id": "CP-0029",
+  "status": "active",
+  "confidence": "high",
+  "supersedes": [],
+  "evidence_ids": ["EV-0067"],
+  "applies_to": [
+    "scripts/setup_rocm_env.sh",
+    "Triton LLVM CMakeCache.txt",
+    "Triton LLVM VCSRevision.h",
+    "Triton LLD VCSVersion.inc",
+    "schema-8 postinstall validator"
+  ],
+  "question_or_symptom": "Why can a pinned Triton LLVM source still produce a different HSACO identity when it is exported below a repository that has a parent Git checkout?",
+  "observation": "LLVM VCS revision discovery walks upward from an exported source directory and can find the amdgpu-sim root Git repository. With LLVM_APPEND_VC_REV enabled, the embedded LLD version string added the parent repository path and commit to the HSACO .comment section. The first fresh schema-8 attempt therefore generated a 5,648-byte hash-different image and the daemon rejected COMMIT even though removing .comment made the ELF bytes identical. Rebuilding the embedded LLD and Triton wheel with LLVM_APPEND_VC_REV=OFF restored the locked 5,384-byte image and passed two managed launches.",
+  "conclusion": "A pinned source commit does not by itself isolate compiler provenance from the containing checkout. The generated code-object identity is also affected by linker VCS metadata and must be checked at the CMake cache, generated-header, and final HSACO layers.",
+  "decision": "Configure Triton LLVM with LLVM_APPEND_VC_REV=OFF, require LLVM_FORCE_VC_REVISION and LLVM_FORCE_VC_REPOSITORY to remain empty, require the generated LLVM/LLD VCS headers to contain only undefines without a parent path or commit, and keep the exact HSACO SHA as a fail-closed admission gate.",
+  "invalidated_assumptions": [
+    "A clean pinned child source export is sufficient to make compiler output independent of the parent Git checkout.",
+    "An HSACO hash mismatch necessarily indicates a code or descriptor change rather than non-loadable linker provenance metadata.",
+    "Reusing a partially built prefix after changing compiler provenance settings is equivalent to a fresh accepted install."
+  ]
+}

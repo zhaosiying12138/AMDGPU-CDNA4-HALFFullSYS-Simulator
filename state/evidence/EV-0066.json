@@ -1,0 +1,318 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-0066",
+  "checkpoint_id": "CP-0029",
+  "type": "cp29-precommit-queue-mock-stability",
+  "claim": "EV-0066 binds the only CP-0029 runtime change to tests/queue_test.c and proves deterministic queue mock shutdown ordering with serial stress, 18-worker concurrent stress, and fresh GCC/Clang runtime test matrices. It makes no schema-8 installation, OpenCL, Triton, operator, model, TP, CCL, profiling, or performance claim.",
+  "command_argv": [
+    [
+      "cmake",
+      "--build",
+      "projects/self-amdgpu-runtime/build/cp28-runtime-local",
+      "--target",
+      "self_amdgpu_runtime_queue_test",
+      "--parallel",
+      "4"
+    ],
+    [
+      "git",
+      "-C",
+      "projects/self-amdgpu-runtime",
+      "diff",
+      "--check"
+    ],
+    [
+      "bash",
+      "-c",
+      "set -euo pipefail; for i in $(seq 1 100); do timeout 10s projects/self-amdgpu-runtime/build/cp28-runtime-local/tests/self_amdgpu_runtime_queue_test; done; printf \"serial_runs=100 passed=100 failed=0 timed_out=0\\n\""
+    ],
+    [
+      "bash",
+      "-c",
+      "set -euo pipefail; seq 1 1800 | xargs -P18 -n1 timeout 10s projects/self-amdgpu-runtime/build/cp28-runtime-local/tests/self_amdgpu_runtime_queue_test; printf \"concurrent_workers=18 runs_per_worker=100 total_runs=1800 passed=1800 failed=0 timed_out=0\\n\""
+    ],
+    [
+      "bash",
+      "-c",
+      "set -euo pipefail; cp29_build=$(mktemp -d /tmp/cp29-runtime-gcc-build.XXXXXX); cp29_prefix=$(mktemp -d /tmp/cp29-runtime-gcc-prefix.XXXXXX); printf \"build=%s\\nprefix=%s\\n\" \"$cp29_build\" \"$cp29_prefix\"; cmake -S projects/self-amdgpu-runtime -B \"$cp29_build\" -G Ninja -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_SHARED_LIBS=ON -DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON -DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON -DSELF_AMDGPU_RUNTIME_BUILD_OPENCL=ON -DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=OFF -DSELF_AMDGPU_RUNTIME_CP28_TRITON_HSACO=\"$PWD/artifacts/evidence/CP-0028/fixture/add_kernel.hsaco\" -DCMAKE_INSTALL_PREFIX=\"$cp29_prefix\" -DSELF_AMDGPU_RUNTIME_OPENCL_PREFIX=\"$PWD/env/rocm/gfx950-v5-llvm-73f2a21fe16b-rocm-92115a294198-sim-ed808f6a57b8-runtime-749717e1a5c7\" -DSELF_AMDGPU_RUNTIME_OPENCL_GEM5=\"$PWD/projects/gem5/build/VEGA_X86/gem5.opt\" -DSELF_AMDGPU_RUNTIME_OPENCL_GEM5_CONFIG=\"$PWD/projects/gem5/configs/example/gemsim/host_dispatch.py\"; cmake --build \"$cp29_build\" --parallel 18; ctest --test-dir \"$cp29_build\" --output-on-failure -j1"
+    ],
+    [
+      "bash",
+      "-c",
+      "set -euo pipefail; cp29_build=$(mktemp -d /tmp/cp29-runtime-clang-build.XXXXXX); cp29_prefix=$(mktemp -d /tmp/cp29-runtime-clang-prefix.XXXXXX); printf \"build=%s\\nprefix=%s\\n\" \"$cp29_build\" \"$cp29_prefix\"; cmake -S projects/self-amdgpu-runtime -B \"$cp29_build\" -G Ninja -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_SHARED_LIBS=ON -DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON -DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON -DSELF_AMDGPU_RUNTIME_BUILD_OPENCL=ON -DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=OFF -DSELF_AMDGPU_RUNTIME_CP28_TRITON_HSACO=\"$PWD/artifacts/evidence/CP-0028/fixture/add_kernel.hsaco\" -DCMAKE_INSTALL_PREFIX=\"$cp29_prefix\" -DSELF_AMDGPU_RUNTIME_OPENCL_PREFIX=\"$PWD/env/rocm/gfx950-v5-llvm-73f2a21fe16b-rocm-92115a294198-sim-ed808f6a57b8-runtime-749717e1a5c7\" -DSELF_AMDGPU_RUNTIME_OPENCL_GEM5=\"$PWD/projects/gem5/build/VEGA_X86/gem5.opt\" -DSELF_AMDGPU_RUNTIME_OPENCL_GEM5_CONFIG=\"$PWD/projects/gem5/configs/example/gemsim/host_dispatch.py\"; cmake --build \"$cp29_build\" --parallel 18; ctest --test-dir \"$cp29_build\" --output-on-failure -j1"
+    ]
+  ],
+  "command_results": [
+    {
+      "id": "queue-build",
+      "argv": [
+        "cmake",
+        "--build",
+        "projects/self-amdgpu-runtime/build/cp28-runtime-local",
+        "--target",
+        "self_amdgpu_runtime_queue_test",
+        "--parallel",
+        "4"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "The existing GCC build rebuilt the queue test from the modified source.",
+      "raw_streams_retained": true,
+      "started_at": "2026-08-11T03:06:37+00:00",
+      "ended_at": "2026-08-11T03:06:37+00:00",
+      "record": {
+        "path": "artifacts/evidence/CP-0029/queue-build.json",
+        "size": 708,
+        "sha256": "619b31747df643a9d2da0bf5d540a52279c114f2b17a8d474e9c848ae70b423a",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0029/queue-build.stdout",
+        "size": 22,
+        "sha256": "8c35b1682f73592d30612d7b0fabdb384fcfff35cb5a076cb48b85b1368aa794",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0029/queue-build.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      }
+    },
+    {
+      "id": "queue-diff-check",
+      "argv": [
+        "git",
+        "-C",
+        "projects/self-amdgpu-runtime",
+        "diff",
+        "--check"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "The queue-only source diff passes git diff --check.",
+      "raw_streams_retained": true,
+      "started_at": "2026-08-11T03:06:37+00:00",
+      "ended_at": "2026-08-11T03:06:37+00:00",
+      "record": {
+        "path": "artifacts/evidence/CP-0029/queue-diff-check.json",
+        "size": 631,
+        "sha256": "04fe1964b1fad60e0148e5e50a3be2e58e662cfccc432a4af2cb9fc502338fca",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0029/queue-diff-check.stdout",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0029/queue-diff-check.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      }
+    },
+    {
+      "id": "queue-serial-100",
+      "argv": [
+        "bash",
+        "-c",
+        "set -euo pipefail; for i in $(seq 1 100); do timeout 10s projects/self-amdgpu-runtime/build/cp28-runtime-local/tests/self_amdgpu_runtime_queue_test; done; printf \"serial_runs=100 passed=100 failed=0 timed_out=0\\n\""
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "The queue binary passed 100 serial runs with a ten-second per-run timeout.",
+      "raw_streams_retained": true,
+      "started_at": "2026-08-11T03:07:19+00:00",
+      "ended_at": "2026-08-11T03:07:50+00:00",
+      "record": {
+        "path": "artifacts/evidence/CP-0029/queue-serial-100.json",
+        "size": 794,
+        "sha256": "c32f088317f7e07bde00a72a8b74ceac5e715cd958fbdbfa0bd515b1a5690f43",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0029/queue-serial-100.stdout",
+        "size": 48,
+        "sha256": "e1cd3b8f39f1c20c8d93763b40396629b8dc383a3af64e673f99035ea8fa8a58",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0029/queue-serial-100.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      }
+    },
+    {
+      "id": "queue-concurrent-1800",
+      "argv": [
+        "bash",
+        "-c",
+        "set -euo pipefail; seq 1 1800 | xargs -P18 -n1 timeout 10s projects/self-amdgpu-runtime/build/cp28-runtime-local/tests/self_amdgpu_runtime_queue_test; printf \"concurrent_workers=18 runs_per_worker=100 total_runs=1800 passed=1800 failed=0 timed_out=0\\n\""
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "Eighteen workers passed 1,800 aggregate queue runs with a ten-second per-run timeout.",
+      "raw_streams_retained": true,
+      "started_at": "2026-08-11T03:07:19+00:00",
+      "ended_at": "2026-08-11T03:07:50+00:00",
+      "record": {
+        "path": "artifacts/evidence/CP-0029/queue-concurrent-1800.json",
+        "size": 843,
+        "sha256": "f082246ad7f022a526af013e5b0ff7da103e58825da4be665361abf2ca73b263",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0029/queue-concurrent-1800.stdout",
+        "size": 91,
+        "sha256": "a3ff1bb8a7295b79ed49f2b67f0d158961578de69b69dac8c1fec92b0a84ef54",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0029/queue-concurrent-1800.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-gcc-matrix",
+      "argv": [
+        "bash",
+        "-c",
+        "set -euo pipefail; cp29_build=$(mktemp -d /tmp/cp29-runtime-gcc-build.XXXXXX); cp29_prefix=$(mktemp -d /tmp/cp29-runtime-gcc-prefix.XXXXXX); printf \"build=%s\\nprefix=%s\\n\" \"$cp29_build\" \"$cp29_prefix\"; cmake -S projects/self-amdgpu-runtime -B \"$cp29_build\" -G Ninja -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_SHARED_LIBS=ON -DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON -DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON -DSELF_AMDGPU_RUNTIME_BUILD_OPENCL=ON -DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=OFF -DSELF_AMDGPU_RUNTIME_CP28_TRITON_HSACO=\"$PWD/artifacts/evidence/CP-0028/fixture/add_kernel.hsaco\" -DCMAKE_INSTALL_PREFIX=\"$cp29_prefix\" -DSELF_AMDGPU_RUNTIME_OPENCL_PREFIX=\"$PWD/env/rocm/gfx950-v5-llvm-73f2a21fe16b-rocm-92115a294198-sim-ed808f6a57b8-runtime-749717e1a5c7\" -DSELF_AMDGPU_RUNTIME_OPENCL_GEM5=\"$PWD/projects/gem5/build/VEGA_X86/gem5.opt\" -DSELF_AMDGPU_RUNTIME_OPENCL_GEM5_CONFIG=\"$PWD/projects/gem5/configs/example/gemsim/host_dispatch.py\"; cmake --build \"$cp29_build\" --parallel 18; ctest --test-dir \"$cp29_build\" --output-on-failure -j1"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "A fresh GCC configure/build passed all 22 runtime CTests with the two expected opt-in skips.",
+      "raw_streams_retained": true,
+      "started_at": "2026-08-11T03:08:53+00:00",
+      "ended_at": "2026-08-11T03:09:00+00:00",
+      "record": {
+        "path": "artifacts/evidence/CP-0029/runtime-gcc-matrix.json",
+        "size": 1677,
+        "sha256": "e32d7261ef5b390dfac3075ceabf8333f2d5d0b0e8bf66cc3d130b98f7604bdf",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0029/runtime-gcc-matrix.stdout",
+        "size": 11523,
+        "sha256": "3f9aee72cda1402ef5651ce69a1584d00fb72b9b11c5b237ef75c3ee49d66ac3",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0029/runtime-gcc-matrix.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      }
+    },
+    {
+      "id": "runtime-clang-matrix",
+      "argv": [
+        "bash",
+        "-c",
+        "set -euo pipefail; cp29_build=$(mktemp -d /tmp/cp29-runtime-clang-build.XXXXXX); cp29_prefix=$(mktemp -d /tmp/cp29-runtime-clang-prefix.XXXXXX); printf \"build=%s\\nprefix=%s\\n\" \"$cp29_build\" \"$cp29_prefix\"; cmake -S projects/self-amdgpu-runtime -B \"$cp29_build\" -G Ninja -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_SHARED_LIBS=ON -DSELF_AMDGPU_RUNTIME_BUILD_TESTS=ON -DSELF_AMDGPU_RUNTIME_BUILD_TOOLS=ON -DSELF_AMDGPU_RUNTIME_BUILD_OPENCL=ON -DSELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=OFF -DSELF_AMDGPU_RUNTIME_CP28_TRITON_HSACO=\"$PWD/artifacts/evidence/CP-0028/fixture/add_kernel.hsaco\" -DCMAKE_INSTALL_PREFIX=\"$cp29_prefix\" -DSELF_AMDGPU_RUNTIME_OPENCL_PREFIX=\"$PWD/env/rocm/gfx950-v5-llvm-73f2a21fe16b-rocm-92115a294198-sim-ed808f6a57b8-runtime-749717e1a5c7\" -DSELF_AMDGPU_RUNTIME_OPENCL_GEM5=\"$PWD/projects/gem5/build/VEGA_X86/gem5.opt\" -DSELF_AMDGPU_RUNTIME_OPENCL_GEM5_CONFIG=\"$PWD/projects/gem5/configs/example/gemsim/host_dispatch.py\"; cmake --build \"$cp29_build\" --parallel 18; ctest --test-dir \"$cp29_build\" --output-on-failure -j1"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "result": "A fresh Clang configure/build passed all 22 runtime CTests with the two expected opt-in skips.",
+      "raw_streams_retained": true,
+      "started_at": "2026-08-11T03:08:53+00:00",
+      "ended_at": "2026-08-11T03:09:00+00:00",
+      "record": {
+        "path": "artifacts/evidence/CP-0029/runtime-clang-matrix.json",
+        "size": 1687,
+        "sha256": "5803508369a6cd89c53d4815db845c39958ba6fc28a3b0c939b4423d597f11d2",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      },
+      "stdout": {
+        "path": "artifacts/evidence/CP-0029/runtime-clang-matrix.stdout",
+        "size": 11537,
+        "sha256": "a5d8fc0f034effec3307448865218f92371a2e0a8c8e38249b5536ded2967754",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      },
+      "stderr": {
+        "path": "artifacts/evidence/CP-0029/runtime-clang-matrix.stderr",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "required_at_acceptance": true,
+        "required_for_resume": false,
+        "tracked": false
+      }
+    }
+  ],
+  "cwd": ".",
+  "started_at": "2026-08-11T03:06:37+00:00",
+  "ended_at": "2026-08-11T03:09:00+00:00",
+  "exit_code": 0,
+  "environment_fingerprint": {
+    "root_head": "7a7a0cb20a38b06e060d80e14b66f34bdb7429e6",
+    "runtime_head": "7c91133410ce42e4a0a14928fea64c2a89a549e0",
+    "runtime_tree": "fbc873266dee2d2b1be8682860ed28a9503eefe5",
+    "changed_paths": [
+      "tests/queue_test.c"
+    ],
+    "queue_test_old_blob": "cb2a966bfe95716bd09ef5e69a0d78caf2765949",
+    "queue_test_new_blob": "5a7f7256662ef0374449d3216d91040d6bc264bf",
+    "queue_test_sha256": "bc47e89e753eefbc83acd2ab9a113befe12da147d85a680a197ce4af06a15298",
+    "runtime_diff_sha256": "f45dd42bd56ff886ca3612822732b1e1a0e71bc964db24bec7ccb48534ecaa23",
+    "serial_runs": 100,
+    "concurrent_workers": 18,
+    "concurrent_runs": 1800,
+    "stress_failures": 0,
+    "stress_timeouts": 0,
+    "gcc_ctest_total": 22,
+    "clang_ctest_total": 22,
+    "ctest_failures": 0,
+    "expected_opt_in_skips_per_toolchain": 2,
+    "production_source_changed": false,
+    "schema8_prefix_built": false
+  },
+  "limitations": [
+    "This is precommit evidence over one dirty child worktree. A later CP-0029 umbrella must bind the clean runtime commit, updated setup locks, schema-8 prefix, and final root checkpoint.",
+    "The focused queue rebuild reused the CP-0028 local GCC build configuration; the separate GCC and Clang matrices each used a fresh temporary configure and build tree.",
+    "The two skipped tests are existing opt-in live endpoint/OpenCL execution gates. They do not substitute for the independent schema-8 OpenCL and Triton product runs required later in CP-0029.",
+    "expect_peer_close uses a one-second wall-clock timeout; 1,900 retained stress runs did not expose a scheduling failure, but this is not a timing guarantee.",
+    "No repository-local prefix, broader Triton operator, model inference, stable multi-token decode, tensor parallelism, CCL, profiling, or performance result is accepted here."
+  ],
+  "redactions": [],
+  "result": "Only tests/queue_test.c changed; 100 serial and 1,800 concurrent queue runs pass without failure or timeout, and fresh GCC and Clang builds each pass all 22 runtime CTests with two expected opt-in skips.",
+  "external_artifacts": []
+}

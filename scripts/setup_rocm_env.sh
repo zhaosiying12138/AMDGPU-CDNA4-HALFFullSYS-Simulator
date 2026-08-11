@@ -31,7 +31,7 @@ triton_example="$root_dir/examples/triton/vecadd_correctness.py"
 gem5_binary="$gem5_source/build/VEGA_X86/gem5.opt"
 gem5_config="$gem5_source/configs/example/gemsim/host_dispatch.py"
 
-setup_schema=7
+setup_schema=8
 llvm_head_expected=73f2a21fe16b34e35fd0e149564b8664e59da392
 llvm_tree_expected=d589480097e8a30fd1df38435ccc9a9fca71f489
 triton_llvm_head_expected=b010a18d2b648cab83c83967ff26b8fde11acdc6
@@ -42,8 +42,8 @@ triton_head_expected=cd513e2798db0f4675b3d1205c8e76eb3381a0b3
 triton_tree_expected=944754ed44b5414f2b72fed267455abc9f6fc8c1
 gem5_head_expected=82eab7b4888c2b414031ceaaa5fe142263cd3d90
 gem5_tree_expected=27b224d5a4dcee75366b013785723f395a937855
-runtime_head_expected=7c91133410ce42e4a0a14928fea64c2a89a549e0
-runtime_tree_expected=fbc873266dee2d2b1be8682860ed28a9503eefe5
+runtime_head_expected=f9ef490668eb6b18bd72805cab2d2cb9140a6782
+runtime_tree_expected=f34c4fb9e65a42d1c6cbfcd3d40cbc98e5df020b
 locked_hsaco_sha=7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56
 locked_hsaco="$rocm_source/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco"
 kernel_source="$rocm_source/projects/rdc/rdc_libs/rdc_modules/kernels/gpuReadWrite_kernels.cl"
@@ -1035,6 +1035,7 @@ CMAKE_LINKER|/usr/bin/ld.lld
 CMAKE_MAKE_PROGRAM|/usr/bin/ninja
 CMAKE_HOME_DIRECTORY|$triton_llvm_source/llvm
 DEFAULT_ROCM_PATH|$prefix
+LLVM_APPEND_VC_REV|OFF
 LLVM_ENABLE_PROJECTS|mlir;lld;clang
 LLVM_TARGETS_TO_BUILD|X86;AMDGPU
 LLVM_USE_LINKER|lld
@@ -1067,6 +1068,7 @@ build_triton_llvm() {
         -DCMAKE_LINKER=/usr/bin/ld.lld \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
         -DDEFAULT_ROCM_PATH:PATH="$prefix" \
+        -DLLVM_APPEND_VC_REV=OFF \
         -DLLVM_ENABLE_PROJECTS='mlir;lld;clang' \
         -DLLVM_TARGETS_TO_BUILD='X86;AMDGPU' \
         -DLLVM_USE_LINKER=lld \
@@ -1577,7 +1579,7 @@ artifacts["compiled_hsaco"]["accepted_by_current_daemon"] = bool(
     compiled["sha256"] and compiled["sha256"] == locked_expected
 )
 payload = {
-    "schema": "amdgpu-sim.rocm-prefix.v7",
+    "schema": "amdgpu-sim.rocm-prefix.v8",
     "setup_schema": int(os.environ["SETUP_SCHEMA"]),
     "setup_script_sha256": os.environ["SETUP_SHA"],
     "prefix": str(prefix),
@@ -1739,7 +1741,7 @@ expected_sources = {
     "gem5": {"head": os.environ["GEM5_HEAD"], "tree": os.environ["GEM5_TREE"]},
     "self-amdgpu-runtime": {"head": os.environ["RUNTIME_HEAD"], "tree": os.environ["RUNTIME_TREE"]},
 }
-require(data.get("schema") == "amdgpu-sim.rocm-prefix.v7", "schema")
+require(data.get("schema") == "amdgpu-sim.rocm-prefix.v8", "schema")
 require(data.get("setup_schema") == int(os.environ["SETUP_SCHEMA"]), "setup schema")
 require(data.get("setup_script_sha256") == os.environ["SETUP_SHA"], "setup script hash")
 require(data.get("prefix") == str(prefix), "prefix")

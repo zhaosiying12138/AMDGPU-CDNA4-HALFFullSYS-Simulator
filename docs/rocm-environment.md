@@ -11,30 +11,32 @@ libraries, `self-amdgpu-runtime`, the bounded local `libOpenCL.so.1`, and the
 `opencl-vecadd` example. Production `libhsa-runtime64`, `libhsakmt`, and
 `libamdhip64` are rejected. `/dev/kfd` and `/dev/dri` are not required or
 opened by the accepted route. The simulator runtime replaces those host
-KMD/UMD entry points with the GemSim transport. CP-0028 accepts one normal
-Triton Python float32 vecadd through an isolated package proof; HIP, broader
-Triton operators, and general OpenCL compatibility remain later product gates.
+KMD/UMD entry points with the GemSim transport. CP-0029 accepts one normal
+Triton Python float32 vecadd through a fresh schema-8 repository-local prefix;
+HIP, broader Triton operators, and general OpenCL compatibility remain later
+product gates.
 
 ## Prepare
 
-The command below describes the intended final repository-local route. No
-CP-0028 prefix is currently accepted: the v6 attempt was interrupted after a
-baked `/opt/rocm` default was detected, and the clean v7 attempt failed closed
-on a queue-test mock race. Both partial prefixes are NON-PASSING and must not be
-reused. CP-0029 applies the test-only fix and starts from a fresh schema-8
-prefix before this command becomes accepted installation authority.
+The command below is the accepted CP-0029 repository-local route. The v6
+attempt was interrupted after a baked `/opt/rocm` default was detected, the
+clean v7 attempt failed closed on a queue-test mock race, and the first v8
+attempt failed closed on parent-Git provenance. Those prefixes remain
+NON-PASSING evidence and must not be reused. The accepted v8 prefix was built
+from an absent path and passes the complete setup gate, independent verify-only,
+OpenCL, Triton, provenance, pollution, and active-isolation checks.
 
 Run from the repository root. A full build creates only the repository-local
 prefix:
 
 ```bash
-scripts/setup_rocm_env.sh --all --jobs "$(nproc)"
+scripts/setup_rocm_env.sh --all --jobs 24
 ```
 
 Verify an existing prefix without rebuilding it:
 
 ```bash
-scripts/setup_rocm_env.sh --verify-only
+scripts/setup_rocm_env.sh --verify-only --prefix "$(scripts/setup_rocm_env.sh --print-prefix)"
 ```
 
 The script locks the `llvm-project`, `rocm-systems`, `gem5`, and
@@ -46,6 +48,16 @@ is scanned for `/opt/rocm`, system CUDA, Triton LLVM, Miniforge, and old
 temporary overlays. The final manifest is parsed and its source identities,
 component state, local OpenCL files, managed gem5 input, and SHA-256 values are
 verified.
+
+## Build policy for subsequent projects
+
+Project LLVM/Triton builds must use `ccache` with `/usr/bin/clang` and
+`/usr/bin/ld.lld`, and must pass `-j24` (or the equivalent `--jobs 24`). A
+compatible completed build directory and cache should be reused. Cleanup is
+limited to build directories proven obsolete by the active evidence and
+checkpoint; accepted and NON-PASSING evidence prefixes remain preserved. The
+CP-0029 install was already in flight before this policy was requested, so its
+manifest records the original setup script and is not retrofitted in place.
 
 ## Activate for one shell
 
@@ -151,10 +163,11 @@ a regression test, not the user command.
 
 ```bash
 test ! -e /opt/rocm
-scripts/setup_rocm_env.sh --verify-only
+rocm_prefix=$(scripts/setup_rocm_env.sh --print-prefix)
+scripts/setup_rocm_env.sh --verify-only --prefix "$rocm_prefix"
 env | grep -E '^(CUDA|ROCM|HIP|HSA|LLVM_SYSPATH|TRITON|LD_LIBRARY_PATH)=' || true
-ldd "${ROCM_SIM_ROOT}/bin/sagr-handshake" | grep -Ei 'libhsa|libhsakmt|libamdhip64' && exit 1 || true
-ldd "${ROCM_SIM_ROOT}/bin/opencl-vecadd" | grep -Ei 'system.*/libOpenCL|libhsa|libhsakmt|libamdhip64' && exit 1 || true
+ldd "$rocm_prefix/bin/sagr-handshake" | grep -Ei 'libhsa|libhsakmt|libamdhip64' && exit 1 || true
+ldd "$rocm_prefix/bin/opencl-vecadd" | grep -Ei 'system.*/libOpenCL|libhsa|libhsakmt|libamdhip64' && exit 1 || true
 ls -ld /dev/kfd /dev/dri 2>/dev/null || true
 ```
 

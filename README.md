@@ -297,7 +297,10 @@ full-model, multi-token, TP, and CCL execution are not accepted.
 
 The CP-0028 v6/v7 final-prefix attempts are retained as NON-PASSING evidence:
 v6 was stopped after detecting a baked `/opt/rocm` default, and v7 failed a
-deterministic queue mock test race. CP-0029 fixes that test-only race and builds
-a fresh schema-8 repository-local prefix before operator-matrix expansion.
+deterministic queue mock test race. CP-0029 fixes that test-only race and accepts
+a fresh schema-8 repository-local prefix after independent verify-only, OpenCL,
+Triton, provenance, pollution, and active-isolation gates. The accepted Triton
+boundary remains the exact contiguous float32 vecadd path. CP-0030 begins the
+minimum BF16 SiluAndMul model-operator gate.
 
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.

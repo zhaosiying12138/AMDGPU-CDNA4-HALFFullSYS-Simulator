@@ -5,19 +5,20 @@ with the pinned Triton checkout and the external `gemsim_amd` backend. It does
 not install or modify a system ROCm, HIP, HSA, CUDA, OpenCL ICD, Python package,
 or device configuration.
 
-The accepted CP-0028 correctness evidence comes from a clean isolated package,
-ordinary installed-wheel Python, and managed gem5 runs. It does not accept a
-final repository-local prefix. The v6 attempt was stopped after a baked
-`/opt/rocm` default was found; the clean v7 attempt failed a queue mock test
-race. Both are retained as NON-PASSING evidence and must not be activated.
-CP-0029 fixes that test-only race and builds a fresh schema-8 prefix.
+The accepted CP-0028 correctness evidence came from a clean isolated package,
+ordinary installed-wheel Python, and managed gem5 runs. CP-0029 now accepts a
+fresh schema-8 repository-local prefix after independent verify-only, OpenCL,
+Triton, provenance, pollution, and active-isolation gates. The v6 attempt was
+stopped after a baked `/opt/rocm` default was found, the clean v7 attempt failed
+a queue mock test race, and the first v8 attempt failed parent-Git provenance;
+all three are retained as NON-PASSING evidence and must not be activated.
 
 Build the complete isolated prefix from the repository root after CP-0029. The command can
 take a long time on the first run because it builds the pinned LLVM and Triton
 sources; every install and Python package remains below `env/rocm/`:
 
 ```bash
-scripts/setup_rocm_env.sh --all --jobs "$(nproc)"
+scripts/setup_rocm_env.sh --all --jobs 24
 ```
 
 The build uses the host `/usr/bin/python3.14` interpreter only as a pinned
@@ -57,8 +58,16 @@ the local wheel still exposes only the `amd` and `gemsim_amd` backends. It does
 not install the NVIDIA Python backend, configure CUDA tools, load a CUDA/HSA/HIP
 production runtime, or permit NVIDIA execution as a fallback.
 
-CP-0028 is deliberately bounded to contiguous float32 vector add at 98,432
-elements, `BLOCK_SIZE=1024`, 97 programs, and two same-process launches. The
-upstream tutorial benchmark block, arbitrary kernels, persistent cross-kernel
-device allocations, the model operator matrix, stable multi-token inference,
-TP, and CCL require later evidence gates.
+CP-0028 and CP-0029 remain deliberately bounded to contiguous float32 vector
+add at 98,432 elements, `BLOCK_SIZE=1024`, 97 programs, and two same-process
+launches. The upstream tutorial benchmark block, arbitrary kernels, persistent
+cross-kernel device allocations, the model operator matrix, stable multi-token
+inference, TP, and CCL require later evidence gates. CP-0030 starts with the
+minimum BF16 SiluAndMul contracts for decode `[1,7168] -> [1,3584]` and masked
+prefill `[7,7168] -> [7,3584]`.
+
+Subsequent LLVM/Triton project builds use `ccache`, `/usr/bin/clang`, and
+`/usr/bin/ld.lld` with `-j24`. Compatible completed build directories and
+caches are reused; cleanup is limited to directories proven obsolete by the
+active evidence. The CP-0029 prefix was already in flight before this policy
+was requested and is therefore kept unchanged.

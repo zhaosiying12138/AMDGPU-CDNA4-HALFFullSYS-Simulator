@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-11`
 
-**State at this commit:** `CP-0028 normal Triton Python float32 vecadd accepted with two same-process launches and managed-session reuse; broader operators remain unaccepted; CP-0029 stabilizes the queue test and builds a fresh schema-8 prefix before the model operator matrix`
+**State at this commit:** `CP-0029 accepts the schema-8 repository-local prefix after queue serial/concurrent stability, OpenCL/Triton, provenance, pollution, and active-isolation gates; broader operators remain unaccepted; CP-0030 starts the minimum BF16 SiluAndMul gate`
 
 ## 1. Outcome and non-negotiable invariants
 
@@ -545,7 +545,8 @@ additional checkpoints, and a later row may not skip its prerequisite.
 | CP-0025 / P5-TRITON-VECADD-04-DAEMON-LIFECYCLE | P5 | Accepted positive bit-8 daemon control lifecycle through logical-align-8 ALLOC, v1 H2D, native CP admission/type-19 ACK/type-20 retire, cleanup, and reconnect; no GPU execution |
 | CP-0026 / P5-TRITON-VECADD-05-GPU-EXECUTION | P5 | Connect the committed daemon lifecycle to GPUDispatcher/CU execution and prove output correctness for the locked zero-preload fixture |
 | CP-0028 / P5-TRITON-VECADD-06-NORMAL-PYTHON | P5A | Ordinary Python/Triton compiles and executes exact contiguous float32 vecadd twice in one managed session with resource reuse, exact output, and zero fallback; broader operators and final repo-local install remain bounded |
-| CP-0029 / P5-TRITON-VECADD-07-FRESH-SCHEMA8 | P5A | Remove the deterministic queue-test mock race with a test-only change, prove serial/concurrent stability, and build/verify a fresh schema-8 repository-local prefix before operator expansion |
+| CP-0029 / P5-TRITON-VECADD-07-FRESH-SCHEMA8 | P5A | Accepted: test-only queue ordering fix, GCC/Clang serial and 18-worker stability, fresh schema-8 repository-local prefix, independent verify-only, OpenCL/Triton, provenance, pollution, and active-isolation gates |
+| CP-0030 / P5-OPS-00-SILU-AND-MUL-MINIMUM | P5C | First model-required BF16 SiluAndMul contract: decode `[1,7168] -> [1,3584]` and masked-prefill `[7,7168] -> [7,3584]`, exact image/trace/oracle and zero fallback; does not accept the full operator matrix |
 | P5-PROFILE-ON-BLOCKER | P5A | Conditional retained profile and measured 80/20 optimization only after a real operator/layer/model bottleneck is demonstrated |
 | P5-PARALLEL-TB-ON-BLOCKER | P5B | Conditional safe serial-versus-parallel threadblock experiment justified by a retained profile |
 | P5-OPS-01 | P5C | Broader model-operator manifest and differential gates |
@@ -901,10 +902,12 @@ fallback. The 12-DWORD descriptor preload remains an explicit NOT_SUPPORTED
    produce bit-exact float32 `C=A+B` with zero fallback. The stable image hash,
    packet VA/CRC, trace, ticket, and dispatch IDs support an inference of the
    same kernel source packet; the trace exposes no kernel mapping ID. No other Triton operator is
-   accepted. The v6/v7 final-prefix attempts remain NON-PASSING; CP-0029 fixes
-   the queue mock race and builds a fresh schema-8 prefix before the model-
-   required operator matrix. Profiling is conditional on a demonstrated
-   operator-, layer-, or model-level bottleneck.
+	   accepted. The v6/v7 final-prefix attempts remain NON-PASSING; CP-0029 fixes
+	   the queue mock race and accepts a fresh schema-8 repository-local prefix after
+	   independent installation, workload, provenance, pollution, and active-isolation
+	   gates. CP-0030 starts the minimum BF16 SiluAndMul model operator gate before the
+	   broader operator matrix. Profiling is conditional on a demonstrated
+operator-, layer-, or model-level bottleneck.
 
 ### P3H - host-native simulator and first Triton gate
 
@@ -964,9 +967,11 @@ The work is staged as follows:
    managed gem5 lifecycle and output oracle. CP-0028 accepts normal Triton
    Python driver/JIT/launcher execution for one exact float32 vecadd, including
    preload-aware mapping and two-launch reuse. It does not accept a second
-   operator family. CP-0029 is the next coordinated gate: stabilize the queue
-   mock test, produce a fresh schema-8 repository-local prefix, and then enter
-   the model-required operator matrix.
+	   operator family. CP-0029 is accepted: it stabilizes the queue mock test and
+	   produces a fresh schema-8 repository-local prefix with independent runtime,
+	   OpenCL, Triton, provenance, pollution, and active-isolation evidence. CP-0030
+	   is the next coordinated gate and begins with the model-required BF16
+	   SiluAndMul decode and masked-prefill contracts.
 
 This workstream is not a cycle-accurate replacement. Timing, wider operator
 coverage, host-parallel threadblocks, HIP/OpenCL CTS, PyTorch, vLLM, and Qwen
