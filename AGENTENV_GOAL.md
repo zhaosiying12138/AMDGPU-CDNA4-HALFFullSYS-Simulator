@@ -25,6 +25,6 @@ The current WSL kernel lacks ublk. Building and staging a replacement kernel is 
 ## Current Pins
 
 - Root base: `ba85d279883f6190c7c7639ea6ea7d34ae8e04ab`
+- Current feature checkpoint before activation: `cc1dd1a`
 - AgentENV: `kvcache-ai/AgentENV`, commit `d2405769618c37de5e181a94dc4052d786ec041a`
 - WSL2 kernel: `microsoft/WSL2-Linux-Kernel`, branch `linux-msft-wsl-6.18.y`, commit `14794180686c2fb6307fbe359c359bec765249f3` (source version `6.18.40.1`)
-

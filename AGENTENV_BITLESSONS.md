@@ -8,4 +8,5 @@
 6. A common snapshot is safe only when both sandboxes use identical fixed resources. Per-instance state must still be separated at VM, PID, filesystem, network, tmp, cache, socket, log, SMI, and endpoint levels.
 7. A custom WSL kernel switch is globally disruptive. Build and stage artifacts first; never hide `wsl --shutdown` inside a script.
 8. vLLM/SGLang launch failures after the existing initialization marker are evidence, not a reason to widen this environment integration into model debugging.
-
+9. AgentENV warm `templateID` creation does not accept CPU, memory, or disk overrides; those values must be fixed by the template (or use the cold API). Metadata alone is a report/verification contract, not resource enforcement.
+10. Pair creation must be transactional: if a later sandbox POST or local state write fails, delete every sandbox already created and mark its local record deleted. A host-only lifecycle test now covers this rollback.

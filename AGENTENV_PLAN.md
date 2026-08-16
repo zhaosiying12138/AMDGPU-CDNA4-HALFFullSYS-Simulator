@@ -14,8 +14,8 @@ This plan is executed only in `feature/agentenv-sandbox-isolation` at `/home/zha
 - [x] Build a deterministic active-runtime closure as tar.zst; do not rely on symlink-preserving directory upload.
 - [x] Add guest bootstrap and two-sandbox lifecycle orchestration with per-instance namespaces.
 - [x] Run static/unit/build checks without stopping WSL or changing `.wslconfig`.
-- [ ] Present the exact kernel activation diff and rollback, then pause for explicit `wsl --shutdown` approval.
-- [ ] After approval only: activate the custom kernel, run ublk/Firecracker/AgentENV gates, and perform the bounded concurrent launch acceptance.
+- [x] Present the exact candidate kernel activation diff and rollback plan; pause before explicit `wsl --shutdown` approval.
+- [ ] After explicit approval only: activate the custom kernel, run ublk/Firecracker/AgentENV gates, and perform the bounded concurrent launch acceptance.
 
 ## Resource Policy
 
