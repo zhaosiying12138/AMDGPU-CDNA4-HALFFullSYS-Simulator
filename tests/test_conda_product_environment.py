@@ -62,6 +62,7 @@ class CondaProductEnvironmentTest(unittest.TestCase):
             self.assertIn("export HIP_PATH=/native/product", activation)
             self.assertIn("export HSA_PATH=/native/product", activation)
             self.assertIn("export HSA_ENABLE_DTIF_FAST_COPY=0", activation)
+            self.assertIn("export SAGR_HSAKMT_MODEL_FAST_COPY=0", activation)
             self.assertIn(
                 "export HSA_MODEL_LIB=/native/product/lib/libself_amdgpu_hsakmt_model.so.1",
                 activation,
@@ -94,6 +95,7 @@ class CondaProductEnvironmentTest(unittest.TestCase):
             self.assertEqual(environment["TRITON_CACHE_DIR"], str(state / "triton-cache"))
             self.assertEqual(environment["HSA_ENABLE_DXG_DETECTION"], "0")
             self.assertEqual(environment["HSA_ENABLE_DTIF_FAST_COPY"], "0")
+            self.assertEqual(environment["SAGR_HSAKMT_MODEL_FAST_COPY"], "0")
             self.assertEqual(environment["HSA_ENABLE_INTERRUPT"], "0")
             self.assertEqual(environment["HIP_PLATFORM"], "amd")
             self.assertEqual(environment["HIP_PATH"], "/native/product")

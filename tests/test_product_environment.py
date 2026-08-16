@@ -223,6 +223,7 @@ class ProductEnvironmentTest(unittest.TestCase):
         self.assertIn("export HIP_PLATFORM=amd", text)
         self.assertIn("export HSA_ENABLE_DXG_DETECTION=0", text)
         self.assertIn("export HSA_ENABLE_DTIF_FAST_COPY=0", text)
+        self.assertIn("export SAGR_HSAKMT_MODEL_FAST_COPY=0", text)
         self.assertIn("export HSA_ENABLE_INTERRUPT=0", text)
         self.assertIn(f"export HIP_PATH={prefix}", text)
         self.assertIn(

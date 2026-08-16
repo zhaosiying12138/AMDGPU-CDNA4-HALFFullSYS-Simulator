@@ -1888,8 +1888,9 @@ export ROCM_SIM_ROOT={prefix}
     export HIP_PLATFORM=amd
     export HIP_CLANG_PATH={base}/bin
     export HSA_ENABLE_DXG_DETECTION=0
-    # Model-backed VRAM is not host-accessible; use the standard ROCr blit AQL path.
+    # Fast copy is explicitly opt-in. Model mode requires both gates.
     export HSA_ENABLE_DTIF_FAST_COPY=0
+    export SAGR_HSAKMT_MODEL_FAST_COPY=0
     export HSA_ENABLE_INTERRUPT=0
     export HSA_MODEL_LIB={prefix}/lib/libself_amdgpu_hsakmt_model.so.1
     export HSA_MODEL_TOPOLOGY={prefix}/share/self-amdgpu-runtime/hsakmt-topology

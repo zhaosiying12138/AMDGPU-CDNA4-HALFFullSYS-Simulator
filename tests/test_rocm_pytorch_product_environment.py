@@ -139,6 +139,7 @@ class RocmPytorchProductEnvironmentTest(unittest.TestCase):
         )
         self.assertEqual(environment["ROCM_SDK_TARGET_FAMILY"], "gfx950-dcgpu")
         self.assertEqual(environment["HSA_ENABLE_DTIF_FAST_COPY"], "0")
+        self.assertEqual(environment["SAGR_HSAKMT_MODEL_FAST_COPY"], "0")
         self.assertNotIn("TRITON_DEFAULT_BACKEND", environment)
 
     def test_sdk_libraries_use_the_official_rocm_locator(self) -> None:
@@ -255,6 +256,7 @@ class RocmPytorchProductEnvironmentTest(unittest.TestCase):
                 "ROCM_PATH",
                 "HIP_PATH",
                 "HSA_ENABLE_DTIF_FAST_COPY",
+                "SAGR_HSAKMT_MODEL_FAST_COPY",
                 "HSA_MODEL_LIB",
                 "PATH",
             ):

@@ -284,8 +284,9 @@ def product_environment(
         "HIP_PLATFORM": "amd",
         "HIP_CLANG_PATH": f"{base}/bin",
         "HSA_ENABLE_DXG_DETECTION": "0",
-        # Model-backed VRAM is not host-accessible; use the standard ROCr blit AQL path.
+        # Fast copy is explicitly opt-in. Model mode requires both gates.
         "HSA_ENABLE_DTIF_FAST_COPY": "0",
+        "SAGR_HSAKMT_MODEL_FAST_COPY": "0",
         "HSA_ENABLE_INTERRUPT": "0",
         "HSA_MODEL_LIB": f"{native['prefix']}/lib/libself_amdgpu_hsakmt_model.so.1",
         "HSA_MODEL_TOPOLOGY": f"{native['prefix']}/share/self-amdgpu-runtime/hsakmt-topology",
@@ -316,6 +317,7 @@ def write_activation(prefix: Path, native: dict[str, Any], state: Path) -> None:
         "HIP_CLANG_PATH": f"{base}/bin",
         "HSA_ENABLE_DXG_DETECTION": "0",
         "HSA_ENABLE_DTIF_FAST_COPY": "0",
+        "SAGR_HSAKMT_MODEL_FAST_COPY": "0",
         "HSA_ENABLE_INTERRUPT": "0",
         "HSA_MODEL_LIB": f"{product}/lib/libself_amdgpu_hsakmt_model.so.1",
         "HSA_MODEL_TOPOLOGY": f"{product}/share/self-amdgpu-runtime/hsakmt-topology",

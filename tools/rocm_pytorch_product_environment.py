@@ -731,8 +731,9 @@ def product_environment(
         "PYTORCH_ROCM_ARCH": "gfx950",
         "ROCM_SDK_TARGET_FAMILY": "gfx950-dcgpu",
         "HSA_ENABLE_DXG_DETECTION": "0",
-        # Model-backed VRAM is not host-accessible; use the standard ROCr blit AQL path.
+        # Fast copy is explicitly opt-in. Model mode requires both gates.
         "HSA_ENABLE_DTIF_FAST_COPY": "0",
+        "SAGR_HSAKMT_MODEL_FAST_COPY": "0",
         "HSA_ENABLE_INTERRUPT": "0",
         "HSA_MODEL_LIB": model_library,
         "HSA_MODEL_TOPOLOGY": str(topology_directory),
@@ -761,7 +762,7 @@ def write_activation(
         for key in (
             "PATH", "LD_LIBRARY_PATH", "PKG_CONFIG_PATH", "LD_PRELOAD", "ROCM_SIM_ROOT", "ROCM_PATH", "HIP_PATH", "HSA_PATH",
             "HIP_PLATFORM", "HIP_CLANG_PATH", "PYTORCH_ROCM_ARCH", "HSA_ENABLE_DXG_DETECTION",
-            "HSA_ENABLE_DTIF_FAST_COPY", "HSA_ENABLE_INTERRUPT", "HSA_MODEL_LIB", "HSA_MODEL_TOPOLOGY", "ROCM_SDK_TARGET_FAMILY", "TRITON_CACHE_DIR",
+            "HSA_ENABLE_DTIF_FAST_COPY", "SAGR_HSAKMT_MODEL_FAST_COPY", "HSA_ENABLE_INTERRUPT", "HSA_MODEL_LIB", "HSA_MODEL_TOPOLOGY", "ROCM_SDK_TARGET_FAMILY", "TRITON_CACHE_DIR",
             "PYTHONNOUSERSITE",
         )
     }
