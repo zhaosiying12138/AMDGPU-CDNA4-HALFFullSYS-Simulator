@@ -38,7 +38,7 @@
 /projects/*/build-*/
 /projects/*/.cache/
 /projects/*/compile_commands.json
-/projects/*/\.ninja_*
+/projects/*/\\.ninja_*
 
 # Python and native build noise.
 __pycache__/
@@ -72,3 +72,9 @@ __pycache__/
 *.pem
 *.key
 *.log
+
+# AgentENV integration source/build state.
+/projects/AgentENV/target/
+/projects/WSL2-Linux-Kernel/
+/projects/agentenv-runtime-bundle/
+/projects/agentenv-kernel/
