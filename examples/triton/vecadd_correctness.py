@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+__import__("runpy").run_path(__file__.replace("vecadd_correctness.py", "_gemsim_bootstrap.py"))["bootstrap"](__file__, "vecadd")
+
 import json
 
 import torch

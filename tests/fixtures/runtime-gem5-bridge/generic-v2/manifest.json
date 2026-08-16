@@ -1,0 +1,74 @@
+{
+  "contract_sha256": "b3d9ea1b647fda6bea5c93a53cc447d6df6866e9b846d78ee076abf1b885d206",
+  "schema": "amdgpu-sim.runtime-gem5-bridge.generic-v2-vectors.v1",
+  "vectors": [
+    {
+      "bytes": 4016,
+      "direction": "request",
+      "opcode": "MAP_OBJECT",
+      "path": "request-map-object.bin",
+      "sha256": "dc0bf7b6c7486fd4282444ef8d6432e53a8d8b9dd2cad32646bd334b81659d22"
+    },
+    {
+      "bytes": 4016,
+      "direction": "request",
+      "opcode": "ALLOC_KERNARG",
+      "path": "request-alloc-kernarg.bin",
+      "sha256": "8436b1e0480544725902a3516ecd8edcd8dc6fcd2534dc002ba8b66bc5b89c0f"
+    },
+    {
+      "bytes": 4016,
+      "direction": "request",
+      "opcode": "SUBMIT_AQL",
+      "path": "request-submit-aql.bin",
+      "sha256": "14242cd02f01a919b832fb35ce2f9b3cf8fdd0fed699ab5734ef434147c7e72c"
+    },
+    {
+      "bytes": 4016,
+      "direction": "request",
+      "opcode": "UNMAP_OBJECT",
+      "path": "request-unmap-object.bin",
+      "sha256": "c74b3ba4cba1d5b3d383914effb8de17e985834df47aea8f94edab52867b0903"
+    },
+    {
+      "bytes": 4016,
+      "direction": "response",
+      "opcode": "MAP_OBJECT",
+      "path": "response-map-object-success.bin",
+      "sha256": "5ce8ac346b031d6621586f28e3c54a713b12fb349071101634da9109dee1cf49",
+      "status": "OK"
+    },
+    {
+      "bytes": 4016,
+      "direction": "response",
+      "opcode": "ALLOC_KERNARG",
+      "path": "response-alloc-kernarg-success.bin",
+      "sha256": "bd532d97c800b7c61c34c6280bc21ae172643236a9f1754c3994db0c32ddb951",
+      "status": "OK"
+    },
+    {
+      "bytes": 4016,
+      "direction": "response",
+      "opcode": "SUBMIT_AQL",
+      "path": "response-submit-aql-success.bin",
+      "sha256": "38f809b7595025d65f9462e5dcc23790a9d22e685f180be91623705c8015f7b3",
+      "status": "OK"
+    },
+    {
+      "bytes": 4016,
+      "direction": "response",
+      "opcode": "UNMAP_OBJECT",
+      "path": "response-unmap-object-success.bin",
+      "sha256": "eaf567aa33c1f34c2982af872330516afbc82723bd934ca6cf81a3dd4f630219",
+      "status": "OK"
+    },
+    {
+      "bytes": 4016,
+      "direction": "response",
+      "opcode": "MAP_OBJECT",
+      "path": "response-map-object-unsupported-version.bin",
+      "sha256": "a61322b242b10e23190e85759cf1d74f0e8e1afccb99e4751481e6e69f612894",
+      "status": "UNSUPPORTED_VERSION"
+    }
+  ]
+}

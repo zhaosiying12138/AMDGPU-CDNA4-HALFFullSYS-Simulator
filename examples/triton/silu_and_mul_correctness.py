@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+__import__("runpy").run_path(__file__.replace("silu_and_mul_correctness.py", "_gemsim_bootstrap.py"))["bootstrap"](__file__, "qwen35-silu-and-mul")
+
 import json
 
 import torch

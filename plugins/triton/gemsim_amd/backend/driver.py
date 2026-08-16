@@ -1,6 +1,9 @@
 import atexit
 import ctypes
+import hashlib
+import json
 import os
+import stat
 import struct
 import threading
 from pathlib import Path
@@ -10,7 +13,13 @@ from triton.backends.driver import DriverBase
 
 
 _MANAGED_API_VERSION = 1
+_MANAGED_SESSION_OPTIONS_V2_VERSION = 2
+_MANAGED_SESSION_V2_FLAG_PRIVATE_NAMESPACE = 2
+_MANAGED_ENDPOINT_BYTES = 108
+_MANAGED_MAX_WORLD_SIZE = 16
+_RANK_DESCRIPTOR_MAX_BYTES = 64 * 1024
 _ABI_MAJOR = 1
+_ABI_MINOR = 7
 _WAVEFRONT_SIZE = 64
 _BUFFER_ALIGNMENT = 4096
 
@@ -36,6 +45,24 @@ class _SessionOptions(ctypes.Structure):
         ("operation_timeout_ns", ctypes.c_uint64),
         ("run_timeout_ns", ctypes.c_uint64),
         ("reserved", ctypes.c_uint8 * 24),
+    ]
+
+
+class _SessionOptionsV2(ctypes.Structure):
+    _fields_ = [
+        ("struct_size", ctypes.c_uint32),
+        ("version", ctypes.c_uint32),
+        ("flags", ctypes.c_uint32),
+        ("queue_depth", ctypes.c_uint32),
+        ("startup_timeout_ns", ctypes.c_uint64),
+        ("operation_timeout_ns", ctypes.c_uint64),
+        ("run_timeout_ns", ctypes.c_uint64),
+        ("epoch", ctypes.c_uint64),
+        ("rank", ctypes.c_uint32),
+        ("world_size", ctypes.c_uint32),
+        ("job_uuid", ctypes.c_uint8 * 16),
+        ("endpoint", ctypes.c_uint8 * _MANAGED_ENDPOINT_BYTES),
+        ("reserved", ctypes.c_uint8 * 20),
     ]
 
 
@@ -166,12 +193,151 @@ class _DispatchCompletion(ctypes.Structure):
 _EXPECTED_STRUCTURE_SIZES = {
     _ErrorInfo: 160,
     _SessionOptions: 64,
+    _SessionOptionsV2: 200,
     _SessionInfo: 96,
     _MemoryInfo: 96,
     _KernelInfo: 176,
     _LaunchOptions: 76,
     _DispatchCompletion: 304,
 }
+
+
+def _canonical_json(value):
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode(
+        "ascii"
+    )
+
+
+def _read_private_file(path):
+    flags = os.O_RDONLY | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise RuntimeError(
+            "gemsim rank launch descriptor could not be opened safely"
+        ) from error
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or metadata.st_mode & (stat.S_IRWXG | stat.S_IRWXO)
+            or metadata.st_size <= 0
+            or metadata.st_size > _RANK_DESCRIPTOR_MAX_BYTES
+        ):
+            raise RuntimeError("gemsim rank launch descriptor is not private")
+        chunks = []
+        remaining = metadata.st_size
+        while remaining:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                raise RuntimeError("gemsim rank launch descriptor was truncated")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise RuntimeError("gemsim rank launch descriptor changed while reading")
+        return b"".join(chunks)
+    finally:
+        os.close(descriptor)
+
+
+def _rank_launch_descriptor():
+    value = os.environ.get("GEMSIM_RANK_LAUNCH_DESCRIPTOR")
+    if value is None:
+        return None
+    path = Path(value)
+    if not path.is_absolute() or path != Path(os.path.normpath(value)):
+        raise RuntimeError("gemsim rank launch descriptor path is invalid")
+    data = _read_private_file(path)
+    try:
+        document = json.loads(data.decode("ascii"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("gemsim rank launch descriptor is invalid JSON") from error
+    if not isinstance(document, dict) or data != _canonical_json(document):
+        raise RuntimeError("gemsim rank launch descriptor is not canonical")
+    if set(document) != {
+        "schema",
+        "job_uuid",
+        "epoch",
+        "rank",
+        "world_size",
+        "paths",
+    } or document["schema"] != "amdgpu-sim.gemsim-rank-launch.v1":
+        raise RuntimeError("gemsim rank launch descriptor schema is invalid")
+    paths = document["paths"]
+    expected_path_keys = {
+        "instance_directory",
+        "triton_cache_directory",
+        "runtime_directory",
+        "endpoint",
+        "gem5_output_directory",
+        "dispatch_trace_path",
+        "gem5_log_path",
+        "gem5_cache_directory",
+    }
+    if not isinstance(paths, dict) or set(paths) != expected_path_keys:
+        raise RuntimeError("gemsim rank launch descriptor paths are invalid")
+    normalized_paths = {}
+    for name in expected_path_keys:
+        path_value = paths[name]
+        if (
+            not isinstance(path_value, str)
+            or not Path(path_value).is_absolute()
+            or Path(path_value) != Path(os.path.normpath(path_value))
+        ):
+            raise RuntimeError(f"gemsim rank launch path {name} is invalid")
+        normalized_paths[name] = Path(path_value)
+    instance_directory = normalized_paths["instance_directory"]
+    runtime_directory = normalized_paths["runtime_directory"]
+    if runtime_directory.parent != instance_directory:
+        raise RuntimeError("gemsim rank launch runtime namespace is invalid")
+    for name in (
+        "endpoint",
+        "gem5_output_directory",
+        "dispatch_trace_path",
+        "gem5_log_path",
+        "gem5_cache_directory",
+    ):
+        if normalized_paths[name].parent != runtime_directory:
+            raise RuntimeError("gemsim rank launch runtime paths are not isolated")
+    job_uuid = document["job_uuid"]
+    endpoint = paths["endpoint"]
+    if (
+        not isinstance(job_uuid, str)
+        or len(job_uuid) != 32
+        or job_uuid == "0" * 32
+        or any(character not in "0123456789abcdef" for character in job_uuid)
+        or not isinstance(document["epoch"], int)
+        or isinstance(document["epoch"], bool)
+        or document["epoch"] <= 0
+        or not isinstance(document["rank"], int)
+        or isinstance(document["rank"], bool)
+        or not isinstance(document["world_size"], int)
+        or isinstance(document["world_size"], bool)
+        or document["world_size"] < 2
+        or document["world_size"] > _MANAGED_MAX_WORLD_SIZE
+        or not 0 <= document["rank"] < document["world_size"]
+        or len(endpoint.encode("utf-8")) >= _MANAGED_ENDPOINT_BYTES
+    ):
+        raise RuntimeError("gemsim rank launch descriptor identity is invalid")
+    ambient_cache = os.environ.get("TRITON_CACHE_DIR")
+    expected_cache = str(normalized_paths["triton_cache_directory"])
+    if ambient_cache is None or str(Path(ambient_cache).resolve()) != expected_cache:
+        raise RuntimeError(
+            "TRITON_CACHE_DIR does not match the immutable rank launch descriptor"
+        )
+    return {
+        "path": str(path),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "job_uuid": bytes.fromhex(job_uuid),
+        "epoch": document["epoch"],
+        "rank": document["rank"],
+        "world_size": document["world_size"],
+        "endpoint": endpoint.encode("utf-8"),
+        "triton_cache_directory": expected_cache,
+    }
 
 
 class _ManagedBuffer:
@@ -224,14 +390,40 @@ class _ManagedRuntime:
         self.lock = threading.RLock()
         self.session = ctypes.c_void_p()
         self.session_info = None
+        self.owner_pid = os.getpid()
+        self.forked_child = False
+        if hasattr(os, "register_at_fork"):
+            os.register_at_fork(after_in_child=self._after_fork_child)
         atexit.register(self._close_at_exit)
 
+    def _after_fork_child(self):
+        self.lock = threading.RLock()
+        self.forked_child = True
+        self.session = ctypes.c_void_p()
+        self.session_info = None
+
+    def _check_owner(self):
+        if self.forked_child or os.getpid() != self.owner_pid:
+            raise RuntimeError(
+                "gemsim_amd managed runtime cannot use a session inherited across fork"
+            )
+
     def _ensure_library(self):
+        self._check_owner()
         if self.lib is not None:
             return
         lib = ctypes.CDLL(str(self.path), mode=ctypes.RTLD_LOCAL)
         lib.sagr_abi_version.argtypes = []
         lib.sagr_abi_version.restype = ctypes.c_uint32
+        abi_version = lib.sagr_abi_version()
+        abi_major = abi_version >> 16
+        abi_minor = abi_version & 0xFFFF
+        if abi_major != _ABI_MAJOR or abi_minor < _ABI_MINOR:
+            raise RuntimeError(
+                f"managed runtime ABI mismatch in {self.path}: expected "
+                f"{_ABI_MAJOR}.{_ABI_MINOR} or newer compatible minor, got "
+                f"0x{abi_version:08x}"
+            )
         lib.sagr_status_string.argtypes = [ctypes.c_int32]
         lib.sagr_status_string.restype = ctypes.c_char_p
         lib.sagr_managed_session_options_init.argtypes = [
@@ -239,6 +431,11 @@ class _ManagedRuntime:
             ctypes.c_uint32,
         ]
         lib.sagr_managed_session_options_init.restype = ctypes.c_int32
+        lib.sagr_managed_session_options_v2_init.argtypes = [
+            ctypes.POINTER(_SessionOptionsV2),
+            ctypes.c_uint32,
+        ]
+        lib.sagr_managed_session_options_v2_init.restype = ctypes.c_int32
         lib.sagr_managed_launch_options_init.argtypes = [
             ctypes.POINTER(_LaunchOptions),
             ctypes.c_uint32,
@@ -253,6 +450,15 @@ class _ManagedRuntime:
             ctypes.c_uint32,
         ]
         lib.sagr_managed_session_open.restype = ctypes.c_int32
+        lib.sagr_managed_session_open_v2.argtypes = [
+            ctypes.POINTER(_SessionOptionsV2),
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(_SessionInfo),
+            ctypes.c_uint32,
+            ctypes.POINTER(_ErrorInfo),
+            ctypes.c_uint32,
+        ]
+        lib.sagr_managed_session_open_v2.restype = ctypes.c_int32
         lib.sagr_managed_session_close.argtypes = [
             ctypes.POINTER(ctypes.c_void_p),
             ctypes.POINTER(_ErrorInfo),
@@ -317,12 +523,6 @@ class _ManagedRuntime:
             ctypes.c_uint32,
         ]
         lib.sagr_managed_kernel_unload.restype = ctypes.c_int32
-        abi_version = lib.sagr_abi_version()
-        if abi_version >> 16 != _ABI_MAJOR:
-            raise RuntimeError(
-                f"managed runtime ABI mismatch in {self.path}: expected major "
-                f"{_ABI_MAJOR}, got 0x{abi_version:08x}"
-            )
         self.lib = lib
 
     def _check(self, status, operation, error=None):
@@ -340,29 +540,68 @@ class _ManagedRuntime:
         )
 
     def _ensure_session(self):
+        self._check_owner()
         self._ensure_library()
         if self.session.value:
             return
-        options = _SessionOptions()
-        status = self.lib.sagr_managed_session_options_init(
-            ctypes.byref(options), ctypes.sizeof(options)
-        )
-        self._check(status, "session options initialization")
+        descriptor = _rank_launch_descriptor()
         info = _SessionInfo()
         error = _ErrorInfo()
-        status = self.lib.sagr_managed_session_open(
-            ctypes.byref(options),
-            ctypes.byref(self.session),
-            ctypes.byref(info),
-            ctypes.sizeof(info),
-            ctypes.byref(error),
-            ctypes.sizeof(error),
-        )
+        if descriptor is None:
+            options = _SessionOptions()
+            status = self.lib.sagr_managed_session_options_init(
+                ctypes.byref(options), ctypes.sizeof(options)
+            )
+            self._check(status, "session options initialization")
+            status = self.lib.sagr_managed_session_open(
+                ctypes.byref(options),
+                ctypes.byref(self.session),
+                ctypes.byref(info),
+                ctypes.sizeof(info),
+                ctypes.byref(error),
+                ctypes.sizeof(error),
+            )
+        else:
+            options_v2 = _SessionOptionsV2()
+            status = self.lib.sagr_managed_session_options_v2_init(
+                ctypes.byref(options_v2), ctypes.sizeof(options_v2)
+            )
+            self._check(status, "exact-topology session options initialization")
+            options_v2.flags = _MANAGED_SESSION_V2_FLAG_PRIVATE_NAMESPACE
+            options_v2.epoch = descriptor["epoch"]
+            options_v2.rank = descriptor["rank"]
+            options_v2.world_size = descriptor["world_size"]
+            options_v2.job_uuid[:] = descriptor["job_uuid"]
+            endpoint = descriptor["endpoint"]
+            options_v2.endpoint[: len(endpoint)] = endpoint
+            status = self.lib.sagr_managed_session_open_v2(
+                ctypes.byref(options_v2),
+                ctypes.byref(self.session),
+                ctypes.byref(info),
+                ctypes.sizeof(info),
+                ctypes.byref(error),
+                ctypes.sizeof(error),
+            )
         self._check(status, "session open", error)
+        if descriptor is not None and (
+            info.epoch != descriptor["epoch"]
+            or info.rank != descriptor["rank"]
+            or info.world_size != descriptor["world_size"]
+            or bytes(info.job_uuid) != descriptor["job_uuid"]
+        ):
+            close_error = _ErrorInfo()
+            close_status = self.lib.sagr_managed_session_close(
+                ctypes.byref(self.session),
+                ctypes.byref(close_error),
+                ctypes.sizeof(close_error),
+            )
+            self._check(close_status, "mismatched session close", close_error)
+            raise RuntimeError("gemsim exact-topology session identity mismatch")
         self.session_info = info
 
     def load_kernel(self, name, image):
         with self.lock:
+            self._check_owner()
             self._ensure_session()
             image_buffer = ctypes.create_string_buffer(image)
             handle = ctypes.c_void_p()
@@ -392,6 +631,7 @@ class _ManagedRuntime:
 
     def unload_kernel(self, kernel):
         with self.lock:
+            self._check_owner()
             self._unload_handle(kernel.handle)
 
     def _unload_handle(self, handle):
@@ -408,6 +648,7 @@ class _ManagedRuntime:
 
     def allocate_buffer(self, host_address, host_size, alignment=_BUFFER_ALIGNMENT):
         with self.lock:
+            self._check_owner()
             self._ensure_session()
             allocation_size = max(host_size, 1)
             handle = ctypes.c_void_p()
@@ -437,6 +678,7 @@ class _ManagedRuntime:
             return buffer
 
     def copy_from_host(self, buffer):
+        self._check_owner()
         error = _ErrorInfo()
         status = self.lib.sagr_managed_buffer_copy_from_host(
             buffer.handle,
@@ -449,6 +691,7 @@ class _ManagedRuntime:
         self._check(status, "host-to-simulator copy", error)
 
     def copy_to_host(self, buffer):
+        self._check_owner()
         if not buffer.host_size:
             return
         error = _ErrorInfo()
@@ -463,6 +706,7 @@ class _ManagedRuntime:
         self._check(status, "simulator-to-host copy", error)
 
     def free_buffer(self, buffer):
+        self._check_owner()
         if not buffer.handle.value:
             return
         error = _ErrorInfo()
@@ -473,6 +717,7 @@ class _ManagedRuntime:
 
     def launch(self, kernel, kernarg, options):
         with self.lock:
+            self._check_owner()
             packed = (ctypes.c_uint8 * len(kernarg)).from_buffer_copy(kernarg)
             completion = _DispatchCompletion()
             error = _ErrorInfo()
@@ -493,6 +738,7 @@ class _ManagedRuntime:
 
     def close(self):
         with self.lock:
+            self._check_owner()
             if self.lib is None or not self.session.value:
                 return
             error = _ErrorInfo()
@@ -504,6 +750,8 @@ class _ManagedRuntime:
             self._check(status, "session close", error)
 
     def _close_at_exit(self):
+        if self.forked_child or os.getpid() != self.owner_pid:
+            return
         try:
             self.close()
         except Exception:

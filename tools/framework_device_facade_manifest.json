@@ -1,0 +1,119 @@
+{
+  "schema": "amdgpu-sim.framework-device-facade.v1",
+  "policy": {
+    "accepted_surface": "standard_rocr_hip_rccl_pytorch_rocm",
+    "privateuse1": "diagnostic_fallback_only",
+    "framework_source_edits": false,
+    "triton_source_edits": false,
+    "gem5_gpu_core_edits_per_consumer": false,
+    "runtime_bridge_edits_per_consumer": false,
+    "operator_or_model_specialization": false,
+    "model_world_sizes": [2, 4],
+    "scale_world_size": 16,
+    "infrastructure_world_size_range": [1, 16]
+  },
+  "upstream": {
+    "pytorch": {
+      "commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "files": {
+        "aten/src/ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h": "f92f87ac867bf12f6c988db4021619fdc50dbda8a17d3c9f67a6daebac4de7bf",
+        "aten/src/ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.cpp": "10795a924224914b0a1ee498eb59a64a468771418a09e5a722a5e7312d5f5987",
+        "c10/cuda/CUDACachingAllocator.cpp": "c0f0b0d3540a021b213b1683eb03773e05b98656153cd59a374003456378d9aa",
+        "cmake/public/LoadHIP.cmake": "02e7e7d8689828ef6186e303c5e28d60b68c791fe42c102c8da5eeaed221e352"
+      }
+    },
+    "triton": {
+      "commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
+      "backend": "hip",
+      "files": {
+        "third_party/amd/backend/compiler.py": "5febaa1b43f4656b7c7e2d0972ed2b521ecd15a159e2c41aa9ab780a97492c95",
+        "third_party/amd/backend/driver.py": "24b908043301e5dfcdbc4cdb17b9b7313e650cdfd4098b2ebfb998af8994be4e",
+        "third_party/amd/backend/driver.c": "921ac82f0170b5405c131395b2900c6fdab84484da96c98cf1d688610007fc7c"
+      }
+    },
+    "vllm": {
+      "commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
+      "files": {
+        "vllm/platforms/rocm.py": "2d18012d138681c4dc6af8e2456e92f6e8bad9b7d9181050a12fe4e271e4d6bc"
+      }
+    },
+    "sglang": {
+      "version": "0.5.17",
+      "source_set_sha256": "a82dc8b22f5eac4d67dc5e029af8446dc05cefbe4e17d8b0db32472dac76e562",
+      "files": {
+        "sglang/srt/platforms/rocm.py": "36dd7d7330e72c2dad9666c1cef97cfd92eb38545e537184cec598b5a7b90831",
+        "sglang/srt/platforms/__init__.py": "2430f325fb54aa6a1265c64149e01929140e841f450f52536b344fa1c51a7ffe",
+        "sglang/srt/distributed/parallel_state.py": "49e8810c5e63ec2f154b543ce694aa58822d149d26cee4b259e966b42a7b6cbe"
+      }
+    },
+    "rocm_systems": {
+      "commit": "92115a2941982a384de161be3f78cf9bff547027",
+      "files": {
+      "projects/rccl/src/nccl.h.in": "267047d2a90b51ee5fa2a6028b042b773e494792b333f352a8a0dfb31ff5c929",
+        "projects/rccl/src/device/reduce_kernel.h": "818f5faa066654d84c4c0d99624cbe1cece7780e16e5a50dbf2298360c6ed4ce",
+        "projects/rocr-runtime/libhsakmt/include/hsakmt/hsakmtmodeliface.h": "2495716e141174f1d073bc06cb8298f85eb674d1ad2f754503ae4490fe13997a",
+        "projects/rocr-runtime/libhsakmt/include/hsakmt/linux/kfd_ioctl.h": "ec5b2ef82d657d26515d7b9ce6472526a8521436ca6509ff8bfca9140454d5a1",
+        "projects/rocr-runtime/libhsakmt/src/hsakmtmodel.c": "e49d921544af96f3260954b69bfc8652180240a7f91bd79c9061108105e63de6",
+        "projects/rocr-runtime/libhsakmt/src/openclose.c": "61f1fe09a1e6d9139a807dd0744459650c74a0e8335cd27cf39852ec92cec808"
+      }
+    }
+  },
+  "capability_families": [
+    {
+      "id": "rocr_provider",
+      "status": "in_progress",
+      "required": ["agent_region_topology", "memory_registration_and_mapping", "queue_doorbell", "signals_events", "pointer_info"],
+      "existing_primitives": ["upstream_libhsakmt_model_1_1", "managed_kmt_provider", "process_owned_memfd", "exact_gfx950_topology", "get_version", "fork_owned_transport", "memory_registration_and_mapping", "standard_aql_queue_doorbell", "signal_completion", "pointer_info", "code_object_execution"],
+      "blocker": "unchanged upstream ROCr standard AQL and one ordinary public-HIP module kernel are formally trace-bound through the same provider; event/coherence negative coverage and the complete PyTorch-facing ROCr surface remain"
+    },
+    {
+      "id": "hip_runtime",
+      "status": "in_progress",
+      "required": ["device_identity", "allocator", "copies", "streams", "events", "modules", "functions", "kernel_launch", "synchronization", "errors"],
+      "existing_primitives": ["self_built_libamdhip64", "device_identity", "allocator", "copies", "streams", "modules", "functions", "generic_kernel_launch", "synchronization", "errors", "runtime_gem5_bridge", "formal_generic_hip_kernel"],
+      "blocker": "the frozen conda product formally accepts an ordinary public-HIP vector-add bit exactly with zero fallback, one durable native retirement, and clean natural teardown; event semantics and broader error/failure paths remain before complete HIP-runtime acceptance"
+    },
+    {
+      "id": "pytorch_rocm_device",
+      "status": "blocked",
+      "required": ["torch_version_hip", "torch_cuda_device", "allocator", "device_guard", "streams_events", "storage_copy_view", "generator_rng", "amp", "inductor"],
+      "existing_primitives": ["upstream_pytorch_hip_masquerading_as_cuda_sources"],
+      "blocker": "the pinned vLLM ROCm dependency requires the official torch 2.11.0 and Triton 3.6.0 stack; a private content-addressed gfx950 ROCm SDK/PyTorch product must retain AMD's official HIP/COMGR/RCCL and replace only ROCr at the KMD boundary, then pass torch.cuda device, allocator, stream/event, storage/view/copy, RNG/AMP, and Inductor gates"
+    },
+    {
+      "id": "triton_upstream_hip",
+      "status": "source_ready",
+      "required": ["hip_target", "hsaco", "hip_module_load", "hip_kernel_launch", "torch_cuda_device_interface"],
+      "existing_primitives": ["pinned_upstream_hip_backend"],
+      "blocker": "execution waits for the standard HIP device facade; gemsim_amd is regression-only"
+    },
+    {
+      "id": "rccl_abi",
+      "status": "in_progress",
+      "required": ["unique_id", "communicator", "all_reduce", "all_gather", "reduce_scatter", "broadcast", "group_semantics", "stream_ordering", "abort"],
+      "existing_primitives": ["self_built_librccl", "libnccl_so_2_compatibility", "generic_ccl_2_to_16", "device_sum", "live_rendezvous", "failure_epoch"],
+      "blocker": "the frozen product publishes and loads the standard RCCL/NCCL ABI, while the existing native CCL engine is accepted through N=16; a live collective entered through the public RCCL ABI with stream ordering and abort evidence is still required"
+    },
+    {
+      "id": "vllm_upstream_rocm",
+      "status": "source_ready",
+      "required": ["RocmPlatform", "cuda_device_type", "nccl_backend", "framework_backend_selection", "inductor"],
+      "existing_primitives": ["pinned_upstream_rocm_platform"],
+      "blocker": "runtime execution waits for pytorch_rocm_device and rccl_abi"
+    },
+    {
+      "id": "sglang_upstream_rocm",
+      "status": "source_ready",
+      "required": ["RocmSRTPlatform", "cuda_device_type", "framework_backend_selection", "inductor", "nccl_or_c10d"],
+      "existing_primitives": ["pinned_upstream_rocm_platform", "official_oot_platform_hook", "generic_c10d_diagnostic"],
+      "blocker": "runtime execution waits for pytorch_rocm_device and rccl_abi; CPU staging is non-acceptance"
+    }
+  ],
+  "acceptance": {
+    "device_facade_prerequisite": ["rocr_provider", "hip_runtime", "pytorch_rocm_device"],
+    "distributed_prerequisite": ["rccl_abi"],
+    "first_generic_runtime_gates": ["upstream_triton_vecadd", "upstream_triton_reduction"],
+    "framework_gates": ["vllm_qwen35_0_8b_tp2", "vllm_qwen35_0_8b_tp4", "sglang_qwen35_0_8b_tp4", "vllm_qwen35_9b_tp16_compile"],
+    "model_ready": false
+  }
+}

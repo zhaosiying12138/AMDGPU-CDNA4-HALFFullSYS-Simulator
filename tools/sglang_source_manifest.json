@@ -1,0 +1,52 @@
+{
+  "schema": "amdgpu-sim.sglang-source.v1",
+  "upstream": {
+    "name": "sglang",
+    "version": "0.5.17",
+    "distribution": "PyPI cp313 manylinux x86_64 wheel, unpacked read-only",
+    "origin": "https://pypi.org/project/sglang/0.5.17/",
+    "artifact": "sglang-0.5.17-cp313-cp313-manylinux_2_34_x86_64.whl",
+    "artifact_url": "https://files.pythonhosted.org/packages/22/c5/fb3867372ccb69fd43c8c64bad2c14469ccd9953c4aec50d0f121164fc55/sglang-0.5.17-cp313-cp313-manylinux_2_34_x86_64.whl",
+    "artifact_sha256": "b4cec115215aaf355f1ca94122ea0d00318f19f9d9d59846fdb674203efd1f94",
+    "source_root": "projects/sglang-0.5.17",
+    "source_set_sha256": "a82dc8b22f5eac4d67dc5e029af8446dc05cefbe4e17d8b0db32472dac76e562",
+    "source_file_count": 3856,
+    "source_bytes": 72995972,
+    "upstream_unchanged": true,
+    "python_abi": "cp313"
+  },
+  "historical_gap_snapshot": {
+    "version": "0.5.10.post1",
+    "distribution": "PyPI source distribution",
+    "archive_sha256": "01f7adfe7cde85b238fb0e1bae4b31d494e19d1471cf35ff3c5489a02f9d2263",
+    "source_set_sha256": "fcd2b238cb5f50a4b7d24aec42c3774d1b53622e84951389acabca6a3ac7fab0",
+    "gap_code": "SRT_NO_PUBLIC_OOT_DEVICE_COMMUNICATOR"
+  },
+  "attention_policy": {
+    "allowed": ["aiter", "triton"],
+    "forbidden_for_gemsim": ["flashinfer", "flashinfer_python", "flashinfer_cubin"],
+    "compile": "use upstream SGLang compiler selection; no framework source patch"
+  },
+  "srt_extension_audit": {
+    "official_oot_hook": true,
+    "entry_point_group": "sglang.srt.platforms",
+    "platform_backend_selector": "SRTPlatform.get_torch_distributed_backend_str",
+    "backend_initialization": "SRTPlatform.init_backend before init_torch_distributed",
+    "gap_code": null,
+    "upstream_rocm_auto_detection": true,
+    "formal_model_platform": "in_tree_RocmSRTPlatform",
+    "oot_platform_role": "diagnostic_only",
+    "group_coordinator": "sglang.srt.distributed.parallel_state.GroupCoordinator",
+    "collective_path": "GroupCoordinator.all_reduce -> sgl_kernel.shm_allreduce or torch.distributed.all_reduce",
+    "planned_resolution": "standard HIP-backed PyTorch and RCCL/NCCL contracts make unchanged SGLang auto-select its in-tree RocmSRTPlatform; the official OOT platform and generic c10d ProcessGroup remain diagnostics/fallback"
+  },
+  "key_files": {
+    "sglang-0.5.17.dist-info/METADATA": "80b1b90c1e9780006f3f3d79f30c33702fbafa67464c76ec615208dc833aa2c7",
+    "sglang/srt/distributed/parallel_state.py": "49e8810c5e63ec2f154b543ce694aa58822d149d26cee4b259e966b42a7b6cbe",
+    "sglang/srt/layers/attention/attention_registry.py": "b8174416b2f4a97724f6f28e375700992c23879a06b9822b33375eb2c0ac8b70",
+    "sglang/srt/platforms/__init__.py": "2430f325fb54aa6a1265c64149e01929140e841f450f52536b344fa1c51a7ffe",
+    "sglang/srt/platforms/rocm.py": "36dd7d7330e72c2dad9666c1cef97cfd92eb38545e537184cec598b5a7b90831",
+    "sglang/srt/plugins/__init__.py": "3a975a73f1a7887e68c81ea7a2530250597ac8ae978efc0b0f70f038a99a3164",
+    "sglang/srt/server_args.py": "79d9bbb61b429574e31e7a7e319831fcd129a83a475e6ffe2b7e8a5e8eb06b0f"
+  }
+}

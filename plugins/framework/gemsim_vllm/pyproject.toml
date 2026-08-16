@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gemsim-vllm-plugin"
+version = "0.1.0"
+description = "Out-of-tree PyTorch and vLLM integration for amdgpu-sim"
+requires-python = ">=3.10,<3.15"
+license = "GPL-3.0-or-later"
+
+[project.entry-points."vllm.platform_plugins"]
+gemsim_amd = "gemsim_vllm:platform_plugin"
+
+[project.entry-points."vllm.general_plugins"]
+gemsim_qwen35_ops = "gemsim_vllm:register_ops"
+
+[tool.setuptools.packages.find]
+where = ["src"]

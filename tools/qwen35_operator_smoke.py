@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Run the deterministic Qwen3.5 operator-contract smoke gate.
+"""Run the deterministic Qwen3.5 executable operator-work-queue smoke gate.
 
-The default run is intentionally a *static* smoke: it validates model shapes,
-layer counts, registrations, and source symbols.  It does not call a CPU
-implementation, and it does not call a CUDA/NVIDIA kernel.  Consequently the
-result is ``blocked`` until an AMD/ROCm host-native device runner is connected.
-Use ``--require-amd`` in CI when a missing AMD runtime should fail the command.
+The default run validates the materialized queue and its static model/source
+contracts. It never turns an ambient AMD, CPU, or NVIDIA runtime probe into
+operator acceptance. Use ``--require-complete`` when incomplete runtime
+evidence should fail the command.
 """
 
 from __future__ import annotations
@@ -28,8 +27,10 @@ for _path in (str(ROOT), str(TOOLS)):
 
 try:
     from qwen35_operator_manifest import ROOT, build_manifest
+    from qwen35_operator_work_queue import queue_summary, validate_manifest
 except ImportError:  # pragma: no cover - supports importing from the repository root
     from tools.qwen35_operator_manifest import ROOT, build_manifest
+    from tools.qwen35_operator_work_queue import queue_summary, validate_manifest
 
 
 def _shape_contract(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -75,17 +76,16 @@ def _shape_contract(manifest: dict[str, Any]) -> dict[str, Any]:
 def run_smoke() -> dict[str, Any]:
     manifest = build_manifest()
     shape = _shape_contract(manifest)
-    runtime = manifest["runtime_probe"]
-    static_ok = bool(manifest["summary"]["static_source_ok"] and shape["passed"])
-    amd_execution = bool(runtime["amd_ready"] and manifest["summary"]["amd_runtime_executed"])
-    if amd_execution:
-        runtime_status = "execution_not_implemented"
-        blocker = "AMD runtime detected, but no host-native Triton execution runner is registered"
-    else:
-        runtime_status = "blocked"
-        blocker = runtime["reason"]
+    validation_errors = validate_manifest(manifest)
+    work_queue = queue_summary(manifest)
+    static_ok = bool(
+        not validation_errors
+        and manifest["summary"]["static_source_ok"]
+        and shape["passed"]
+    )
+    complete = bool(static_ok and work_queue["all_contracts_accepted"])
     return {
-        "schema": "amdgpu-sim.qwen35.operator-smoke.v1",
+        "schema": "amdgpu-sim.qwen35.operator-smoke.v3",
         "model_revision": manifest["model"]["revision"],
         "scope": {
             "text_only": True,
@@ -95,18 +95,23 @@ def run_smoke() -> dict[str, Any]:
             "full_rocm_opencl_cts_required": False,
         },
         "static_contract": {
+            "manifest_schema_gate": not validation_errors,
+            "manifest_schema_errors": validation_errors,
             "source_and_registration_gate": bool(manifest["summary"]["static_source_ok"]),
             "shape_gate": bool(shape["passed"]),
             "passed": static_ok,
         },
         "shape_contract": shape,
+        "work_queue": {
+            **work_queue,
+            "status": "accepted" if complete else "incomplete",
+            "results_external": True,
+        },
         "runtime": {
-            "status": runtime_status,
-            "amd_ready": bool(runtime["amd_ready"]),
-            "hip_runtime": bool(runtime["hip_runtime"]),
-            "cuda_runtime": bool(runtime["cuda_runtime"]),
-            "device_name": runtime["device_name"],
-            "blocker": blocker,
+            "status": "accepted" if complete else "work_queue_incomplete",
+            "source_only_manifest": True,
+            "external_results_required": True,
+            "blocker": None if complete else manifest["summary"]["blocker"],
         },
         "fallback_audit": {
             "cpu_fallback_attempted": False,
@@ -114,10 +119,12 @@ def run_smoke() -> dict[str, Any]:
             "nvidia_fallback_attempted": False,
             "nvidia_fallback_counted_as_pass": False,
         },
-        # A static contract is progress, not end-to-end success.  Keep this
-        # false until the AMD device runner executes every contract.
-        "passed": False,
-        "pass_reason": "static contract only; AMD device execution is still required",
+        "passed": complete,
+        "pass_reason": (
+            "all 15 contracts have complete accepted fresh/repeat evidence"
+            if complete
+            else "work queue is valid but all 15 contracts are not accepted"
+        ),
     }
 
 
@@ -125,9 +132,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("-"))
     parser.add_argument(
-        "--require-amd",
+        "--require-complete",
         action="store_true",
-        help="fail unless an AMD runtime is available (execution remains a separate gate)",
+        help="fail unless all 15 operator contracts are accepted",
     )
     args = parser.parse_args()
     result = run_smoke()
@@ -140,8 +147,8 @@ def main() -> int:
         print(json.dumps({"output": str(args.output), "status": result["runtime"]["status"]}, sort_keys=True))
     if not result["static_contract"]["passed"]:
         return 1
-    if args.require_amd and not result["runtime"]["amd_ready"]:
-        return 2
+    if args.require_complete and not result["passed"]:
+        return 3
     return 0
 
 

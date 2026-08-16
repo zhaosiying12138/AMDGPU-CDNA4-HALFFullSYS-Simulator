@@ -78,6 +78,7 @@ python_wheels=(
     'networkx==3.6.1|networkx-3.6.1-py3-none-any.whl|d47fbf302e7d9cbbb9e2555a0d267983d2aa476bac30e90dfbe5669bd57f3762|https://files.pythonhosted.org/packages/9e/c9/b2622292ea83fbb4ec318f5b9ab867d0a28ab43c5717bb85b0a5f6b3b0a4/networkx-3.6.1-py3-none-any.whl'
     'numpy==2.4.3|numpy-2.4.3-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl|679f2a834bae9020f81534671c56fd0cc76dd7e5182f57131478e23d0dc59e24|https://files.pythonhosted.org/packages/a9/7e/4f120ecc54ba26ddf3dc348eeb9eb063f421de65c05fc961941798feea18/numpy-2.4.3-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl'
     'packaging==26.3|packaging-26.3-py3-none-any.whl|d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c|https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl'
+    'safetensors==0.8.0|safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl|fd6f3f93c9a0a7cc2788ee63fb763353d4bd2e89b0751bc78fcf7dda00bea774|https://files.pythonhosted.org/packages/28/50/f203ff3a3ddfe19308efc83c5a3a29ed02bf786732ec35e68bf9162f3365/safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl'
     'setuptools==78.1.0|setuptools-78.1.0-py3-none-any.whl|3e386e96793c8702ae83d17b853fb93d3e09ef82ec62722e61da5cd22376dcd8|https://files.pythonhosted.org/packages/54/21/f43f0a1fa8b06b32812e0975981f4677d28e0f3271601dc88ac5a5b83220/setuptools-78.1.0-py3-none-any.whl'
     'sympy==1.14.0|sympy-1.14.0-py3-none-any.whl|e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5|https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl'
     'torch==2.13.0+cpu|torch-2.13.0+cpu-cp314-cp314-manylinux_2_28_x86_64.whl|d20fa53ee744502fa4c69818a720b05ca0d37abd055d4f6e66cae155114bc691|https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp314-cp314-manylinux_2_28_x86_64.whl'
@@ -94,9 +95,26 @@ prefix="$rocm_root/$profile_name"
 jobs=${requested_jobs:-$(/usr/bin/getconf _NPROCESSORS_ONLN 2>/dev/null || printf '4')}
 mode=verify
 
+# Product commands are isolated from the schema-8 builder below. The default
+# base profile remains its read-only compiler/Python/Triton foundation.
+case "${1-}" in
+    --print-base-prefix)
+        (($# == 1)) || { printf '%s\n' '--print-base-prefix takes no arguments' >&2; exit 2; }
+        printf '%s\n' "$prefix"
+        exit 0
+        ;;
+    --print-prefix|--freeze-product|--product-runtime|--verify-product)
+        product_mode=$1
+        shift
+        exec /usr/bin/python3 -I "$root_dir/tools/product_environment.py" \
+            "$product_mode" --root "$root_dir" --base-prefix "$prefix" "$@"
+        ;;
+esac
+
 usage() {
     cat >&2 <<'EOF'
-usage: scripts/setup_rocm_env.sh [--verify-only|--all|--compiler|--runtime|--triton|--print-prefix]
+usage: scripts/setup_rocm_env.sh [--verify-only|--all|--compiler|--runtime|--triton]
+       [--print-base-prefix|--print-prefix|--freeze-product|--product-runtime|--verify-product]
        [--prefix PATH] [--jobs N]
 
 The default is --verify-only. --all builds the pinned LLVM/Clang/lld,
@@ -729,6 +747,7 @@ expected = {
     "numpy": "2.4.3",
     "packaging": "26.3",
     "pip": "26.1.2",
+    "safetensors": "0.8.0",
     "setuptools": "78.1.0",
     "sympy": "1.14.0",
     "torch": "2.13.0+cpu",
@@ -2061,7 +2080,7 @@ import triton
 runtime = ctypes.CDLL(str(Path(os.environ["ROCM_SIM_ROOT"]) / "lib" / "libself_amdgpu_runtime.so.1"))
 runtime.sagr_abi_version.argtypes = []
 runtime.sagr_abi_version.restype = ctypes.c_uint32
-if runtime.sagr_abi_version() != 0x00010006:
+if runtime.sagr_abi_version() != 0x00010008:
     raise SystemExit(f"managed runtime ABI mismatch: 0x{runtime.sagr_abi_version():08x}")
 for symbol in (
     "sagr_managed_session_open",
@@ -2083,6 +2102,7 @@ expected = {
     "numpy": "2.4.3",
     "packaging": "26.3",
     "pip": "26.1.2",
+    "safetensors": "0.8.0",
     "setuptools": "78.1.0",
     "sympy": "1.14.0",
     "torch": "2.13.0+cpu",

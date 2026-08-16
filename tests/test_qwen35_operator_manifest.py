@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import importlib
 import json
 from pathlib import Path
 import unittest
@@ -16,6 +17,7 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC and SPEC.loader
 manifest_tool = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(manifest_tool)
+work_queue_tool = importlib.import_module("qwen35_operator_work_queue")
 
 
 class Qwen35OperatorManifestTest(unittest.TestCase):
@@ -48,6 +50,15 @@ class Qwen35OperatorManifestTest(unittest.TestCase):
         self.assertTrue(all(item["source_evidence"] for item in self.manifest["contracts"]))
         self.assertTrue(all(item["cpu_fallback_forbidden"] for item in self.manifest["contracts"]))
         self.assertTrue(all(item["nvidia_runtime_is_not_pass"] for item in self.manifest["contracts"]))
+        self.assertTrue(
+            all(
+                item["completion_rule"] == "all_required_items_accepted"
+                for item in self.manifest["contracts"]
+            )
+        )
+        self.assertTrue(
+            all(item["required_work_item_ids"] for item in self.manifest["contracts"])
+        )
 
     def test_expected_triton_kernel_families_are_discovered(self) -> None:
         by_id = {item["id"]: item for item in self.manifest["contracts"]}
@@ -82,7 +93,7 @@ class Qwen35OperatorManifestTest(unittest.TestCase):
         self.assertGreaterEqual(counts["custom_registration_count"], 30)
 
         backend = self.manifest["backend_support"]
-        self.assertEqual(backend["target"]["backend"], "triton_amd_host_native")
+        self.assertEqual(backend["target"]["backend"], "gemsim_amd")
         self.assertFalse(backend["target"]["counts_as_pass"])
         unsupported = {
             item["backend"]: item for item in self.manifest["unsupported_backends"]
@@ -101,10 +112,45 @@ class Qwen35OperatorManifestTest(unittest.TestCase):
         materialized = json.loads(
             (ROOT / "tools" / "qwen35_operator_manifest.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(materialized["schema"], self.manifest["schema"])
-        self.assertEqual(materialized["model"], self.manifest["model"])
-        self.assertEqual(materialized["topology"], self.manifest["topology"])
-        self.assertEqual(materialized["contracts"], self.manifest["contracts"])
+        self.assertEqual(materialized, self.manifest)
+
+    def test_work_queue_is_valid_but_no_complete_contract_is_accepted(self) -> None:
+        self.assertEqual(self.manifest["schema"], work_queue_tool.SCHEMA)
+        self.assertEqual(work_queue_tool.validate_manifest(self.manifest), [])
+        summary = work_queue_tool.queue_summary(self.manifest)
+        self.assertEqual(summary["contract_count"], 15)
+        self.assertEqual(summary["work_item_count"], 32)
+        self.assertEqual(summary["configured_work_item_count"], 2)
+        self.assertEqual(summary["accepted_contract_count"], 0)
+        self.assertEqual(summary["accepted_work_item_count"], 0)
+        self.assertEqual(summary["ready_work_item_count"], 2)
+        self.assertEqual(summary["result_errors"], [])
+        self.assertFalse(summary["all_contracts_accepted"])
+
+    def test_manifest_is_source_only_and_contains_no_preaccepted_results(self) -> None:
+        items = self.manifest["work_items"]
+        self.assertEqual(len(items), 32)
+        self.assertTrue(all(item["required_for_contract"] for item in items))
+        self.assertTrue(all(item["acceptance_role"] == "required" for item in items))
+        self.assertTrue(
+            all(item["runtime_evidence"] == work_queue_tool.runtime_evidence_policy()
+                for item in items)
+        )
+        self.assertTrue(
+            all(contract["partial_work_item_ids"] == []
+                for contract in self.manifest["contracts"])
+        )
+        configured = [
+            item for item in items if item["configuration_status"] == "configured"
+        ]
+        self.assertTrue(configured)
+        self.assertTrue(
+            all(
+                item["kernel"]["code_objects"]
+                == {"count": 1, "identity_policy": "recorded_sha256"}
+                for item in configured
+            )
+        )
 
     def test_smoke_never_promotes_nvidia_or_cpu_to_pass(self) -> None:
         result = self.smoke.run_smoke()
@@ -112,8 +158,11 @@ class Qwen35OperatorManifestTest(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertFalse(result["fallback_audit"]["cpu_fallback_counted_as_pass"])
         self.assertFalse(result["fallback_audit"]["nvidia_fallback_counted_as_pass"])
-        if not result["runtime"]["amd_ready"]:
-            self.assertEqual(result["runtime"]["status"], "blocked")
+        self.assertEqual(result["runtime"]["status"], "work_queue_incomplete")
+        self.assertTrue(result["runtime"]["source_only_manifest"])
+        self.assertTrue(result["runtime"]["external_results_required"])
+        self.assertEqual(result["work_queue"]["accepted_contract_count"], 0)
+        self.assertEqual(result["work_queue"]["work_item_count"], 32)
 
 
 if __name__ == "__main__":

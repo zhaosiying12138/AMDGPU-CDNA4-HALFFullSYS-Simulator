@@ -2,12 +2,12 @@
   "checkpoint_id": "CP-0030",
   "checkpoint_sha256": "7f0a6289851f9013f4bae6dae95d2e0dc4b06a173c8696205c7339dfb7917c9e",
   "goal_id": "GSIM-001",
-  "next_action_id": "P5-OPS-01",
-  "next_action_summary": "Begin CP-0031, turn the 15-contract source manifest into an executable per-op work queue, and accept the next bounded BF16 RMSNorm decode/prefill differential subgate without widening the CP-0030 SiluAndMul claim.",
+  "next_action_id": null,
+  "next_action_summary": "Historical CP-0030 pointer only. Resume from current GOAL.md and PLAN.md; do not begin the obsolete CP-0031/RMSNorm transaction.",
   "phase_id": "P5C",
   "plan_id": "AMDGPU-SIM-V1",
   "plan_revision": 2,
-  "resume_command": "scripts/resume.sh --verify",
+  "resume_command": null,
   "schema": "amdgpu-sim.current.v1",
-  "state": "ready"
+  "state": "archived"
 }

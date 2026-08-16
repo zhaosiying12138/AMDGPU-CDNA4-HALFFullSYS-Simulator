@@ -55,14 +55,46 @@ class KmtSpecTest(unittest.TestCase):
         self.assertEqual(transport["request_frame_bytes"], 336)
         self.assertEqual(transport["result_frame_bytes"], 336)
         self.assertEqual(transport["message_types"], {"KMT_REQUEST": 14, "KMT_ACK": 15})
-        self.assertEqual(transport["ancillary_descriptors"], 0)
+        self.assertIn("EXPORT_BACKING", transport["ancillary_descriptors"])
         self.assertTrue(transport["no_fragmentation"])
+
+    def test_shared_backing_layout_reserves_one_generic_doorbell_tail(self):
+        layout = self.spec["shared_backing_layout"]
+        self.assertEqual(layout["layout_major"], 1)
+        self.assertEqual(layout["alignment_bytes"], 4096)
+        self.assertEqual(layout["doorbell_region_bytes"], 8192)
+        self.assertEqual(layout["doorbell_region_base_bytes"], 0)
+        self.assertEqual(layout["doorbell_slot_bytes"], 8)
+        self.assertEqual(layout["maximum_doorbell_slots"], 128)
+        self.assertEqual(layout["doorbell_initial_value"], "UINT64_MAX")
+        self.assertEqual(layout["completion_region_base_bytes"], 1024)
+        self.assertEqual(layout["completion_slot_bytes"], 8)
+        self.assertEqual(layout["completion_initial_value"], 0)
+        self.assertEqual(layout["userptr_memory_flag_mask"], 1 << 2)
+        self.assertEqual(layout["doorbell_memory_flag_mask"], 1 << 3)
+        self.assertLessEqual(
+            layout["maximum_doorbell_slots"] * layout["doorbell_slot_bytes"],
+            layout["doorbell_region_bytes"],
+        )
+        self.assertIn("exported_backing_bytes", layout["doorbell_offset"])
+        self.assertIn("exported_backing_bytes", layout["completion_offset"])
+        self.assertGreaterEqual(
+            layout["completion_region_base_bytes"],
+            layout["maximum_doorbell_slots"] * layout["doorbell_slot_bytes"],
+        )
+
+    def test_clock_correlation_is_one_nanosecond_domain(self):
+        clock = self.spec["clock_correlation"]
+        self.assertEqual(clock["counter_unit"], "nanoseconds")
+        self.assertEqual(clock["system_clock_frequency_hz"], 1_000_000_000)
 
     def test_payload_layouts_are_contiguous_and_fixed(self):
         self._assert_contiguous(self, self.spec["request_payload"]["fields"], 256)
         self._assert_contiguous(self, self.spec["result_payload"]["fields"], 256)
         request = {field["name"]: field for field in self.spec["request_payload"]["fields"]}
         result = {field["name"]: field for field in self.spec["result_payload"]["fields"]}
+        self.assertEqual(request["kmt_minor"]["constant"], 5)
+        self.assertEqual(result["kmt_minor"]["constant"], 5)
         self.assertEqual(request["copied_buffer"]["bytes"], 128)
         self.assertEqual(result["copied_result"]["bytes"], 128)
         self.assertEqual(request["reserved"]["bytes"], 24)
@@ -83,10 +115,28 @@ class KmtSpecTest(unittest.TestCase):
     def test_operation_ids_are_unique_and_stable(self):
         operations = self.spec["operations"]
         ids = [entry["id"] for entry in operations.values()]
-        self.assertEqual(ids, list(range(1, 19)))
+        self.assertEqual(ids, list(range(1, 29)))
         self.assertEqual(len(ids), len(set(ids)))
         self.assertEqual(operations["OPEN_KFD"]["id"], 1)
         self.assertEqual(operations["MODEL_DRM_CALL"]["id"], 18)
+        self.assertEqual(operations["PROCESS_APERTURES"]["id"], 19)
+        self.assertEqual(operations["ACQUIRE_VM"]["id"], 20)
+        self.assertEqual(operations["SET_MEMORY_POLICY"]["id"], 21)
+        self.assertEqual(operations["ALLOC_MEMORY_OF_GPU"]["id"], 22)
+        self.assertEqual(operations["FREE_MEMORY_OF_GPU"]["id"], 23)
+        self.assertEqual(operations["MAP_MEMORY_TO_GPU"]["id"], 24)
+        self.assertEqual(operations["UNMAP_MEMORY_FROM_GPU"]["id"], 25)
+        self.assertEqual(operations["SET_SCRATCH_BACKING_VA"]["id"], 26)
+        self.assertEqual(operations["EXPORT_BACKING"]["id"], 27)
+        self.assertEqual(operations["GET_CLOCK_COUNTERS"]["id"], 28)
+        self.assertEqual(
+            [entry["name"] for entry in self.spec["operation_layouts"]["QUEUE_CREATE"]["results"]],
+            [
+                "accepted_queue_depth",
+                "doorbell_backing_offset_high",
+                "doorbell_backing_offset_low",
+            ],
+        )
         surface_ids = [entry["operation_id"] for entry in self.spec["operation_wrapper_surface"]]
         self.assertEqual(surface_ids, ids)
         implementation = self.spec["cp0010_implementation_table"]
@@ -100,9 +150,21 @@ class KmtSpecTest(unittest.TestCase):
             "sagr_kmt_event_reset", "sagr_kmt_event_query",
             "sagr_kmt_event_wait", "sagr_kmt_pointer_info",
             "sagr_kmt_model_drm_call",
+            "sagr_kmt_process_apertures", "sagr_kmt_acquire_vm",
+            "sagr_kmt_set_memory_policy", "sagr_kmt_alloc_memory_of_gpu",
+            "sagr_kmt_free_memory_of_gpu", "sagr_kmt_map_memory_to_gpu",
+            "sagr_kmt_unmap_memory_from_gpu", "sagr_kmt_set_scratch_backing_va",
+            "sagr_kmt_export_backing", "sagr_kmt_get_clock_counters",
         ]
         self.assertEqual(implementation["operation_wrappers_implemented"], expected_wrappers)
-        self.assertEqual(implementation["provider_semantics_unsupported_by_default"], list(operations))
+        self.assertEqual(
+            implementation["provider_semantics_unsupported_by_default"],
+            [
+                name
+                for name in operations
+                if name not in ("EXPORT_BACKING", "GET_CLOCK_COUNTERS")
+            ],
+        )
         self.assertIn("HSAKMT_STATUS_NOT_SUPPORTED", implementation["unsupported_rule"])
         layouts = self.spec["operation_layouts"]
         self.assertEqual(list(layouts), list(operations))
@@ -118,7 +180,15 @@ class KmtSpecTest(unittest.TestCase):
                 for word, field in by_word.items():
                     if field.endswith("_high"):
                         self.assertEqual(by_word.get(word + 1), field[:-5] + "_low", name)
-            self.assertIn(layout["request_buffer"]["direction"], ("none", "client_to_daemon", "client_to_daemon only for H2D"))
+            self.assertIn(
+                layout["request_buffer"]["direction"],
+                (
+                    "none",
+                    "client_to_daemon",
+                    "client_to_daemon only for H2D",
+                    "one SCM_RIGHTS descriptor",
+                ),
+            )
             self.assertIn(layout["result_buffer"]["direction"], ("none", "daemon_to_client", "daemon_to_client only for D2H"))
         fixture = self.spec["deterministic_fixture"]
         version = bytes.fromhex(fixture["version_record"]["hex"])

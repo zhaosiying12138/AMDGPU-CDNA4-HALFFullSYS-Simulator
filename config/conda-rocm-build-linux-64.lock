@@ -1,0 +1,12 @@
+# Recreate with:
+#   conda create --offline --prefix <prefix> --file config/conda-rocm-build-linux-64.lock
+# platform: linux-64
+@EXPLICIT
+https://conda.anaconda.org/conda-forge/linux-64/libgomp-15.2.0-he0feb66_19.conda#5abe4ab9d93f6c9757d654f1969ae2267d4505315c1f2f8fe705fd60af084f1b
+https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda#1dd3fffd892081df9726d7eb7e0dea6198962ba775bd88842135a4ddb4deb3c9
+https://conda.anaconda.org/conda-forge/linux-64/libgcc-15.2.0-he0feb66_19.conda#8e0a3b5e41272e5678499b5dfc4cddb673f9e935de01eb0767ce857001229f46
+https://conda.anaconda.org/conda-forge/linux-64/libgcc-ng-15.2.0-h69a702a_19.conda#9dcf54adfaa5e861123c2da4f2f0451a685464ea7e5a41ad91cf67b31d658d98
+https://conda.anaconda.org/conda-forge/linux-64/libnuma-2.0.18-hb03c661_3.conda#17d72848a6480f0b0708f2b2f64292b5fa0e0996ce56f26fc26e4aebb5a9ca81
+https://conda.anaconda.org/conda-forge/linux-64/libpciaccess-0.18-hb9d3cd8_0.conda#0bd91de9b447a2991e666f284ae8c722ffb1d84acb594dbd0c031bd656fa32b2
+https://conda.anaconda.org/conda-forge/linux-64/libdrm-2.4.125-hb03c661_1.conda#c076a213bd3676cc1ef22eeff91588826273513ccc6040d9bea68bccdc849501
+https://conda.anaconda.org/conda-forge/linux-64/pkg-config-0.29.2-h4bc722e_1009.conda#c9601efb1af5391317e04eca77c6fe4d716bf1ca1ad8da2a05d15cb7c28d7d4e

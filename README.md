@@ -21,8 +21,10 @@ The first hard acceptance target is the official text-only
 two independent gem5 instances, producing at least one greedy token with the
 same token ID as the reference and no CPU arithmetic fallback, then sustaining
 a predeclared multi-token decode window. The protocol
-is N-rank from the beginning so TP=4/8 can follow without a pair-specific
-rewrite.  The checkpoint is already downloaded at the pinned revision under
+is N-rank from the beginning so TP=4 can follow without a pair-specific
+rewrite. The underlying CCL and simulator-device capacity remains 16 ranks;
+that capacity is not a requirement to run a TP=8 or TP=16 model gate. The
+checkpoint is already downloaded at the pinned revision under
 `models/`; its first software gate is a source-grounded 15-contract text-only
 operator manifest.  Full ROCm/OpenCL CTS is deliberately not a prerequisite;
 every operator used by this model still needs an AMD execution result, and
@@ -41,9 +43,56 @@ and finally CCL-backed multi-TP stable inference. The complete unmodified
 upstream tutorial file, including its benchmark sweep, is a later scale gate
 rather than a prerequisite for the model-specific operator matrix. Profiling and simulator
 optimization are scheduled only when a real operator, layer, or model run
-materially blocks that correctness path. After the model path is usable, a
-low-priority simulator-aware `rocm-smi` client will report the ON/OFF state of
-multiple gem5 daemon instances without probing physical GPUs.
+materially blocks that correctness path.
+
+The simulator-aware `rocm-smi` client is now installed with the repository
+conda product. It always exposes 16 logical simulator slots. A slot is `ON`
+only while a managed gem5 process holds a live runtime lease whose PID,
+process start time, executable inode, daemon/job identity, and private socket
+all validate; unused or released slots are `OFF`. It never probes physical
+GPUs or loads a production ROCm SMI library.
+
+Current accepted collective scope is intentionally narrower than the final
+model target. The reusable out-of-tree CCL engine has device-backed BF16/1024
+allreduce evidence at N=2/3/4/8/16, and a real pinned-vLLM
+`GroupCoordinator.all_reduce` passes separately at N=2 through the out-of-tree
+communicator with zero Gloo tensor payload or fallback. No RowParallel layer or
+Qwen TP model is accepted yet; the next gate is Qwen-sized TP2
+`RowParallelLinear` sharding plus out-of-place allreduce.
+
+The integration architecture deliberately keeps pinned vLLM, PyTorch, and
+Triton core unmodified. vLLM uses its official platform/general plugin,
+`PluggableLayer`, attention, and `DeviceCommunicator` extension points; Triton
+uses the out-of-tree `gemsim_amd` backend while retaining its normal frontend,
+JIT/cache, compiler coordinator, and AMD lowering. The backend hides the
+versioned self-runtime, CCL engine, and gem5 transport. See
+[docs/framework-runtime-layering.md](docs/framework-runtime-layering.md) for
+the ownership and TP integration contract.
+
+The bounded migration from the current implementation to a concentrated
+runtime-gem5 bridge and repository-owned conda entry point is specified in
+[docs/runtime-gem5-bridge-migration.md](docs/runtime-gem5-bridge-migration.md),
+including regression, legacy-removal, and rollback gates.
+
+The repository-owned conda entry point is now available. It installs exact
+noneditable project wheels over the pinned framework/compiler packages and
+keeps mutable caches outside the content-addressed prefix:
+
+```bash
+./scripts/setup_conda_env.sh --install
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate "$(./scripts/setup_conda_env.sh --print-prefix)"
+python examples/quickstart/triton_vecadd.py
+python examples/quickstart/vllm_silu.py
+rocm-smi
+rocm-smi --json
+```
+
+`./scripts/setup_conda_env.sh --verify` rehashes the product, native runtime,
+gem5 inputs, plugin source sets, and pinned upstream identities. These two
+quickstarts are user-entry smoke gates; they do not by themselves claim full
+Qwen inference or tensor-parallel model acceptance. Formal Qwen TP model gates
+are limited to TP=2 and TP=4; the generic CCL/runtime capacity remains 2..16.
 
 Read [PLAN.md](PLAN.md) for the complete staged plan and [GOAL.md](GOAL.md) for
 the immutable acceptance anchor.  A blank-context handoff starts with:
@@ -52,9 +101,10 @@ Gem5 acceptance builds use the recorded mold/24-job procedure in
 [docs/gem5-build.md](docs/gem5-build.md).
 
 ```text
-继续执行 amdgpu-sim 计划。从 checkpoint 指定的下一条唯一动作继续：先读取
-PLAN.md、GOAL.md、SOURCE_LOCK.json、state/current.json、最新 checkpoint 和
-bitlesson，运行 scripts/resume.sh --verify；不要重做已通过的工作。
+继续执行 amdgpu-sim 计划。先读取 PLAN.md、GOAL.md、
+ENGINEERING_CONSTRAINTS.md、SOURCE_LOCK.json 和 PROJECT_LANES.json，再核对当前
+源码、测试与相关 evidence。state/current.json 和 CP1-30 是历史档案，不执行其
+过时的 CP31/RMSNorm next_action；从 PLAN 当前 P8 correctness gate 继续。
 ```
 
 `CP-0007` remains the accepted bridge-private signal/event boundary. The standalone

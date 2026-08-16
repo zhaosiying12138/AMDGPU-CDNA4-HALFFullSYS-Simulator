@@ -14,12 +14,25 @@ import argparse
 import ast
 from collections import Counter
 import hashlib
-import importlib.util
 import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 from typing import Any
+
+
+TOOLS_ROOT = Path(__file__).resolve().parent
+if str(TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TOOLS_ROOT))
+
+from qwen35_operator_work_queue import (  # noqa: E402
+    derive_work_item_status,
+    queue_summary,
+    runtime_evidence_policy,
+    validate_manifest,
+    work_item_spec_sha256,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +40,8 @@ MODEL_DIR = ROOT / "models" / "Qwen3.5-0.8B"
 VLLM_ROOT = ROOT / "projects" / "vllm"
 TRITON_ROOT = ROOT / "projects" / "triton"
 PYTORCH_ROOT = ROOT / "projects" / "pytorch"
+SOURCE_LOCK_PATH = ROOT / "SOURCE_LOCK.json"
+MODEL_MANIFEST_PATH = MODEL_DIR / "manifest.json"
 
 
 # These are the source files on the text-only Qwen3.5 path.  Keeping the list
@@ -533,9 +548,7 @@ def _evidence_for_symbols(
     )
 
 
-def _backend_support(
-    inventories: dict[str, dict[str, Any]], runtime: dict[str, Any]
-) -> dict[str, Any]:
+def _backend_support(inventories: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """Describe backend boundaries without importing vLLM or executing code.
 
     ``unsupported`` is deliberately explicit.  A CPU implementation or a
@@ -543,18 +556,13 @@ def _backend_support(
     the AMD operator gate.  Optional AITER/FlashInfer/CuteDSL paths are also
     kept separate because they are external or CUDA-only dependencies.
     """
-    amd_status = (
-        "runtime_available_not_executed"
-        if runtime["amd_ready"]
-        else "blocked_no_amd_runtime"
-    )
     target = {
-        "backend": "triton_amd_host_native",
-        "status": amd_status,
+        "backend": "gemsim_amd",
+        "status": "work_queue_incomplete",
         "counts_as_pass": False,
         "reason": (
-            "Static source closure is ready; an AMD device runner must compile "
-            "and execute every contract before this becomes a pass."
+            "Only accepted per-item gemsim_amd evidence can complete a contract; "
+            "ambient physical accelerator availability is not part of this spec."
         ),
         "source_evidence": _evidence_for_symbols(
             inventories,
@@ -634,41 +642,421 @@ def _backend_support(
     }
 
 
-def _runtime_probe() -> dict[str, Any]:
-    """Return a conservative runtime capability probe.
-
-    A CUDA build is intentionally not treated as HIP.  The probe only reports
-    ``amd_ready`` when a ROCm PyTorch build is importable and exposes HIP.
-    """
-    spec = importlib.util.find_spec("torch")
-    result: dict[str, Any] = {
-        "torch_importable": spec is not None,
-        "torch_origin": str(spec.origin) if spec is not None else None,
-        "hip_runtime": False,
-        "cuda_runtime": False,
-        "device_name": None,
-        "amd_ready": False,
-        "reason": "torch is not importable",
+def _tensor(
+    name: str,
+    role: str,
+    dtype: str,
+    shape: list[int],
+    strides: list[int],
+    access: str,
+    *,
+    storage_elements: int | None = None,
+) -> dict[str, Any]:
+    elements = 1
+    for extent in shape:
+        elements *= extent
+    return {
+        "name": name,
+        "role": role,
+        "dtype": dtype,
+        "shape": shape,
+        "strides": strides,
+        "stride_unit": "elements",
+        "storage_offset": 0,
+        "storage_elements": storage_elements if storage_elements is not None else elements,
+        "access": access,
+        "alias_group": name,
     }
-    if spec is None:
-        return result
-    try:
-        import torch  # type: ignore
 
-        result["hip_runtime"] = torch.version.hip is not None
-        result["cuda_runtime"] = torch.cuda.is_available()
-        if result["cuda_runtime"]:
-            result["device_name"] = torch.cuda.get_device_name(0)
-        if result["hip_runtime"] and result["cuda_runtime"]:
-            result["amd_ready"] = True
-            result["reason"] = "ROCm PyTorch and an accelerator are available"
-        elif result["cuda_runtime"]:
-            result["reason"] = "CUDA accelerator detected; NVIDIA execution is not an AMD pass"
-        else:
-            result["reason"] = "PyTorch is present but no accelerator is available"
-    except Exception as exc:  # pragma: no cover - defensive environment probe
-        result["reason"] = f"runtime probe failed: {type(exc).__name__}: {exc}"
-    return result
+
+def _fallback_policy() -> dict[str, Any]:
+    return {
+        "allowed": False,
+        "forbidden_backends": [
+            "cpu",
+            "cuda_nvidia",
+            "gdn_flashinfer",
+            "gdn_cutedsl",
+            "production_rocm",
+        ],
+        "required_zero_counters": [
+            "fallback_count",
+            "cpu_fallback_count",
+            "nvidia_fallback_count",
+        ],
+        "forbidden_dsos": [
+            "/opt/rocm",
+            "libcuda.so",
+            "libamdhip64.so",
+            "libhsa-runtime64.so",
+        ],
+        "forbidden_device_nodes": ["/dev/kfd", "/dev/dri"],
+    }
+
+
+def _source_entries(
+    contract: dict[str, Any], source_meta: dict[str, Any]
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    seen: set[tuple[str, str | None, str | None]] = set()
+    for evidence in contract["source_evidence"]:
+        path = evidence["source"]
+        key = (path, evidence.get("symbol"), evidence.get("registration"))
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append(
+            {
+                "repo": "vllm",
+                "path": path,
+                "symbol": evidence.get("symbol"),
+                "registration": evidence.get("registration"),
+                "line": evidence.get("line"),
+                "file_sha256": source_meta[path]["sha256"],
+            }
+        )
+    return entries
+
+
+def _root_source(path: str, symbol: str) -> dict[str, Any]:
+    absolute = ROOT / path
+    return {
+        "repo": "root",
+        "path": path,
+        "symbol": symbol,
+        "registration": None,
+        "line": None,
+        "file_sha256": _sha256(absolute),
+    }
+
+
+def _repository_source(repo: str, path: str, symbol: str) -> dict[str, Any]:
+    roots = {
+        "vllm": VLLM_ROOT,
+        "triton": TRITON_ROOT,
+        "pytorch": PYTORCH_ROOT,
+    }
+    absolute = roots[repo] / path
+    return {
+        "repo": repo,
+        "path": path,
+        "symbol": symbol,
+        "registration": None,
+        "line": None,
+        "file_sha256": _sha256(absolute),
+    }
+
+
+def _common_provenance(
+    source_revisions: dict[str, Any], model_manifest: dict[str, Any]
+) -> dict[str, Any]:
+    weights = model_manifest["files"]["model.safetensors-00001-of-00001.safetensors"]
+    return {
+        "model_revision": model_manifest["revision"],
+        "config_sha256": model_manifest["files"]["config.json"]["sha256"],
+        "model_manifest_sha256": _sha256(MODEL_MANIFEST_PATH),
+        "weight_bytes": weights["bytes"],
+        "weight_sha256": weights["sha256"],
+        "source_lock_sha256": _sha256(SOURCE_LOCK_PATH),
+        "required_repo_commits": {
+            name: source_revisions[name]["head"]
+            for name in ("vllm", "triton", "pytorch")
+        },
+    }
+
+
+def _empty_execution_contract() -> dict[str, Any]:
+    return {
+        "tensors": [],
+        "mutation": {
+            "allowed": [],
+            "must_remain_bitwise_equal": [],
+            "must_be_disjoint": [],
+        },
+        "state": {
+            "kind": "unconfigured",
+            "transition_count": 0,
+            "slots": [],
+            "initial_state": None,
+            "expected_transition": None,
+        },
+        "oracle": {
+            "reference": "",
+            "accumulation_dtype": "",
+            "comparisons": [],
+            "invariants": [],
+        },
+        "kernel": {
+            "entrypoint": "",
+            "expected_symbols": [],
+            "target": {
+                "backend": "gemsim_amd",
+                "arch": "gfx950",
+                "wavefront_size": 64,
+            },
+            "launch": {"grid": [], "workgroup": [], "num_warps": None},
+            "code_objects": {"count": 0, "identity_policy": "recorded_sha256"},
+        },
+    }
+
+
+def _make_unconfigured_item(
+    contract: dict[str, Any],
+    item_id: str,
+    phase: str,
+    variant: str,
+    reason: str,
+    source_meta: dict[str, Any],
+    provenance: dict[str, Any],
+    *,
+    dependencies: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    item = {
+        "id": item_id,
+        "contract_id": contract["id"],
+        "phase": phase,
+        "variant": variant,
+        "acceptance_role": "required",
+        "required_for_contract": True,
+        "configuration_status": "unconfigured",
+        "configuration_errors": [reason],
+        **_empty_execution_contract(),
+        "dependencies": {
+            "all_of_work_items": list(dependencies),
+            "capabilities": ["normal_python", "gemsim_amd", "gfx950"],
+            "state_inputs": [],
+        },
+        "source": {
+            "entrypoints": _source_entries(contract, source_meta),
+            "runner": None,
+        },
+        "provenance": provenance,
+        "runtime_evidence": runtime_evidence_policy(),
+        "fallback": _fallback_policy(),
+    }
+    item["spec_sha256"] = work_item_spec_sha256(item)
+    item["status"] = derive_work_item_status(item)
+    return item
+
+
+def _make_rms_norm_item(
+    contract: dict[str, Any],
+    rows: int,
+    phase: str,
+    source_meta: dict[str, Any],
+    provenance: dict[str, Any],
+) -> dict[str, Any]:
+    item = {
+        "id": f"decoder.rms_norm.{phase}.no_residual.bf16.c.v1",
+        "contract_id": contract["id"],
+        "phase": phase,
+        "variant": "no_residual_gemma_weight_plus_one",
+        "acceptance_role": "required",
+        "required_for_contract": True,
+        "configuration_status": "configured",
+        "configuration_errors": [],
+        "tensors": [
+            _tensor("x", "input", "bfloat16", [rows, 1024], [1024, 1], "read_only"),
+            _tensor("raw_weight", "parameter", "bfloat16", [1024], [1], "read_only"),
+            _tensor(
+                "out",
+                "output",
+                "bfloat16",
+                [rows, 1024],
+                [1024, 1],
+                "write_only",
+                storage_elements=(rows + 1) * 1024,
+            ),
+        ],
+        "mutation": {
+            "allowed": [{"tensor": "out", "region": "all", "kind": "write"}],
+            "must_remain_bitwise_equal": ["x", "raw_weight"],
+            "must_be_disjoint": ["x", "raw_weight", "out"],
+        },
+        "state": {
+            "kind": "stateless",
+            "transition_count": 0,
+            "slots": [],
+            "initial_state": None,
+            "expected_transition": None,
+        },
+        "oracle": {
+            "reference": (
+                "float32(x) * rsqrt(mean(float32(x)^2)+1e-6) * "
+                "(1+float32(raw_weight)), rounded to bfloat16"
+            ),
+            "accumulation_dtype": "float32",
+            "comparisons": [
+                {
+                    "actual": "out",
+                    "expected": "reference",
+                    "mode": "atol_rtol",
+                    "atol": 0.015625,
+                    "rtol": 0.02,
+                    "max_mismatches": 0,
+                    "finite_required": True,
+                    "equal_nan": False,
+                }
+            ],
+            "invariants": [
+                {"name": "relative_l2_error", "operator": "lt", "value": 0.005},
+                {"name": "guard_unchanged", "operator": "eq", "value": True},
+            ],
+        },
+        "dependencies": {
+            "all_of_work_items": [],
+            "capabilities": ["normal_python", "triton_jit", "gemsim_amd", "gfx950"],
+            "state_inputs": [],
+        },
+        "kernel": {
+            "entrypoint": (
+                "examples/triton/rms_norm_correctness.py:"
+                "qwen35_plain_gemma_rms_norm_kernel"
+            ),
+            "expected_symbols": ["qwen35_plain_gemma_rms_norm_kernel"],
+            "target": {"backend": "gemsim_amd", "arch": "gfx950", "wavefront_size": 64},
+            "launch": {
+                "grid": [rows, 1, 1],
+                "workgroup": [512, 1, 1],
+                "num_warps": 8,
+            },
+            "code_objects": {
+                "count": 1,
+                "identity_policy": "recorded_sha256",
+            },
+        },
+        "source": {
+            "entrypoints": _source_entries(contract, source_meta)
+            + [
+                _repository_source(
+                    "vllm",
+                    "vllm/models/minimax_m3/amd/ops/gemma_rmsnorm.py",
+                    "_gemma_rmsnorm_kernel",
+                ),
+                _root_source(
+                    "examples/triton/rms_norm_correctness.py",
+                    "qwen35_plain_gemma_rms_norm_kernel",
+                )
+            ],
+            "runner": {
+                "path": "examples/triton/rms_norm_correctness.py",
+                "sha256": _sha256(ROOT / "examples/triton/rms_norm_correctness.py"),
+            },
+        },
+        "provenance": provenance,
+        "runtime_evidence": runtime_evidence_policy(),
+        "fallback": _fallback_policy(),
+    }
+    item["spec_sha256"] = work_item_spec_sha256(item)
+    item["status"] = derive_work_item_status(item)
+    return item
+
+
+def _build_work_queue(
+    contracts: list[dict[str, Any]],
+    source_meta: dict[str, Any],
+    source_revisions: dict[str, Any],
+    model_manifest: dict[str, Any],
+) -> list[dict[str, Any]]:
+    by_id = {contract["id"]: contract for contract in contracts}
+    provenance = _common_provenance(source_revisions, model_manifest)
+    item_specs: dict[str, list[tuple[str, str, str]]] = {
+        "embedding.lookup": [
+            ("embedding.lookup.decode.bf16.c.v1", "decode", "decode_lookup"),
+            ("embedding.lookup.prefill.bf16.c.v1", "prefill", "prefill_lookup"),
+        ],
+        "gdn.input_projection": [
+            ("gdn.input_projection.qkvz_decode.bf16.c.v1", "decode", "qkvz_decode"),
+            ("gdn.input_projection.qkvz_prefill.bf16.c.v1", "prefill", "qkvz_prefill"),
+            ("gdn.input_projection.ba_decode.bf16.c.v1", "decode", "ba_decode"),
+            ("gdn.input_projection.ba_prefill.bf16.c.v1", "prefill", "ba_prefill"),
+        ],
+        "gdn.conv.prefill": [("gdn.conv.prefill.bf16.c.v1", "prefill", "width4")],
+        "gdn.conv.decode": [("gdn.conv.decode.bf16.state.v1", "decode", "width4_state")],
+        "gdn.post_conv_prep": [("gdn.post_conv_prep.prefill.bf16.c.v1", "prefill", "fused")],
+        "gdn.chunk_prefill": [("gdn.chunk_prefill.bf16.state.v1", "prefill", "kernel_family")],
+        "gdn.recurrent_decode": [("gdn.recurrent_decode.bf16.state.v1", "decode", "kernel_family")],
+        "gdn.auxiliary_triton_variants": [
+            ("gdn.auxiliary_triton_variants.applicability.v1", "prefill_decode", "resolve_model_path")
+        ],
+        "gdn.output_norm_gate": [
+            ("gdn.output_norm_gate.decode.bf16.c.v1", "decode", "decode"),
+            ("gdn.output_norm_gate.prefill.bf16.c.v1", "prefill", "prefill"),
+        ],
+        "full_attention.qkv_qk_norm_rope": [
+            ("full_attention.qkv_qk_norm_rope.decode.bf16.c.v1", "decode", "text_1d_positions"),
+            ("full_attention.qkv_qk_norm_rope.prefill.bf16.c.v1", "prefill", "text_1d_positions"),
+        ],
+        "full_attention.kv_cache_attention": [
+            ("full_attention.kv_cache_update.bf16.state.v1", "prefill_decode", "cache_update"),
+            ("full_attention.attention.prefill.bf16.state.v1", "prefill", "causal_prefill"),
+            ("full_attention.attention.decode.bf16.state.v1", "decode", "paged_decode"),
+        ],
+        "full_attention.output_gate_projection": [
+            ("full_attention.output_gate_projection.decode.bf16.c.v1", "decode", "decode"),
+            ("full_attention.output_gate_projection.prefill.bf16.c.v1", "prefill", "prefill"),
+        ],
+        "mlp.gate_up_silu_down": [
+            ("mlp.gate_up_projection.decode.bf16.c.v1", "decode", "gate_up_projection"),
+            ("mlp.gate_up_projection.prefill.bf16.c.v1", "prefill", "gate_up_projection"),
+            ("mlp.silu_and_mul.integration.decode.bf16.c.v1", "decode", "model_integration"),
+            ("mlp.silu_and_mul.integration.prefill.bf16.c.v1", "prefill", "model_integration"),
+            ("mlp.down_projection.decode.bf16.c.v1", "decode", "down_projection"),
+            ("mlp.down_projection.prefill.bf16.c.v1", "prefill", "down_projection"),
+        ],
+        "lm_head.logits": [("lm_head.logits.decode.bf16.c.v1", "output", "selected_token")],
+    }
+    items: list[dict[str, Any]] = []
+    for contract_id, specs in item_specs.items():
+        contract = by_id[contract_id]
+        reason = (
+            "exact dtype/shape/stride/mutation/state/oracle/kernel contract "
+            "has not yet been captured from the pinned text graph"
+        )
+        if contract_id == "gdn.auxiliary_triton_variants":
+            reason = (
+                "model applicability is unresolved; optional variants cannot count "
+                "until a pinned text-graph selection guard names the required path"
+            )
+        for item_id, phase, variant in specs:
+            items.append(
+                _make_unconfigured_item(
+                    contract,
+                    item_id,
+                    phase,
+                    variant,
+                    reason,
+                    source_meta,
+                    provenance,
+                )
+            )
+
+    rms = by_id["decoder.rms_norm"]
+    items.extend(
+        [
+            _make_rms_norm_item(rms, 1, "decode", source_meta, provenance),
+            _make_rms_norm_item(rms, 7, "prefill", source_meta, provenance),
+            _make_unconfigured_item(
+                rms,
+                "decoder.rms_norm.decode.fused_residual.bf16.c.v1",
+                "decode",
+                "fused_residual",
+                "fused residual output and mutation semantics require a separate exact runner",
+                source_meta,
+                provenance,
+            ),
+            _make_unconfigured_item(
+                rms,
+                "decoder.rms_norm.prefill.fused_residual.bf16.c.v1",
+                "prefill",
+                "fused_residual",
+                "fused residual output and mutation semantics require a separate exact runner",
+                source_meta,
+                provenance,
+            ),
+        ]
+    )
+    return sorted(items, key=lambda item: item["id"])
 
 
 def build_manifest() -> dict[str, Any]:
@@ -811,7 +1199,36 @@ def build_manifest() -> dict[str, Any]:
             }
         )
 
-    runtime = _runtime_probe()
+    model_manifest = json.loads(MODEL_MANIFEST_PATH.read_text(encoding="utf-8"))
+    source_lock = json.loads(SOURCE_LOCK_PATH.read_text(encoding="utf-8"))
+    locked_sources = {
+        source["id"]: source
+        for source in source_lock["sources"]
+        if source.get("id") in {"vllm", "triton", "pytorch"}
+    }
+    if set(locked_sources) != {"vllm", "triton", "pytorch"}:
+        raise RuntimeError("SOURCE_LOCK.json lacks the required model source locks")
+    source_revisions = {
+        name: {
+            "head": locked_sources[name]["work_head"],
+            "tree": locked_sources[name]["work_tree"],
+        }
+        for name in ("vllm", "triton", "pytorch")
+    }
+    work_items = _build_work_queue(
+        contracts, source_meta, source_revisions, model_manifest
+    )
+    for contract in contracts:
+        contract_id = contract["id"]
+        required_ids = sorted(
+            item["id"]
+            for item in work_items
+            if item["contract_id"] == contract_id and item["required_for_contract"]
+        )
+        contract["completion_rule"] = "all_required_items_accepted"
+        contract["required_work_item_ids"] = required_ids
+        contract["partial_work_item_ids"] = []
+        contract["work_queue_status"] = "not_accepted"
     static_ok = not missing_files and all(item["static_source_ok"] for item in contracts)
     inventory_counts = _inventory_counts(inventories)
     contract_counts = {
@@ -827,13 +1244,28 @@ def build_manifest() -> dict[str, Any]:
             len(item["alternate_triton_symbols"]) for item in contracts
         ),
     }
-    backend_support = _backend_support(inventories, runtime)
-    return {
-        "schema": "amdgpu-sim.qwen35.operator-manifest.v1",
-        "purpose": "model-specific text-only Triton operator closure; no CPU fallback",
+    backend_support = _backend_support(inventories)
+    manifest = {
+        "schema": "amdgpu-sim.qwen35.operator-manifest.v2",
+        "purpose": (
+            "model-specific text-only executable operator work queue; "
+            "no CPU, NVIDIA, production ROCm, or GDN fallback"
+        ),
+        "acceptance_policy": {
+            "contract_completion": "all_required_items_accepted",
+            "environment_probe_completes_contracts": False,
+            "cpu_oracle_is_execution": False,
+            "runtime_target": {
+                "backend": "gemsim_amd",
+                "arch": "gfx950",
+                "wavefront_size": 64,
+            },
+            "required_run_kinds": ["fresh", "repeat"],
+            "fallback_allowed": False,
+        },
         "model": {
             "id": "Qwen/Qwen3.5-0.8B",
-            "revision": json.loads((MODEL_DIR / "manifest.json").read_text(encoding="utf-8"))["revision"],
+            "revision": model_manifest["revision"],
             "config_sha256": _sha256(config_path),
             "architecture": config.get("architectures", []),
             "model_type": config.get("model_type"),
@@ -863,11 +1295,7 @@ def build_manifest() -> dict[str, Any]:
             "linear_value_head_dim": text_config.get("linear_value_head_dim"),
             "linear_conv_kernel_dim": text_config.get("linear_conv_kernel_dim"),
         },
-        "source_revisions": {
-            "vllm": {"head": _git_head(VLLM_ROOT), "dirty": _git_dirty(VLLM_ROOT)},
-            "triton": {"head": _git_head(TRITON_ROOT), "dirty": _git_dirty(TRITON_ROOT)},
-            "pytorch": {"head": _git_head(PYTORCH_ROOT), "dirty": _git_dirty(PYTORCH_ROOT)},
-        },
+        "source_revisions": source_revisions,
         "counts": {
             **inventory_counts,
             "configured_layer_count": len(layer_types),
@@ -886,6 +1314,7 @@ def build_manifest() -> dict[str, Any]:
         },
         "source_files": source_meta,
         "contracts": contracts,
+        "work_items": work_items,
         "backend_support": backend_support,
         # Keep a short, stable top-level projection for CI/reporting tools.
         # The detailed evidence remains under ``backend_support``.
@@ -895,11 +1324,41 @@ def build_manifest() -> dict[str, Any]:
             "static_source_ok": static_ok,
             "amd_runtime_executed": False,
             "amd_runtime_pass": False,
-            "runtime_status": "ready_for_amd_gate" if runtime["amd_ready"] else "blocked",
-            "blocker": None if runtime["amd_ready"] else runtime["reason"],
+            "accepted_contract_count": 0,
+            "all_contracts_accepted": False,
+            "runtime_status": "work_queue_incomplete",
+            "blocker": "32/32 required work items still require external generic results",
         },
-        "runtime_probe": runtime,
     }
+    work_queue_summary = queue_summary(manifest)
+    manifest["counts"].update(
+        {
+            "work_item_count": work_queue_summary["work_item_count"],
+            "work_item_configured_count": work_queue_summary[
+                "configured_work_item_count"
+            ],
+            "work_item_ready_count": work_queue_summary["ready_work_item_count"],
+            "work_item_accepted_count": work_queue_summary[
+                "accepted_work_item_count"
+            ],
+        }
+    )
+    manifest["summary"].update(
+        {
+            "accepted_contract_count": work_queue_summary[
+                "accepted_contract_count"
+            ],
+            "all_contracts_accepted": work_queue_summary[
+                "all_contracts_accepted"
+            ],
+        }
+    )
+    validation_errors = validate_manifest(manifest)
+    if validation_errors:
+        raise RuntimeError(
+            "generated work queue failed validation: " + "; ".join(validation_errors)
+        )
+    return manifest
 
 
 def main() -> int:
@@ -911,9 +1370,9 @@ def main() -> int:
         help="write the deterministic manifest here (default: tools/qwen35_operator_manifest.json)",
     )
     parser.add_argument(
-        "--strict-runtime",
+        "--require-complete",
         action="store_true",
-        help="return non-zero unless an AMD runtime is available (does not execute kernels)",
+        help="return non-zero unless all 15 operator contracts are accepted",
     )
     args = parser.parse_args()
     manifest = build_manifest()
@@ -931,14 +1390,17 @@ def main() -> int:
                     "static_source_ok": manifest["summary"]["static_source_ok"],
                     "runtime_status": manifest["summary"]["runtime_status"],
                     "blocker": manifest["summary"]["blocker"],
+                    "accepted_contract_count": manifest["summary"][
+                        "accepted_contract_count"
+                    ],
                 },
                 sort_keys=True,
             )
         )
     if not manifest["summary"]["static_source_ok"]:
         return 1
-    if args.strict_runtime and not manifest["runtime_probe"]["amd_ready"]:
-        return 2
+    if args.require_complete and not manifest["summary"]["all_contracts_accepted"]:
+        return 3
     return 0
 
 
