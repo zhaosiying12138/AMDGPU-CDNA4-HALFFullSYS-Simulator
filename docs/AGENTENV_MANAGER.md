@@ -59,6 +59,19 @@ examples/sglang/qwen35_inference.py --tp-size 1
 Run them through AgentENV's `aenv exec` or the API from inside each recorded
 sandbox after the sandbox boot and bundle extraction gates have passed.
 
+For live API calls, source the feature-local service environment first so the
+manager sends the local API key:
+
+```bash
+source build/agentenv-integration/server/server.env
+```
+
+The warm `templateID` API does not accept per-request CPU, memory, or disk
+overrides. The manager records and checks the requested resource contract, but
+the template itself must have been built with the intended CPU/memory and root
+filesystem size. Use AgentENV's cold API separately when per-sandbox resource
+overrides are required; do not treat metadata fields as enforcement.
+
 ## Collect and stop
 
 ```bash

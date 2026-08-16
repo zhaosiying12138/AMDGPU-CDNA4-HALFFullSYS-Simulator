@@ -456,34 +456,71 @@ def start_pair(args: argparse.Namespace) -> dict[str, Any]:
         return result
     if not args.template:
         raise ManagerError("--template is required unless --dry-run is used")
-    for plan in plans:
-        status, response, headers = api_request(
-            args.api,
-            "POST",
-            "/sandboxes",
-            body=plan["payload"],
-            timeout=args.http_timeout,
-        )
-        sandbox_id = _sandbox_id(response, headers)
-        if not sandbox_id:
-            raise ManagerError(
-                "AgentENV created a sandbox without an id for "
-                f"{plan['instance']}: {response}"
+    created: list[dict[str, Any]] = []
+    try:
+        for plan in plans:
+            status, response, headers = api_request(
+                args.api,
+                "POST",
+                "/sandboxes",
+                body=plan["payload"],
+                timeout=args.http_timeout,
             )
-        record = {
-            "schema": MANAGER_SCHEMA,
-            "created_at": now_utc(),
-            "instance": plan["instance"],
-            "namespace": plan["namespace"],
-            "sandbox_id": sandbox_id,
-            "template": args.template,
-            "payload": plan["payload"],
-            "api_status": status,
-            "response": response,
-            "launch_commands": _launch_commands(plan["instance"], plan["namespace"]),
-        }
-        _write_instance_state(state, plan["instance"], record)
-        result["sandboxes"].append(record)
+            sandbox_id = _sandbox_id(response, headers)
+            if not sandbox_id:
+                raise ManagerError(
+                    "AgentENV created a sandbox without an id for "
+                    f"{plan['instance']}: {response}"
+                )
+            record = {
+                "schema": MANAGER_SCHEMA,
+                "created_at": now_utc(),
+                "instance": plan["instance"],
+                "namespace": plan["namespace"],
+                "sandbox_id": sandbox_id,
+                "template": args.template,
+                "payload": plan["payload"],
+                "api_status": status,
+                "response": response,
+                "launch_commands": _launch_commands(plan["instance"], plan["namespace"]),
+            }
+            # Persist immediately so a later failure can be recovered even if
+            # the process is interrupted between API calls.
+            _write_instance_state(state, plan["instance"], record)
+            created.append(record)
+            result["sandboxes"].append(record)
+    except Exception as error:
+        rollback: list[dict[str, Any]] = []
+        for record in reversed(created):
+            sandbox_id = record.get("sandbox_id")
+            if not isinstance(sandbox_id, str) or not sandbox_id:
+                continue
+            try:
+                code, _, _ = api_request(
+                    args.api,
+                    "DELETE",
+                    f"/sandboxes/{sandbox_id}",
+                    timeout=args.http_timeout,
+                )
+                rollback.append(
+                    {"instance": record.get("instance"), "sandbox_id": sandbox_id, "status": code}
+                )
+                updated = dict(record)
+                updated["deleted_at"] = now_utc()
+                updated["delete_status"] = code
+                instance = record.get("instance")
+                if isinstance(instance, str) and instance:
+                    _write_instance_state(state, instance, updated)
+            except ManagerError as rollback_error:
+                rollback.append(
+                    {
+                        "instance": record.get("instance"),
+                        "sandbox_id": sandbox_id,
+                        "error": str(rollback_error),
+                    }
+                )
+        detail = f"; rollback={json.dumps(rollback, sort_keys=True)}" if rollback else ""
+        raise ManagerError(f"start-pair failed: {error}{detail}") from error
     result["completed_at"] = now_utc()
     return result
 
