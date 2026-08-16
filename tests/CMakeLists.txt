@@ -358,6 +358,33 @@ if(SELF_AMDGPU_RUNTIME_UPSTREAM_ROCR_LIBRARY OR
     PRIVATE
       SAGR_UPSTREAM_ROCR_TEST=1
       SAGR_UPSTREAM_ROCR_TEST_PATH="$<TARGET_FILE:self_amdgpu_runtime_upstream_rocr_model_test>")
+
+  # Standalone runtime-API probe for the explicitly enabled host-accessible
+  # copy path. Keep it out of the default CTest set so merely building tests
+  # never starts a model-backed HSA runtime.
+  add_executable(
+    self_amdgpu_runtime_upstream_rocr_fastcopy_probe
+    fastcopy_probe.c)
+  target_compile_features(
+    self_amdgpu_runtime_upstream_rocr_fastcopy_probe PRIVATE c_std_11)
+  target_include_directories(
+    self_amdgpu_runtime_upstream_rocr_fastcopy_probe
+    SYSTEM PRIVATE "${SELF_AMDGPU_RUNTIME_UPSTREAM_ROCR_INCLUDE_DIR}")
+  target_link_libraries(
+    self_amdgpu_runtime_upstream_rocr_fastcopy_probe
+    PRIVATE "${SELF_AMDGPU_RUNTIME_UPSTREAM_ROCR_LIBRARY}" ${CMAKE_DL_LIBS})
+  set_target_properties(
+    self_amdgpu_runtime_upstream_rocr_fastcopy_probe
+    PROPERTIES BUILD_RPATH
+               "$<TARGET_FILE_DIR:self_amdgpu_hsakmt_model>;${_upstream_rocr_library_dir}")
+  if(MSVC)
+    target_compile_options(
+      self_amdgpu_runtime_upstream_rocr_fastcopy_probe PRIVATE /W4 /WX)
+  else()
+    target_compile_options(
+      self_amdgpu_runtime_upstream_rocr_fastcopy_probe
+      PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+  endif()
 endif()
 if(MSVC)
   target_compile_options(self_amdgpu_runtime_kmt_shim_test PRIVATE /W4 /WX)
