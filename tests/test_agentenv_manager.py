@@ -127,6 +127,44 @@ class AgentEnvManagerTest(unittest.TestCase):
                 with self.assertRaisesRegex(MODULE.ManagerError, "unrelated"):
                     MODULE.start_pair(args)
 
+    def test_start_pair_rolls_back_partial_creation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "repo"
+            state = root / "state"
+            root.mkdir(parents=True)
+            args = start_args(root, state, dry_run=False, allow_live=True)
+            calls: list[tuple[str, str]] = []
+
+            def api_side_effect(
+                _base: str,
+                method: str,
+                path: str,
+                **_kwargs: object,
+            ) -> tuple[int, object, dict[str, str]]:
+                calls.append((method, path))
+                if method == "POST" and path == "/sandboxes" and len(calls) == 1:
+                    return 201, {"sandboxID": "sb-first"}, {}
+                if method == "POST":
+                    raise MODULE.ManagerError("second create failed")
+                if method == "DELETE" and path == "/sandboxes/sb-first":
+                    return 204, None, {}
+                raise AssertionError((method, path))
+
+            with mock.patch.object(MODULE, "scan_live_workloads", return_value=[]), mock.patch.object(
+                MODULE, "api_request", side_effect=api_side_effect
+            ):
+                with self.assertRaisesRegex(MODULE.ManagerError, "rollback"):
+                    MODULE.start_pair(args)
+
+            self.assertIn(("DELETE", "/sandboxes/sb-first"), calls)
+            state_record = json.loads(
+                (state / "instances" / "vllm-tp4" / "sandbox.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertIsInstance(state_record.get("deleted_at"), str)
+            self.assertEqual(state_record["delete_status"], 204)
+
     def test_stop_without_confirmation_never_calls_delete(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "repo"

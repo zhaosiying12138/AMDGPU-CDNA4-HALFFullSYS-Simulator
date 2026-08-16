@@ -8,12 +8,12 @@ This plan is executed only in `feature/agentenv-sandbox-isolation` at `/home/zha
 
 - [x] Create an isolated worktree and preserve the main branch boundary.
 - [x] Persist the goal, plan, checkpoint, and lessons before source changes.
-- [ ] Pin AgentENV source under `projects/AgentENV`.
-- [ ] Pin WSL kernel source under the feature build area and add reproducible ublk build tooling.
-- [ ] Add host preflight and a feature-local AgentENV service/unit bound to loopback.
-- [ ] Build a deterministic active-runtime closure as tar.zst; do not rely on symlink-preserving directory upload.
-- [ ] Add guest bootstrap and two-sandbox lifecycle orchestration with per-instance namespaces.
-- [ ] Run static/unit/build checks without stopping WSL or changing `.wslconfig`.
+- [x] Pin AgentENV source under `projects/AgentENV`.
+- [x] Pin WSL kernel source under the feature build area and add reproducible ublk build tooling.
+- [x] Add host preflight and a feature-local AgentENV service/unit bound to loopback.
+- [x] Build a deterministic active-runtime closure as tar.zst; do not rely on symlink-preserving directory upload.
+- [x] Add guest bootstrap and two-sandbox lifecycle orchestration with per-instance namespaces.
+- [x] Run static/unit/build checks without stopping WSL or changing `.wslconfig`.
 - [ ] Present the exact kernel activation diff and rollback, then pause for explicit `wsl --shutdown` approval.
 - [ ] After approval only: activate the custom kernel, run ublk/Firecracker/AgentENV gates, and perform the bounded concurrent launch acceptance.
 
@@ -32,3 +32,10 @@ This plan is executed only in `feature/agentenv-sandbox-isolation` at `/home/zha
 - model/operator/shape-specific workarounds
 - merging this branch into `main`
 
+## Acceptance Boundary
+
+This checkpoint proves source pinning, feature-local build/tooling, deterministic
+bundle planning, and lifecycle safety checks. It does not prove that the AgentENV
+server can boot on the current WSL kernel, that `/dev/ublk-control` is available,
+or that either model workload runs. Those require the separately approved kernel
+activation gate and are intentionally not performed in this phase.

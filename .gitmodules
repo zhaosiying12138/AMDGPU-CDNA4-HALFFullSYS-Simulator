@@ -26,3 +26,11 @@
 	path = projects/self-amdgpu-runtime
 	url = ../self-amdgpu-runtime.git
 	branch = main
+[submodule "projects/AgentENV"]
+	path = projects/AgentENV
+	url = git@github.com:kvcache-ai/AgentENV.git
+	branch = main
+[submodule "projects/WSL2-Linux-Kernel"]
+	path = projects/WSL2-Linux-Kernel
+	url = git@github.com:microsoft/WSL2-Linux-Kernel.git
+	branch = linux-msft-wsl-6.18.y
