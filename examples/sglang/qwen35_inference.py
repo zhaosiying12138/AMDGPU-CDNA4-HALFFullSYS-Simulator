@@ -27,6 +27,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--watchdog-timeout", type=float, default=86400.0)
     parser.add_argument("--enable-multimodal", action="store_true")
     parser.add_argument("--initialize-tokenizer", action="store_true")
+    parser.add_argument(
+        "--load-format",
+        default="auto",
+        help=(
+            "Upstream ServerArgs load format. 'dummy' initializes random "
+            "weights, which keeps simulator bring-up iterations short when "
+            "the failure under investigation is not numerical."
+        ),
+    )
     args = parser.parse_args()
     if args.watchdog_timeout <= 0:
         parser.error("--watchdog-timeout must be positive")
@@ -53,6 +62,7 @@ def main() -> None:
             context_length=args.context_length,
             chunked_prefill_size=-1,
             enable_multimodal=args.enable_multimodal,
+            load_format=args.load_format,
             skip_tokenizer_init=not args.initialize_tokenizer,
             log_level="info",
         )
