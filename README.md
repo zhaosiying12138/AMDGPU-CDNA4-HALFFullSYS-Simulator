@@ -66,7 +66,7 @@ The installed `<self_amdgpu_runtime/runtime.h>` header exposes:
 - pinned-dispatch options, admission tickets, completion results, and separate
   submit/wait APIs.
 
-The transport API is ABI version `1.5`; the project release is `0.6.0`.
+The transport API is ABI version `1.8`; the project release is `0.8.0`.
 Status values 0 through 3 retain their original meanings. Transport statuses
 are appended, and native `errno` values are diagnostic rather than primary.
 

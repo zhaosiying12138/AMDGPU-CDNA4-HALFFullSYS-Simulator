@@ -255,9 +255,31 @@ SAGR_API sagr_status_t sagr_provider_open(
     const char *endpoint, const sagr_instance_open_options_t *options,
     sagr_provider_t **out_provider, sagr_error_info_t *out_error,
     uint32_t error_size);
+/*
+ * Managed opens retain the same provider contract while assigning simulator
+ * process, registry, and transport ownership to one managed session.  They
+ * explicitly require the generic KMT capability; ordinary managed-runtime
+ * callers keep their existing capability set and lifecycle.
+ */
+SAGR_API sagr_status_t sagr_provider_open_managed(
+    const sagr_managed_session_options_t *options,
+    sagr_provider_t **out_provider, sagr_managed_session_info_t *out_info,
+    uint32_t info_size, sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_provider_open_managed_v2(
+    const sagr_managed_session_options_v2_t *options,
+    sagr_provider_t **out_provider, sagr_managed_session_info_t *out_info,
+    uint32_t info_size, sagr_error_info_t *out_error, uint32_t error_size);
 SAGR_API sagr_status_t sagr_provider_get_info(
     sagr_provider_t *provider, sagr_provider_info_t *info, uint32_t info_size);
 SAGR_API sagr_status_t sagr_provider_close(sagr_provider_t **provider);
+/*
+ * A provider is process-owned and every normal operation fails after fork.
+ * A child that does not immediately exec may discard its inherited local copy
+ * without sending remote teardown or terminating the parent-owned simulator.
+ * Calling this on the creating process is rejected.
+ */
+SAGR_API sagr_status_t sagr_provider_discard_inherited(
+    sagr_provider_t **provider);
 
 /* Source lifecycle/query hooks. They are deliberately semantic, not KFD I/O. */
 SAGR_API sagr_provider_hsakmt_status_t sagr_provider_query_lifecycle(

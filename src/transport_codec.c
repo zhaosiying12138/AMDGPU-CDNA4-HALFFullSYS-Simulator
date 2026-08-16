@@ -1650,35 +1650,17 @@ sagr_status_t sagr_protocol_validate_failed_dispatch_ack(
 }
 
 static int kmt_operation_valid(uint16_t operation) {
-  return operation >= (uint16_t)SAGR_KMT_OP_OPEN_KFD &&
-         operation <= (uint16_t)SAGR_KMT_OP_MODEL_DRM_CALL;
+  return sagr_bridge_kmt_operation_valid(operation);
 }
 
 static int kmt_words_zero_outside(const uint32_t words[8], uint16_t operation,
                                   int result_words) {
-  uint32_t allowed = 0;
+  uint32_t allowed;
   uint32_t index;
-  switch (operation) {
-    case SAGR_KMT_OP_GET_VERSION: allowed = 0x0fU; break;
-    case SAGR_KMT_OP_TOPOLOGY_SNAPSHOT: allowed = 0x3fU; break;
-    case SAGR_KMT_OP_ALLOC_MEMORY: allowed = 0x7fU; break;
-    case SAGR_KMT_OP_COPY_MEMORY: allowed = result_words ? 0U : 0x1fU; break;
-    case SAGR_KMT_OP_QUEUE_CREATE: allowed = result_words ? 0x01U : 0x1fU; break;
-    case SAGR_KMT_OP_QUEUE_DOORBELL: allowed = 0x03U; break;
-    case SAGR_KMT_OP_EVENT_CREATE:
-    case SAGR_KMT_OP_EVENT_SET: allowed = result_words ? 0U : 0x03U; break;
-    case SAGR_KMT_OP_EVENT_QUERY: allowed = result_words ? 0x1fU : 0U; break;
-    case SAGR_KMT_OP_EVENT_WAIT: allowed = result_words ? 0x03U : 0x0fU; break;
-    case SAGR_KMT_OP_MODEL_DRM_CALL: allowed = result_words ? 0U : 0x03U; break;
-    case SAGR_KMT_OP_POINTER_INFO: allowed = result_words ? 0x1fU : 0U; break;
-    case SAGR_KMT_OP_OPEN_KFD:
-    case SAGR_KMT_OP_CLOSE_KFD:
-    case SAGR_KMT_OP_FREE_MEMORY:
-    case SAGR_KMT_OP_QUEUE_DESTROY:
-    case SAGR_KMT_OP_EVENT_DESTROY:
-    case SAGR_KMT_OP_EVENT_RESET: allowed = 0U; break;
-    default: return 0;
-  }
+  if (!sagr_bridge_kmt_operation_valid(operation))
+    return 0;
+  allowed = result_words ? sagr_bridge_kmt_result_word_mask(operation)
+                         : sagr_bridge_kmt_request_word_mask(operation);
   for (index = 0; index < 8U; ++index) {
     if ((allowed & (UINT32_C(1) << index)) == 0 && words[index] != 0) {
       return 0;
@@ -1815,19 +1797,45 @@ sagr_status_t sagr_protocol_decode_kmt_result(
     *reason = "malformed KMT result";
   }
   if (frame == NULL || info == NULL || result == NULL ||
-      frame_size != SAGR_WIRE_KMT_FRAME_BYTES || expected_request_id == 0 ||
-      memcmp(frame, k_magic, sizeof(k_magic)) != 0 ||
-      get_u16(frame + 8) != 1 || get_u16(frame + 10) != 0 ||
-      get_u16(frame + 12) != SAGR_WIRE_HEADER_BYTES ||
+      expected_request_id == 0) {
+    if (reason != NULL) *reason = "invalid KMT result decoder arguments";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (frame_size != SAGR_WIRE_KMT_FRAME_BYTES) {
+    if (reason != NULL) *reason = "invalid KMT result frame length";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (memcmp(frame, k_magic, sizeof(k_magic)) != 0) {
+    if (reason != NULL) *reason = "invalid KMT result magic";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (get_u16(frame + 8) != 1 || get_u16(frame + 10) != 0) {
+    if (reason != NULL) *reason = "unsupported KMT result frame version";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (get_u16(frame + 12) != SAGR_WIRE_HEADER_BYTES ||
       get_u16(frame + 14) != SAGR_WIRE_MESSAGE_KMT_RESULT ||
-      get_u32(frame + 20) != SAGR_KMT_PAYLOAD_BYTES ||
-      get_u32(frame + 16) != 0 || get_u32(frame + 68) != 0 ||
-      !bytes_are_zero(frame + 72, 8) ||
-      get_u64(frame + 24) != expected_request_id ||
-      get_u64(frame + 48) != info->connection_id ||
+      get_u32(frame + 20) != SAGR_KMT_PAYLOAD_BYTES) {
+    if (reason != NULL) *reason = "invalid KMT result frame shape";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (get_u32(frame + 16) != 0 || get_u32(frame + 68) != 0 ||
+      !bytes_are_zero(frame + 72, 8)) {
+    if (reason != NULL) *reason = "nonzero KMT result frame reserved fields";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (get_u64(frame + 24) != expected_request_id) {
+    if (reason != NULL) *reason = "KMT result request identity mismatch";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (get_u64(frame + 48) != info->connection_id ||
       get_u64(frame + 56) != info->epoch ||
-      memcmp(frame + 32, info->daemon_uuid, SAGR_UUID_SIZE) != 0 ||
-      get_u32(frame + 64) != frame_crc32c(frame, frame_size)) {
+      memcmp(frame + 32, info->daemon_uuid, SAGR_UUID_SIZE) != 0) {
+    if (reason != NULL) *reason = "KMT result session identity mismatch";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (get_u32(frame + 64) != frame_crc32c(frame, frame_size)) {
+    if (reason != NULL) *reason = "KMT result frame checksum mismatch";
     return SAGR_STATUS_PROTOCOL_ERROR;
   }
   payload = frame + SAGR_WIRE_HEADER_BYTES;
@@ -1853,19 +1861,38 @@ sagr_status_t sagr_protocol_decode_kmt_result(
   memcpy(result->buffer, payload + 112, SAGR_KMT_BUFFER_BYTES);
   buffer_bytes = result->buffer_bytes;
   if (result->major != SAGR_KMT_PROTOCOL_MAJOR ||
-      result->minor != SAGR_KMT_PROTOCOL_MINOR ||
-      !kmt_operation_valid(result->operation) || result->flags != 0 ||
-      result->operation_sequence == 0 ||
-      (result->operation != SAGR_KMT_OP_OPEN_KFD &&
-       (result->owner_id == 0 || result->owner_generation == 0)) ||
-      !kmt_words_zero_outside(result->result_words, result->operation, 1) ||
-      buffer_bytes > SAGR_KMT_BUFFER_BYTES ||
-      (buffer_bytes == 0 && result->buffer_crc32c != 0) ||
+      result->minor != SAGR_KMT_PROTOCOL_MINOR) {
+    if (reason != NULL) *reason = "unsupported KMT result payload version";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (!kmt_operation_valid(result->operation) || result->flags != 0 ||
+      result->operation_sequence == 0) {
+    if (reason != NULL) *reason = "invalid KMT result operation fields";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (result->operation != SAGR_KMT_OP_OPEN_KFD &&
+      (result->owner_id == 0 || result->owner_generation == 0)) {
+    if (reason != NULL) *reason = "invalid KMT result owner identity";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (!kmt_words_zero_outside(result->result_words, result->operation, 1)) {
+    if (reason != NULL) *reason = "noncanonical KMT result words";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (buffer_bytes > SAGR_KMT_BUFFER_BYTES) {
+    if (reason != NULL) *reason = "invalid KMT result buffer length";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if ((buffer_bytes == 0 && result->buffer_crc32c != 0) ||
       (buffer_bytes != 0 && result->buffer_crc32c !=
-                                  sagr_crc32c(result->buffer, buffer_bytes)) ||
-      !bytes_are_zero(result->buffer + buffer_bytes,
+                                  sagr_crc32c(result->buffer, buffer_bytes))) {
+    if (reason != NULL) *reason = "KMT result buffer checksum mismatch";
+    return SAGR_STATUS_PROTOCOL_ERROR;
+  }
+  if (!bytes_are_zero(result->buffer + buffer_bytes,
                       SAGR_KMT_BUFFER_BYTES - buffer_bytes) ||
       !kmt_reserved_result_zero(result)) {
+    if (reason != NULL) *reason = "nonzero KMT result payload padding";
     return SAGR_STATUS_PROTOCOL_ERROR;
   }
   if (wire_status != NULL) {
@@ -2820,57 +2847,111 @@ sagr_protocol_encode_generic_dispatch_request(
                 SAGR_WIRE_GENERIC_PAYLOAD_BYTES, request_id, info->daemon_uuid,
                 info->connection_id, info->epoch);
   payload = frame + SAGR_WIRE_HEADER_BYTES;
-  put_u16(payload, request->major);
-  put_u16(payload + 2U, request->minor);
-  put_u16(payload + 4U, request->opcode);
-  put_u16(payload + 6U, request->flags);
-  put_u64(payload + 8U, request->object_id);
-  put_u64(payload + 16U, request->object_generation);
-  put_u64(payload + 24U, request->mapping_id);
-  put_u64(payload + 32U, request->mapping_generation);
-  put_u64(payload + 40U, request->queue_id);
-  put_u64(payload + 48U, request->queue_generation);
-  put_u64(payload + 56U, request->queue_sequence);
-  put_u32(payload + 64U, request->kernel_index);
-  memcpy(payload + 72U, request->image_sha256, 32U);
-  memcpy(payload + 104U, request->kernel_name,
+  put_u16(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_PAYLOAD_MAJOR_OFFSET,
+          request->major);
+  put_u16(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_PAYLOAD_MINOR_OFFSET,
+          request->minor);
+  put_u16(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_OPCODE_OFFSET,
+          request->opcode);
+  put_u16(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_FLAGS_OFFSET,
+          request->flags);
+  put_u64(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_OBJECT_ID_OFFSET,
+          request->object_id);
+  put_u64(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_OBJECT_GENERATION_OFFSET,
+          request->object_generation);
+  put_u64(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_MAPPING_ID_OFFSET,
+          request->mapping_id);
+  put_u64(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_MAPPING_GENERATION_OFFSET,
+          request->mapping_generation);
+  put_u64(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_QUEUE_ID_OFFSET,
+          request->queue_id);
+  put_u64(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_QUEUE_GENERATION_OFFSET,
+          request->queue_generation);
+  put_u64(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_QUEUE_SEQUENCE_OFFSET,
+          request->queue_sequence);
+  put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_KERNEL_INDEX_OFFSET,
+          request->kernel_index);
+  memcpy(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_IMAGE_SHA256_OFFSET,
+         request->image_sha256,
+         SAGR_BRIDGE_GENERIC_V2_REQUEST_IMAGE_SHA256_BYTES);
+  memcpy(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_KERNEL_NAME_OFFSET,
+         request->kernel_name,
          SAGR_WIRE_GENERIC_KERNEL_NAME_BYTES);
   if (request->opcode == SAGR_WIRE_GENERIC_OPCODE_MAP_OBJECT) {
     const sagr_wire_generic_map_body_t *body = &request->body.map;
-    put_u32(payload + 232U, body->gfx_target);
-    put_u32(payload + 236U, body->relocation_count);
-    put_u32(payload + 240U, body->kernarg_segment_size);
-    put_u32(payload + 244U, body->kernarg_segment_align);
-    put_u32(payload + 248U, body->descriptor_preload_dwords);
-    put_u32(payload + 252U, body->page_size);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_MAP_GFX_TARGET_OFFSET,
+            body->gfx_target);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_MAP_RELOCATION_COUNT_OFFSET,
+            body->relocation_count);
+    put_u32(payload +
+                SAGR_BRIDGE_GENERIC_V2_REQUEST_MAP_KERNARG_SEGMENT_SIZE_OFFSET,
+            body->kernarg_segment_size);
+    put_u32(payload +
+                SAGR_BRIDGE_GENERIC_V2_REQUEST_MAP_KERNARG_SEGMENT_ALIGN_OFFSET,
+            body->kernarg_segment_align);
+    put_u32(payload +
+                SAGR_BRIDGE_GENERIC_V2_REQUEST_MAP_DESCRIPTOR_PRELOAD_DWORDS_OFFSET,
+            body->descriptor_preload_dwords);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_MAP_PAGE_SIZE_OFFSET,
+            body->page_size);
   } else if (request->opcode == SAGR_WIRE_GENERIC_OPCODE_ALLOC_KERNARG) {
     const sagr_wire_generic_alloc_kernarg_body_t *body =
         &request->body.alloc_kernarg;
-    put_u64(payload + 232U, body->size_bytes);
-    put_u64(payload + 240U, body->alignment_bytes);
-    put_u32(payload + 248U, body->allocation_flags);
-    put_u32(payload + 252U, body->reserved0);
+    put_u64(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_ALLOC_SIZE_BYTES_OFFSET,
+            body->size_bytes);
+    put_u64(payload +
+                SAGR_BRIDGE_GENERIC_V2_REQUEST_ALLOC_ALIGNMENT_BYTES_OFFSET,
+            body->alignment_bytes);
+    put_u32(payload +
+                SAGR_BRIDGE_GENERIC_V2_REQUEST_ALLOC_ALLOCATION_FLAGS_OFFSET,
+            body->allocation_flags);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_ALLOC_RESERVED0_OFFSET,
+            body->reserved0);
   } else if (request->opcode == SAGR_WIRE_GENERIC_OPCODE_SUBMIT_AQL) {
     const sagr_wire_generic_submit_body_t *body = &request->body.submit;
-    put_u64(payload + 232U, body->kernarg_allocation_id);
-    put_u64(payload + 240U, body->kernarg_generation);
-    put_u64(payload + 248U, body->kernarg_offset);
-    put_u64(payload + 256U, body->kernarg_size);
-    put_u64(payload + 264U, body->signal_id);
-    put_u64(payload + 272U, body->signal_generation);
-    put_u64(payload + 280U, body->expected_signal_value_bits);
-    put_u32(payload + 288U, body->grid_x);
-    put_u32(payload + 292U, body->grid_y);
-    put_u32(payload + 296U, body->grid_z);
-    put_u32(payload + 300U, body->workgroup_x);
-    put_u32(payload + 304U, body->workgroup_y);
-    put_u32(payload + 308U, body->workgroup_z);
-    put_u32(payload + 312U, body->num_warps);
-    put_u32(payload + 316U, body->num_ctas);
-    put_u32(payload + 320U, body->shared_memory_bytes);
-    put_u32(payload + 324U, body->wavefront_size);
-    put_u32(payload + 328U, body->launch_flags);
-    put_u32(payload + 332U, body->reserved0);
+    put_u64(payload +
+                SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_KERNARG_ALLOCATION_ID_OFFSET,
+            body->kernarg_allocation_id);
+    put_u64(payload +
+                SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_KERNARG_GENERATION_OFFSET,
+            body->kernarg_generation);
+    put_u64(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_KERNARG_OFFSET_OFFSET,
+            body->kernarg_offset);
+    put_u64(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_KERNARG_SIZE_OFFSET,
+            body->kernarg_size);
+    put_u64(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_SIGNAL_ID_OFFSET,
+            body->signal_id);
+    put_u64(payload +
+                SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_SIGNAL_GENERATION_OFFSET,
+            body->signal_generation);
+    put_u64(payload +
+                SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_EXPECTED_SIGNAL_VALUE_BITS_OFFSET,
+            body->expected_signal_value_bits);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_GRID_X_OFFSET,
+            body->grid_x);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_GRID_Y_OFFSET,
+            body->grid_y);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_GRID_Z_OFFSET,
+            body->grid_z);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_WORKGROUP_X_OFFSET,
+            body->workgroup_x);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_WORKGROUP_Y_OFFSET,
+            body->workgroup_y);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_WORKGROUP_Z_OFFSET,
+            body->workgroup_z);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_NUM_WARPS_OFFSET,
+            body->num_warps);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_NUM_CTAS_OFFSET,
+            body->num_ctas);
+    put_u32(payload +
+                SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_SHARED_MEMORY_BYTES_OFFSET,
+            body->shared_memory_bytes);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_WAVEFRONT_SIZE_OFFSET,
+            body->wavefront_size);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_LAUNCH_FLAGS_OFFSET,
+            body->launch_flags);
+    put_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_RESERVED0_OFFSET,
+            body->reserved0);
   }
   sagr_protocol_recompute_frame_crc(frame, SAGR_WIRE_GENERIC_FRAME_BYTES);
   *frame_size = SAGR_WIRE_GENERIC_FRAME_BYTES;
@@ -2899,66 +2980,119 @@ sagr_protocol_decode_generic_dispatch_request(
     return status;
   }
   memset(request, 0, sizeof(*request));
-  request->major = get_u16(payload);
-  request->minor = get_u16(payload + 2U);
-  request->opcode = get_u16(payload + 4U);
-  request->flags = get_u16(payload + 6U);
-  request->object_id = get_u64(payload + 8U);
-  request->object_generation = get_u64(payload + 16U);
-  request->mapping_id = get_u64(payload + 24U);
-  request->mapping_generation = get_u64(payload + 32U);
-  request->queue_id = get_u64(payload + 40U);
-  request->queue_generation = get_u64(payload + 48U);
-  request->queue_sequence = get_u64(payload + 56U);
-  request->kernel_index = get_u32(payload + 64U);
-  request->reserved0 = get_u32(payload + 68U);
-  memcpy(request->image_sha256, payload + 72U, 32U);
-  memcpy(request->kernel_name, payload + 104U,
+  request->major = get_u16(
+      payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_PAYLOAD_MAJOR_OFFSET);
+  request->minor = get_u16(
+      payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_PAYLOAD_MINOR_OFFSET);
+  request->opcode =
+      get_u16(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_OPCODE_OFFSET);
+  request->flags =
+      get_u16(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_FLAGS_OFFSET);
+  request->object_id =
+      get_u64(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_OBJECT_ID_OFFSET);
+  request->object_generation = get_u64(
+      payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_OBJECT_GENERATION_OFFSET);
+  request->mapping_id =
+      get_u64(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_MAPPING_ID_OFFSET);
+  request->mapping_generation = get_u64(
+      payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_MAPPING_GENERATION_OFFSET);
+  request->queue_id =
+      get_u64(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_QUEUE_ID_OFFSET);
+  request->queue_generation = get_u64(
+      payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_QUEUE_GENERATION_OFFSET);
+  request->queue_sequence = get_u64(
+      payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_QUEUE_SEQUENCE_OFFSET);
+  request->kernel_index = get_u32(
+      payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_KERNEL_INDEX_OFFSET);
+  request->reserved0 =
+      get_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_RESERVED0_OFFSET);
+  memcpy(request->image_sha256,
+         payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_IMAGE_SHA256_OFFSET,
+         SAGR_BRIDGE_GENERIC_V2_REQUEST_IMAGE_SHA256_BYTES);
+  memcpy(request->kernel_name,
+         payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_KERNEL_NAME_OFFSET,
          SAGR_WIRE_GENERIC_KERNEL_NAME_BYTES);
   if (request->opcode == SAGR_WIRE_GENERIC_OPCODE_MAP_OBJECT) {
     sagr_wire_generic_map_body_t *body = &request->body.map;
-    body->gfx_target = get_u32(payload + 232U);
-    body->relocation_count = get_u32(payload + 236U);
-    body->kernarg_segment_size = get_u32(payload + 240U);
-    body->kernarg_segment_align = get_u32(payload + 244U);
-    body->descriptor_preload_dwords = get_u32(payload + 248U);
-    body->page_size = get_u32(payload + 252U);
-    active_end = 256U;
+    body->gfx_target = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_MAP_GFX_TARGET_OFFSET);
+    body->relocation_count = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_MAP_RELOCATION_COUNT_OFFSET);
+    body->kernarg_segment_size = get_u32(
+        payload +
+        SAGR_BRIDGE_GENERIC_V2_REQUEST_MAP_KERNARG_SEGMENT_SIZE_OFFSET);
+    body->kernarg_segment_align = get_u32(
+        payload +
+        SAGR_BRIDGE_GENERIC_V2_REQUEST_MAP_KERNARG_SEGMENT_ALIGN_OFFSET);
+    body->descriptor_preload_dwords = get_u32(
+        payload +
+        SAGR_BRIDGE_GENERIC_V2_REQUEST_MAP_DESCRIPTOR_PRELOAD_DWORDS_OFFSET);
+    body->page_size = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_MAP_PAGE_SIZE_OFFSET);
+    active_end = SAGR_BRIDGE_GENERIC_V2_REQUEST_MAP_ACTIVE_END;
   } else if (request->opcode == SAGR_WIRE_GENERIC_OPCODE_ALLOC_KERNARG) {
     sagr_wire_generic_alloc_kernarg_body_t *body =
         &request->body.alloc_kernarg;
-    body->size_bytes = get_u64(payload + 232U);
-    body->alignment_bytes = get_u64(payload + 240U);
-    body->allocation_flags = get_u32(payload + 248U);
-    body->reserved0 = get_u32(payload + 252U);
-    active_end = 256U;
+    body->size_bytes = get_u64(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_ALLOC_SIZE_BYTES_OFFSET);
+    body->alignment_bytes = get_u64(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_ALLOC_ALIGNMENT_BYTES_OFFSET);
+    body->allocation_flags = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_ALLOC_ALLOCATION_FLAGS_OFFSET);
+    body->reserved0 = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_ALLOC_RESERVED0_OFFSET);
+    active_end = SAGR_BRIDGE_GENERIC_V2_REQUEST_ALLOC_ACTIVE_END;
   } else if (request->opcode == SAGR_WIRE_GENERIC_OPCODE_SUBMIT_AQL) {
     sagr_wire_generic_submit_body_t *body = &request->body.submit;
-    body->kernarg_allocation_id = get_u64(payload + 232U);
-    body->kernarg_generation = get_u64(payload + 240U);
-    body->kernarg_offset = get_u64(payload + 248U);
-    body->kernarg_size = get_u64(payload + 256U);
-    body->signal_id = get_u64(payload + 264U);
-    body->signal_generation = get_u64(payload + 272U);
-    body->expected_signal_value_bits = get_u64(payload + 280U);
-    body->grid_x = get_u32(payload + 288U);
-    body->grid_y = get_u32(payload + 292U);
-    body->grid_z = get_u32(payload + 296U);
-    body->workgroup_x = get_u32(payload + 300U);
-    body->workgroup_y = get_u32(payload + 304U);
-    body->workgroup_z = get_u32(payload + 308U);
-    body->num_warps = get_u32(payload + 312U);
-    body->num_ctas = get_u32(payload + 316U);
-    body->shared_memory_bytes = get_u32(payload + 320U);
-    body->wavefront_size = get_u32(payload + 324U);
-    body->launch_flags = get_u32(payload + 328U);
-    body->reserved0 = get_u32(payload + 332U);
-    active_end = 336U;
+    body->kernarg_allocation_id = get_u64(
+        payload +
+        SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_KERNARG_ALLOCATION_ID_OFFSET);
+    body->kernarg_generation = get_u64(
+        payload +
+        SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_KERNARG_GENERATION_OFFSET);
+    body->kernarg_offset = get_u64(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_KERNARG_OFFSET_OFFSET);
+    body->kernarg_size = get_u64(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_KERNARG_SIZE_OFFSET);
+    body->signal_id = get_u64(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_SIGNAL_ID_OFFSET);
+    body->signal_generation = get_u64(
+        payload +
+        SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_SIGNAL_GENERATION_OFFSET);
+    body->expected_signal_value_bits = get_u64(
+        payload +
+        SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_EXPECTED_SIGNAL_VALUE_BITS_OFFSET);
+    body->grid_x = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_GRID_X_OFFSET);
+    body->grid_y = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_GRID_Y_OFFSET);
+    body->grid_z = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_GRID_Z_OFFSET);
+    body->workgroup_x = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_WORKGROUP_X_OFFSET);
+    body->workgroup_y = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_WORKGROUP_Y_OFFSET);
+    body->workgroup_z = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_WORKGROUP_Z_OFFSET);
+    body->num_warps = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_NUM_WARPS_OFFSET);
+    body->num_ctas = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_NUM_CTAS_OFFSET);
+    body->shared_memory_bytes = get_u32(
+        payload +
+        SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_SHARED_MEMORY_BYTES_OFFSET);
+    body->wavefront_size = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_WAVEFRONT_SIZE_OFFSET);
+    body->launch_flags = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_LAUNCH_FLAGS_OFFSET);
+    body->reserved0 = get_u32(
+        payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_RESERVED0_OFFSET);
+    active_end = SAGR_BRIDGE_GENERIC_V2_REQUEST_SUBMIT_ACTIVE_END;
   } else if (request->opcode != SAGR_WIRE_GENERIC_OPCODE_UNMAP_OBJECT) {
     *reason = "unknown generic dispatch opcode";
     return SAGR_STATUS_PROTOCOL_ERROR;
   }
-  if (get_u32(payload + 68U) != 0U ||
+  if (get_u32(payload + SAGR_BRIDGE_GENERIC_V2_REQUEST_RESERVED0_OFFSET) != 0U ||
       !bytes_are_zero(payload + active_end,
                       SAGR_WIRE_GENERIC_PAYLOAD_BYTES - active_end)) {
     *reason = "noncanonical generic dispatch request padding";
@@ -2978,49 +3112,73 @@ sagr_protocol_decode_generic_dispatch_request(
 }
 
 enum {
-  GENERIC_RESPONSE_TAIL = 304,
-  GENERIC_RESPONSE_MAJOR = 0,
-  GENERIC_RESPONSE_MINOR = 2,
-  GENERIC_RESPONSE_STATUS = 4,
-  GENERIC_RESPONSE_OPCODE = 8,
-  GENERIC_RESPONSE_FLAGS = 10,
-  GENERIC_RESPONSE_ERROR = 12,
-  GENERIC_RESPONSE_OBJECT = 16,
-  GENERIC_RESPONSE_OBJECT_GEN = 24,
-  GENERIC_RESPONSE_MAPPING = 32,
-  GENERIC_RESPONSE_MAPPING_GEN = 40,
-  GENERIC_RESPONSE_MAPPED_BASE = 48,
-  GENERIC_RESPONSE_MAPPED_END = 56,
-  GENERIC_RESPONSE_DESCRIPTOR = 64,
-  GENERIC_RESPONSE_CODE = 72,
-  GENERIC_RESPONSE_ENTRY = 80,
-  GENERIC_RESPONSE_MAPPED_BYTES = 88,
-  GENERIC_RESPONSE_KERNARG = 96,
-  GENERIC_RESPONSE_KERNARG_GEN = 104,
-  GENERIC_RESPONSE_KERNARG_VA = 112,
-  GENERIC_RESPONSE_KERNARG_SIZE = 120,
-  GENERIC_RESPONSE_KERNARG_ALIGN = 128,
-  GENERIC_RESPONSE_KERNEL_INDEX = 136,
-  GENERIC_RESPONSE_SEGMENTS = 140,
-  GENERIC_RESPONSE_PRELOAD = 144,
-  GENERIC_RESPONSE_RESERVED = 148,
-  GENERIC_RESPONSE_TICKET = 152,
-  GENERIC_RESPONSE_TRACE = 160,
-  GENERIC_RESPONSE_QUEUE = 168,
-  GENERIC_RESPONSE_QUEUE_GEN = 176,
-  GENERIC_RESPONSE_QUEUE_SEQ = 184,
-  GENERIC_RESPONSE_SIGNAL = 192,
-  GENERIC_RESPONSE_SIGNAL_GEN = 200,
-  GENERIC_RESPONSE_SIGNAL_VALUE = 208,
-  GENERIC_RESPONSE_PACKET_VA = 216,
-  GENERIC_RESPONSE_PACKET_CRC = 224,
-  GENERIC_RESPONSE_OUTPUT_CRC = 228,
-  GENERIC_RESPONSE_SIM_TICK = 232,
-  GENERIC_RESPONSE_ADMISSION_TICK = 240,
-  GENERIC_RESPONSE_START_TICK = 248,
-  GENERIC_RESPONSE_END_TICK = 256,
-  GENERIC_RESPONSE_RETIRE_TICK = 264,
-  GENERIC_RESPONSE_DIGEST = 272
+  GENERIC_RESPONSE_TAIL = SAGR_BRIDGE_GENERIC_V2_RESPONSE_ACTIVE_END,
+  GENERIC_RESPONSE_MAJOR = SAGR_BRIDGE_GENERIC_V2_RESPONSE_PAYLOAD_MAJOR_OFFSET,
+  GENERIC_RESPONSE_MINOR = SAGR_BRIDGE_GENERIC_V2_RESPONSE_PAYLOAD_MINOR_OFFSET,
+  GENERIC_RESPONSE_STATUS = SAGR_BRIDGE_GENERIC_V2_RESPONSE_STATUS_OFFSET,
+  GENERIC_RESPONSE_OPCODE = SAGR_BRIDGE_GENERIC_V2_RESPONSE_OPCODE_OFFSET,
+  GENERIC_RESPONSE_FLAGS = SAGR_BRIDGE_GENERIC_V2_RESPONSE_FLAGS_OFFSET,
+  GENERIC_RESPONSE_ERROR = SAGR_BRIDGE_GENERIC_V2_RESPONSE_ERROR_CODE_OFFSET,
+  GENERIC_RESPONSE_OBJECT = SAGR_BRIDGE_GENERIC_V2_RESPONSE_OBJECT_ID_OFFSET,
+  GENERIC_RESPONSE_OBJECT_GEN =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_OBJECT_GENERATION_OFFSET,
+  GENERIC_RESPONSE_MAPPING = SAGR_BRIDGE_GENERIC_V2_RESPONSE_MAPPING_ID_OFFSET,
+  GENERIC_RESPONSE_MAPPING_GEN =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_MAPPING_GENERATION_OFFSET,
+  GENERIC_RESPONSE_MAPPED_BASE =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_MAPPED_BASE_VA_OFFSET,
+  GENERIC_RESPONSE_MAPPED_END =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_MAPPED_END_VA_OFFSET,
+  GENERIC_RESPONSE_DESCRIPTOR =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_DESCRIPTOR_VA_OFFSET,
+  GENERIC_RESPONSE_CODE = SAGR_BRIDGE_GENERIC_V2_RESPONSE_CODE_VA_OFFSET,
+  GENERIC_RESPONSE_ENTRY = SAGR_BRIDGE_GENERIC_V2_RESPONSE_ENTRY_VA_OFFSET,
+  GENERIC_RESPONSE_MAPPED_BYTES =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_MAPPED_BYTES_OFFSET,
+  GENERIC_RESPONSE_KERNARG =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_KERNARG_ALLOCATION_ID_OFFSET,
+  GENERIC_RESPONSE_KERNARG_GEN =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_KERNARG_GENERATION_OFFSET,
+  GENERIC_RESPONSE_KERNARG_VA =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_KERNARG_VA_OFFSET,
+  GENERIC_RESPONSE_KERNARG_SIZE =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_KERNARG_SIZE_OFFSET,
+  GENERIC_RESPONSE_KERNARG_ALIGN =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_KERNARG_ALIGNMENT_OFFSET,
+  GENERIC_RESPONSE_KERNEL_INDEX =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_KERNEL_INDEX_OFFSET,
+  GENERIC_RESPONSE_SEGMENTS =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_SEGMENT_COUNT_OFFSET,
+  GENERIC_RESPONSE_PRELOAD =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_DESCRIPTOR_PRELOAD_DWORDS_OFFSET,
+  GENERIC_RESPONSE_RESERVED = SAGR_BRIDGE_GENERIC_V2_RESPONSE_RESERVED0_OFFSET,
+  GENERIC_RESPONSE_TICKET = SAGR_BRIDGE_GENERIC_V2_RESPONSE_TICKET_ID_OFFSET,
+  GENERIC_RESPONSE_TRACE = SAGR_BRIDGE_GENERIC_V2_RESPONSE_TRACE_ID_OFFSET,
+  GENERIC_RESPONSE_QUEUE = SAGR_BRIDGE_GENERIC_V2_RESPONSE_QUEUE_ID_OFFSET,
+  GENERIC_RESPONSE_QUEUE_GEN =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_QUEUE_GENERATION_OFFSET,
+  GENERIC_RESPONSE_QUEUE_SEQ =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_QUEUE_SEQUENCE_OFFSET,
+  GENERIC_RESPONSE_SIGNAL = SAGR_BRIDGE_GENERIC_V2_RESPONSE_SIGNAL_ID_OFFSET,
+  GENERIC_RESPONSE_SIGNAL_GEN =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_SIGNAL_GENERATION_OFFSET,
+  GENERIC_RESPONSE_SIGNAL_VALUE =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_SIGNAL_VALUE_BITS_OFFSET,
+  GENERIC_RESPONSE_PACKET_VA =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_PACKET_VA_OFFSET,
+  GENERIC_RESPONSE_PACKET_CRC =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_PACKET_CRC32C_OFFSET,
+  GENERIC_RESPONSE_OUTPUT_CRC =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_OUTPUT_CRC32C_OFFSET,
+  GENERIC_RESPONSE_SIM_TICK = SAGR_BRIDGE_GENERIC_V2_RESPONSE_SIM_TICK_OFFSET,
+  GENERIC_RESPONSE_ADMISSION_TICK =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_ADMISSION_TICK_OFFSET,
+  GENERIC_RESPONSE_START_TICK =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_START_TICK_OFFSET,
+  GENERIC_RESPONSE_END_TICK = SAGR_BRIDGE_GENERIC_V2_RESPONSE_END_TICK_OFFSET,
+  GENERIC_RESPONSE_RETIRE_TICK =
+      SAGR_BRIDGE_GENERIC_V2_RESPONSE_RETIRE_TICK_OFFSET,
+  GENERIC_RESPONSE_DIGEST = SAGR_BRIDGE_GENERIC_V2_RESPONSE_IMAGE_SHA256_OFFSET
 };
 
 static int

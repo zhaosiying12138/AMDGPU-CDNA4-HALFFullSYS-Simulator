@@ -3,12 +3,14 @@
 #include <self_amdgpu_runtime/provider.h>
 
 #include "provider_internal.h"
+#include "managed_session_internal.h"
 
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdatomic.h>
 #include <string.h>
+#include <unistd.h>
 
 enum { SAGR_PROVIDER_MAGIC = 0x50525631 };
 
@@ -525,7 +527,38 @@ static void set_error(sagr_error_info_t *error, uint32_t error_size,
 
 static int valid_provider(const sagr_provider_t *provider) {
   return provider != NULL && provider->magic == SAGR_PROVIDER_MAGIC &&
-         provider->instance != NULL;
+         provider->instance != NULL && provider->owner_pid == getpid();
+}
+
+static sagr_status_t create_provider(sagr_instance_t instance,
+                                     sagr_managed_session_t managed_session,
+                                     sagr_provider_t **out_provider,
+                                     sagr_error_info_t *out_error,
+                                     uint32_t error_size) {
+  sagr_provider_t *provider =
+      (sagr_provider_t *)calloc(1, sizeof(*provider));
+  sagr_status_t status;
+  if (provider == NULL) {
+    set_error(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES,
+              "could not allocate provider state");
+    return SAGR_STATUS_OUT_OF_RESOURCES;
+  }
+  provider->magic = SAGR_PROVIDER_MAGIC;
+  provider->instance = instance;
+  provider->managed_session = managed_session;
+  provider->owner_pid = getpid();
+  atomic_init(&provider->kmt_operation_sequence, UINT64_C(1));
+  status = sagr_instance_get_info(instance, &provider->transport_info,
+                                  (uint32_t)sizeof(provider->transport_info));
+  if (status != SAGR_STATUS_SUCCESS) {
+    provider->magic = 0U;
+    free(provider);
+    set_error(out_error, error_size, status,
+              "could not capture provider transport identity");
+    return status;
+  }
+  *out_provider = provider;
+  return SAGR_STATUS_SUCCESS;
 }
 
 const char *sagr_provider_authority_sha256(void) {
@@ -819,7 +852,6 @@ sagr_status_t sagr_provider_open(
     sagr_provider_t **out_provider, sagr_error_info_t *out_error,
     uint32_t error_size) {
   sagr_instance_t instance = NULL;
-  sagr_provider_t *provider;
   sagr_status_t status;
 
   if (out_provider != NULL) {
@@ -841,28 +873,112 @@ sagr_status_t sagr_provider_open(
   if (status != SAGR_STATUS_SUCCESS) {
     return status;
   }
-  provider = (sagr_provider_t *)calloc(1, sizeof(*provider));
-  if (provider == NULL) {
-    (void)sagr_instance_close(&instance);
-    set_error(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES,
-              "could not allocate provider state");
-    return SAGR_STATUS_OUT_OF_RESOURCES;
-  }
-  provider->magic = SAGR_PROVIDER_MAGIC;
-  provider->instance = instance;
-  atomic_init(&provider->kmt_operation_sequence, UINT64_C(1));
-  status = sagr_instance_get_info(instance, &provider->transport_info,
-                                  (uint32_t)sizeof(provider->transport_info));
+  status = create_provider(instance, NULL, out_provider, out_error, error_size);
   if (status != SAGR_STATUS_SUCCESS) {
-    (void)sagr_instance_close(&provider->instance);
-    provider->magic = 0U;
-    free(provider);
-    set_error(out_error, error_size, status,
-              "could not capture provider transport identity");
+    (void)sagr_instance_close(&instance);
     return status;
   }
-  *out_provider = provider;
   return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t open_managed_provider(
+    const sagr_managed_session_options_t *options,
+    const sagr_managed_session_options_v2_t *exact_options,
+    sagr_provider_t **out_provider, sagr_managed_session_info_t *out_info,
+    uint32_t info_size, sagr_error_info_t *out_error, uint32_t error_size) {
+  sagr_managed_session_options_t local_options;
+  sagr_managed_session_options_v2_t local_exact_options;
+  sagr_managed_session_t session = NULL;
+  sagr_instance_t instance = NULL;
+  sagr_status_t status;
+  if (out_provider != NULL) {
+    *out_provider = NULL;
+  }
+  if (out_provider == NULL || (options != NULL && exact_options != NULL) ||
+      (out_error == NULL && error_size != 0U)) {
+    set_error(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT,
+              "invalid managed provider output or options");
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (out_error != NULL && error_size < sizeof(*out_error)) {
+    initialize_error(out_error, error_size);
+    return SAGR_STATUS_BUFFER_TOO_SMALL;
+  }
+  if (exact_options != NULL) {
+    if (exact_options->struct_size < sizeof(*exact_options)) {
+      set_error(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT,
+                "managed provider v2 options are too small");
+      return SAGR_STATUS_INVALID_ARGUMENT;
+    }
+    memcpy(&local_exact_options, exact_options, sizeof(local_exact_options));
+    local_exact_options.flags |= SAGR_MANAGED_SESSION_V2_FLAG_KMT_PROVIDER;
+    status = sagr_managed_session_open_v2(
+        &local_exact_options, &session, out_info, info_size, out_error,
+        error_size);
+  } else {
+    if (options != NULL) {
+      if (options->struct_size < sizeof(*options)) {
+        set_error(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT,
+                  "managed provider options are too small");
+        return SAGR_STATUS_INVALID_ARGUMENT;
+      }
+      memcpy(&local_options, options, sizeof(local_options));
+    } else {
+      status = sagr_managed_session_options_init(
+          &local_options, (uint32_t)sizeof(local_options));
+      if (status != SAGR_STATUS_SUCCESS) {
+        set_error(out_error, error_size, status,
+                  "could not initialize managed provider options");
+        return status;
+      }
+    }
+    local_options.flags |= SAGR_MANAGED_SESSION_FLAG_KMT_PROVIDER;
+    status = sagr_managed_session_open(
+        &local_options, &session, out_info, info_size, out_error, error_size);
+  }
+  if (status != SAGR_STATUS_SUCCESS) {
+    return status;
+  }
+  status = sagr_managed_session_get_instance(session, &instance);
+  if (status == SAGR_STATUS_SUCCESS) {
+    status = create_provider(instance, session, out_provider, out_error,
+                             error_size);
+  }
+  if (status != SAGR_STATUS_SUCCESS) {
+    (void)sagr_managed_session_close(&session, NULL, 0U);
+  }
+  return status;
+}
+
+sagr_status_t sagr_provider_open_managed(
+    const sagr_managed_session_options_t *options,
+    sagr_provider_t **out_provider, sagr_managed_session_info_t *out_info,
+    uint32_t info_size, sagr_error_info_t *out_error, uint32_t error_size) {
+  return open_managed_provider(options, NULL, out_provider, out_info, info_size,
+                               out_error, error_size);
+}
+
+sagr_status_t sagr_provider_open_managed_v2(
+    const sagr_managed_session_options_v2_t *options,
+    sagr_provider_t **out_provider, sagr_managed_session_info_t *out_info,
+    uint32_t info_size, sagr_error_info_t *out_error, uint32_t error_size) {
+  if (out_provider != NULL) {
+    *out_provider = NULL;
+  }
+  if (out_error == NULL && error_size != 0U) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (out_error != NULL && error_size < sizeof(*out_error)) {
+    initialize_error(out_error, error_size);
+    return SAGR_STATUS_BUFFER_TOO_SMALL;
+  }
+  if (options == NULL) {
+    set_error(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT,
+              "managed provider v2 options are required");
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  return open_managed_provider(NULL, options, out_provider, out_info, info_size,
+                               out_error, error_size);
 }
 
 sagr_status_t sagr_provider_get_info(sagr_provider_t *provider,
@@ -910,9 +1026,50 @@ sagr_status_t sagr_provider_close(sagr_provider_t **provider) {
   if (!valid_provider(*provider)) {
     return SAGR_STATUS_INVALID_HANDLE;
   }
+  if ((*provider)->managed_session != NULL) {
+    status = sagr_managed_session_close(&(*provider)->managed_session, NULL, 0U);
+    (*provider)->instance = NULL;
+    (*provider)->magic = 0U;
+    free(*provider);
+    *provider = NULL;
+    return status;
+  }
   status = sagr_instance_close(&(*provider)->instance);
   if (status != SAGR_STATUS_SUCCESS) {
     return status;
+  }
+  (*provider)->magic = 0U;
+  free(*provider);
+  *provider = NULL;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_provider_discard_inherited(sagr_provider_t **provider) {
+  sagr_status_t status;
+  if (provider == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (*provider == NULL) {
+    return SAGR_STATUS_SUCCESS;
+  }
+  if ((*provider)->magic != SAGR_PROVIDER_MAGIC) {
+    return SAGR_STATUS_INVALID_HANDLE;
+  }
+  if ((*provider)->owner_pid == getpid()) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if ((*provider)->managed_session != NULL) {
+    status = sagr_managed_session_discard_inherited(
+        &(*provider)->managed_session);
+    if (status != SAGR_STATUS_SUCCESS) {
+      return status;
+    }
+    (*provider)->instance = NULL;
+  } else {
+    status = sagr_instance_close(&(*provider)->instance);
+    if (status != SAGR_STATUS_SUCCESS) {
+      return status;
+    }
   }
   (*provider)->magic = 0U;
   free(*provider);

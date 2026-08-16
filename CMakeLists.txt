@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   self_amdgpu_runtime
-  VERSION 0.6.0
+  VERSION 0.8.0
   DESCRIPTION "Host-side C runtime foundation for the self-amdgpu gem5 transport"
   LANGUAGES C)
 
@@ -20,16 +20,41 @@ option(SELF_AMDGPU_RUNTIME_BUILD_TESTS "Build self-amdgpu-runtime tests" ON)
 option(SELF_AMDGPU_RUNTIME_BUILD_TOOLS "Build self-amdgpu-runtime tools" ON)
 option(SELF_AMDGPU_RUNTIME_BUILD_OPENCL "Build the local OpenCL 1.2 subset" ON)
 option(
+  SELF_AMDGPU_RUNTIME_BUILD_HSAKMT_MODEL
+  "Build the upstream libhsakmt model-interface provider"
+  ON)
+option(
   SELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE
   "Test the installed package with an independent default-toolchain consumer"
   ON)
+set(
+  SELF_AMDGPU_RUNTIME_UPSTREAM_HSAKMT_LIBRARY
+  ""
+  CACHE FILEPATH "Optional unchanged upstream libhsakmt archive for the Model smoke")
+set(
+  SELF_AMDGPU_RUNTIME_UPSTREAM_HSAKMT_DEPENDENCY_PREFIX
+  ""
+  CACHE PATH "Private libdrm/NUMA prefix for the upstream libhsakmt smoke")
+set(
+  SELF_AMDGPU_RUNTIME_UPSTREAM_ROCR_LIBRARY
+  ""
+  CACHE FILEPATH "Optional unchanged upstream libhsa-runtime64 shared library for the ROCr smoke")
+set(
+  SELF_AMDGPU_RUNTIME_UPSTREAM_ROCR_INCLUDE_DIR
+  ""
+  CACHE PATH "Public headers matching the upstream libhsa-runtime64 ROCr smoke")
 
 if(NOT UNIX)
   message(FATAL_ERROR "The managed gem5 runtime requires UNIX")
 endif()
-get_filename_component(
+find_package(Threads REQUIRED)
+set(
   SELF_AMDGPU_RUNTIME_REPO_ROOT
   "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  CACHE PATH "Repository root containing the managed gem5 and test inputs")
+get_filename_component(
+  SELF_AMDGPU_RUNTIME_REPO_ROOT
+  "${SELF_AMDGPU_RUNTIME_REPO_ROOT}"
   ABSOLUTE)
 set(
   SELF_AMDGPU_RUNTIME_OPENCL_PREFIX
@@ -52,7 +77,11 @@ add_library(
   src/provider.c
   src/kmt_shim.c
   src/code_object.c
+  src/ccl_v1.c
+  src/ccl_carrier_v1.c
+  src/ccl_live_v1.c
   src/managed_session.c
+  src/smi_registry.c
   src/sha256.c)
 add_library(SelfAmdgpuRuntime::runtime ALIAS self_amdgpu_runtime)
 
@@ -83,14 +112,60 @@ target_include_directories(
   self_amdgpu_runtime
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_link_libraries(self_amdgpu_runtime PRIVATE Threads::Threads)
+
+if(SELF_AMDGPU_RUNTIME_BUILD_HSAKMT_MODEL)
+  set(
+    SELF_AMDGPU_RUNTIME_HSAKMT_INCLUDE_DIR
+    "${SELF_AMDGPU_RUNTIME_REPO_ROOT}/projects/rocm-systems/projects/rocr-runtime/libhsakmt/include"
+    CACHE PATH "Pinned upstream libhsakmt public include directory")
+  if(NOT EXISTS
+     "${SELF_AMDGPU_RUNTIME_HSAKMT_INCLUDE_DIR}/hsakmt/hsakmtmodeliface.h")
+    message(
+      FATAL_ERROR
+        "The pinned upstream hsakmt model-interface header is unavailable")
+  endif()
+  add_library(
+    self_amdgpu_hsakmt_model SHARED
+    src/hsakmt_model.c)
+  add_library(
+    SelfAmdgpuRuntime::HsakmtModel ALIAS self_amdgpu_hsakmt_model)
+  set_target_properties(
+    self_amdgpu_hsakmt_model
+    PROPERTIES C_VISIBILITY_PRESET hidden
+               EXPORT_NAME HsakmtModel
+               INSTALL_RPATH "$ORIGIN"
+               OUTPUT_NAME self_amdgpu_hsakmt_model
+               VERSION "1.1.0"
+               SOVERSION "1"
+               VISIBILITY_INLINES_HIDDEN YES)
+  target_compile_features(self_amdgpu_hsakmt_model PRIVATE c_std_11)
+  target_include_directories(
+    self_amdgpu_hsakmt_model
+    SYSTEM PRIVATE "${SELF_AMDGPU_RUNTIME_HSAKMT_INCLUDE_DIR}")
+  target_link_libraries(
+    self_amdgpu_hsakmt_model
+    PRIVATE SelfAmdgpuRuntime::runtime Threads::Threads)
+  if(MSVC)
+    target_compile_options(self_amdgpu_hsakmt_model PRIVATE /W4 /WX)
+  else()
+    target_compile_options(
+      self_amdgpu_hsakmt_model
+      PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+    target_link_options(
+      self_amdgpu_hsakmt_model
+      PRIVATE
+        "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/src/hsakmt_model.map")
+  endif()
+endif()
 
 if(SELF_AMDGPU_RUNTIME_BUILD_OPENCL)
-  find_package(Threads REQUIRED)
   add_library(
     self_amdgpu_opencl SHARED
     src/opencl_api.c
     src/opencl_compiler.c
     src/opencl_enqueue.c
+    src/opencl_geometry.c
     src/opencl_objects.c
     src/simulator_process.c
     src/sha256.c)
@@ -201,6 +276,12 @@ install(
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
   INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+if(SELF_AMDGPU_RUNTIME_BUILD_HSAKMT_MODEL)
+  install(
+    TARGETS self_amdgpu_hsakmt_model
+    EXPORT SelfAmdgpuRuntimeTargets
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+endif()
 if(SELF_AMDGPU_RUNTIME_BUILD_OPENCL)
   install(
     TARGETS self_amdgpu_opencl self_amdgpu_opencl_vecadd

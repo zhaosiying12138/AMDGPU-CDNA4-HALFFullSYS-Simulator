@@ -4,6 +4,109 @@ add_executable(self_amdgpu_runtime_api_test runtime_test.c)
 target_link_libraries(self_amdgpu_runtime_api_test PRIVATE SelfAmdgpuRuntime::runtime)
 add_test(NAME self_amdgpu_runtime.api COMMAND self_amdgpu_runtime_api_test)
 
+add_executable(
+  self_amdgpu_runtime_smi_registry_test
+  smi_registry_test.c
+  ../src/smi_registry.c
+  ../src/sha256.c)
+target_compile_features(self_amdgpu_runtime_smi_registry_test PRIVATE c_std_11)
+target_include_directories(
+  self_amdgpu_runtime_smi_registry_test PRIVATE ../src ../include)
+target_link_libraries(
+  self_amdgpu_runtime_smi_registry_test PRIVATE Threads::Threads)
+if(MSVC)
+  target_compile_options(self_amdgpu_runtime_smi_registry_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    self_amdgpu_runtime_smi_registry_test
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(
+  NAME self_amdgpu_runtime.smi_registry
+  COMMAND self_amdgpu_runtime_smi_registry_test)
+
+add_executable(self_amdgpu_runtime_ccl_v1_test ccl_v1_test.c)
+target_compile_features(self_amdgpu_runtime_ccl_v1_test PRIVATE c_std_11)
+target_link_libraries(
+  self_amdgpu_runtime_ccl_v1_test PRIVATE SelfAmdgpuRuntime::runtime)
+if(MSVC)
+  target_compile_options(self_amdgpu_runtime_ccl_v1_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    self_amdgpu_runtime_ccl_v1_test
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(
+  NAME self_amdgpu_runtime.ccl_v1
+  COMMAND self_amdgpu_runtime_ccl_v1_test)
+
+add_executable(
+  self_amdgpu_runtime_ccl_carrier_v1_test ccl_carrier_v1_test.c)
+target_compile_features(
+  self_amdgpu_runtime_ccl_carrier_v1_test PRIVATE c_std_11)
+target_link_libraries(
+  self_amdgpu_runtime_ccl_carrier_v1_test
+  PRIVATE SelfAmdgpuRuntime::runtime)
+if(MSVC)
+  target_compile_options(
+    self_amdgpu_runtime_ccl_carrier_v1_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    self_amdgpu_runtime_ccl_carrier_v1_test
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(
+  NAME self_amdgpu_runtime.ccl_carrier_v1
+  COMMAND self_amdgpu_runtime_ccl_carrier_v1_test)
+
+add_executable(
+  self_amdgpu_runtime_ccl_live_v1_test ccl_live_v1_test.c)
+target_compile_features(
+  self_amdgpu_runtime_ccl_live_v1_test PRIVATE c_std_11)
+target_link_libraries(
+  self_amdgpu_runtime_ccl_live_v1_test
+  PRIVATE SelfAmdgpuRuntime::runtime)
+if(MSVC)
+  target_compile_options(
+    self_amdgpu_runtime_ccl_live_v1_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    self_amdgpu_runtime_ccl_live_v1_test
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(
+  NAME self_amdgpu_runtime.ccl_live_v1
+  COMMAND self_amdgpu_runtime_ccl_live_v1_test)
+
+# Standalone multi-process integration gate for the live broker FD table, the
+# CCL v1 ring planner, and carrier sessions. Its FP32 descriptor carries
+# rank-coded uint32 bytes through an explicitly host-only mock reduction; this
+# validates ordering/transport/lifecycle and is not device or gem5 acceptance.
+add_executable(
+  self_amdgpu_runtime_ccl_live_collective_v1_test
+  ccl_live_collective_v1_test.c
+  ../src/sha256.c)
+target_compile_features(
+  self_amdgpu_runtime_ccl_live_collective_v1_test PRIVATE c_std_11)
+target_include_directories(
+  self_amdgpu_runtime_ccl_live_collective_v1_test PRIVATE ../src ../include)
+target_link_libraries(
+  self_amdgpu_runtime_ccl_live_collective_v1_test
+  PRIVATE SelfAmdgpuRuntime::runtime)
+if(MSVC)
+  target_compile_options(
+    self_amdgpu_runtime_ccl_live_collective_v1_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    self_amdgpu_runtime_ccl_live_collective_v1_test
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(
+  NAME self_amdgpu_runtime.ccl_live_collective_v1
+  COMMAND self_amdgpu_runtime_ccl_live_collective_v1_test)
+set_tests_properties(
+  self_amdgpu_runtime.ccl_live_collective_v1 PROPERTIES TIMEOUT 60)
+
 # Keep a tiny public-header-only consumer as the extraction gate for CP-0014.
 # This target deliberately has no simulator, ROCr, or device-library linkage;
 # the companion CMake audit checks that property on the produced executable.
@@ -56,6 +159,44 @@ add_test(
     "-DSAGR_PROVIDER_BINARY=$<TARGET_FILE:self_amdgpu_runtime_provider_test>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/provider_audit.cmake")
 
+if(SELF_AMDGPU_RUNTIME_BUILD_HSAKMT_MODEL)
+  add_executable(
+    self_amdgpu_runtime_hsakmt_model_test
+    hsakmt_model_test.c)
+  add_dependencies(
+    self_amdgpu_runtime_hsakmt_model_test
+    self_amdgpu_hsakmt_model)
+  target_compile_features(
+    self_amdgpu_runtime_hsakmt_model_test PRIVATE c_std_11)
+  target_include_directories(
+    self_amdgpu_runtime_hsakmt_model_test
+    SYSTEM PRIVATE "${SELF_AMDGPU_RUNTIME_HSAKMT_INCLUDE_DIR}")
+  target_compile_definitions(
+    self_amdgpu_runtime_hsakmt_model_test
+    PRIVATE
+      SAGR_HSAKMT_MODEL_PATH="$<TARGET_FILE:self_amdgpu_hsakmt_model>")
+  target_link_libraries(
+    self_amdgpu_runtime_hsakmt_model_test
+    PRIVATE ${CMAKE_DL_LIBS})
+  if(MSVC)
+    target_compile_options(
+      self_amdgpu_runtime_hsakmt_model_test PRIVATE /W4 /WX)
+  else()
+    target_compile_options(
+      self_amdgpu_runtime_hsakmt_model_test
+      PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+  endif()
+  add_test(
+    NAME self_amdgpu_runtime.hsakmt_model
+    COMMAND self_amdgpu_runtime_hsakmt_model_test)
+  add_test(
+    NAME self_amdgpu_runtime.hsakmt_model.audit
+    COMMAND
+      "${CMAKE_COMMAND}"
+      "-DSAGR_HSAKMT_MODEL=$<TARGET_FILE:self_amdgpu_hsakmt_model>"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/hsakmt_model_audit.cmake")
+endif()
+
 find_package(Threads REQUIRED)
 add_executable(
   self_amdgpu_runtime_kmt_shim_test
@@ -68,6 +209,156 @@ target_include_directories(
 target_link_libraries(
   self_amdgpu_runtime_kmt_shim_test
   PRIVATE SelfAmdgpuRuntime::runtime Threads::Threads)
+if(SELF_AMDGPU_RUNTIME_BUILD_HSAKMT_MODEL)
+  add_dependencies(
+    self_amdgpu_runtime_kmt_shim_test
+    self_amdgpu_hsakmt_model)
+  target_include_directories(
+    self_amdgpu_runtime_kmt_shim_test
+    SYSTEM PRIVATE "${SELF_AMDGPU_RUNTIME_HSAKMT_INCLUDE_DIR}")
+  target_compile_definitions(
+    self_amdgpu_runtime_kmt_shim_test
+    PRIVATE
+      SAGR_HSAKMT_MODEL_PATH="$<TARGET_FILE:self_amdgpu_hsakmt_model>")
+  target_link_libraries(
+    self_amdgpu_runtime_kmt_shim_test
+    PRIVATE ${CMAKE_DL_LIBS})
+
+  if(SELF_AMDGPU_RUNTIME_UPSTREAM_HSAKMT_LIBRARY OR
+     SELF_AMDGPU_RUNTIME_UPSTREAM_HSAKMT_DEPENDENCY_PREFIX)
+    if(NOT EXISTS "${SELF_AMDGPU_RUNTIME_UPSTREAM_HSAKMT_LIBRARY}" OR
+       NOT IS_DIRECTORY
+           "${SELF_AMDGPU_RUNTIME_UPSTREAM_HSAKMT_DEPENDENCY_PREFIX}")
+      message(
+        FATAL_ERROR
+          "Both upstream libhsakmt archive and dependency prefix are required")
+    endif()
+    set(
+      _hsakmt_dependencies
+      "${SELF_AMDGPU_RUNTIME_UPSTREAM_HSAKMT_DEPENDENCY_PREFIX}/lib/libdrm_amdgpu.so"
+      "${SELF_AMDGPU_RUNTIME_UPSTREAM_HSAKMT_DEPENDENCY_PREFIX}/lib/libdrm.so"
+      "${SELF_AMDGPU_RUNTIME_UPSTREAM_HSAKMT_DEPENDENCY_PREFIX}/lib/libnuma.so"
+      "${SELF_AMDGPU_RUNTIME_UPSTREAM_HSAKMT_DEPENDENCY_PREFIX}/lib/libpciaccess.so")
+    foreach(_dependency IN LISTS _hsakmt_dependencies)
+      if(NOT EXISTS "${_dependency}")
+        message(FATAL_ERROR "Upstream libhsakmt dependency is absent: ${_dependency}")
+      endif()
+    endforeach()
+    add_library(self_amdgpu_upstream_hsakmt STATIC IMPORTED)
+    set_target_properties(
+      self_amdgpu_upstream_hsakmt
+      PROPERTIES IMPORTED_LOCATION
+                 "${SELF_AMDGPU_RUNTIME_UPSTREAM_HSAKMT_LIBRARY}")
+    set(_topology_tool
+        "${CMAKE_CURRENT_SOURCE_DIR}/../tools/hsakmt-model-topology.py")
+    file(SHA256 "${_topology_tool}" _topology_tool_sha256)
+    set(_topology_directory
+        "${CMAKE_CURRENT_BINARY_DIR}/hsakmt-model-topology-${_topology_tool_sha256}")
+    set(_topology_stamp
+        "${CMAKE_CURRENT_BINARY_DIR}/hsakmt-model-topology-${_topology_tool_sha256}.stamp")
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_custom_command(
+      OUTPUT "${_topology_stamp}"
+      COMMAND
+        "${Python3_EXECUTABLE}" "${_topology_tool}"
+        --output-dir "${_topology_directory}" --gpu-count 1
+      COMMAND "${CMAKE_COMMAND}" -E touch "${_topology_stamp}"
+      DEPENDS "${_topology_tool}"
+      VERBATIM)
+    add_custom_target(
+      self_amdgpu_runtime_hsakmt_topology
+      DEPENDS "${_topology_stamp}")
+    add_executable(
+      self_amdgpu_runtime_upstream_hsakmt_model_test
+      hsakmt_upstream_model_test.c)
+    target_compile_features(
+      self_amdgpu_runtime_upstream_hsakmt_model_test PRIVATE c_std_11)
+    target_include_directories(
+      self_amdgpu_runtime_upstream_hsakmt_model_test
+      SYSTEM PRIVATE "${SELF_AMDGPU_RUNTIME_HSAKMT_INCLUDE_DIR}")
+    target_link_libraries(
+      self_amdgpu_runtime_upstream_hsakmt_model_test
+      PRIVATE
+        self_amdgpu_upstream_hsakmt
+        ${_hsakmt_dependencies}
+        ${CMAKE_DL_LIBS}
+        Threads::Threads
+        rt)
+    if(MSVC)
+      target_compile_options(
+        self_amdgpu_runtime_upstream_hsakmt_model_test PRIVATE /W4 /WX)
+    else()
+      target_compile_options(
+        self_amdgpu_runtime_upstream_hsakmt_model_test
+        PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+    endif()
+    add_dependencies(
+      self_amdgpu_runtime_kmt_shim_test
+      self_amdgpu_runtime_hsakmt_topology
+      self_amdgpu_runtime_upstream_hsakmt_model_test)
+    target_compile_definitions(
+      self_amdgpu_runtime_kmt_shim_test
+      PRIVATE
+        SAGR_UPSTREAM_HSAKMT_TEST=1
+        SAGR_UPSTREAM_HSAKMT_TEST_PATH="$<TARGET_FILE:self_amdgpu_runtime_upstream_hsakmt_model_test>"
+        SAGR_HSAKMT_TOPOLOGY_PATH="${_topology_directory}")
+  endif()
+endif()
+
+if(SELF_AMDGPU_RUNTIME_UPSTREAM_ROCR_LIBRARY OR
+   SELF_AMDGPU_RUNTIME_UPSTREAM_ROCR_INCLUDE_DIR)
+  if(NOT EXISTS "${SELF_AMDGPU_RUNTIME_UPSTREAM_ROCR_LIBRARY}" OR
+     NOT IS_DIRECTORY "${SELF_AMDGPU_RUNTIME_UPSTREAM_ROCR_INCLUDE_DIR}")
+    message(
+      FATAL_ERROR
+        "Both upstream ROCr library and include directory are required")
+  endif()
+  if(NOT SELF_AMDGPU_RUNTIME_BUILD_HSAKMT_MODEL OR
+     NOT DEFINED _topology_directory)
+    message(
+      FATAL_ERROR
+        "The upstream ROCr smoke requires the HSAKMT model and topology")
+  endif()
+  add_executable(
+    self_amdgpu_runtime_upstream_rocr_model_test
+    rocr_upstream_model_test.c)
+  target_compile_features(
+    self_amdgpu_runtime_upstream_rocr_model_test PRIVATE c_std_11)
+  target_include_directories(
+    self_amdgpu_runtime_upstream_rocr_model_test
+    PRIVATE ../include
+    SYSTEM PRIVATE "${SELF_AMDGPU_RUNTIME_UPSTREAM_ROCR_INCLUDE_DIR}")
+  target_compile_definitions(
+    self_amdgpu_runtime_upstream_rocr_model_test
+    PRIVATE
+      SAGR_HSAKMT_MODEL_PATH="$<TARGET_FILE:self_amdgpu_hsakmt_model>")
+  target_link_libraries(
+    self_amdgpu_runtime_upstream_rocr_model_test
+    PRIVATE "${SELF_AMDGPU_RUNTIME_UPSTREAM_ROCR_LIBRARY}" ${CMAKE_DL_LIBS})
+  get_filename_component(_upstream_rocr_library_dir
+                         "${SELF_AMDGPU_RUNTIME_UPSTREAM_ROCR_LIBRARY}" DIRECTORY)
+  set_target_properties(
+    self_amdgpu_runtime_upstream_rocr_model_test
+    PROPERTIES BUILD_RPATH
+               "$<TARGET_FILE_DIR:self_amdgpu_hsakmt_model>;${_upstream_rocr_library_dir}"
+               INSTALL_RPATH "\$ORIGIN")
+  if(MSVC)
+    target_compile_options(
+      self_amdgpu_runtime_upstream_rocr_model_test PRIVATE /W4 /WX)
+  else()
+    target_compile_options(
+      self_amdgpu_runtime_upstream_rocr_model_test
+      PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+  endif()
+  add_dependencies(
+    self_amdgpu_runtime_kmt_shim_test
+    self_amdgpu_runtime_upstream_rocr_model_test)
+  target_compile_definitions(
+    self_amdgpu_runtime_kmt_shim_test
+    PRIVATE
+      SAGR_UPSTREAM_ROCR_TEST=1
+      SAGR_UPSTREAM_ROCR_TEST_PATH="$<TARGET_FILE:self_amdgpu_runtime_upstream_rocr_model_test>")
+endif()
 if(MSVC)
   target_compile_options(self_amdgpu_runtime_kmt_shim_test PRIVATE /W4 /WX)
 else()
@@ -93,8 +384,8 @@ target_link_libraries(
 target_compile_definitions(
   self_amdgpu_runtime_code_object_test
   PRIVATE
-    SAGR_CODE_OBJECT_GPU_READ_WRITE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco"
-    SAGR_CODE_OBJECT_BINARY_SEARCH_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/binary_search_kernels.hsaco")
+    SAGR_CODE_OBJECT_GPU_READ_WRITE_PATH="${SELF_AMDGPU_RUNTIME_REPO_ROOT}/projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco"
+    SAGR_CODE_OBJECT_BINARY_SEARCH_PATH="${SELF_AMDGPU_RUNTIME_REPO_ROOT}/projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/binary_search_kernels.hsaco")
 if(MSVC)
   target_compile_options(self_amdgpu_runtime_code_object_test PRIVATE /W4 /WX)
 else()
@@ -125,8 +416,8 @@ target_link_libraries(
 target_compile_definitions(
   self_amdgpu_runtime_triton_vecadd_compile_test
   PRIVATE
-    SAGR_TRITON_TUTORIAL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../triton/python/tutorials/01-vector-add.py"
-    SAGR_TRITON_HSACO_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../../artifacts/evidence/CP-0017/triton-builds/vecadd-gfx950.hsaco")
+    SAGR_TRITON_TUTORIAL_PATH="${SELF_AMDGPU_RUNTIME_REPO_ROOT}/projects/triton/python/tutorials/01-vector-add.py"
+    SAGR_TRITON_HSACO_PATH="${SELF_AMDGPU_RUNTIME_REPO_ROOT}/artifacts/evidence/CP-0017/triton-builds/vecadd-gfx950.hsaco")
 if(MSVC)
   target_compile_options(
     self_amdgpu_runtime_triton_vecadd_compile_test PRIVATE /W4 /WX)
@@ -141,49 +432,6 @@ add_test(
 set_tests_properties(
   self_amdgpu_runtime.triton_vecadd_compile
   PROPERTIES TIMEOUT 30)
-
-# CP-0028 exact Triton artifact gate.  The canonical HSACO is generated by the
-# pinned Triton compiler outside this source repository, so callers provide its
-# path at configure time.  With --managed the same executable additionally
-# proves upload/MAP/kernarg allocation against a live managed endpoint.
-set(
-  SELF_AMDGPU_RUNTIME_CP28_TRITON_HSACO
-  ""
-  CACHE FILEPATH "Canonical CP-0028 add_kernel HSACO for runtime validation")
-add_executable(
-  self_amdgpu_runtime_cp28_triton_artifact_test
-  cp28_triton_artifact_test.c
-  ../src/sha256.c)
-target_compile_features(
-  self_amdgpu_runtime_cp28_triton_artifact_test
-  PRIVATE c_std_11)
-target_include_directories(
-  self_amdgpu_runtime_cp28_triton_artifact_test
-  PRIVATE ../src ../include)
-target_link_libraries(
-  self_amdgpu_runtime_cp28_triton_artifact_test
-  PRIVATE SelfAmdgpuRuntime::runtime)
-if(MSVC)
-  target_compile_options(
-    self_amdgpu_runtime_cp28_triton_artifact_test PRIVATE /W4 /WX)
-else()
-  target_compile_options(
-    self_amdgpu_runtime_cp28_triton_artifact_test
-    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
-endif()
-if(SELF_AMDGPU_RUNTIME_CP28_TRITON_HSACO)
-  add_test(
-    NAME self_amdgpu_runtime.cp28_triton_artifact
-    COMMAND self_amdgpu_runtime_cp28_triton_artifact_test
-            "${SELF_AMDGPU_RUNTIME_CP28_TRITON_HSACO}")
-else()
-  add_test(
-    NAME self_amdgpu_runtime.cp28_triton_artifact
-    COMMAND self_amdgpu_runtime_cp28_triton_artifact_test)
-endif()
-set_tests_properties(
-  self_amdgpu_runtime.cp28_triton_artifact
-  PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
 
 add_executable(
   self_amdgpu_runtime_code_object_transport_test
@@ -218,6 +466,10 @@ add_executable(
   ../src/transport_codec.c)
 target_compile_features(
   self_amdgpu_runtime_generic_dispatch_v2_transport_test PRIVATE c_std_11)
+target_compile_definitions(
+  self_amdgpu_runtime_generic_dispatch_v2_transport_test
+  PRIVATE
+    AMDGPU_SIM_BRIDGE_VECTOR_DIR="${SELF_AMDGPU_RUNTIME_REPO_ROOT}/tests/fixtures/runtime-gem5-bridge/generic-v2")
 target_include_directories(
   self_amdgpu_runtime_generic_dispatch_v2_transport_test
   PRIVATE ../src ../include)
@@ -252,7 +504,7 @@ target_link_libraries(
 target_compile_definitions(
   self_amdgpu_runtime_code_object_upload_test
   PRIVATE
-    SAGR_CODE_OBJECT_GPU_READ_WRITE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco")
+    SAGR_CODE_OBJECT_GPU_READ_WRITE_PATH="${SELF_AMDGPU_RUNTIME_REPO_ROOT}/projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/gpuReadWrite_kernels.hsaco")
 if(MSVC)
   target_compile_options(self_amdgpu_runtime_code_object_upload_test PRIVATE /W4 /WX)
 else()
@@ -509,7 +761,8 @@ add_test(
 if(SELF_AMDGPU_RUNTIME_BUILD_OPENCL)
   add_executable(
     self_amdgpu_runtime_opencl_api_test
-    opencl_api_test.c)
+    opencl_api_test.c
+    ../src/opencl_geometry.c)
   target_compile_features(
     self_amdgpu_runtime_opencl_api_test
     PRIVATE c_std_11)

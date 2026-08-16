@@ -202,6 +202,7 @@ static int expect_dispatch_option_defaults(void) {
 
 static int expect_managed_option_defaults(void) {
   sagr_managed_session_options_t session;
+  sagr_managed_session_options_v2_t exact_session;
   sagr_managed_launch_options_t launch;
   if (sagr_managed_session_options_init(
           &session, (uint32_t)sizeof(session)) != SAGR_STATUS_SUCCESS ||
@@ -217,6 +218,20 @@ static int expect_managed_option_defaults(void) {
       session.startup_timeout_ns != UINT64_C(15000000000) ||
       session.operation_timeout_ns != UINT64_C(21600000000000) ||
       session.run_timeout_ns != UINT64_C(86400000000000) ||
+      sagr_managed_session_options_v2_init(
+          &exact_session, (uint32_t)sizeof(exact_session)) !=
+          SAGR_STATUS_SUCCESS ||
+      exact_session.struct_size != (uint32_t)sizeof(exact_session) ||
+      exact_session.version != SAGR_MANAGED_SESSION_OPTIONS_V2_VERSION ||
+      exact_session.flags != 0U || exact_session.epoch != 0U ||
+      exact_session.rank != 0U || exact_session.world_size != 0U ||
+      exact_session.queue_depth != SAGR_MANAGED_DEFAULT_QUEUE_DEPTH ||
+      exact_session.startup_timeout_ns !=
+          SAGR_MANAGED_DEFAULT_STARTUP_TIMEOUT_NS ||
+      exact_session.operation_timeout_ns !=
+          SAGR_MANAGED_DEFAULT_OPERATION_TIMEOUT_NS ||
+      exact_session.run_timeout_ns !=
+          SAGR_MANAGED_DEFAULT_RUN_TIMEOUT_NS ||
       sagr_managed_launch_options_init(
           &launch, (uint32_t)sizeof(launch)) != SAGR_STATUS_SUCCESS ||
       launch.struct_size != (uint32_t)sizeof(launch) ||
@@ -246,6 +261,13 @@ static int expect_managed_option_defaults(void) {
           &session, (uint32_t)sizeof(session) - 1U) !=
           SAGR_STATUS_BUFFER_TOO_SMALL ||
       session.struct_size != (uint32_t)sizeof(session) ||
+      sagr_managed_session_options_v2_init(NULL,
+                                            (uint32_t)sizeof(exact_session)) !=
+          SAGR_STATUS_INVALID_ARGUMENT ||
+      sagr_managed_session_options_v2_init(
+          &exact_session, (uint32_t)sizeof(exact_session) - 1U) !=
+          SAGR_STATUS_BUFFER_TOO_SMALL ||
+      exact_session.struct_size != (uint32_t)sizeof(exact_session) ||
       sagr_managed_launch_options_init(NULL, (uint32_t)sizeof(launch)) !=
           SAGR_STATUS_INVALID_ARGUMENT ||
       sagr_managed_launch_options_init(
@@ -253,6 +275,82 @@ static int expect_managed_option_defaults(void) {
           SAGR_STATUS_BUFFER_TOO_SMALL ||
       launch.struct_size != (uint32_t)sizeof(launch)) {
     fprintf(stderr, "unexpected managed API option validation\n");
+    return 1;
+  }
+  return 0;
+}
+
+static int expect_exact_managed_option_validation(void) {
+  sagr_managed_session_options_v2_t options;
+  sagr_managed_session_options_t legacy_options;
+  sagr_managed_session_t session = NULL;
+  sagr_error_info_t error;
+  if (sagr_managed_session_options_init(
+          &legacy_options, (uint32_t)sizeof(legacy_options)) !=
+          SAGR_STATUS_SUCCESS) {
+    return 1;
+  }
+  legacy_options.flags = UINT32_C(2);
+  if (sagr_managed_session_open(
+          &legacy_options, &session, NULL, 0U, &error,
+          (uint32_t)sizeof(error)) != SAGR_STATUS_INVALID_ARGUMENT ||
+      session != NULL) {
+    fprintf(stderr, "unknown managed-session v1 flag was accepted\n");
+    return 1;
+  }
+  if (sagr_managed_session_options_v2_init(
+          &options, (uint32_t)sizeof(options)) != SAGR_STATUS_SUCCESS ||
+      sagr_managed_session_open_v2(
+          &options, &session, NULL, 0U, &error,
+          (uint32_t)sizeof(error)) != SAGR_STATUS_INVALID_ARGUMENT ||
+      session != NULL) {
+    fprintf(stderr, "zero exact-topology identity was accepted\n");
+    return 1;
+  }
+
+  options.epoch = 1U;
+  options.world_size = 2U;
+  options.rank = 2U;
+  options.job_uuid[0] = 1U;
+  if (sagr_managed_session_open_v2(
+          &options, &session, NULL, 0U, &error,
+          (uint32_t)sizeof(error)) != SAGR_STATUS_INVALID_ARGUMENT ||
+      session != NULL) {
+    fprintf(stderr, "out-of-range exact-topology rank was accepted\n");
+    return 1;
+  }
+
+  options.rank = 1U;
+  options.flags = SAGR_MANAGED_SESSION_V2_FLAG_EXTERNAL_ENDPOINT;
+  memcpy(options.endpoint, "relative.sock", sizeof("relative.sock"));
+  if (sagr_managed_session_open_v2(
+          &options, &session, NULL, 0U, &error,
+          (uint32_t)sizeof(error)) != SAGR_STATUS_INVALID_ARGUMENT ||
+      session != NULL) {
+    fprintf(stderr, "relative exact-topology endpoint was accepted\n");
+    return 1;
+  }
+
+  memset(options.endpoint, 0, sizeof(options.endpoint));
+  options.flags = 0U;
+  options.endpoint[0] = (uint8_t)'/';
+  if (sagr_managed_session_open_v2(
+          &options, &session, NULL, 0U, &error,
+          (uint32_t)sizeof(error)) != SAGR_STATUS_INVALID_ARGUMENT ||
+      session != NULL) {
+    fprintf(stderr, "unselected exact-topology endpoint was accepted\n");
+    return 1;
+  }
+
+  memset(options.endpoint, 0, sizeof(options.endpoint));
+  options.flags = SAGR_MANAGED_SESSION_V2_FLAG_EXTERNAL_ENDPOINT |
+                  SAGR_MANAGED_SESSION_V2_FLAG_PRIVATE_NAMESPACE;
+  memcpy(options.endpoint, "/tmp/both.sock", sizeof("/tmp/both.sock"));
+  if (sagr_managed_session_open_v2(
+          &options, &session, NULL, 0U, &error,
+          (uint32_t)sizeof(error)) != SAGR_STATUS_INVALID_ARGUMENT ||
+      session != NULL) {
+    fprintf(stderr, "conflicting exact-topology endpoint modes were accepted\n");
     return 1;
   }
   return 0;
@@ -298,6 +396,8 @@ int main(void) {
                  "public dispatch completion ABI size changed");
   _Static_assert(sizeof(sagr_managed_session_options_t) == 64,
                  "managed session options ABI size changed");
+  _Static_assert(sizeof(sagr_managed_session_options_v2_t) == 200,
+                 "managed session v2 options ABI size changed");
   _Static_assert(sizeof(sagr_managed_session_info_t) == 96,
                  "managed session info ABI size changed");
   _Static_assert(sizeof(sagr_managed_kernel_info_t) == 176,
@@ -308,10 +408,10 @@ int main(void) {
                  "generic completion ABI size changed");
 
   if (abi_version != SAGR_ABI_VERSION ||
-      strcmp(SAGR_VERSION_STRING, "0.6.0") != 0 ||
+      strcmp(SAGR_VERSION_STRING, "0.8.0") != 0 ||
       SAGR_ABI_VERSION_DECODE_MAJOR(abi_version) != SAGR_ABI_VERSION_MAJOR ||
       SAGR_ABI_VERSION_DECODE_MINOR(abi_version) != SAGR_ABI_VERSION_MINOR ||
-      SAGR_ABI_VERSION_MAJOR != 1 || SAGR_ABI_VERSION_MINOR != 6 ||
+      SAGR_ABI_VERSION_MAJOR != 1 || SAGR_ABI_VERSION_MINOR != 8 ||
       SAGR_CAPABILITY_QUEUE_MASK != UINT64_C(2) ||
       SAGR_QUEUE_COMMAND_CONTROL_ERROR_TEST != UINT64_C(2) ||
       SAGR_CAPABILITY_MEMORY_MASK != UINT64_C(4) ||
@@ -374,6 +474,7 @@ int main(void) {
   failures += expect_signal_option_defaults();
   failures += expect_dispatch_option_defaults();
   failures += expect_managed_option_defaults();
+  failures += expect_exact_managed_option_validation();
 
   return failures == 0 ? 0 : 1;
 }

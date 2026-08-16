@@ -2495,9 +2495,9 @@ static sagr_status_t receive_code_object_ack(
   }
 }
 
-sagr_status_t sagr_transport_kmt_exchange(
+sagr_status_t sagr_transport_kmt_exchange_with_descriptor(
     sagr_instance_t opaque_instance, const sagr_kmt_envelope_request_t *request,
-    const sagr_kmt_call_options_t *options,
+    int descriptor, const sagr_kmt_call_options_t *options,
     sagr_kmt_envelope_result_t *result, int32_t *wire_status,
     sagr_error_info_t *error, uint32_t error_size) {
   struct sagr_instance *instance = (struct sagr_instance *)opaque_instance;
@@ -2517,7 +2517,9 @@ sagr_status_t sagr_transport_kmt_exchange(
   initialize_error(error, error_size);
   if (instance == NULL || instance->magic != SAGR_INSTANCE_MAGIC ||
       request == NULL || result == NULL ||
-      (error != NULL && error_size < sizeof(*error))) {
+      (error != NULL && error_size < sizeof(*error)) || descriptor < -1 ||
+      ((request != NULL && request->operation == SAGR_KMT_OP_EXPORT_BACKING) !=
+       (descriptor >= 0))) {
     return fail_open(error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1, 0,
                      "invalid KMT exchange arguments");
   }
@@ -2579,9 +2581,22 @@ sagr_status_t sagr_transport_kmt_exchange(
                      "could not encode KMT request");
   }
   instance->operation_active = 1;
-  status = send_record(instance->socket_fd, request_frame, request_size,
-                       &deadline, local_options.cancel_fd, &native_errno,
-                       &record_sent);
+  if (descriptor >= 0) {
+    const int descriptor_flags = fcntl(descriptor, F_GETFD);
+    if (descriptor_flags < 0 || (descriptor_flags & FD_CLOEXEC) == 0) {
+      instance->operation_active = 0;
+      return fail_open(error, error_size, SAGR_STATUS_INVALID_ARGUMENT, -1,
+                       descriptor_flags < 0 ? errno : EINVAL,
+                       "KMT backing descriptor must be CLOEXEC");
+    }
+    status = send_record_with_descriptor(
+        instance->socket_fd, request_frame, request_size, descriptor,
+        &deadline, local_options.cancel_fd, &native_errno, &record_sent);
+  } else {
+    status = send_record(instance->socket_fd, request_frame, request_size,
+                         &deadline, local_options.cancel_fd, &native_errno,
+                         &record_sent);
+  }
   if (status != SAGR_STATUS_SUCCESS) {
     if (record_sent != 0) {
       poison_queue_transport(instance);
@@ -2611,6 +2626,7 @@ sagr_status_t sagr_transport_kmt_exchange(
       ((request->operation != SAGR_KMT_OP_OPEN_KFD &&
         request->operation != SAGR_KMT_OP_TOPOLOGY_SNAPSHOT &&
         request->operation != SAGR_KMT_OP_ALLOC_MEMORY &&
+        request->operation != SAGR_KMT_OP_ALLOC_MEMORY_OF_GPU &&
         request->operation != SAGR_KMT_OP_QUEUE_CREATE &&
         request->operation != SAGR_KMT_OP_EVENT_CREATE) &&
        (result->object_id != request->object_id ||
@@ -2636,6 +2652,16 @@ sagr_status_t sagr_transport_kmt_exchange(
     (void)snprintf(error->message, sizeof(error->message), "%s", reason);
   }
   return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_transport_kmt_exchange(
+    sagr_instance_t opaque_instance, const sagr_kmt_envelope_request_t *request,
+    const sagr_kmt_call_options_t *options,
+    sagr_kmt_envelope_result_t *result, int32_t *wire_status,
+    sagr_error_info_t *error, uint32_t error_size) {
+  return sagr_transport_kmt_exchange_with_descriptor(
+      opaque_instance, request, -1, options, result, wire_status, error,
+      error_size);
 }
 
 sagr_status_t

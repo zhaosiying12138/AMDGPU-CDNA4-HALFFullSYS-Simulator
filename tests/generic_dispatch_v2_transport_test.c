@@ -3,6 +3,7 @@
 #include "transport_internal.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int expect(int condition, const char *message) {
@@ -11,6 +12,48 @@ static int expect(int condition, const char *message) {
     return 1;
   }
   return 0;
+}
+
+static int load_vector(const char *name,
+                       uint8_t output[SAGR_WIRE_GENERIC_PAYLOAD_BYTES]) {
+  char path[1024];
+  FILE *stream;
+  size_t bytes;
+  int written = snprintf(path, sizeof(path), "%s/%s",
+                         AMDGPU_SIM_BRIDGE_VECTOR_DIR, name);
+  if (written <= 0 || (size_t)written >= sizeof(path)) {
+    return 0;
+  }
+  stream = fopen(path, "rb");
+  if (stream == NULL) {
+    return 0;
+  }
+  bytes = fread(output, 1U, SAGR_WIRE_GENERIC_PAYLOAD_BYTES, stream);
+  return fgetc(stream) == EOF && fclose(stream) == 0 &&
+         bytes == SAGR_WIRE_GENERIC_PAYLOAD_BYTES;
+}
+
+static int expect_payload_vector(const uint8_t *frame, const char *name) {
+  uint8_t expected[SAGR_WIRE_GENERIC_PAYLOAD_BYTES];
+  size_t mismatch = SAGR_WIRE_GENERIC_PAYLOAD_BYTES;
+  if (!load_vector(name, expected)) {
+    return expect(0, "shared response vector loads");
+  }
+  for (size_t index = 0; index < SAGR_WIRE_GENERIC_PAYLOAD_BYTES; ++index) {
+    if (frame[SAGR_WIRE_HEADER_BYTES + index] != expected[index]) {
+      mismatch = index;
+      break;
+    }
+  }
+  if (mismatch == SAGR_WIRE_GENERIC_PAYLOAD_BYTES) {
+    return 0;
+  }
+  fprintf(stderr,
+          "generic dispatch v2 transport: %s differs at payload offset %zu "
+          "(actual=0x%02x expected=0x%02x)\n",
+          name, mismatch, frame[SAGR_WIRE_HEADER_BYTES + mismatch],
+          expected[mismatch]);
+  return 1;
 }
 
 static void fill_info(sagr_instance_info_t *info) {
@@ -42,23 +85,42 @@ static void fill_request(sagr_wire_generic_request_t *request, uint16_t opcode) 
     request->image_sha256[index] = (uint8_t)(index + 1U);
   }
   (void)snprintf(request->kernel_name, sizeof(request->kernel_name), "%s",
-                 "vecadd");
+                 "bridge_generic_kernel");
 }
 
 static int round_trip_request(const sagr_instance_info_t *info,
                               const sagr_wire_generic_request_t *request,
                               sagr_wire_generic_request_t *decoded,
-                              uint64_t expected_id) {
+                              uint64_t expected_id,
+                              const char *vector_name) {
   uint8_t frame[SAGR_WIRE_GENERIC_FRAME_BYTES];
+  uint8_t expected_payload[SAGR_WIRE_GENERIC_PAYLOAD_BYTES];
   size_t frame_size = 0U;
   uint64_t request_id = 0U;
   const char *reason = NULL;
   int failures = 0;
+  size_t mismatch = SAGR_WIRE_GENERIC_PAYLOAD_BYTES;
   failures += expect(sagr_protocol_encode_generic_dispatch_request(
                          info, expected_id, request, frame, sizeof(frame),
                          &frame_size) == SAGR_STATUS_SUCCESS &&
                          frame_size == SAGR_WIRE_GENERIC_FRAME_BYTES,
                      "request uses one fixed 4096-byte frame");
+  failures += expect(load_vector(vector_name, expected_payload),
+                     "shared runtime-gem5 golden vector loads");
+  for (size_t index = 0; index < SAGR_WIRE_GENERIC_PAYLOAD_BYTES; ++index) {
+    if (frame[SAGR_WIRE_HEADER_BYTES + index] != expected_payload[index]) {
+      mismatch = index;
+      break;
+    }
+  }
+  if (mismatch != SAGR_WIRE_GENERIC_PAYLOAD_BYTES) {
+    fprintf(stderr,
+            "generic dispatch v2 transport: %s differs at payload offset %zu "
+            "(actual=0x%02x expected=0x%02x)\n",
+            vector_name, mismatch, frame[SAGR_WIRE_HEADER_BYTES + mismatch],
+            expected_payload[mismatch]);
+    ++failures;
+  }
   failures += expect(sagr_protocol_decode_generic_dispatch_request(
                          frame, frame_size, info, decoded, &request_id,
                          &reason) == SAGR_STATUS_SUCCESS &&
@@ -115,7 +177,9 @@ int main(void) {
   request.body.map.kernarg_segment_align = 8U;
   request.body.map.descriptor_preload_dwords = 12U;
   request.body.map.page_size = 4096U;
-  failures += round_trip_request(&info, &request, &decoded_request, 41U);
+  failures += round_trip_request(
+      &info, &request, &decoded_request, 41U,
+      "request-map-object.bin");
   failures += expect(decoded_request.body.map.descriptor_preload_dwords == 12U,
                      "Triton 12-DWORD preload round-trips exactly");
   request.body.map.descriptor_preload_dwords =
@@ -125,7 +189,9 @@ int main(void) {
                          &frame_size) == SAGR_STATUS_INVALID_ARGUMENT,
                      "preload above 64 DWORD is rejected");
   request.body.map.descriptor_preload_dwords = 12U;
-  failures += round_trip_request(&info, &request, &decoded_request, 42U);
+  failures += round_trip_request(
+      &info, &request, &decoded_request, 42U,
+      "request-map-object.bin");
 
   /* Re-encode before mutating so this check is independent of the helper's
    * local frame lifetime. */
@@ -159,7 +225,9 @@ int main(void) {
   memset(request.kernel_name, 0, sizeof(request.kernel_name));
   request.body.alloc_kernarg.size_bytes = 48U;
   request.body.alloc_kernarg.alignment_bytes = 8U;
-  failures += round_trip_request(&info, &request, &decoded_request, 43U);
+  failures += round_trip_request(
+      &info, &request, &decoded_request, 43U,
+      "request-alloc-kernarg.bin");
   failures += expect(decoded_request.body.alloc_kernarg.size_bytes == 48U,
                      "ALLOC preserves kernarg size");
 
@@ -184,7 +252,9 @@ int main(void) {
   request.body.submit.num_warps = 4U;
   request.body.submit.num_ctas = 1U;
   request.body.submit.wavefront_size = 64U;
-  failures += round_trip_request(&info, &request, &decoded_request, 47U);
+  failures += round_trip_request(
+      &info, &request, &decoded_request, 47U,
+      "request-submit-aql.bin");
   failures += expect(decoded_request.body.submit.grid_x == 24832U &&
                          decoded_request.body.submit.workgroup_x == 256U,
                      "SUBMIT preserves work-item and workgroup geometry");
@@ -206,7 +276,9 @@ int main(void) {
   request.mapping_generation = UINT64_C(13);
   memset(request.image_sha256, 0, sizeof(request.image_sha256));
   memset(request.kernel_name, 0, sizeof(request.kernel_name));
-  failures += round_trip_request(&info, &request, &decoded_request, 53U);
+  failures += round_trip_request(
+      &info, &request, &decoded_request, 53U,
+      "request-unmap-object.bin");
 
   fill_map_response(&response);
   failures += expect(sagr_protocol_encode_generic_dispatch_response(
@@ -214,6 +286,7 @@ int main(void) {
                          &response, frame, sizeof(frame), &frame_size) ==
                          SAGR_STATUS_SUCCESS,
                      "MAP ACK encodes daemon-issued GPU VAs");
+  failures += expect_payload_vector(frame, "response-map-object-success.bin");
   failures += expect(sagr_protocol_decode_generic_dispatch_response(
                          frame, frame_size, &info, 61U,
                          SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_ACK,
@@ -222,6 +295,32 @@ int main(void) {
                          decoded_response.descriptor_preload_dwords == 12U &&
                          decoded_response.request_id == 61U,
                      "MAP ACK round-trips mapping identity and preload");
+
+  memset(&response, 0, sizeof(response));
+  response.major = SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR;
+  response.minor = SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR;
+  response.status = SAGR_WIRE_STATUS_OK;
+  response.opcode = SAGR_WIRE_GENERIC_OPCODE_ALLOC_KERNARG;
+  response.object_id = 7U;
+  response.object_generation = 9U;
+  response.mapping_id = 11U;
+  response.mapping_generation = 13U;
+  response.kernarg_allocation_id = 29U;
+  response.kernarg_generation = 31U;
+  response.kernarg_va = UINT64_C(0x100000004000);
+  response.kernarg_size = 48U;
+  response.kernarg_alignment = 8U;
+  for (size_t index = 0; index < sizeof(response.image_sha256); ++index) {
+    response.image_sha256[index] = (uint8_t)(index + 1U);
+  }
+  failures += expect(sagr_protocol_encode_generic_dispatch_response(
+                         &info, 67U,
+                         SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_ACK,
+                         &response, frame, sizeof(frame), &frame_size) ==
+                         SAGR_STATUS_SUCCESS,
+                     "ALLOC ACK encodes daemon allocation identity");
+  failures += expect_payload_vector(frame,
+                                    "response-alloc-kernarg-success.bin");
 
   memset(&response, 0, sizeof(response));
   response.major = SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR;
@@ -266,6 +365,24 @@ int main(void) {
                              SAGR_STATUS_SUCCESS &&
                          decoded_response.retire_tick == 130U,
                      "SUBMIT completion round-trips without execution claim");
+  failures += expect_payload_vector(frame, "response-submit-aql-success.bin");
+
+  memset(&response, 0, sizeof(response));
+  response.major = SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR;
+  response.minor = SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR;
+  response.status = SAGR_WIRE_STATUS_OK;
+  response.opcode = SAGR_WIRE_GENERIC_OPCODE_UNMAP_OBJECT;
+  response.object_id = 7U;
+  response.object_generation = 9U;
+  response.mapping_id = 11U;
+  response.mapping_generation = 13U;
+  failures += expect(sagr_protocol_encode_generic_dispatch_response(
+                         &info, 72U,
+                         SAGR_WIRE_MESSAGE_GENERIC_DISPATCH_ACK,
+                         &response, frame, sizeof(frame), &frame_size) ==
+                         SAGR_STATUS_SUCCESS,
+                     "UNMAP ACK encodes released mapping identity");
+  failures += expect_payload_vector(frame, "response-unmap-object-success.bin");
 
   memset(&response, 0, sizeof(response));
   response.major = SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR;
@@ -284,6 +401,8 @@ int main(void) {
                              SAGR_STATUS_VERSION_MISMATCH && wire_status ==
                              SAGR_WIRE_STATUS_UNSUPPORTED_VERSION,
                      "failed ACK is canonical and maps its wire status");
+  failures += expect_payload_vector(
+      frame, "response-map-object-unsupported-version.bin");
 
   request.mapping_id = UINT64_C(99);
   request.opcode = SAGR_WIRE_GENERIC_OPCODE_MAP_OBJECT;

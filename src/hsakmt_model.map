@@ -1,0 +1,6 @@
+SAGR_HSAKMT_MODEL_1.1 {
+  global:
+    get_hsakmt_model_functions;
+  local:
+    *;
+};

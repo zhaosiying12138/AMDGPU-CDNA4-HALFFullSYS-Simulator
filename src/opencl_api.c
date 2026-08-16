@@ -111,11 +111,14 @@ clGetDeviceInfo(cl_device_id device, cl_device_info parameter_name,
     DEVICE_SCALAR(CL_DEVICE_MAX_COMPUTE_UNITS, cl_uint, 1U)
     DEVICE_SCALAR(CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, cl_uint, 3U)
     case CL_DEVICE_MAX_WORK_ITEM_SIZES: {
-      const size_t sizes[3] = {1024U, 1U, 1U};
+      const size_t sizes[3] = {SAGR_CL_MAX_WORK_ITEM_SIZE,
+                               SAGR_CL_MAX_WORK_ITEM_SIZE,
+                               SAGR_CL_MAX_WORK_ITEM_SIZE};
       return sagr_cl_copy_info(sizes, sizeof(sizes), parameter_size,
                                parameter_value, parameter_size_ret);
     }
-    DEVICE_SCALAR(CL_DEVICE_MAX_WORK_GROUP_SIZE, size_t, 256U)
+    DEVICE_SCALAR(CL_DEVICE_MAX_WORK_GROUP_SIZE, size_t,
+                  SAGR_CL_MAX_WORK_GROUP_SIZE)
     DEVICE_SCALAR(CL_DEVICE_PREFERRED_VECTOR_WIDTH_CHAR, cl_uint, 1U)
     DEVICE_SCALAR(CL_DEVICE_PREFERRED_VECTOR_WIDTH_SHORT, cl_uint, 1U)
     DEVICE_SCALAR(CL_DEVICE_PREFERRED_VECTOR_WIDTH_INT, cl_uint, 1U)
@@ -161,7 +164,7 @@ clGetDeviceInfo(cl_device_id device, cl_device_info parameter_name,
       return sagr_cl_copy_string("self-amdgpu-runtime", parameter_size,
                                  parameter_value, parameter_size_ret);
     case CL_DRIVER_VERSION:
-      return sagr_cl_copy_string("0.6.0-cp27", parameter_size,
+      return sagr_cl_copy_string("0.8.0-ccl-v1", parameter_size,
                                  parameter_value, parameter_size_ret);
     case CL_DEVICE_PROFILE:
       return sagr_cl_copy_string("FULL_PROFILE", parameter_size,

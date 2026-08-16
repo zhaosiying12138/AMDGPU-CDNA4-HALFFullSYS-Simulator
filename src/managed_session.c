@@ -5,9 +5,14 @@
 #include <self_amdgpu_runtime/code_object.h>
 #include <self_amdgpu_runtime/runtime.h>
 
+#include "smi_registry_internal.h"
+#include "managed_session_internal.h"
+#include "managed_supervisor_protocol.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdint.h>
@@ -35,6 +40,8 @@
 #define SAGR_MANAGED_SESSION_MAGIC UINT64_C(0x534147524d534553)
 #define SAGR_MANAGED_BUFFER_MAGIC UINT64_C(0x534147524d425546)
 #define SAGR_MANAGED_KERNEL_MAGIC UINT64_C(0x534147524d4b4552)
+#define SAGR_MANAGED_SUPERVISOR_ENV "SAGR_MANAGED_SUPERVISOR"
+#define SAGR_MANAGED_SUPERVISOR_GRACE_MS UINT64_C(2000)
 
 struct sagr_managed_buffer {
   uint64_t magic;
@@ -66,19 +73,28 @@ struct sagr_managed_session {
   struct sagr_managed_kernel *kernels;
   pid_t child_pid;
   pid_t child_pgid;
+  pid_t supervisor_pid;
+  pid_t owner_pid;
   uint64_t epoch;
+  uint32_t rank;
+  uint32_t world_size;
   uint8_t job_uuid[SAGR_UUID_SIZE];
   char job_uuid_text[33];
+  int exact_topology;
   int external_endpoint;
+  int require_kmt;
+  int supervised;
   char prefix[PATH_MAX];
   char gem5_path[PATH_MAX];
   char gem5_config_path[PATH_MAX];
+  char supervisor_path[PATH_MAX];
   char repo_root[PATH_MAX];
   char run_dir[PATH_MAX];
   char endpoint[PATH_MAX];
   char trace_path[PATH_MAX];
   char output_dir[PATH_MAX];
   char log_path[PATH_MAX];
+  sagr_smi_registry_lease_t smi_lease;
 };
 
 static int bytes_are_zero(const uint8_t *bytes, size_t size) {
@@ -133,7 +149,7 @@ static void succeed(sagr_error_info_t *error, uint32_t error_size,
 
 static int session_valid(const struct sagr_managed_session *session) {
   return session != NULL && session->magic == SAGR_MANAGED_SESSION_MAGIC &&
-         session->instance != NULL;
+         session->instance != NULL && session->owner_pid == getpid();
 }
 
 static int buffer_valid(const struct sagr_managed_buffer *buffer) {
@@ -264,6 +280,17 @@ static void make_job_uuid(uint64_t epoch, uint64_t process_id,
   text[32] = '\0';
 }
 
+static void format_job_uuid(const uint8_t bytes[SAGR_UUID_SIZE],
+                            char text[33]) {
+  static const char digits[] = "0123456789abcdef";
+  size_t index;
+  for (index = 0U; index < SAGR_UUID_SIZE; ++index) {
+    text[index * 2U] = digits[bytes[index] >> 4U];
+    text[index * 2U + 1U] = digits[bytes[index] & 0x0fU];
+  }
+  text[32] = '\0';
+}
+
 static uint64_t make_epoch(void) {
   struct timespec value;
   uint64_t result = (uint64_t)(uint32_t)getpid() << 32U;
@@ -277,7 +304,8 @@ static uint64_t make_epoch(void) {
 
 static int configure_spawn(posix_spawn_file_actions_t *actions,
                            posix_spawnattr_t *attributes,
-                           const char *working_dir, const char *log_path) {
+                           const char *working_dir, const char *log_path,
+                           int status_read_fd, int status_write_fd) {
   const short flags = POSIX_SPAWN_SETPGROUP;
   if (posix_spawn_file_actions_init(actions) != 0 ||
       posix_spawnattr_init(attributes) != 0 ||
@@ -302,6 +330,69 @@ static int configure_spawn(posix_spawn_file_actions_t *actions,
     return 0;
   }
 #endif
+  if (status_read_fd >= 0 && status_write_fd >= 0 &&
+      (posix_spawn_file_actions_addclose(actions, status_read_fd) != 0 ||
+       posix_spawn_file_actions_adddup2(
+           actions, status_write_fd, SAGR_MANAGED_SUPERVISOR_REPORT_FD) !=
+           0 ||
+       (status_write_fd != SAGR_MANAGED_SUPERVISOR_REPORT_FD &&
+        posix_spawn_file_actions_addclose(actions, status_write_fd) != 0))) {
+    return 0;
+  }
+  return 1;
+}
+
+static int read_supervisor_report(int descriptor, uint64_t timeout_ms,
+                                  sagr_managed_supervisor_report_t *report) {
+  const uint64_t start = monotonic_milliseconds();
+  uint8_t *bytes = (uint8_t *)report;
+  size_t offset = 0U;
+  if (descriptor < 0 || report == NULL || timeout_ms == 0U) {
+    errno = EINVAL;
+    return 0;
+  }
+  memset(report, 0, sizeof(*report));
+  while (offset < sizeof(*report)) {
+    struct pollfd readiness;
+    uint64_t elapsed = monotonic_milliseconds() - start;
+    int remaining;
+    ssize_t count;
+    if (elapsed >= timeout_ms) {
+      errno = ETIMEDOUT;
+      return 0;
+    }
+    remaining = (int)(timeout_ms - elapsed > (uint64_t)INT_MAX
+                          ? (uint64_t)INT_MAX
+                          : timeout_ms - elapsed);
+    memset(&readiness, 0, sizeof(readiness));
+    readiness.fd = descriptor;
+    readiness.events = POLLIN;
+    do {
+      count = poll(&readiness, 1U, remaining);
+    } while (count < 0 && errno == EINTR);
+    if (count <= 0) {
+      if (count == 0) {
+        errno = ETIMEDOUT;
+      }
+      return 0;
+    }
+    do {
+      count = read(descriptor, bytes + offset, sizeof(*report) - offset);
+    } while (count < 0 && errno == EINTR);
+    if (count <= 0) {
+      errno = count == 0 ? EPIPE : errno;
+      return 0;
+    }
+    offset += (size_t)count;
+  }
+  if (report->magic != SAGR_MANAGED_SUPERVISOR_REPORT_MAGIC ||
+      report->version != SAGR_MANAGED_SUPERVISOR_PROTOCOL_VERSION ||
+      report->error_number != 0 || report->daemon_pid <= 0 ||
+      report->daemon_pid > (int64_t)INT32_MAX ||
+      !bytes_are_zero(report->reserved, sizeof(report->reserved))) {
+    errno = report->error_number != 0 ? report->error_number : EPROTO;
+    return 0;
+  }
   return 1;
 }
 
@@ -309,30 +400,49 @@ static int spawn_gem5(struct sagr_managed_session *session) {
   posix_spawn_file_actions_t actions;
   posix_spawnattr_t attributes;
   char epoch[32];
+  char rank[16];
+  char world_size[16];
   char startup_timeout[32];
   char run_timeout[32];
+  char owner_pid[32];
+  char grace_ms[32];
+  char status_fd[16];
   char path_environment[64];
   char home_environment[PATH_MAX + 16];
   char temp_environment[PATH_MAX + 16];
   char cache_environment[PATH_MAX + 32];
   char *environment[8];
   char *arguments[28];
+  char *supervisor_arguments[40];
+  sagr_managed_supervisor_report_t report;
+  int report_pipe[2] = {-1, -1};
+  pid_t spawned_pid = -1;
+  int supervisor_index = 0;
   int index = 0;
   int count;
   if (!regular_file(session->gem5_path, 1) ||
       !regular_file(session->gem5_config_path, 0) ||
-      access(session->repo_root, X_OK) != 0) {
+      access(session->repo_root, X_OK) != 0 ||
+      (session->supervised && !regular_file(session->supervisor_path, 1))) {
     return 0;
   }
   count = snprintf(epoch, sizeof(epoch), "%llu",
                    (unsigned long long)session->epoch);
   if (count < 0 || (size_t)count >= sizeof(epoch) ||
+      snprintf(rank, sizeof(rank), "%u", session->rank) < 0 ||
+      snprintf(world_size, sizeof(world_size), "%u", session->world_size) <
+          0 ||
       snprintf(startup_timeout, sizeof(startup_timeout), "%llu",
                (unsigned long long)timeout_milliseconds(
                    session->options.startup_timeout_ns)) < 0 ||
       snprintf(run_timeout, sizeof(run_timeout), "%llu",
                (unsigned long long)timeout_milliseconds(
                    session->options.run_timeout_ns)) < 0 ||
+      snprintf(owner_pid, sizeof(owner_pid), "%ld", (long)getpid()) < 0 ||
+      snprintf(grace_ms, sizeof(grace_ms), "%llu",
+               (unsigned long long)SAGR_MANAGED_SUPERVISOR_GRACE_MS) < 0 ||
+      snprintf(status_fd, sizeof(status_fd), "%d",
+               SAGR_MANAGED_SUPERVISOR_REPORT_FD) < 0 ||
       snprintf(path_environment, sizeof(path_environment),
                "PATH=/usr/bin:/bin") < 0 ||
       snprintf(home_environment, sizeof(home_environment), "HOME=%s",
@@ -366,9 +476,9 @@ static int spawn_gem5(struct sagr_managed_session *session) {
   arguments[index++] = (char *)"--job-uuid";
   arguments[index++] = session->job_uuid_text;
   arguments[index++] = (char *)"--rank";
-  arguments[index++] = (char *)"0";
+  arguments[index++] = rank;
   arguments[index++] = (char *)"--world-size";
-  arguments[index++] = (char *)"1";
+  arguments[index++] = world_size;
   arguments[index++] = (char *)"--startup-timeout-ms";
   arguments[index++] = startup_timeout;
   arguments[index++] = (char *)"--handshake-timeout-ms";
@@ -377,21 +487,76 @@ static int spawn_gem5(struct sagr_managed_session *session) {
   arguments[index++] = run_timeout;
   arguments[index] = NULL;
 
-  if (!configure_spawn(&actions, &attributes, session->repo_root,
-                       session->log_path)) {
-    return 0;
+  if (session->supervised) {
+    supervisor_arguments[supervisor_index++] = session->supervisor_path;
+    supervisor_arguments[supervisor_index++] = (char *)"--owner-pid";
+    supervisor_arguments[supervisor_index++] = owner_pid;
+    supervisor_arguments[supervisor_index++] = (char *)"--status-fd";
+    supervisor_arguments[supervisor_index++] = status_fd;
+    supervisor_arguments[supervisor_index++] = (char *)"--grace-ms";
+    supervisor_arguments[supervisor_index++] = grace_ms;
+    supervisor_arguments[supervisor_index++] = (char *)"--";
+    for (count = 0; count < index; ++count) {
+      supervisor_arguments[supervisor_index++] = arguments[count];
+    }
+    supervisor_arguments[supervisor_index] = NULL;
+    if (pipe2(report_pipe, O_CLOEXEC) != 0) {
+      return 0;
+    }
   }
-  if (posix_spawn(&session->child_pid, session->gem5_path, &actions,
-                  &attributes, arguments, environment) != 0) {
-    session->child_pid = -1;
+  if (!configure_spawn(&actions, &attributes, session->repo_root,
+                       session->log_path,
+                       session->supervised ? report_pipe[0] : -1,
+                       session->supervised ? report_pipe[1] : -1)) {
+    goto cleanup;
+  }
+  if (posix_spawn(&spawned_pid,
+                  session->supervised ? session->supervisor_path
+                                      : session->gem5_path,
+                  &actions, &attributes,
+                  session->supervised ? supervisor_arguments : arguments,
+                  environment) != 0) {
+    spawned_pid = -1;
   }
   (void)posix_spawn_file_actions_destroy(&actions);
   (void)posix_spawnattr_destroy(&attributes);
-  if (session->child_pid <= 0) {
-    return 0;
+  if (session->supervised) {
+    (void)close(report_pipe[1]);
+    report_pipe[1] = -1;
   }
+  if (spawned_pid <= 0) {
+    goto cleanup;
+  }
+  if (!session->supervised) {
+    session->child_pid = spawned_pid;
+    session->child_pgid = spawned_pid;
+    return 1;
+  }
+  session->supervisor_pid = spawned_pid;
+  if (!read_supervisor_report(
+          report_pipe[0], timeout_milliseconds(session->options.startup_timeout_ns),
+          &report)) {
+    terminate_process_group(session->supervisor_pid);
+    session->supervisor_pid = -1;
+    goto cleanup;
+  }
+  (void)close(report_pipe[0]);
+  report_pipe[0] = -1;
+  session->child_pid = (pid_t)report.daemon_pid;
   session->child_pgid = session->child_pid;
   return 1;
+
+cleanup:
+  if (report_pipe[0] >= 0) {
+    (void)close(report_pipe[0]);
+  }
+  if (report_pipe[1] >= 0) {
+    (void)close(report_pipe[1]);
+  }
+  if (spawned_pid > 0) {
+    terminate_process_group(spawned_pid);
+  }
+  return 0;
 }
 
 static int wait_for_endpoint(struct sagr_managed_session *session) {
@@ -429,13 +594,49 @@ static int reserved_zero(const uint8_t *reserved, size_t size) {
 
 static sagr_status_t validate_session_options(
     const sagr_managed_session_options_t *options) {
+  const uint32_t known_flags = SAGR_MANAGED_SESSION_FLAG_KMT_PROVIDER;
   if (options == NULL || options->struct_size < sizeof(*options) ||
       options->version != SAGR_MANAGED_RUNTIME_API_VERSION ||
-      options->flags != 0U || options->queue_depth == 0U ||
+      (options->flags & ~known_flags) != 0U || options->queue_depth == 0U ||
       options->queue_depth > SAGR_QUEUE_MAX_DEPTH ||
       options->startup_timeout_ns == 0U ||
       options->operation_timeout_ns == 0U || options->run_timeout_ns == 0U ||
       !reserved_zero(options->reserved, sizeof(options->reserved))) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  return SAGR_STATUS_SUCCESS;
+}
+
+static sagr_status_t validate_session_options_v2(
+    const sagr_managed_session_options_v2_t *options) {
+  const uint32_t known_flags =
+      SAGR_MANAGED_SESSION_V2_FLAG_EXTERNAL_ENDPOINT |
+      SAGR_MANAGED_SESSION_V2_FLAG_PRIVATE_NAMESPACE |
+      SAGR_MANAGED_SESSION_V2_FLAG_KMT_PROVIDER;
+  const int external =
+      options != NULL &&
+      (options->flags & SAGR_MANAGED_SESSION_V2_FLAG_EXTERNAL_ENDPOINT) != 0U;
+  const int private_namespace =
+      options != NULL &&
+      (options->flags & SAGR_MANAGED_SESSION_V2_FLAG_PRIVATE_NAMESPACE) != 0U;
+  if (options == NULL || options->struct_size < sizeof(*options) ||
+      options->version != SAGR_MANAGED_SESSION_OPTIONS_V2_VERSION ||
+      (options->flags & ~known_flags) != 0U || options->queue_depth == 0U ||
+      options->queue_depth > SAGR_QUEUE_MAX_DEPTH ||
+      options->startup_timeout_ns == 0U ||
+      options->operation_timeout_ns == 0U || options->run_timeout_ns == 0U ||
+      options->epoch == 0U || options->world_size == 0U ||
+      options->world_size > SAGR_MANAGED_MAX_WORLD_SIZE ||
+      options->rank >= options->world_size ||
+      bytes_are_zero(options->job_uuid, sizeof(options->job_uuid)) ||
+      !reserved_zero(options->reserved, sizeof(options->reserved))) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (external == private_namespace) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (options->endpoint[0] != (uint8_t)'/' ||
+      memchr(options->endpoint, '\0', sizeof(options->endpoint)) == NULL) {
     return SAGR_STATUS_INVALID_ARGUMENT;
   }
   return SAGR_STATUS_SUCCESS;
@@ -455,6 +656,27 @@ sagr_status_t sagr_managed_session_options_init(
   memset(options, 0, options_size);
   options->struct_size = options_size;
   options->version = SAGR_MANAGED_RUNTIME_API_VERSION;
+  options->queue_depth = SAGR_MANAGED_DEFAULT_QUEUE_DEPTH;
+  options->startup_timeout_ns = SAGR_MANAGED_DEFAULT_STARTUP_TIMEOUT_NS;
+  options->operation_timeout_ns = SAGR_MANAGED_DEFAULT_OPERATION_TIMEOUT_NS;
+  options->run_timeout_ns = SAGR_MANAGED_DEFAULT_RUN_TIMEOUT_NS;
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_managed_session_options_v2_init(
+    sagr_managed_session_options_v2_t *options, uint32_t options_size) {
+  if (options == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (options_size < sizeof(*options)) {
+    if (options_size >= sizeof(options->struct_size)) {
+      options->struct_size = (uint32_t)sizeof(*options);
+    }
+    return SAGR_STATUS_BUFFER_TOO_SMALL;
+  }
+  memset(options, 0, options_size);
+  options->struct_size = options_size;
+  options->version = SAGR_MANAGED_SESSION_OPTIONS_V2_VERSION;
   options->queue_depth = SAGR_MANAGED_DEFAULT_QUEUE_DEPTH;
   options->startup_timeout_ns = SAGR_MANAGED_DEFAULT_STARTUP_TIMEOUT_NS;
   options->operation_timeout_ns = SAGR_MANAGED_DEFAULT_OPERATION_TIMEOUT_NS;
@@ -498,7 +720,10 @@ static sagr_status_t resolve_paths(struct sagr_managed_session *session,
     return fail(error, error_size, SAGR_STATUS_INVALID_ARGUMENT, 0,
                 "managed runtime prefix is not an absolute path");
   }
-  if (endpoint != NULL && endpoint[0] != '\0') {
+  if (session->external_endpoint) {
+    return SAGR_STATUS_SUCCESS;
+  }
+  if (!session->exact_topology && endpoint != NULL && endpoint[0] != '\0') {
     if (!copy_path(session->endpoint, endpoint)) {
       return fail(error, error_size, SAGR_STATUS_INVALID_ARGUMENT, 0,
                   "managed external endpoint is not an absolute path");
@@ -526,7 +751,7 @@ static sagr_status_t resolve_paths(struct sagr_managed_session *session,
 static sagr_status_t open_instance(struct sagr_managed_session *session,
                                    sagr_error_info_t *error,
                                    uint32_t error_size) {
-  const uint64_t capabilities =
+  uint64_t capabilities =
       SAGR_CAPABILITY_TOPOLOGY_MASK | SAGR_CAPABILITY_QUEUE_MASK |
       SAGR_CAPABILITY_MEMORY_MASK | SAGR_CAPABILITY_SIGNAL_MASK |
       SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK |
@@ -539,15 +764,18 @@ static sagr_status_t open_instance(struct sagr_managed_session *session,
     return fail(error, error_size, status, 0,
                 "could not initialize managed handshake options");
   }
+  if (session->require_kmt) {
+    capabilities |= SAGR_CAPABILITY_KMT_MASK;
+  }
   options.open_timeout_ns = session->options.startup_timeout_ns;
   options.offered_capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] |= capabilities;
   options.required_capabilities[SAGR_CAPABILITY_TOPOLOGY_WORD] |= capabilities;
-  if (!session->external_endpoint) {
+  if (session->exact_topology || !session->external_endpoint) {
     memcpy(options.expected_job_uuid, session->job_uuid,
            sizeof(options.expected_job_uuid));
     options.expected_epoch = session->epoch;
-    options.expected_rank = 0U;
-    options.expected_world_size = 1U;
+    options.expected_rank = session->rank;
+    options.expected_world_size = session->world_size;
   }
   status = sagr_instance_open(session->endpoint, &options, &session->instance,
                               error, error_size);
@@ -581,8 +809,30 @@ static void fill_session_info(const struct sagr_managed_session *session,
          sizeof(info->job_uuid));
 }
 
-sagr_status_t sagr_managed_session_open(
+static int register_managed_daemon(struct sagr_managed_session *session) {
+  sagr_smi_registry_identity_t identity;
+  if (session->external_endpoint || session->child_pid <= 0) {
+    return 1;
+  }
+  memset(&identity, 0, sizeof(identity));
+  identity.owner_pid = getpid();
+  identity.daemon_pid = session->child_pid;
+  identity.epoch = session->instance_info.epoch;
+  identity.connection_id = session->instance_info.connection_id;
+  identity.rank = session->instance_info.rank;
+  identity.world_size = session->instance_info.world_size;
+  memcpy(identity.job_uuid, session->instance_info.job_uuid,
+         sizeof(identity.job_uuid));
+  memcpy(identity.daemon_uuid, session->instance_info.daemon_uuid,
+         sizeof(identity.daemon_uuid));
+  identity.endpoint = session->endpoint;
+  identity.exact_topology = session->exact_topology;
+  return sagr_smi_registry_claim(NULL, &identity, &session->smi_lease);
+}
+
+static sagr_status_t open_managed_session(
     const sagr_managed_session_options_t *options,
+    const sagr_managed_session_options_v2_t *exact_options,
     sagr_managed_session_t *out_session,
     sagr_managed_session_info_t *out_info, uint32_t info_size,
     sagr_error_info_t *out_error, uint32_t error_size) {
@@ -612,8 +862,22 @@ sagr_status_t sagr_managed_session_open(
   }
   if (options == NULL) {
     (void)sagr_managed_session_options_init(&defaults,
-                                             (uint32_t)sizeof(defaults));
+                                            (uint32_t)sizeof(defaults));
+    if (exact_options != NULL) {
+      status = validate_session_options_v2(exact_options);
+      if (status != SAGR_STATUS_SUCCESS) {
+        return fail(out_error, error_size, status, 0,
+                    "invalid exact-topology managed session options");
+      }
+      defaults.queue_depth = exact_options->queue_depth;
+      defaults.startup_timeout_ns = exact_options->startup_timeout_ns;
+      defaults.operation_timeout_ns = exact_options->operation_timeout_ns;
+      defaults.run_timeout_ns = exact_options->run_timeout_ns;
+    }
     options = &defaults;
+  } else if (exact_options != NULL) {
+    return fail(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, 0,
+                "managed session option versions cannot be mixed");
   }
   status = validate_session_options(options);
   if (status != SAGR_STATUS_SUCCESS) {
@@ -626,21 +890,79 @@ sagr_status_t sagr_managed_session_open(
                 "could not allocate managed session");
   }
   session->magic = SAGR_MANAGED_SESSION_MAGIC;
+  sagr_smi_registry_lease_init(&session->smi_lease);
   memcpy(&session->options, options, sizeof(session->options));
   session->child_pid = -1;
   session->child_pgid = -1;
+  session->owner_pid = getpid();
+  session->rank = exact_options != NULL ? exact_options->rank : 0U;
+  session->world_size =
+      exact_options != NULL ? exact_options->world_size : 1U;
+  session->require_kmt =
+      exact_options != NULL
+          ? (exact_options->flags &
+             SAGR_MANAGED_SESSION_V2_FLAG_KMT_PROVIDER) != 0U
+          : (options->flags & SAGR_MANAGED_SESSION_FLAG_KMT_PROVIDER) != 0U;
+  if (exact_options != NULL) {
+    session->exact_topology = 1;
+    session->epoch = exact_options->epoch;
+    memcpy(session->job_uuid, exact_options->job_uuid,
+           sizeof(session->job_uuid));
+    format_job_uuid(session->job_uuid, session->job_uuid_text);
+    if ((exact_options->flags &
+         SAGR_MANAGED_SESSION_V2_FLAG_EXTERNAL_ENDPOINT) != 0U) {
+      if (!copy_path(session->endpoint,
+                     (const char *)exact_options->endpoint)) {
+        status = fail(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, 0,
+                      "exact-topology external endpoint is invalid");
+        goto failure;
+      }
+      session->external_endpoint = 1;
+    } else if (!copy_path(session->endpoint,
+                          (const char *)exact_options->endpoint)) {
+      status = fail(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, 0,
+                    "exact-topology private endpoint is invalid");
+      goto failure;
+    }
+  }
   status = resolve_paths(session, out_error, error_size);
   if (status != SAGR_STATUS_SUCCESS) {
     goto failure;
   }
   if (!session->external_endpoint) {
-    count = snprintf(template_path, sizeof(template_path),
-                     "/tmp/self-amdgpu-opencl-run.%lu.XXXXXX",
-                     (unsigned long)getuid());
-    if (count < 0 || (size_t)count >= sizeof(template_path) ||
-        mkdtemp(template_path) == NULL || chmod(template_path, S_IRWXU) != 0 ||
-        !copy_path(session->run_dir, template_path) ||
-        !join_path(session->endpoint, session->run_dir, "bridge.sock") ||
+    if (session->exact_topology) {
+      const char *separator = strrchr(session->endpoint, '/');
+      if (separator == NULL || separator == session->endpoint ||
+          (size_t)(separator - session->endpoint) >= sizeof(session->run_dir)) {
+        status = fail(out_error, error_size, SAGR_STATUS_INVALID_ARGUMENT, 0,
+                      "exact-topology endpoint parent is invalid");
+        goto failure;
+      }
+      memcpy(session->run_dir, session->endpoint,
+             (size_t)(separator - session->endpoint));
+      session->run_dir[separator - session->endpoint] = '\0';
+      if (mkdir(session->run_dir, S_IRWXU) != 0 ||
+          chmod(session->run_dir, S_IRWXU) != 0) {
+        status = fail(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES,
+                      errno, "could not create exact-topology run directory");
+        goto failure;
+      }
+    } else {
+      count = snprintf(template_path, sizeof(template_path),
+                       "/tmp/self-amdgpu-opencl-run.%lu.XXXXXX",
+                       (unsigned long)getuid());
+      if (count < 0 || (size_t)count >= sizeof(template_path) ||
+          mkdtemp(template_path) == NULL ||
+          chmod(template_path, S_IRWXU) != 0 ||
+          !copy_path(session->run_dir, template_path) ||
+          !join_path(session->endpoint, session->run_dir, "bridge.sock")) {
+        status = fail(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES,
+                      errno,
+                      "could not create managed simulator run directory");
+        goto failure;
+      }
+    }
+    if (
         !join_path(session->trace_path, session->run_dir,
                    "dispatch-trace.jsonl") ||
         !join_path(session->output_dir, session->run_dir, "m5out") ||
@@ -652,9 +974,11 @@ sagr_status_t sagr_managed_session_open(
                     "could not create managed simulator run directory");
       goto failure;
     }
-    session->epoch = make_epoch();
-    make_job_uuid(session->epoch, (uint64_t)(uint32_t)getpid(),
-                  session->job_uuid, session->job_uuid_text);
+    if (!session->exact_topology) {
+      session->epoch = make_epoch();
+      make_job_uuid(session->epoch, (uint64_t)(uint32_t)getpid(),
+                    session->job_uuid, session->job_uuid_text);
+    }
     if (!spawn_gem5(session) || !wait_for_endpoint(session)) {
       status = fail(out_error, error_size, SAGR_STATUS_UNAVAILABLE, errno,
                     "managed gem5 did not publish its private endpoint");
@@ -663,6 +987,11 @@ sagr_status_t sagr_managed_session_open(
   }
   status = open_instance(session, out_error, error_size);
   if (status != SAGR_STATUS_SUCCESS) {
+    goto failure;
+  }
+  if (!register_managed_daemon(session)) {
+    status = fail(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES, errno,
+                  "managed simulator device registry has no free slot");
     goto failure;
   }
   if (out_info != NULL) {
@@ -679,9 +1008,28 @@ failure:
   if (!session->external_endpoint && session->child_pid > 0) {
     terminate_process_group(session->child_pid);
   }
+  sagr_smi_registry_release(&session->smi_lease);
   session->magic = 0U;
   free(session);
   return status;
+}
+
+sagr_status_t sagr_managed_session_open(
+    const sagr_managed_session_options_t *options,
+    sagr_managed_session_t *out_session,
+    sagr_managed_session_info_t *out_info, uint32_t info_size,
+    sagr_error_info_t *out_error, uint32_t error_size) {
+  return open_managed_session(options, NULL, out_session, out_info, info_size,
+                              out_error, error_size);
+}
+
+sagr_status_t sagr_managed_session_open_v2(
+    const sagr_managed_session_options_v2_t *options,
+    sagr_managed_session_t *out_session,
+    sagr_managed_session_info_t *out_info, uint32_t info_size,
+    sagr_error_info_t *out_error, uint32_t error_size) {
+  return open_managed_session(NULL, options, out_session, out_info, info_size,
+                              out_error, error_size);
 }
 
 sagr_status_t sagr_managed_session_get_info(
@@ -1383,6 +1731,7 @@ sagr_status_t sagr_managed_session_close(
              exit_code != 0 && first_status == SAGR_STATUS_SUCCESS) {
     first_status = SAGR_STATUS_INTERNAL_ERROR;
   }
+  sagr_smi_registry_release(&session->smi_lease);
   session->magic = 0U;
   session->child_pid = -1;
   session->child_pgid = -1;
@@ -1393,5 +1742,47 @@ sagr_status_t sagr_managed_session_close(
                 "managed session closed after a cleanup failure");
   }
   succeed(out_error, error_size, "managed simulator session closed cleanly");
+  return SAGR_STATUS_SUCCESS;
+}
+
+sagr_status_t sagr_managed_session_discard_inherited(
+    sagr_managed_session_t *opaque_session) {
+  struct sagr_managed_session *session;
+  if (opaque_session == NULL) {
+    return SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  if (*opaque_session == NULL) {
+    return SAGR_STATUS_SUCCESS;
+  }
+  session = (struct sagr_managed_session *)*opaque_session;
+  if (session->magic != SAGR_MANAGED_SESSION_MAGIC ||
+      session->owner_pid == getpid()) {
+    return session->magic != SAGR_MANAGED_SESSION_MAGIC
+               ? SAGR_STATUS_INVALID_HANDLE
+               : SAGR_STATUS_INVALID_ARGUMENT;
+  }
+  /* sagr_instance_close only destroys this process's copied transport and
+   * local handle wrappers. It deliberately sends no synthesized remote
+   * teardown. The SMI atfork handler already invalidated the child lease. */
+  (void)sagr_instance_close(&session->instance);
+  while (session->kernels != NULL) {
+    struct sagr_managed_kernel *kernel = session->kernels;
+    session->kernels = kernel->next;
+    kernel->magic = 0U;
+    free(kernel);
+  }
+  while (session->buffers != NULL) {
+    struct sagr_managed_buffer *buffer = session->buffers;
+    session->buffers = buffer->next;
+    buffer->magic = 0U;
+    free(buffer);
+  }
+  session->queue = NULL;
+  session->signal = NULL;
+  session->magic = 0U;
+  session->child_pid = -1;
+  session->child_pgid = -1;
+  *opaque_session = NULL;
+  free(session);
   return SAGR_STATUS_SUCCESS;
 }

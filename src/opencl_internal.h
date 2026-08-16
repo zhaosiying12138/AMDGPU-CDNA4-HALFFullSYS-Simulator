@@ -36,6 +36,8 @@
 #define SAGR_CL_MAX_BUILD_LOG_BYTES (UINT64_C(1) << 20)
 #define SAGR_CL_KERNARG_OFFSET UINT64_C(64)
 #define SAGR_CL_KERNARG_ALLOCATION_BYTES UINT64_C(512)
+#define SAGR_CL_MAX_WORK_GROUP_SIZE UINT32_C(256)
+#define SAGR_CL_MAX_WORK_ITEM_SIZE UINT32_C(256)
 #define SAGR_CL_PROCESS_TIMEOUT_MS UINT64_C(120000)
 #define SAGR_CL_STARTUP_TIMEOUT_MS UINT64_C(15000)
 
@@ -154,6 +156,15 @@ struct _cl_mem {
   uint8_t *initial_data;
 };
 
+struct sagr_cl_launch_geometry {
+  uint64_t global[3];
+  uint64_t local[3];
+  uint64_t offset[3];
+  uint64_t total_workgroups;
+  uint32_t num_warps;
+  uint32_t dynamic_shared_memory_bytes;
+};
+
 extern struct _cl_platform_id sagr_cl_platform;
 extern struct _cl_device_id sagr_cl_device;
 
@@ -183,6 +194,12 @@ void sagr_cl_memory_release_internal(cl_mem memory);
 cl_int sagr_cl_compile_program(cl_program program, const char *options);
 cl_int sagr_cl_ensure_queue(cl_command_queue queue);
 cl_int sagr_cl_ensure_memory(cl_mem memory);
+
+cl_int sagr_cl_prepare_launch_geometry(
+    cl_uint work_dimensions, const size_t *global_offset,
+    const size_t *global_size, const size_t *local_size,
+    uint32_t max_flat_workgroup_size, uint32_t wavefront_size,
+    struct sagr_cl_launch_geometry *geometry);
 
 cl_int sagr_cl_enqueue_write(cl_command_queue queue, cl_mem buffer,
                              cl_bool blocking_write, size_t offset, size_t size,

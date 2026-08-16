@@ -1,14 +1,19 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 
+#define _GNU_SOURCE
+
 #include <self_amdgpu_runtime/kmt_shim.h>
 #include <self_amdgpu_runtime/provider.h>
 
 #include "provider_internal.h"
 #include "transport_internal.h"
 
+#include <fcntl.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 
 static int bytes_are_zero(const uint8_t *bytes, size_t size) {
   uint8_t combined = 0;
@@ -20,8 +25,7 @@ static int bytes_are_zero(const uint8_t *bytes, size_t size) {
 }
 
 static int operation_valid(uint16_t operation) {
-  return operation >= (uint16_t)SAGR_KMT_OP_OPEN_KFD &&
-         operation <= (uint16_t)SAGR_KMT_OP_MODEL_DRM_CALL;
+  return sagr_bridge_kmt_operation_valid(operation);
 }
 
 static int hsakmt_status_valid(uint32_t status) {
@@ -55,53 +59,13 @@ static int hsakmt_status_valid(uint32_t status) {
 
 static int words_zero_outside(const uint32_t words[8], uint16_t operation,
                               int result_words) {
-  uint32_t allowed_mask = 0;
+  uint32_t allowed_mask;
   uint32_t index;
-  switch (operation) {
-    case SAGR_KMT_OP_GET_VERSION:
-      allowed_mask = UINT32_C(0x0f);
-      break;
-    case SAGR_KMT_OP_TOPOLOGY_SNAPSHOT:
-      allowed_mask = UINT32_C(0x3f);
-      break;
-    case SAGR_KMT_OP_ALLOC_MEMORY:
-      allowed_mask = UINT32_C(0x7f);
-      break;
-    case SAGR_KMT_OP_COPY_MEMORY:
-      allowed_mask = result_words ? 0U : UINT32_C(0x1f);
-      break;
-    case SAGR_KMT_OP_QUEUE_CREATE:
-      allowed_mask = result_words ? UINT32_C(0x01) : UINT32_C(0x1f);
-      break;
-    case SAGR_KMT_OP_QUEUE_DOORBELL:
-      allowed_mask = UINT32_C(0x03);
-      break;
-    case SAGR_KMT_OP_EVENT_CREATE:
-    case SAGR_KMT_OP_EVENT_SET:
-      allowed_mask = result_words ? 0U : UINT32_C(0x03);
-      break;
-    case SAGR_KMT_OP_EVENT_QUERY:
-      allowed_mask = result_words ? UINT32_C(0x1f) : 0U;
-      break;
-    case SAGR_KMT_OP_EVENT_WAIT:
-      allowed_mask = result_words ? UINT32_C(0x03) : UINT32_C(0x0f);
-      break;
-    case SAGR_KMT_OP_MODEL_DRM_CALL:
-      allowed_mask = result_words ? 0U : UINT32_C(0x03);
-      break;
-    case SAGR_KMT_OP_OPEN_KFD:
-    case SAGR_KMT_OP_CLOSE_KFD:
-    case SAGR_KMT_OP_FREE_MEMORY:
-    case SAGR_KMT_OP_QUEUE_DESTROY:
-    case SAGR_KMT_OP_EVENT_DESTROY:
-    case SAGR_KMT_OP_EVENT_RESET:
-    case SAGR_KMT_OP_POINTER_INFO:
-      allowed_mask = result_words ?
-          (operation == SAGR_KMT_OP_POINTER_INFO ? UINT32_C(0x1f) : 0U) : 0U;
-      break;
-    default:
-      return 0;
-  }
+  if (!sagr_bridge_kmt_operation_valid(operation))
+    return 0;
+  allowed_mask = result_words
+                     ? sagr_bridge_kmt_result_word_mask(operation)
+                     : sagr_bridge_kmt_request_word_mask(operation);
   for (index = 0; index < SAGR_KMT_ARGUMENT_WORD_COUNT; ++index) {
     if ((allowed_mask & (UINT32_C(1) << index)) == 0 && words[index] != 0) {
       return 0;
@@ -162,6 +126,13 @@ static sagr_kmt_status_t fail_local(sagr_error_info_t *error,
 static void put_word_u64(uint32_t *words, uint32_t index, uint64_t value) {
   words[index] = (uint32_t)(value >> 32);
   words[index + 1U] = (uint32_t)value;
+}
+
+static void put_buffer_u64(uint8_t *buffer, uint32_t offset, uint64_t value) {
+  uint32_t index;
+  for (index = 0U; index < 8U; ++index) {
+    buffer[offset + index] = (uint8_t)(value >> (56U - index * 8U));
+  }
 }
 
 static uint64_t get_word_u64(const uint32_t *words, uint32_t index) {
@@ -309,6 +280,40 @@ static sagr_kmt_status_t exchange(
   return status;
 }
 
+static sagr_kmt_status_t exchange_with_descriptor(
+    sagr_provider_t *provider, const sagr_kmt_envelope_request_t *request,
+    int descriptor, const sagr_kmt_call_options_t *options,
+    sagr_kmt_envelope_result_t *result, sagr_error_info_t *error,
+    uint32_t error_size) {
+  int32_t wire_status = -1;
+  sagr_status_t runtime_status;
+  sagr_kmt_status_t status;
+  memset(result, 0, sizeof(*result));
+  runtime_status = sagr_transport_kmt_exchange_with_descriptor(
+      sagr_provider_transport_instance(provider), request, descriptor, options,
+      result, &wire_status, error, error_size);
+  if (runtime_status != SAGR_STATUS_SUCCESS) {
+    return runtime_to_kmt(runtime_status);
+  }
+  status = sagr_kmt_envelope_result_validate(request, result);
+  if (status != SAGR_KMT_STATUS_SUCCESS) {
+    return fail_local(error, error_size,
+                      SAGR_KMT_STATUS_KERNEL_COMMUNICATION_ERROR,
+                      "noncanonical KMT backing result envelope");
+  }
+  if (result->wire_status != SAGR_WIRE_STATUS_OK) {
+    return fail_local(error, error_size,
+                      SAGR_KMT_STATUS_KERNEL_COMMUNICATION_ERROR,
+                      "KMT backing result carries a transport failure");
+  }
+  status = (sagr_kmt_status_t)result->status;
+  if (error != NULL && error_size >= sizeof(*error)) {
+    error->status = sagr_provider_status_to_runtime(status);
+    error->wire_status = wire_status;
+  }
+  return status;
+}
+
 sagr_kmt_status_t sagr_kmt_call_options_init(sagr_kmt_call_options_t *options,
                                               uint32_t options_size) {
   if (options == NULL) {
@@ -352,6 +357,7 @@ sagr_kmt_status_t sagr_kmt_envelope_result_validate(
       request != NULL &&
       (request->operation == SAGR_KMT_OP_TOPOLOGY_SNAPSHOT ||
        request->operation == SAGR_KMT_OP_ALLOC_MEMORY ||
+       request->operation == SAGR_KMT_OP_ALLOC_MEMORY_OF_GPU ||
        request->operation == SAGR_KMT_OP_QUEUE_CREATE ||
        request->operation == SAGR_KMT_OP_EVENT_CREATE);
   if (request == NULL || result == NULL ||
@@ -407,6 +413,229 @@ sagr_kmt_status_t sagr_kmt_envelope_result_validate(
     }
   }
   return SAGR_KMT_STATUS_SUCCESS;
+}
+
+sagr_kmt_status_t sagr_kmt_alloc_memory_of_gpu(
+    sagr_provider_t *provider, const sagr_kmt_handle_t *handle,
+    uint64_t virtual_address, uint64_t size_bytes, uint32_t gpu_id,
+    uint32_t memory_flags, uint64_t mmap_offset,
+    sagr_kmt_handle_t *out_memory, uint64_t *out_mmap_offset,
+    const sagr_kmt_call_options_t *options, sagr_error_info_t *error,
+    uint32_t error_size) {
+  sagr_kmt_envelope_request_t request;
+  sagr_kmt_envelope_result_t result;
+  sagr_kmt_handle_t committed;
+  sagr_kmt_status_t status = prepare_request(
+      provider, SAGR_KMT_OP_ALLOC_MEMORY_OF_GPU, options, &request, error,
+      error_size);
+  if (status == SAGR_KMT_STATUS_SUCCESS)
+    status = validate_kfd_handle(handle, error, error_size);
+  if (status != SAGR_KMT_STATUS_SUCCESS)
+    return status;
+  if (gpu_id == 0U || size_bytes == 0U ||
+      virtual_address > UINT64_MAX - size_bytes ||
+      (virtual_address != 0U && (virtual_address & UINT64_C(0xfff)) != 0U) ||
+      (mmap_offset != 0U && (mmap_offset & UINT64_C(0xfff)) != 0U) ||
+      (mmap_offset != 0U && mmap_offset > UINT64_MAX - size_bytes) ||
+      out_memory == NULL || out_mmap_offset == NULL) {
+    return fail_local(error, error_size, SAGR_KMT_STATUS_INVALID_PARAMETER,
+                      "invalid GPU memory allocation carriers");
+  }
+  request_owner(&request, handle);
+  put_word_u64(request.argument_words, 0, virtual_address);
+  put_word_u64(request.argument_words, 2, size_bytes);
+  put_word_u64(request.argument_words, 4, mmap_offset);
+  request.argument_words[6] = gpu_id;
+  request.argument_words[7] = memory_flags;
+  status = exchange(provider, &request, options, &result, error, error_size);
+  if (status != SAGR_KMT_STATUS_SUCCESS)
+    return status;
+  if (result.object_id == 0U || result.object_generation == 0U)
+    return fail_local(error, error_size,
+                      SAGR_KMT_STATUS_KERNEL_COMMUNICATION_ERROR,
+                      "GPU allocation returned an empty handle");
+  committed.owner_id = result.owner_id;
+  committed.owner_generation = result.owner_generation;
+  committed.object_id = result.object_id;
+  committed.object_generation = result.object_generation;
+  *out_memory = committed;
+  *out_mmap_offset = get_word_u64(result.result_words, 0);
+  return SAGR_KMT_STATUS_SUCCESS;
+}
+
+sagr_kmt_status_t sagr_kmt_free_memory_of_gpu(
+    sagr_provider_t *provider, const sagr_kmt_handle_t *handle,
+    const sagr_kmt_handle_t *memory, const sagr_kmt_call_options_t *options,
+    sagr_error_info_t *error, uint32_t error_size) {
+  sagr_kmt_envelope_request_t request;
+  sagr_kmt_envelope_result_t result;
+  sagr_kmt_status_t status = prepare_request(
+      provider, SAGR_KMT_OP_FREE_MEMORY_OF_GPU, options, &request, error,
+      error_size);
+  if (status == SAGR_KMT_STATUS_SUCCESS)
+    status = validate_kfd_handle(handle, error, error_size);
+  if (status == SAGR_KMT_STATUS_SUCCESS)
+    status = validate_resource_handle(handle, memory, error, error_size);
+  if (status != SAGR_KMT_STATUS_SUCCESS)
+    return status;
+  request_owner(&request, memory);
+  request_object(&request, memory);
+  return exchange(provider, &request, options, &result, error, error_size);
+}
+
+sagr_kmt_status_t sagr_kmt_map_memory_to_gpu(
+    sagr_provider_t *provider, const sagr_kmt_handle_t *handle,
+    const sagr_kmt_handle_t *memory, const uint32_t *gpu_ids,
+    uint32_t gpu_count, uint32_t *out_success,
+    const sagr_kmt_call_options_t *options, sagr_error_info_t *error,
+    uint32_t error_size) {
+  sagr_kmt_envelope_request_t request;
+  sagr_kmt_envelope_result_t result;
+  sagr_kmt_status_t status = prepare_request(
+      provider, SAGR_KMT_OP_MAP_MEMORY_TO_GPU, options, &request, error,
+      error_size);
+  uint32_t index;
+  if (status == SAGR_KMT_STATUS_SUCCESS)
+    status = validate_kfd_handle(handle, error, error_size);
+  if (status == SAGR_KMT_STATUS_SUCCESS)
+    status = validate_resource_handle(handle, memory, error, error_size);
+  if (status != SAGR_KMT_STATUS_SUCCESS)
+    return status;
+  if (gpu_ids == NULL || gpu_count == 0U || gpu_count > 16U ||
+      out_success == NULL) {
+    return fail_local(error, error_size, SAGR_KMT_STATUS_INVALID_PARAMETER,
+                      "invalid GPU mapping carriers");
+  }
+  request_owner(&request, memory);
+  request_object(&request, memory);
+  request.argument_words[0] = gpu_count;
+  request.argument_words[1] = 0;
+  request.buffer_bytes = gpu_count * sizeof(uint32_t);
+  for (index = 0U; index < gpu_count; ++index) {
+    request.buffer[index * 4U] = (uint8_t)(gpu_ids[index] >> 24);
+    request.buffer[index * 4U + 1U] = (uint8_t)(gpu_ids[index] >> 16);
+    request.buffer[index * 4U + 2U] = (uint8_t)(gpu_ids[index] >> 8);
+    request.buffer[index * 4U + 3U] = (uint8_t)gpu_ids[index];
+  }
+  request.buffer_crc32c = sagr_crc32c(request.buffer, request.buffer_bytes);
+  status = exchange(provider, &request, options, &result, error, error_size);
+  if (status != SAGR_KMT_STATUS_SUCCESS)
+    return status;
+  if (result.result_words[0] > gpu_count)
+    return fail_local(error, error_size,
+                      SAGR_KMT_STATUS_KERNEL_COMMUNICATION_ERROR,
+                      "invalid GPU mapping result count");
+  *out_success = result.result_words[0];
+  return SAGR_KMT_STATUS_SUCCESS;
+}
+
+sagr_kmt_status_t sagr_kmt_unmap_memory_from_gpu(
+    sagr_provider_t *provider, const sagr_kmt_handle_t *handle,
+    const sagr_kmt_handle_t *memory, const uint32_t *gpu_ids,
+    uint32_t gpu_count, uint32_t *out_success,
+    const sagr_kmt_call_options_t *options, sagr_error_info_t *error,
+    uint32_t error_size) {
+  sagr_kmt_envelope_request_t request;
+  sagr_kmt_envelope_result_t result;
+  sagr_kmt_status_t status = prepare_request(
+      provider, SAGR_KMT_OP_UNMAP_MEMORY_FROM_GPU, options, &request, error,
+      error_size);
+  uint32_t index;
+  if (status == SAGR_KMT_STATUS_SUCCESS)
+    status = validate_kfd_handle(handle, error, error_size);
+  if (status == SAGR_KMT_STATUS_SUCCESS)
+    status = validate_resource_handle(handle, memory, error, error_size);
+  if (status != SAGR_KMT_STATUS_SUCCESS)
+    return status;
+  if (gpu_ids == NULL || gpu_count == 0U || gpu_count > 16U ||
+      out_success == NULL) {
+    return fail_local(error, error_size, SAGR_KMT_STATUS_INVALID_PARAMETER,
+                      "invalid GPU unmapping carriers");
+  }
+  request_owner(&request, memory);
+  request_object(&request, memory);
+  request.argument_words[0] = gpu_count;
+  request.buffer_bytes = gpu_count * sizeof(uint32_t);
+  for (index = 0U; index < gpu_count; ++index) {
+    request.buffer[index * 4U] = (uint8_t)(gpu_ids[index] >> 24);
+    request.buffer[index * 4U + 1U] = (uint8_t)(gpu_ids[index] >> 16);
+    request.buffer[index * 4U + 2U] = (uint8_t)(gpu_ids[index] >> 8);
+    request.buffer[index * 4U + 3U] = (uint8_t)gpu_ids[index];
+  }
+  request.buffer_crc32c = sagr_crc32c(request.buffer, request.buffer_bytes);
+  status = exchange(provider, &request, options, &result, error, error_size);
+  if (status != SAGR_KMT_STATUS_SUCCESS)
+    return status;
+  if (result.result_words[0] > gpu_count)
+    return fail_local(error, error_size,
+                      SAGR_KMT_STATUS_KERNEL_COMMUNICATION_ERROR,
+                      "invalid GPU unmapping result count");
+  *out_success = result.result_words[0];
+  return SAGR_KMT_STATUS_SUCCESS;
+}
+
+sagr_kmt_status_t sagr_kmt_set_scratch_backing_va(
+    sagr_provider_t *provider, const sagr_kmt_handle_t *handle,
+    uint32_t gpu_id, uint64_t va_addr,
+    const sagr_kmt_call_options_t *options, sagr_error_info_t *error,
+    uint32_t error_size) {
+  sagr_kmt_envelope_request_t request;
+  sagr_kmt_envelope_result_t result;
+  sagr_kmt_status_t status = prepare_request(
+      provider, SAGR_KMT_OP_SET_SCRATCH_BACKING_VA, options, &request, error,
+      error_size);
+  if (status == SAGR_KMT_STATUS_SUCCESS)
+    status = validate_kfd_handle(handle, error, error_size);
+  if (status != SAGR_KMT_STATUS_SUCCESS)
+    return status;
+  if (gpu_id == 0U || va_addr == 0U || (va_addr & UINT64_C(0xffff)) != 0U)
+    return fail_local(error, error_size, SAGR_KMT_STATUS_INVALID_PARAMETER,
+                      "invalid scratch backing address");
+  request_owner(&request, handle);
+  request.argument_words[0] = gpu_id;
+  put_word_u64(request.argument_words, 1, va_addr);
+  return exchange(provider, &request, options, &result, error, error_size);
+}
+
+sagr_kmt_status_t sagr_kmt_export_backing(
+    sagr_provider_t *provider, const sagr_kmt_handle_t *handle,
+    int backing_fd, uint64_t backing_bytes, uint32_t page_bytes,
+    const sagr_kmt_call_options_t *options, sagr_error_info_t *error,
+    uint32_t error_size) {
+  sagr_kmt_envelope_request_t request;
+  sagr_kmt_envelope_result_t result;
+  struct stat metadata;
+  int descriptor_flags;
+  int status_flags;
+  int seals;
+  sagr_kmt_status_t status = prepare_request(
+      provider, SAGR_KMT_OP_EXPORT_BACKING, options, &request, error,
+      error_size);
+  if (status == SAGR_KMT_STATUS_SUCCESS)
+    status = validate_kfd_handle(handle, error, error_size);
+  if (status != SAGR_KMT_STATUS_SUCCESS)
+    return status;
+  descriptor_flags = backing_fd >= 0 ? fcntl(backing_fd, F_GETFD) : -1;
+  status_flags = backing_fd >= 0 ? fcntl(backing_fd, F_GETFL) : -1;
+  seals = backing_fd >= 0 ? fcntl(backing_fd, F_GET_SEALS) : -1;
+  if (backing_fd < 0 || descriptor_flags < 0 ||
+      (descriptor_flags & FD_CLOEXEC) == 0 || status_flags < 0 ||
+      (status_flags & O_ACCMODE) != O_RDWR || fstat(backing_fd, &metadata) != 0 ||
+      !S_ISREG(metadata.st_mode) || metadata.st_size < 0 ||
+      (uint64_t)metadata.st_size != backing_bytes || backing_bytes == 0U ||
+      page_bytes < UINT32_C(4096) ||
+      (page_bytes & (page_bytes - UINT32_C(1))) != 0U ||
+      backing_bytes % page_bytes != 0U || seals < 0 ||
+      (seals & (F_SEAL_SHRINK | F_SEAL_GROW)) !=
+          (F_SEAL_SHRINK | F_SEAL_GROW)) {
+    return fail_local(error, error_size, SAGR_KMT_STATUS_INVALID_PARAMETER,
+                      "invalid shared KMT backing descriptor");
+  }
+  request_owner(&request, handle);
+  put_word_u64(request.argument_words, 0, backing_bytes);
+  request.argument_words[2] = page_bytes;
+  return exchange_with_descriptor(provider, &request, backing_fd, options,
+                                  &result, error, error_size);
 }
 
 sagr_kmt_status_t sagr_kmt_open_kfd(
@@ -492,6 +721,60 @@ sagr_kmt_status_t sagr_kmt_get_version(
   return status;
 }
 
+sagr_kmt_status_t sagr_kmt_get_clock_counters(
+    sagr_provider_t *provider, const sagr_kmt_handle_t *handle,
+    uint32_t gpu_id, sagr_kmt_clock_counters_t *out_counters,
+    uint32_t counters_size, const sagr_kmt_call_options_t *options,
+    sagr_error_info_t *error, uint32_t error_size) {
+  sagr_kmt_envelope_request_t request;
+  sagr_kmt_envelope_result_t result;
+  sagr_kmt_clock_counters_t committed;
+  sagr_kmt_status_t status = prepare_request(
+      provider, SAGR_KMT_OP_GET_CLOCK_COUNTERS, options, &request, error,
+      error_size);
+  if (status == SAGR_KMT_STATUS_SUCCESS) {
+    status = validate_kfd_handle(handle, error, error_size);
+  }
+  if (status != SAGR_KMT_STATUS_SUCCESS) {
+    return status;
+  }
+  if (gpu_id == 0U || out_counters == NULL ||
+      counters_size < sizeof(*out_counters)) {
+    return fail_local(
+        error, error_size,
+        out_counters == NULL || gpu_id == 0U
+            ? SAGR_KMT_STATUS_INVALID_PARAMETER
+            : SAGR_KMT_STATUS_BUFFER_TOO_SMALL,
+        "clock-counter request or output buffer is invalid");
+  }
+  request_owner(&request, handle);
+  request.argument_words[0] = gpu_id;
+  status = exchange(provider, &request, options, &result, error, error_size);
+  if (status != SAGR_KMT_STATUS_SUCCESS) {
+    return status;
+  }
+  memset(&committed, 0, sizeof(committed));
+  committed.struct_size = (uint32_t)sizeof(committed);
+  committed.gpu_clock_counter = get_word_u64(result.result_words, 0U);
+  committed.cpu_clock_counter = get_word_u64(result.result_words, 2U);
+  committed.system_clock_counter = get_word_u64(result.result_words, 4U);
+  committed.system_clock_frequency_hz =
+      get_word_u64(result.result_words, 6U);
+  if (committed.gpu_clock_counter == 0U ||
+      committed.cpu_clock_counter == 0U ||
+      committed.system_clock_counter == 0U ||
+      committed.gpu_clock_counter != committed.cpu_clock_counter ||
+      committed.gpu_clock_counter != committed.system_clock_counter ||
+      committed.system_clock_frequency_hz !=
+          SAGR_BRIDGE_KMT_CLOCK_FREQUENCY_HZ) {
+    return fail_local(error, error_size,
+                      SAGR_KMT_STATUS_KERNEL_COMMUNICATION_ERROR,
+                      "noncanonical simulated clock-counter result");
+  }
+  memcpy(out_counters, &committed, sizeof(committed));
+  return status;
+}
+
 sagr_kmt_status_t sagr_kmt_topology_snapshot(
     sagr_provider_t *provider, const sagr_kmt_handle_t *handle,
     sagr_kmt_topology_t *out_topology, uint32_t topology_size,
@@ -564,6 +847,147 @@ sagr_kmt_status_t sagr_kmt_topology_snapshot(
   committed.topology_generation = get_word_u64(result.result_words, 4);
   memcpy(out_topology, &committed, sizeof(committed));
   return status;
+}
+
+sagr_kmt_status_t sagr_kmt_process_apertures(
+    sagr_provider_t *provider, const sagr_kmt_handle_t *handle,
+    uint32_t start_index, sagr_kmt_process_aperture_t *out_apertures,
+    uint32_t capacity, uint32_t *out_returned, uint32_t *out_total,
+    const sagr_kmt_call_options_t *options, sagr_error_info_t *error,
+    uint32_t error_size) {
+  sagr_kmt_envelope_request_t request;
+  sagr_kmt_envelope_result_t result;
+  sagr_kmt_process_aperture_t committed[SAGR_KMT_PROCESS_APERTURES_PER_PAGE];
+  sagr_kmt_status_t status = prepare_request(
+      provider, SAGR_KMT_OP_PROCESS_APERTURES, options, &request, error,
+      error_size);
+  uint32_t returned;
+  uint32_t total;
+  uint32_t index;
+  if (status == SAGR_KMT_STATUS_SUCCESS) {
+    status = validate_kfd_handle(handle, error, error_size);
+  }
+  if (status != SAGR_KMT_STATUS_SUCCESS) {
+    return status;
+  }
+  if (capacity > SAGR_KMT_PROCESS_APERTURES_PER_PAGE ||
+      (capacity != 0U && out_apertures == NULL) || out_returned == NULL ||
+      out_total == NULL) {
+    return fail_local(error, error_size, SAGR_KMT_STATUS_INVALID_PARAMETER,
+                      "invalid process aperture page carriers");
+  }
+  request_owner(&request, handle);
+  request.argument_words[0] = start_index;
+  request.argument_words[1] = capacity;
+  status = exchange(provider, &request, options, &result, error, error_size);
+  if (status != SAGR_KMT_STATUS_SUCCESS) {
+    return status;
+  }
+  returned = result.result_words[1];
+  total = result.result_words[2];
+  if (result.result_words[0] != start_index || start_index > total ||
+      returned > capacity || returned > total - start_index ||
+      returned != (capacity < total - start_index ? capacity
+                                                   : total - start_index) ||
+      result.buffer_bytes !=
+          returned * SAGR_KMT_PROCESS_APERTURE_WIRE_BYTES) {
+    return fail_local(error, error_size,
+                      SAGR_KMT_STATUS_KERNEL_COMMUNICATION_ERROR,
+                      "noncanonical process aperture page");
+  }
+  memset(committed, 0, sizeof(committed));
+  for (index = 0U; index < returned; ++index) {
+    const uint8_t *record =
+        result.buffer + index * SAGR_KMT_PROCESS_APERTURE_WIRE_BYTES;
+    sagr_kmt_process_aperture_t *entry = &committed[index];
+    entry->lds_base = get_be_u64(record);
+    entry->lds_limit = get_be_u64(record + 8);
+    entry->scratch_base = get_be_u64(record + 16);
+    entry->scratch_limit = get_be_u64(record + 24);
+    entry->gpuvm_base = get_be_u64(record + 32);
+    entry->gpuvm_limit = get_be_u64(record + 40);
+    entry->gpu_id = get_be_u32(record + 48);
+    entry->reserved0 = get_be_u32(record + 52);
+    if (entry->gpu_id == 0U || entry->reserved0 != 0U ||
+        entry->lds_base > entry->lds_limit ||
+        entry->scratch_base > entry->scratch_limit ||
+        entry->gpuvm_base > entry->gpuvm_limit) {
+      return fail_local(error, error_size,
+                        SAGR_KMT_STATUS_KERNEL_COMMUNICATION_ERROR,
+                        "invalid process aperture record");
+    }
+  }
+  if (returned != 0U) {
+    memcpy(out_apertures, committed,
+           (size_t)returned * sizeof(committed[0]));
+  }
+  *out_returned = returned;
+  *out_total = total;
+  return SAGR_KMT_STATUS_SUCCESS;
+}
+
+sagr_kmt_status_t sagr_kmt_acquire_vm(
+    sagr_provider_t *provider, const sagr_kmt_handle_t *handle,
+    uint32_t gpu_id, uint32_t render_minor,
+    const sagr_kmt_call_options_t *options, sagr_error_info_t *error,
+    uint32_t error_size) {
+  sagr_kmt_envelope_request_t request;
+  sagr_kmt_envelope_result_t result;
+  sagr_kmt_status_t status = prepare_request(
+      provider, SAGR_KMT_OP_ACQUIRE_VM, options, &request, error, error_size);
+  if (status == SAGR_KMT_STATUS_SUCCESS) {
+    status = validate_kfd_handle(handle, error, error_size);
+  }
+  if (status != SAGR_KMT_STATUS_SUCCESS) {
+    return status;
+  }
+  if (gpu_id == 0U || render_minor < 128U || render_minor > 255U) {
+    return fail_local(error, error_size, SAGR_KMT_STATUS_INVALID_PARAMETER,
+                      "invalid VM acquisition identity");
+  }
+  request_owner(&request, handle);
+  request.argument_words[0] = gpu_id;
+  request.argument_words[1] = render_minor;
+  return exchange(provider, &request, options, &result, error, error_size);
+}
+
+sagr_kmt_status_t sagr_kmt_set_memory_policy(
+    sagr_provider_t *provider, const sagr_kmt_handle_t *handle,
+    uint32_t gpu_id, uint32_t default_policy, uint32_t alternate_policy,
+    uint32_t misc_process_flags, uint64_t alternate_aperture_base,
+    uint64_t alternate_aperture_size, const sagr_kmt_call_options_t *options,
+    sagr_error_info_t *error, uint32_t error_size) {
+  sagr_kmt_envelope_request_t request;
+  sagr_kmt_envelope_result_t result;
+  sagr_kmt_status_t status = prepare_request(
+      provider, SAGR_KMT_OP_SET_MEMORY_POLICY, options, &request, error,
+      error_size);
+  if (status == SAGR_KMT_STATUS_SUCCESS) {
+    status = validate_kfd_handle(handle, error, error_size);
+  }
+  if (status != SAGR_KMT_STATUS_SUCCESS) {
+    return status;
+  }
+  if (gpu_id == 0U ||
+      (default_policy != SAGR_KMT_CACHE_POLICY_COHERENT &&
+       default_policy != SAGR_KMT_CACHE_POLICY_NONCOHERENT) ||
+      (alternate_policy != SAGR_KMT_CACHE_POLICY_COHERENT &&
+       alternate_policy != SAGR_KMT_CACHE_POLICY_NONCOHERENT) ||
+      alternate_aperture_size == 0U ||
+      alternate_aperture_base > UINT64_MAX - alternate_aperture_size ||
+      (alternate_aperture_base & UINT64_C(0xffff)) != 0U ||
+      (alternate_aperture_size & UINT64_C(0xffff)) != 0U) {
+    return fail_local(error, error_size, SAGR_KMT_STATUS_INVALID_PARAMETER,
+                      "invalid memory policy carriers");
+  }
+  request_owner(&request, handle);
+  request.argument_words[0] = gpu_id;
+  request.argument_words[1] = default_policy;
+  request.argument_words[2] = alternate_policy;
+  request.argument_words[3] = misc_process_flags;
+  put_word_u64(request.argument_words, 4, alternate_aperture_base);
+  put_word_u64(request.argument_words, 6, alternate_aperture_size);
+  return exchange(provider, &request, options, &result, error, error_size);
 }
 
 sagr_kmt_status_t sagr_kmt_alloc_memory(
@@ -718,7 +1142,15 @@ sagr_kmt_status_t sagr_kmt_queue_create(
   }
   if (queue == NULL || queue->struct_size < sizeof(*queue) ||
       queue->flags != 0 || queue->node_id != 1U || queue->depth == 0 ||
-      queue->depth > SAGR_QUEUE_MAX_DEPTH || queue->ring_size_bytes == 0 ||
+      queue->depth > SAGR_KMT_QUEUE_MAX_DEPTH ||
+      queue->ring_size_bytes == 0 ||
+      queue->ring_base_address == 0 ||
+      (queue->ring_base_address & UINT64_C(63)) != 0 ||
+      queue->read_pointer_address == 0 ||
+      queue->write_pointer_address == 0 ||
+      (queue->read_pointer_address & UINT64_C(7)) != 0 ||
+      (queue->write_pointer_address & UINT64_C(7)) != 0 ||
+      queue->ring_size_bytes != (uint64_t)queue->depth * UINT64_C(64) ||
       queue->reserved0 != 0 ||
       !bytes_are_zero(queue->reserved, sizeof(queue->reserved)) ||
       out_queue == NULL) {
@@ -729,10 +1161,25 @@ sagr_kmt_status_t sagr_kmt_queue_create(
   request.argument_words[0] = queue->node_id;
   request.argument_words[1] = queue->queue_type;
   request.argument_words[2] = queue->depth;
-  put_word_u64(request.argument_words, 3, queue->ring_size_bytes);
+  put_word_u64(request.argument_words, 3, queue->ring_base_address);
+  request.buffer_bytes = 24U;
+  put_buffer_u64(request.buffer, 0U, queue->ring_size_bytes);
+  put_buffer_u64(request.buffer, 8U, queue->read_pointer_address);
+  put_buffer_u64(request.buffer, 16U, queue->write_pointer_address);
+  request.buffer_crc32c = sagr_crc32c(request.buffer, request.buffer_bytes);
   status = exchange(provider, &request, options, &result, error, error_size);
   if (status != SAGR_KMT_STATUS_SUCCESS) {
     return status;
+  }
+  if (result.result_words[0] != queue->depth ||
+      (get_word_u64(result.result_words, 1) %
+       SAGR_BRIDGE_KMT_SHARED_BACKING_DOORBELL_SLOT_BYTES) != 0U ||
+      result.result_words[3] != 0U || result.result_words[4] != 0U ||
+      result.result_words[5] != 0U || result.result_words[6] != 0U ||
+      result.result_words[7] != 0U || result.buffer_bytes != 0U) {
+    return fail_local(error, error_size,
+                      SAGR_KMT_STATUS_KERNEL_COMMUNICATION_ERROR,
+                      "noncanonical queue creation result");
   }
   committed.owner_id = result.owner_id;
   committed.owner_generation = result.owner_generation;

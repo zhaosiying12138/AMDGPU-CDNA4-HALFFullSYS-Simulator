@@ -236,6 +236,9 @@ static int check_model(void) {
 static int check_status_and_unsupported(void) {
   uint8_t result[32];
   sagr_error_info_t error;
+  sagr_managed_session_options_t managed_options;
+  sagr_managed_session_options_v2_t managed_options_v2;
+  sagr_provider_t *managed_provider = NULL;
   int failures = 0;
   memset(result, 0xa5, sizeof(result));
   memset(&error, 0, sizeof(error));
@@ -268,6 +271,37 @@ static int check_status_and_unsupported(void) {
     failures += expect(status != SAGR_STATUS_SUCCESS && provider == NULL,
                        "provider open does not fall back to a host device");
   }
+  failures += expect(
+      sagr_provider_open_managed_v2(
+          NULL, &managed_provider, NULL, 0U, &error,
+          (uint32_t)sizeof(error)) == SAGR_STATUS_INVALID_ARGUMENT &&
+          managed_provider == NULL,
+      "managed v2 provider requires exact options");
+  failures += expect(
+      sagr_managed_session_options_init(
+          &managed_options, (uint32_t)sizeof(managed_options)) ==
+      SAGR_STATUS_SUCCESS,
+      "managed provider options initialize");
+  managed_options.flags = UINT32_C(2);
+  failures += expect(
+      sagr_provider_open_managed(
+          &managed_options, &managed_provider, NULL, 0U, &error,
+          (uint32_t)sizeof(error)) == SAGR_STATUS_INVALID_ARGUMENT &&
+          managed_provider == NULL,
+      "managed provider rejects unknown v1 flags before launch");
+  failures += expect(
+      sagr_managed_session_options_v2_init(
+          &managed_options_v2, (uint32_t)sizeof(managed_options_v2)) ==
+      SAGR_STATUS_SUCCESS,
+      "managed v2 provider options initialize");
+  managed_options_v2.struct_size =
+      (uint32_t)sizeof(managed_options_v2) - 1U;
+  failures += expect(
+      sagr_provider_open_managed_v2(
+          &managed_options_v2, &managed_provider, NULL, 0U, &error,
+          (uint32_t)sizeof(error)) == SAGR_STATUS_INVALID_ARGUMENT &&
+          managed_provider == NULL,
+      "managed provider validates v2 size before copying");
   return failures;
 }
 

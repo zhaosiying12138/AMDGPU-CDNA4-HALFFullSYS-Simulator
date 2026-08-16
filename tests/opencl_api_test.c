@@ -3,6 +3,7 @@
 #define CL_TARGET_OPENCL_VERSION 120
 #include "opencl_internal.h"
 
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -84,6 +85,114 @@ static void put_u32_le(uint8_t *destination, uint32_t value) {
   }
 }
 
+static int test_launch_geometry(void) {
+  struct sagr_cl_launch_geometry geometry;
+  const size_t global_1d[1] = {1024U};
+  const size_t local_1d[1] = {256U};
+  const size_t global_2d[2] = {64U, 32U};
+  const size_t local_2d[2] = {8U, 8U};
+  const size_t global_3d[3] = {32U, 16U, 8U};
+  const size_t local_3d[3] = {8U, 4U, 2U};
+  const size_t local_3d_two_warps[3] = {8U, 4U, 4U};
+  const size_t global_boundary[2] = {(size_t)INT_MAX, 64U};
+  const size_t local_boundary[2] = {1U, 64U};
+  const size_t global_rounded_overflow[2] = {(size_t)INT_MAX - 1U, 64U};
+  const size_t local_rounded_overflow[2] = {3U, 64U};
+  const size_t global_total_overflow[3] = {65536U, 32768U, 64U};
+  const size_t local_total_overflow[3] = {1U, 1U, 64U};
+  const size_t local_half_wave[2] = {8U, 4U};
+  const size_t global_large_local[3] = {8U, 8U, 8U};
+  const size_t local_large[3] = {8U, 8U, 8U};
+  const size_t offset_2d[2] = {3U, 5U};
+  const size_t overflowing_offset_2d[2] = {SIZE_MAX, 0U};
+  int failures = 0;
+
+  failures += expect_status(
+      sagr_cl_prepare_launch_geometry(1U, NULL, global_1d, local_1d, 256U,
+                                      64U, &geometry),
+      CL_SUCCESS, "prepare 1D launch geometry");
+  failures += expect_true(
+      geometry.global[0] == 1024U && geometry.global[1] == 1U &&
+          geometry.global[2] == 1U && geometry.local[0] == 256U &&
+          geometry.local[1] == 1U && geometry.local[2] == 1U &&
+          geometry.num_warps == 4U && geometry.total_workgroups == 4U,
+      "1D geometry must preserve inactive-axis defaults");
+
+  failures += expect_status(
+      sagr_cl_prepare_launch_geometry(2U, NULL, global_2d, local_2d, 256U,
+                                      64U, &geometry),
+      CL_SUCCESS, "prepare 2D launch geometry");
+  failures += expect_true(
+      geometry.global[0] == 64U && geometry.global[1] == 32U &&
+          geometry.global[2] == 1U && geometry.local[0] == 8U &&
+          geometry.local[1] == 8U && geometry.local[2] == 1U &&
+          geometry.num_warps == 1U && geometry.total_workgroups == 32U &&
+          geometry.dynamic_shared_memory_bytes == 0U,
+      "2D geometry must use flat local size and dynamic LDS zero");
+
+  failures += expect_status(
+      sagr_cl_prepare_launch_geometry(3U, NULL, global_3d, local_3d, 256U,
+                                      64U, &geometry),
+      CL_SUCCESS, "prepare 3D launch geometry");
+  failures += expect_true(
+      geometry.num_warps == 1U && geometry.total_workgroups == 64U,
+      "3D geometry must preserve all axes");
+  failures += expect_status(
+      sagr_cl_prepare_launch_geometry(3U, NULL, global_3d,
+                                      local_3d_two_warps, 256U, 64U,
+                                      &geometry),
+      CL_SUCCESS, "prepare two-warp 3D launch geometry");
+  failures += expect_true(geometry.num_warps == 2U &&
+                              geometry.total_workgroups == 32U,
+                          "3D num_warps must use the flat local size");
+
+  failures += expect_status(
+      sagr_cl_prepare_launch_geometry(2U, NULL, global_boundary,
+                                      local_boundary, 256U, 64U, &geometry),
+      CL_SUCCESS, "signed total-workgroup boundary");
+  failures += expect_true(geometry.total_workgroups == (uint64_t)INT_MAX,
+                          "signed workgroup boundary must remain exact");
+  failures += expect_status(
+      sagr_cl_prepare_launch_geometry(
+          2U, NULL, global_rounded_overflow, local_rounded_overflow, 256U, 64U,
+          &geometry),
+      CL_INVALID_GLOBAL_WORK_SIZE, "reject rounded grid overflow");
+  failures += expect_status(
+      sagr_cl_prepare_launch_geometry(
+          3U, NULL, global_total_overflow, local_total_overflow, 256U, 64U,
+          &geometry),
+      CL_INVALID_GLOBAL_WORK_SIZE, "reject total workgroup overflow");
+  failures += expect_status(
+      sagr_cl_prepare_launch_geometry(2U, NULL, global_2d, local_half_wave,
+                                      256U, 64U, &geometry),
+      CL_INVALID_WORK_GROUP_SIZE, "reject sub-wave flat local size");
+  failures += expect_status(
+      sagr_cl_prepare_launch_geometry(3U, NULL, global_large_local, local_large,
+                                      1024U, 64U, &geometry),
+      CL_INVALID_WORK_GROUP_SIZE, "reject flat local size above device limit");
+  failures += expect_status(
+      sagr_cl_prepare_launch_geometry(2U, offset_2d, global_2d, local_2d, 256U,
+                                      64U, &geometry),
+      CL_SUCCESS, "prepare nonzero 2D global offset");
+  failures += expect_true(geometry.offset[0] == 3U &&
+                              geometry.offset[1] == 5U &&
+                              geometry.offset[2] == 0U,
+                          "2D global offsets must preserve active axes");
+  failures += expect_status(
+      sagr_cl_prepare_launch_geometry(2U, overflowing_offset_2d, global_2d,
+                                      local_2d, 256U, 64U, &geometry),
+      CL_INVALID_GLOBAL_OFFSET, "reject overflowing 2D global offset");
+  failures += expect_status(
+      sagr_cl_prepare_launch_geometry(0U, NULL, global_2d, local_2d, 256U, 64U,
+                                      &geometry),
+      CL_INVALID_WORK_DIMENSION, "reject zero work dimensions");
+  failures += expect_status(
+      sagr_cl_prepare_launch_geometry(4U, NULL, global_3d, local_3d, 256U, 64U,
+                                      &geometry),
+      CL_INVALID_WORK_DIMENSION, "reject four work dimensions");
+  return failures;
+}
+
 int main(void) {
   static const char InvalidSource[] =
       "__kernel void intentionally_broken(__global int *output) {\n"
@@ -111,6 +220,8 @@ int main(void) {
   size_t valid_source_size = 0U;
   size_t name_size = 0U;
   size_t build_log_size = 0U;
+  size_t max_work_item_sizes[3] = {0U, 0U, 0U};
+  size_t max_work_group_size = 0U;
   uint8_t kernarg[SAGR_VECADD_KERNARG_SIZE];
   uint8_t expected_kernarg[SAGR_VECADD_KERNARG_SIZE];
   sagr_code_object_arg_value_t values[11];
@@ -127,6 +238,8 @@ int main(void) {
   char identity_text[33];
   size_t identity_index;
   int failures = 0;
+
+  failures += test_launch_geometry();
 
   memset(identity_bytes, 0, sizeof(identity_bytes));
   memset(identity_text, 0, sizeof(identity_text));
@@ -193,6 +306,20 @@ int main(void) {
       clGetDeviceInfo(device, CL_DEVICE_NAME, 0U, NULL, &name_size), CL_SUCCESS,
       "device name size query");
   failures += expect_true(name_size > 1U, "device name must not be empty");
+  failures += expect_status(
+      clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_SIZES,
+                      sizeof(max_work_item_sizes), max_work_item_sizes, NULL),
+      CL_SUCCESS, "device work-item dimensions query");
+  failures += expect_status(
+      clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE,
+                      sizeof(max_work_group_size), &max_work_group_size, NULL),
+      CL_SUCCESS, "device flat workgroup limit query");
+  failures += expect_true(
+      max_work_item_sizes[0] == SAGR_CL_MAX_WORK_ITEM_SIZE &&
+          max_work_item_sizes[1] == SAGR_CL_MAX_WORK_ITEM_SIZE &&
+          max_work_item_sizes[2] == SAGR_CL_MAX_WORK_ITEM_SIZE &&
+          max_work_group_size == SAGR_CL_MAX_WORK_GROUP_SIZE,
+      "device geometry limits must match 1D/2D/3D launch validation");
 
   context = clCreateContext(NULL, 0U, NULL, NULL, NULL, &status);
   failures += expect_true(context == NULL,

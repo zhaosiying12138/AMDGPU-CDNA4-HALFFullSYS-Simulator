@@ -340,11 +340,13 @@ static cl_int materialize_kernarg(
   return CL_SUCCESS;
 }
 
-static cl_int dispatch_locked(cl_command_queue queue, cl_kernel kernel,
-                              const uint64_t global[3],
-                              const uint64_t local[3],
-                              const uint64_t offset[3], uint32_t dimensions) {
+static cl_int dispatch_locked(
+    cl_command_queue queue, cl_kernel kernel,
+    const struct sagr_cl_launch_geometry *geometry, uint32_t dimensions) {
   cl_program program = kernel->program;
+  const uint64_t *global = geometry->global;
+  const uint64_t *local = geometry->local;
+  const uint64_t *offset = geometry->offset;
   sagr_code_object_remote_info_t remote;
   sagr_generic_map_options_t map_options;
   sagr_generic_mapping_t mapping = NULL;
@@ -479,11 +481,9 @@ static cl_int dispatch_locked(cl_command_queue queue, cl_kernel kernel,
   submit_options.workgroup_x = (uint32_t)local[0];
   submit_options.workgroup_y = (uint32_t)local[1];
   submit_options.workgroup_z = (uint32_t)local[2];
-  submit_options.num_warps =
-      ((uint32_t)local[0] + kernel->info.wavefront_size - 1U) /
-      kernel->info.wavefront_size;
+  submit_options.num_warps = geometry->num_warps;
   submit_options.num_ctas = 1U;
-  submit_options.shared_memory_bytes = kernel->info.group_segment_fixed_size;
+  submit_options.shared_memory_bytes = geometry->dynamic_shared_memory_bytes;
   submit_options.wavefront_size = kernel->info.wavefront_size;
   memset(&ticket, 0, sizeof(ticket));
   status = sagr_queue_submit_generic_dispatch(
@@ -540,9 +540,7 @@ cl_int sagr_cl_enqueue_kernel(cl_command_queue queue, cl_kernel kernel,
                               const size_t *global_size,
                               const size_t *local_size, cl_uint wait_count,
                               const cl_event *wait_list, cl_event *event) {
-  uint64_t global[3] = {1U, 1U, 1U};
-  uint64_t local[3] = {1U, 1U, 1U};
-  uint64_t offset[3] = {0U, 0U, 0U};
+  struct sagr_cl_launch_geometry geometry;
   cl_int result;
   if (!sagr_cl_valid_queue(queue)) {
     return CL_INVALID_COMMAND_QUEUE;
@@ -553,8 +551,12 @@ cl_int sagr_cl_enqueue_kernel(cl_command_queue queue, cl_kernel kernel,
   if (kernel->program->context != queue->context) {
     return CL_INVALID_CONTEXT;
   }
-  if (work_dimensions != 1U || global_size == NULL || local_size == NULL) {
-    return CL_INVALID_WORK_DIMENSION;
+  result = sagr_cl_prepare_launch_geometry(
+      work_dimensions, global_offset, global_size, local_size,
+      kernel->info.max_flat_workgroup_size, kernel->info.wavefront_size,
+      &geometry);
+  if (result != CL_SUCCESS) {
+    return result;
   }
   if ((wait_count == 0U) != (wait_list == NULL)) {
     return CL_INVALID_EVENT_WAIT_LIST;
@@ -562,24 +564,8 @@ cl_int sagr_cl_enqueue_kernel(cl_command_queue queue, cl_kernel kernel,
   if (wait_count != 0U || event != NULL) {
     return CL_INVALID_OPERATION;
   }
-  if (global_size[0] == 0U || global_size[0] > UINT32_MAX) {
-    return CL_INVALID_GLOBAL_WORK_SIZE;
-  }
-  if (local_size[0] == 0U || local_size[0] > 256U ||
-      local_size[0] > UINT32_MAX) {
-    return CL_INVALID_WORK_GROUP_SIZE;
-  }
-  if (global_size[0] % local_size[0] != 0U) {
-    return CL_INVALID_WORK_GROUP_SIZE;
-  }
-  if (global_offset != NULL && global_offset[0] != 0U) {
-    return CL_INVALID_GLOBAL_OFFSET;
-  }
-  global[0] = (uint64_t)global_size[0];
-  local[0] = (uint64_t)local_size[0];
   (void)pthread_mutex_lock(&queue->context->mutex);
-  result = dispatch_locked(queue, kernel, global, local, offset,
-                           work_dimensions);
+  result = dispatch_locked(queue, kernel, &geometry, work_dimensions);
   (void)pthread_mutex_unlock(&queue->context->mutex);
   return result;
 }

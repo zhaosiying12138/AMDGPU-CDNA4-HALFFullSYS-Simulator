@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include <self_amdgpu_runtime/export.h>
+#include <self_amdgpu_runtime/generated/bridge_generic_v2.h>
 #include <self_amdgpu_runtime/version.h>
 
 #ifdef __cplusplus
@@ -57,12 +58,16 @@ enum {
 #define SAGR_CAPABILITY_KMT_MASK (UINT64_C(1) << 5)
 #define SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_WORD UINT32_C(0)
 #define SAGR_CAPABILITY_CODE_OBJECT_TRANSPORT_MASK (UINT64_C(1) << 7)
-#define SAGR_CAPABILITY_GENERIC_DISPATCH_WORD UINT32_C(0)
-#define SAGR_CAPABILITY_GENERIC_DISPATCH_MASK (UINT64_C(1) << 8)
+#define SAGR_CAPABILITY_GENERIC_DISPATCH_WORD \
+  SAGR_BRIDGE_GENERIC_V2_GENERIC_CAPABILITY_WORD
+#define SAGR_CAPABILITY_GENERIC_DISPATCH_MASK \
+  SAGR_BRIDGE_GENERIC_V2_GENERIC_CAPABILITY_MASK
 /* CP-0026 selects the real GPU execution adapter only when the existing
  * generic control capability and all of its dependencies are also selected. */
-#define SAGR_CAPABILITY_GENERIC_EXECUTION_WORD UINT32_C(0)
-#define SAGR_CAPABILITY_GENERIC_EXECUTION_MASK (UINT64_C(1) << 9)
+#define SAGR_CAPABILITY_GENERIC_EXECUTION_WORD \
+  SAGR_BRIDGE_GENERIC_V2_EXECUTION_CAPABILITY_WORD
+#define SAGR_CAPABILITY_GENERIC_EXECUTION_MASK \
+  SAGR_BRIDGE_GENERIC_V2_EXECUTION_CAPABILITY_MASK
 
 #define SAGR_QUEUE_PROTOCOL_MAJOR UINT16_C(1)
 #define SAGR_QUEUE_PROTOCOL_MINOR UINT16_C(0)
@@ -103,22 +108,30 @@ enum {
 /* CP-0022 generic object/dispatch payload version.  The enclosing transport
  * framing remains protocol 1.0; this version is selected only when the
  * GENERIC_DISPATCH_V2 capability is negotiated. */
-#define SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR UINT16_C(2)
-#define SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR UINT16_C(0)
+#define SAGR_GENERIC_DISPATCH_PROTOCOL_MAJOR SAGR_BRIDGE_GENERIC_V2_PAYLOAD_MAJOR
+#define SAGR_GENERIC_DISPATCH_PROTOCOL_MINOR SAGR_BRIDGE_GENERIC_V2_PAYLOAD_MINOR
 #define SAGR_GENERIC_RUNTIME_API_VERSION UINT32_C(1)
-#define SAGR_GENERIC_KERNEL_NAME_BYTES UINT32_C(128)
+#define SAGR_GENERIC_KERNEL_NAME_BYTES SAGR_BRIDGE_GENERIC_V2_KERNEL_NAME_BYTES
 #define SAGR_GENERIC_PAGE_SIZE_4K UINT32_C(4096)
 #define SAGR_GENERIC_PAGE_SIZE_64K UINT32_C(65536)
-#define SAGR_GENERIC_MAX_KERNARG_BYTES UINT64_C(16777216)
-#define SAGR_GENERIC_MAX_SHARED_BYTES UINT32_C(65536)
-#define SAGR_GENERIC_MAX_WORKGROUP_DIMENSION UINT32_C(1024)
-#define SAGR_GENERIC_MAX_WARPS UINT32_C(32)
-#define SAGR_GENERIC_MAX_CTAS UINT32_C(8)
+#define SAGR_GENERIC_MAX_KERNARG_BYTES SAGR_BRIDGE_GENERIC_V2_MAX_KERNARG_BYTES
+#define SAGR_GENERIC_MAX_SHARED_BYTES SAGR_BRIDGE_GENERIC_V2_MAX_SHARED_BYTES
+#define SAGR_GENERIC_MAX_WORKGROUP_DIMENSION \
+  SAGR_BRIDGE_GENERIC_V2_MAX_WORKGROUP_DIMENSION
+#define SAGR_GENERIC_MAX_WARPS SAGR_BRIDGE_GENERIC_V2_MAX_WARPS
+#define SAGR_GENERIC_MAX_CTAS SAGR_BRIDGE_GENERIC_V2_MAX_CTAS
 /* The descriptor field is length[6:0], offset[15:7].  Accepting only raw
  * values <= 64 therefore also fail-closes on every nonzero preload offset. */
 #define SAGR_GENERIC_MAX_PRELOAD_DWORDS UINT32_C(64)
 
 #define SAGR_MANAGED_RUNTIME_API_VERSION UINT32_C(1)
+#define SAGR_MANAGED_SESSION_OPTIONS_V2_VERSION UINT32_C(2)
+#define SAGR_MANAGED_SESSION_FLAG_KMT_PROVIDER UINT32_C(1)
+#define SAGR_MANAGED_SESSION_V2_FLAG_EXTERNAL_ENDPOINT UINT32_C(1)
+#define SAGR_MANAGED_SESSION_V2_FLAG_PRIVATE_NAMESPACE UINT32_C(2)
+#define SAGR_MANAGED_SESSION_V2_FLAG_KMT_PROVIDER UINT32_C(4)
+#define SAGR_MANAGED_ENDPOINT_BYTES UINT32_C(108)
+#define SAGR_MANAGED_MAX_WORLD_SIZE UINT32_C(16)
 #define SAGR_MANAGED_DEFAULT_STARTUP_TIMEOUT_NS UINT64_C(15000000000)
 /* gem5 simulation is intentionally slow: keep each call and the reusable
  * process bounded without inheriting CP27's 120-second one-launch ceiling. */
@@ -139,7 +152,8 @@ typedef struct sagr_managed_kernel *sagr_managed_kernel_t;
 /*
  * All public structures contain fixed-width fields only. Callers initialize
  * options with sagr_instance_open_options_init() and pass the actual allocation
- * size. Reserved fields and flags must remain zero.
+ * size. Reserved fields remain zero; flags may contain only constants named for
+ * the corresponding options type.
  */
 typedef struct sagr_instance_open_options {
   uint32_t struct_size;
@@ -571,6 +585,32 @@ typedef struct sagr_managed_session_options {
   uint8_t reserved[24];
 } sagr_managed_session_options_t;
 
+/*
+ * Exact-topology managed sessions are a separate versioned ABI so the
+ * established single-process v1 entry remains binary compatible.  Every v2
+ * session binds the transport handshake and, when auto-spawned, the gem5
+ * command line to one explicit job/epoch/rank/world identity.  Setting the
+ * external-endpoint flag selects an already-published AF_UNIX socket.  The
+ * private-namespace flag instead asks the managed runtime to create the socket
+ * parent and spawn gem5 there.  Topology wildcards are never used by this
+ * interface.
+ */
+typedef struct sagr_managed_session_options_v2 {
+  uint32_t struct_size;
+  uint32_t version;
+  uint32_t flags;
+  uint32_t queue_depth;
+  uint64_t startup_timeout_ns;
+  uint64_t operation_timeout_ns;
+  uint64_t run_timeout_ns;
+  uint64_t epoch;
+  uint32_t rank;
+  uint32_t world_size;
+  uint8_t job_uuid[SAGR_UUID_SIZE];
+  uint8_t endpoint[SAGR_MANAGED_ENDPOINT_BYTES];
+  uint8_t reserved[20];
+} sagr_managed_session_options_v2_t;
+
 typedef struct sagr_managed_session_info {
   uint32_t struct_size;
   uint32_t version;
@@ -662,6 +702,8 @@ SAGR_API sagr_status_t sagr_generic_submit_options_init(
     sagr_generic_submit_options_t *options, uint32_t options_size);
 SAGR_API sagr_status_t sagr_managed_session_options_init(
     sagr_managed_session_options_t *options, uint32_t options_size);
+SAGR_API sagr_status_t sagr_managed_session_options_v2_init(
+    sagr_managed_session_options_v2_t *options, uint32_t options_size);
 SAGR_API sagr_status_t sagr_managed_launch_options_init(
     sagr_managed_launch_options_t *options, uint32_t options_size);
 
@@ -794,14 +836,21 @@ SAGR_API sagr_status_t sagr_generic_unmap_object(
     sagr_error_info_t *out_error, uint32_t error_size);
 
 /*
- * Open starts one private gem5 process and one reusable transport connection.
- * A test may opt into an existing endpoint with SAGR_GENERIC_BRIDGE_ENDPOINT;
- * installed user paths do not require or export that variable.  get_instance
- * returns a borrowed handle for compatibility layers such as libOpenCL; the
- * session retains ownership and callers must not close the borrowed handle.
+ * The v1 open starts one private rank-0/world-1 gem5 process and one reusable
+ * transport connection.  Its legacy test-only endpoint environment remains
+ * topology-wildcarded and must not be used for multi-rank acceptance.  The v2
+ * open requires an exact topology and optionally an explicit endpoint.  The
+ * get_instance function returns a borrowed handle for compatibility layers
+ * such as libOpenCL; the session retains ownership and callers must not close
+ * the borrowed handle.
  */
 SAGR_API sagr_status_t sagr_managed_session_open(
     const sagr_managed_session_options_t *options,
+    sagr_managed_session_t *out_session,
+    sagr_managed_session_info_t *out_info, uint32_t info_size,
+    sagr_error_info_t *out_error, uint32_t error_size);
+SAGR_API sagr_status_t sagr_managed_session_open_v2(
+    const sagr_managed_session_options_v2_t *options,
     sagr_managed_session_t *out_session,
     sagr_managed_session_info_t *out_info, uint32_t info_size,
     sagr_error_info_t *out_error, uint32_t error_size);
