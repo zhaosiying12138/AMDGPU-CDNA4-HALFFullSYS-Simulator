@@ -39,6 +39,9 @@ def start_args(root: Path, state: Path, **overrides: object) -> Namespace:
         "timeout": 120,
         "allow_internet": False,
         "allow_live": False,
+        "cpu_count": 12,
+        "memory_mb": 24576,
+        "disk_size_mb": 98304,
     }
     values.update(overrides)
     return Namespace(**values)
@@ -72,6 +75,9 @@ class AgentEnvManagerTest(unittest.TestCase):
                 feature_id="test-feature",
                 bundle_manifest_sha256="a" * 64,
                 allow_internet=False,
+                cpu_count=12,
+                memory_mb=24576,
+                disk_size_mb=98304,
             )
 
         self.assertEqual(payload["templateID"], "fixture-template")
@@ -82,6 +88,9 @@ class AgentEnvManagerTest(unittest.TestCase):
         self.assertEqual(payload["envVars"]["TMPDIR"], f"/tmp/{namespace}")
         self.assertEqual(payload["envVars"]["XDG_RUNTIME_DIR"], f"/run/{namespace}")
         self.assertEqual(payload["envVars"]["XDG_CACHE_HOME"], f"/var/cache/{namespace}")
+        self.assertEqual(payload["metadata"]["agentenv_cpu_count"], "12")
+        self.assertEqual(payload["metadata"]["agentenv_memory_mb"], "24576")
+        self.assertEqual(payload["metadata"]["agentenv_disk_size_mb"], "98304")
 
     def test_start_pair_dry_run_is_pure_and_plans_two_instances(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -95,6 +104,10 @@ class AgentEnvManagerTest(unittest.TestCase):
                 result = MODULE.start_pair(args)
 
             self.assertEqual(result["operation"], "start-pair")
+            self.assertEqual(
+                result["resource_contract"],
+                {"cpu_count": 12, "memory_mb": 24576, "disk_size_mb": 98304},
+            )
             self.assertEqual([item["instance"] for item in result["plans"]], ["vllm-tp4", "sglang-tp1"])
             self.assertEqual(result["sandboxes"], [])
             self.assertFalse((state / "instances").exists())
