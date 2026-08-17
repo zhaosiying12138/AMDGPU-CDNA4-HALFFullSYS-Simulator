@@ -10,3 +10,6 @@
 8. vLLM/SGLang launch failures after the existing initialization marker are evidence, not a reason to widen this environment integration into model debugging.
 9. AgentENV warm `templateID` creation does not accept CPU, memory, or disk overrides; those values must be fixed by the template (or use the cold API). Metadata alone is a report/verification contract, not resource enforcement.
 10. Pair creation must be transactional: if a later sandbox POST or local state write fails, delete every sandbox already created and mark its local record deleted. A host-only lifecycle test now covers this rollback.
+11. Public source pins must use HTTPS rather than host SSH credentials. A fresh
+    AgentENV guest must be able to initialize the pinned sources without
+    inheriting the host's private key or agent socket.

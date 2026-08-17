@@ -38,7 +38,7 @@
 /projects/*/build-*/
 /projects/*/.cache/
 /projects/*/compile_commands.json
-/projects/*/\.ninja_*
+/projects/*/.ninja_*
 
 # Python and native build noise.
 __pycache__/
