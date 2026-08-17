@@ -69,6 +69,12 @@ FACADE_ARTIFACTS: dict[str, tuple[Path, tuple[str, ...]]] = {
     ),
 }
 
+HIP_VERSIONED_SONAMES = (
+    "libamdhip64.so",
+    "libhiprtc.so",
+    "libhiprtc-builtins.so",
+)
+
 
 class BuildEnvironmentError(RuntimeError):
     pass
@@ -123,6 +129,74 @@ def dynamic_symbols(path: Path) -> set[str]:
             continue
         symbols.add(fields[7].split("@", 1)[0])
     return symbols
+
+
+def hip_versioned_inventory(stage: Path, version_text: str) -> dict[str, object]:
+    metadata: dict[str, str] = {}
+    for raw_line in version_text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, separator, value = line.partition("=")
+        if not separator or not name or not value or name in metadata:
+            raise BuildEnvironmentError("HIP version metadata is malformed")
+        metadata[name] = value
+
+    required = {
+        "HIP_PACKAGING_VERSION_PATCH",
+        "HIP_VERSION_MAJOR",
+        "HIP_VERSION_MINOR",
+        "HIP_VERSION_PATCH",
+        "HIP_VERSION_GITHASH",
+    }
+    if not required.issubset(metadata):
+        raise BuildEnvironmentError("HIP version metadata is incomplete")
+    packaging = metadata["HIP_PACKAGING_VERSION_PATCH"]
+    if packaging != f"{metadata['HIP_VERSION_PATCH']}-{metadata['HIP_VERSION_GITHASH']}":
+        raise BuildEnvironmentError("HIP packaging version differs from patch and source identity")
+    if not metadata["HIP_VERSION_MAJOR"].isdigit() or not metadata["HIP_VERSION_MINOR"].isdigit():
+        raise BuildEnvironmentError("HIP major or minor version is not numeric")
+
+    library = stage / "lib"
+    inventory: dict[str, object] = {}
+    for base in HIP_VERSIONED_SONAMES:
+        soname = f"{base}.{metadata['HIP_VERSION_MAJOR']}"
+        expected_target = f"{soname}.{metadata['HIP_VERSION_MINOR']}.{packaging}"
+        public_path = library / soname
+        try:
+            target = os.readlink(public_path)
+        except OSError as error:
+            raise BuildEnvironmentError(f"HIP SONAME is not a readable symlink: {public_path}") from error
+        if target != expected_target or Path(target).name != target:
+            raise BuildEnvironmentError(f"HIP SONAME target differs from version metadata: {public_path}")
+        resolved = resolved_product_file(public_path, stage)
+        expected_path = library / expected_target
+        if resolved != expected_path.resolve(strict=True):
+            raise BuildEnvironmentError(f"HIP SONAME resolves to an unexpected artifact: {public_path}")
+        versioned = sorted(
+            path.name
+            for path in library.glob(f"{soname}.*")
+            if path.is_file() and not path.is_symlink()
+        )
+        if versioned != [expected_target]:
+            raise BuildEnvironmentError(
+                f"HIP versioned library inventory is not unique for {soname}: {versioned}"
+            )
+        unversioned = library / base
+        try:
+            unversioned_target = os.readlink(unversioned)
+        except OSError as error:
+            raise BuildEnvironmentError(
+                f"HIP unversioned library is not a readable symlink: {unversioned}"
+            ) from error
+        if unversioned_target != soname:
+            raise BuildEnvironmentError(f"HIP unversioned symlink differs from SONAME: {unversioned}")
+        inventory[base] = {
+            "soname": soname,
+            "versioned": expected_target,
+            "artifact": file_record(expected_path),
+        }
+    return {"metadata": metadata, "libraries": inventory}
 
 
 def locked_packages(lock: Path) -> dict[str, dict[str, str]]:
@@ -333,12 +407,14 @@ def verify_facade_stage(root: Path) -> dict[str, object]:
     }
     if not all(versions.values()):
         raise BuildEnvironmentError("facade version metadata is empty")
+    hip_inventory = hip_versioned_inventory(stage, versions["hip"])
     return {
         "prefix": str(stage),
         "target": "gfx950",
         "artifacts": artifacts,
         "headers": headers,
         "versions": versions,
+        "hip_versioned_inventory": hip_inventory,
         "compile_contract": compile_contract,
         "environment": facade_environment(root),
         "upstream_sources_modified": False,

@@ -14,6 +14,25 @@ SPEC.loader.exec_module(MODULE)
 
 
 class HipFacadeBuildEnvironmentTest(unittest.TestCase):
+    @staticmethod
+    def _hip_inventory_fixture(stage: Path) -> str:
+        library = stage / "lib"
+        library.mkdir(parents=True)
+        version = (
+            "HIP_PACKAGING_VERSION_PATCH=26331-d140452e1c\n"
+            "HIP_VERSION_MAJOR=7\n"
+            "HIP_VERSION_MINOR=16\n"
+            "HIP_VERSION_PATCH=26331\n"
+            "HIP_VERSION_GITHASH=d140452e1c\n"
+        )
+        for base in MODULE.HIP_VERSIONED_SONAMES:
+            soname = f"{base}.7"
+            target = f"{soname}.16.26331-d140452e1c"
+            (library / target).write_bytes(base.encode("ascii"))
+            (library / soname).symlink_to(target)
+            (library / base).symlink_to(soname)
+        return version
+
     def test_lock_accepts_conda_and_tar_bz2(self) -> None:
         packages = MODULE.locked_packages(ROOT / MODULE.LOCK_RELATIVE)
         # The lock is an explicit full build environment, so adding an
@@ -53,6 +72,40 @@ class HipFacadeBuildEnvironmentTest(unittest.TestCase):
         symbols = MODULE.dynamic_symbols(stage / "lib/libamdhip64.so.7")
         self.assertIn("hipGetDeviceCount", symbols)
         self.assertIn("hipModuleLaunchKernel", symbols)
+
+    def test_hip_version_inventory_binds_metadata_and_unique_dsos(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stage = Path(directory)
+            version = self._hip_inventory_fixture(stage)
+            result = MODULE.hip_versioned_inventory(stage, version)
+
+        self.assertEqual(result["metadata"]["HIP_VERSION_GITHASH"], "d140452e1c")
+        self.assertEqual(
+            result["libraries"]["libamdhip64.so"]["versioned"],
+            "libamdhip64.so.7.16.26331-d140452e1c",
+        )
+
+    def test_hip_version_inventory_rejects_stale_versioned_dso(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stage = Path(directory)
+            version = self._hip_inventory_fixture(stage)
+            (stage / "lib/libamdhip64.so.7.16.26315-92115a2941").write_bytes(b"stale")
+            with self.assertRaisesRegex(
+                MODULE.BuildEnvironmentError, "inventory is not unique"
+            ):
+                MODULE.hip_versioned_inventory(stage, version)
+
+    def test_hip_version_inventory_rejects_metadata_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stage = Path(directory)
+            version = self._hip_inventory_fixture(stage).replace(
+                "HIP_VERSION_GITHASH=d140452e1c",
+                "HIP_VERSION_GITHASH=92115a2941",
+            )
+            with self.assertRaisesRegex(
+                MODULE.BuildEnvironmentError, "packaging version differs"
+            ):
+                MODULE.hip_versioned_inventory(stage, version)
 
     def test_lock_rejects_unknown_artifact_format(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
