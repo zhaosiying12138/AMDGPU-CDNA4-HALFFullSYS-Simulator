@@ -4,7 +4,7 @@
 
 **Plan:** `AMDGPU-SIM-V1`, revision `16`
 
-**Current state:** `AgentENV and generic model-backed fast copy are integrated on main; the corrected custom-kernel config awaits a user-controlled WSL restart; unchanged-upstream SGLang/vLLM TP1 and TP2 plus Qwen3.5-9B TP16 remain unaccepted`
+**Current state:** `AgentENV and generic model-backed fast copy are integrated on main; the custom 6.18.40.1 WSL kernel is active with usable KVM and ublk devices; unchanged-upstream SGLang/vLLM TP1 and TP2 plus Qwen3.5-9B TP16 remain unaccepted`
 
 **Current phase:** `activate AgentENV isolation on main, then complete unchanged-upstream SGLang and vLLM Qwen3.5-0.8B at TP1 and TP2 with generic fast copy enabled; cancel the 0.8B TP4 lane and continue directly to Qwen3.5-9B TP16`
 
@@ -43,10 +43,22 @@ statement that requires Qwen3.5-0.8B TP4. The active goal has resumed on
    and cleanup behavior as the legacy path. A speedup is reported only after
    correctness equality; a fast-copy failure falls back through the explicit
    legacy switch rather than widening framework-specific code.
-7. The corrected AgentENV `.wslconfig` is staged, but the running kernel is
-   still stock until the user performs the separately announced second
-   `wsl --shutdown`. The assistant must never invoke that shutdown implicitly
-   or while unrelated important work is running.
+7. The corrected AgentENV `.wslconfig` is active and the custom
+   `6.18.40.1-aenv-ublk-6.18.40.1` kernel is running. KVM and ublk are usable
+   in the current session. Do not request another restart while the user is
+   away. If AgentENV cannot complete its lifecycle without one, continue TP1
+   on the host: parallelize only with proven isolation, otherwise run the two
+   engines serially. The assistant never invokes `wsl --shutdown` itself.
+8. During a 50--70 minute TP1 run, use the time for bounded parallel work when
+   it has a concrete chance to shorten the next iteration or improve the first
+   failure record. One agent owns read-only monitoring and capture; useful
+   research agents use `gpt-5.6-sol` at `max` reasoning in isolated worktrees
+   for failure capsules, ISA/execute tests, focused dispatch replay,
+   postmortem debugging, launch-overhead measurement, or the next validation.
+   Do not spawn speculative busywork merely to fill concurrency or consume
+   tokens. Discoveries enter only the next iteration after review and never
+   mutate the binary or source under a live run. Full-model generation and
+   teardown remain the acceptance gate; replay and microtests cannot replace it.
 
 **Execution checkpoint (2026-08-15):** the simulator-aware 16-slot
 `rocm-smi` lease inventory passes focused tests and a real managed-gem5

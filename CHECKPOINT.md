@@ -16,13 +16,18 @@ authority is revision 16 of `GOAL.md` and `PLAN.md`:
 - AgentENV integration and generic fast copy are now on `main` and are required
   foundations for subsequent model tests.
 - The active Windows `.wslconfig` contains the corrected literal doubled path
-  separators and points at the staged 6.18.40.1 kernel/modules. The running WSL
-  kernel is still stock `6.18.33.2-microsoft-standard-WSL2`; the user must
-  perform the separately announced second `wsl --shutdown`. The assistant must
-  not invoke it.
-- Until that restart, do not start AgentENV, Firecracker, or a model. After it,
-  verify the kernel, `/dev/ublk-control`, `/dev/kvm`, service ownership, and a
-  sandbox create/collect/stop cycle first.
+  separators and points at the staged 6.18.40.1 kernel/modules. The restart is
+  complete: the running release is
+  `6.18.40.1-aenv-ublk-6.18.40.1`, and `/dev/ublk-control` plus `/dev/kvm` are
+  present and usable by the current user.
+- The modules VHD has an extra release-directory nesting. Current-session
+  symlinks made the required modules and devices usable; a permanent image
+  layout repair can wait for a future maintenance restart. Do not request or
+  perform another restart while the user is away.
+- Complete one AgentENV service and sandbox create/collect/stop cycle first.
+  If it cannot work without another restart, do not block model bring-up:
+  continue on the host, parallel only with proven disjoint resources and
+  otherwise serially.
 - Model tests default to `source scripts/fastcopy_mode.sh fast`. Legacy remains
   an explicit A/B/fallback, not the default long-run configuration.
 - SGLang and vLLM must both be unchanged upstream. Project replacement Triton
@@ -32,13 +37,17 @@ authority is revision 16 of `GOAL.md` and `PLAN.md`:
   Shared fixes are reviewed against both engines and enter main serially.
 - The active ladder is SGLang TP1 + vLLM TP1, then both TP2, then
   Qwen3.5-9B TP16. All Qwen3.5-0.8B TP4 tasks are cancelled.
+- During a long model run, assign one read-only monitor and use
+  `gpt-5.6-sol` agents at `max` reasoning only for bounded work likely to
+  shorten the next iteration: failure capsules, focused replay/tests,
+  postmortem tooling, launch-overhead measurement, or the next gate. Do not
+  fill concurrency with low-value work, change the running binary, or count
+  focused replay as model acceptance.
 
-AgentENV host-only code and its 25 focused tests have been integrated. The
-main gem5 gitlink remains at `d9c1aa6e5a7ee0df0819c99301cd091d0d48f331`,
-preserving the later Claude-era fixes. One inherited uncommitted
-`wavefront.cc` LGKM-underflow panic guard is under separate review and must be
-committed with focused evidence or explicitly rejected before the clean
-handoff; it must never be silently discarded.
+AgentENV host-only code and its focused tests have been integrated. The main
+gem5 gitlink is `30d2511083d7c32ffa75ef1fd1864432c3212cf8`: it preserves the
+later Claude-era fixes and the reviewed LGKM-underflow fail-closed invariant.
+That inherited change is committed; it is no longer a dirty-worktree item.
 
 ## Non-Negotiable Engineering Rule
 
@@ -127,12 +136,13 @@ that model boundary is known.
    git -C projects/gem5 status --short --branch
    ```
 
-2. If `uname -r` is still stock, stop. Show a fresh process snapshot and the
-   original `.wslconfig` rollback path, then ask the user to run
-   `wsl --shutdown` from Windows. Never invoke it from the agent.
+2. Confirm `uname -r` is the custom 6.18.40.1 release and both required device
+   nodes are usable. If a later AgentENV issue would require another restart,
+   record it for the user's return and continue the model lane on the host.
+   Never invoke `wsl --shutdown` from the agent.
 
-3. After the user returns, verify the custom kernel and AgentENV prerequisites,
-   then run only host/lifecycle checks before any model:
+3. Verify AgentENV prerequisites, then run only host/lifecycle checks before
+   selecting AgentENV or the host fallback for a model:
 
    ```bash
    uname -r
@@ -146,9 +156,10 @@ that model boundary is known.
    python3 tools/agentenv_service.py plan
    ```
 
-4. Build/verify the immutable runtime bundle and one sandbox lifecycle. Do not
-   launch SGLang/vLLM until service ownership, rollback, collection, namespace,
-   and host-process guards are green.
+4. Build/verify the immutable runtime bundle and one sandbox lifecycle. If its
+   service ownership, collection, namespace, and host-process guards are green,
+   use it. Otherwise record the failure and use host execution without waiting
+   for interaction; parallelize only after proving isolation, else serialize.
 
 5. Create independent SGLang/vLLM branches and AgentENV instances. Enable fast
    copy with `source scripts/fastcopy_mode.sh fast`, run byte-exact probes, and

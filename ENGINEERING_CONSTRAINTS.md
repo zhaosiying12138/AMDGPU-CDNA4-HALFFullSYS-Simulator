@@ -114,6 +114,11 @@ checkpoint-specific test procedure.
   service-ownership, and lifecycle gates pass. A configured `.wslconfig` alone
   is not acceptance, and the assistant never invokes `wsl --shutdown` without
   first warning the user and receiving explicit confirmation.
+- AgentENV is preferred isolation, not a progress blocker. While the user is
+  away, a sandbox failure or need for another restart is recorded and model
+  work continues on the host. Host lanes run concurrently only after proving
+  disjoint worktrees, builds, caches, endpoints, leases, logs, tmp directories,
+  and process groups; otherwise SGLang and vLLM run serially.
 - Concurrent SGLang/vLLM work uses separate AgentENV instances, worktrees,
   branches, builds, caches, sockets, endpoints, tmp directories, SMI lease
   namespaces, logs, and process groups. A sandbox must not mutate another

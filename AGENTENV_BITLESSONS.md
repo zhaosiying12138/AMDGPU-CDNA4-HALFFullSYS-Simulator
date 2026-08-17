@@ -20,3 +20,10 @@
     newer runtimes and add relative root aliases (`modules.dep`, `kernel/`,
     ...) for older runtimes; this is dual-compatible without duplicating the
     module payload.
+13. Environment parallelism is useful only when it shortens the critical
+    debug loop. During a long TP1 run, reserve one agent for read-only progress
+    and first-failure capture; use additional agents only for bounded,
+    high-value work such as canonical capsules, decoder/execute regressions,
+    dependency-complete replay, postmortem diagnostics, or measured launch
+    overhead. Do not fill slots with token-consuming busywork, patch the live
+    run, or promote a replay result to engine acceptance.

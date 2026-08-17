@@ -6,7 +6,7 @@
 
 **Revision date:** `2026-08-17`
 
-**State at this commit:** `AgentENV and generic model-backed fast copy are integrated on main while later gem5 fixes remain preserved. The corrected custom-kernel config awaits the user's second WSL restart. Model acceptance is reset to unchanged-upstream SGLang TP1 and vLLM TP1, then both TP2, then Qwen3.5-9B TP16; 0.8B TP4 is cancelled and custom engine operators do not count.`
+**State at this commit:** `AgentENV and generic model-backed fast copy are integrated on main while later gem5 fixes remain preserved. The custom 6.18.40.1 kernel is active with usable KVM and ublk devices. Model acceptance is reset to unchanged-upstream SGLang TP1 and vLLM TP1, then both TP2, then Qwen3.5-9B TP16; 0.8B TP4 is cancelled and custom engine operators do not count.`
 
 ## 0.0 Authoritative resumed plan (2026-08-17)
 
@@ -20,10 +20,13 @@ steps. Execution is resumed on `main` in this order:
    Keep AgentENV, fastcopy, and Claude-era generic gem5/self-runtime fixes as
    separate auditable commits. End each handoff with root and nested trees
    clean.
-3. The user, not the assistant, performs the announced second
-   `wsl --shutdown`. After restart verify the custom 6.18.40.1 kernel,
-   `/dev/ublk-control`, usable `/dev/kvm`, Firecracker, loopback-only AgentENV
-   service ownership, and sandbox create/collect/stop before launching a model.
+3. The user completed the required restart. The running custom 6.18.40.1
+   kernel, `/dev/ublk-control`, and `/dev/kvm` are verified. Complete the
+   Firecracker, loopback-only AgentENV service ownership, and sandbox
+   create/collect/stop gates without requesting another restart. If that is
+   not possible in the current session, switch to host TP1 execution instead
+   of blocking: run lanes concurrently only when their resources are proven
+   disjoint, otherwise run them serially.
 4. Build one immutable runtime bundle from the active main product. Every
    sandbox gets a private worktree/branch, build directory, Triton/FLA cache,
    endpoint/socket, SMI lease namespace, logs, tmp, and process group. Host
@@ -45,6 +48,20 @@ steps. Execution is resumed on `main` in this order:
    SGLang TP2 and vLLM TP2. Cancel all Qwen3.5-0.8B TP4 work. When both TP2
    gates pass, continue directly to Qwen3.5-9B TP16 on the unchanged upstream
    AMD path, including upstream `torch.compile` where required.
+9. Replace repeated full-model-only debugging with a tiered loop. Every long
+   run has one read-only monitor and uses `gpt-5.6-sol` subagents at `max`
+   reasoning only for bounded work that can materially improve the next gate;
+   do not create busywork to occupy slots or spend tokens. Freeze a canonical
+   failure capsule first; validate decoder and
+   pure semantics in seconds; replay an isolated dispatch only when its code,
+   packet, resources, allocation generations, memory inputs, queue/MQD state,
+   and synchronization dependencies are complete; otherwise replay the
+   smallest proven predecessor sequence. Use gdb/core data for diagnosis, not
+   as a substitute for execution. Re-run full TP1 only after the focused gate
+   proves the proposed repair and all artifacts for the next failure capture
+   are already prepared. Measure kernel-launch overhead separately and optimize
+   only a generic, demonstrated bottleneck without weakening dispatch, memory,
+   ordering, completion, profiling, or failure semantics.
 
 AgentENV isolation is not model correctness, fast copy is not model
 correctness, and a custom-operator vLLM probe is not upstream-engine
