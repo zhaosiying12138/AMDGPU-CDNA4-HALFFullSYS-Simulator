@@ -15,7 +15,12 @@ This plan is executed only in `feature/agentenv-sandbox-isolation` at `/home/zha
 - [x] Add guest bootstrap and two-sandbox lifecycle orchestration with per-instance namespaces.
 - [x] Run static/unit/build checks without stopping WSL or changing `.wslconfig`.
 - [x] Present the exact candidate kernel activation diff and rollback plan; pause before explicit `wsl --shutdown` approval.
-- [ ] After explicit approval only: activate the custom kernel, run ublk/Firecracker/AgentENV gates, and perform the bounded concurrent launch acceptance.
+- [x] After explicit approval, back up the original `.wslconfig` and install a
+  candidate without invoking `wsl --shutdown` from the assistant.
+- [x] Diagnose the first stock-kernel fallback and regenerate the candidate
+  with literal doubled Windows path separators.
+- [ ] After a fresh process snapshot, have the user perform the second shutdown;
+  then run ublk/Firecracker/AgentENV gates and bounded launch acceptance.
 
 ## Resource Policy
 

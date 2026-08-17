@@ -70,19 +70,10 @@ stage() {
   cp -f "$SRC/arch/x86/boot/bzImage" "$WIN_STAGE/bzImage"
   cp -f "$OUT/modules.vhdx" "$WIN_STAGE/modules.vhdx"
   candidate="$OUT/wslconfig.candidate"
-  python3 - "$candidate" "$WIN_STAGE" <<'PY'
-import pathlib, sys
-dst = pathlib.Path(sys.argv[1])
-stage = pathlib.Path(sys.argv[2])
-win = str(stage).replace('/mnt/c/', 'C:/').replace('/', '\\')
-current = pathlib.Path('/mnt/c/Users/Admin1/.wslconfig').read_text(encoding='utf-8')
-lines = current.splitlines()
-keys = {'kernel': f'kernel={win}\\bzImage', 'kernelModules': f'kernelModules={win}\\modules.vhdx', 'nestedVirtualization': 'nestedVirtualization=true'}
-for key, value in keys.items():
-    lines = [line for line in lines if not line.startswith(key + '=')]
-    lines.append(value)
-dst.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-PY
+  python3 "$ROOT/tools/agentenv_wslconfig.py" \
+    --active /mnt/c/Users/Admin1/.wslconfig \
+    --output "$candidate" \
+    --stage "$WIN_STAGE"
   sha256sum "$WIN_STAGE/bzImage" "$WIN_STAGE/modules.vhdx" "$OUT/wslconfig.candidate"
   printf 'staged artifacts and candidate config; active .wslconfig was not modified\n'
 }
