@@ -2,11 +2,53 @@
 
 **Plan ID:** `AMDGPU-SIM-V1`
 
-**Revision:** `15`
+**Revision:** `16`
 
-**Revision date:** `2026-08-16`
+**Revision date:** `2026-08-17`
 
-**State at this commit:** `The architecture migration has a recoverable source backup, zero-diff upstream enforcement, generated shared wire declarations/vectors, a protocol-free generic GPU domain seam, and immutable native/conda products bound to the rebuilt bridge. Ordinary conda activation followed by direct Python demos is the user entry. The replacement product passes diverse operator gates, strict live-input layers plus exact final norm, generic device CCL N=2/3/4/8/16, the pinned-vLLM GroupCoordinator communicator gate, and one real upstream RowParallelLinear TP2 prerequisite with exact checkpoint sharding, local dense, device all-reduce, trace, and cleanup evidence. It also passes an uninterrupted 834-dispatch production window and a fork-safe 16-slot simulator-aware rocm-smi lifecycle. Formal independent evidence accepts unchanged upstream ROCr standard AQL, ordinary public HIP, official ROCm PyTorch eager copy/add/sigmoid/sum, and unchanged upstream Triton AMD add/masked-transform/reduction with bitwise outputs and zero fallback. The current product retains AMD HIP/COMGR/RCCL, torch 2.11.0, and Triton 3.6.0 while replacing only ROCr/KMD. Neither the bridge nor any upstream framework contains an operator/model/shape/hash/PC special case. The remaining model lanes are full Qwen3.5-0.8B TP=2, then vLLM TP=4, unchanged upstream SGLang 0.5.17 TP=4, and Qwen3.5-9B TP=16 with the upstream torch.compile path. No TP=8 model matrix is required. AMD attention selection is upstream-first; FlashInfer is not forced. All framework lanes share one generic HIP/ROCr/PyTorch facade and one runtime-gem5 bridge. Broad legacy deletion remains blocked until facade and model gates pass.`
+**State at this commit:** `AgentENV and generic model-backed fast copy are integrated on main while later gem5 fixes remain preserved. The corrected custom-kernel config awaits the user's second WSL restart. Model acceptance is reset to unchanged-upstream SGLang TP1 and vLLM TP1, then both TP2, then Qwen3.5-9B TP16; 0.8B TP4 is cancelled and custom engine operators do not count.`
+
+## 0.0 Authoritative resumed plan (2026-08-17)
+
+This revision overrides the CP-0029 continuation text and all older 0.8B TP4
+steps. Execution is resumed on `main` in this order:
+
+1. Integrate and verify the pinned AgentENV service, deterministic runtime
+   bundle, guest bootstrap, pair manager, custom WSL kernel tooling, and
+   rollback records without reverting fast-copy or later gem5 commits.
+2. Commit or explicitly reject every inherited dirty change after review.
+   Keep AgentENV, fastcopy, and Claude-era generic gem5/self-runtime fixes as
+   separate auditable commits. End each handoff with root and nested trees
+   clean.
+3. The user, not the assistant, performs the announced second
+   `wsl --shutdown`. After restart verify the custom 6.18.40.1 kernel,
+   `/dev/ublk-control`, usable `/dev/kvm`, Firecracker, loopback-only AgentENV
+   service ownership, and sandbox create/collect/stop before launching a model.
+4. Build one immutable runtime bundle from the active main product. Every
+   sandbox gets a private worktree/branch, build directory, Triton/FLA cache,
+   endpoint/socket, SMI lease namespace, logs, tmp, and process group. Host
+   process guards refuse accidental use of unrelated gem5/vLLM/SGLang jobs.
+5. Enable the generic copy path with `source scripts/fastcopy_mode.sh fast` for
+   model bring-up. Run the existing byte-exact probes first. Keep
+   `source scripts/fastcopy_mode.sh legacy` as the explicit fallback and use a
+   single bounded legacy/fast A/B to validate loaded bytes, model outputs, and
+   weight-load speedup; do not duplicate every long run.
+6. Bring up pinned unchanged-upstream SGLang TP1 and vLLM TP1. Each TP1
+   sandbox is limited to exactly one live gem5 process. Project-specific vLLM
+   Triton registrations and modified framework/model paths are diagnostic
+   history only and cannot satisfy this gate.
+7. The two TP1 lanes may run concurrently only in distinct AgentENV instances
+   and branches. A discovered self-runtime/gem5 fix is reviewed for both
+   engines, tested narrowly, committed on its lane, and merged to main one at a
+   time. The peer lane rebases to the new main before resuming.
+8. After both TP1 paths pass generation and clean teardown, run unchanged
+   SGLang TP2 and vLLM TP2. Cancel all Qwen3.5-0.8B TP4 work. When both TP2
+   gates pass, continue directly to Qwen3.5-9B TP16 on the unchanged upstream
+   AMD path, including upstream `torch.compile` where required.
+
+AgentENV isolation is not model correctness, fast copy is not model
+correctness, and a custom-operator vLLM probe is not upstream-engine
+acceptance. Each claim retains its own evidence boundary.
 
 ## 0.1 Execution checkpoint (2026-08-14)
 

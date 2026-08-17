@@ -80,28 +80,24 @@ checkpoint-specific test procedure.
   mutation, cache/state selection, guards, and discrete outputs remain exact or
   bitwise as required by their contract.
 
-## Out-of-tree PyTorch and vLLM integration
+## Unchanged upstream inference-engine integration
 
-- Register Qwen3.5 simulator operators from a project-owned plugin installed
-  only in the private AMD environment. Do not edit the pinned open-source
-  PyTorch or vLLM source trees to select `gemsim_amd` kernels.
-- Use supported extension points in the accepted path: a packaged vLLM
-  platform/general plugin, PyTorch `torch.library` schemas and dispatcher
-  implementations, Fake/Meta registrations, and the isolated device facade.
-  Monkey patching is diagnostic/prototype-only and must be removed before an
-  operator, layer, model, or TP integration gate can be accepted.
+- Keep pinned SGLang and vLLM source byte-identical to upstream. The accepted
+  model path may use only their normal ROCm/HIP/PyTorch/Triton interfaces plus
+  the generic self-runtime facade below those interfaces.
+- Project-owned replacement Triton operators, `torch.library` model-operator
+  registrations, copied framework/model code, and monkey patches are
+  diagnostic history only. They cannot satisfy SGLang or vLLM TP1/TP2/model
+  acceptance and must not be active in an accepted target process.
 - A temporary diagnostic patch must still be idempotent, reversible, limited to
   named symbols, and fail closed unless the pinned module version, source
   identity, callable signature, model config, dtype, shape, alias, mutation,
   and state contract match. Never apply a broad process-global patch to an
   unknown torch/vLLM checkout.
-- Plugin activation must be explicit and observable in the private environment,
-  preserve unpatched behavior when disabled, and expose operator selection and
-  fallback counters. It must not import CUDA/NVIDIA libraries into the AMD
-  target process or turn a reference oracle into target execution.
-- The plugin maps framework calls to the already generic Triton/runtime/socket
-  path. Adding a registration must not add per-operator gem5/runtime code or
-  trigger a gem5/runtime build.
+- Runtime activation must be explicit and observable in the private
+  environment, preserve legacy behavior when disabled, and expose fallback
+  counters. It must not import CUDA/NVIDIA libraries into the AMD target
+  process or turn a reference oracle into target execution.
 - Preserve vLLM's standard model, parameter-loader, distributed-initialization,
   named `GroupCoordinator`, and tensor-parallel layer contracts. Project code
   must not assign private parallel-state globals or build a second sharding
@@ -111,6 +107,47 @@ checkpoint-specific test procedure.
   metadata when required by upstream initialization. Model tensor payload and
   arithmetic must reach the OOT device communicator and never fall back to
   Gloo. Evidence distinguishes these two traffic classes.
+
+## AgentENV isolation and serial integration
+
+- Model tests run in AgentENV once its custom-kernel, ublk, KVM, Firecracker,
+  service-ownership, and lifecycle gates pass. A configured `.wslconfig` alone
+  is not acceptance, and the assistant never invokes `wsl --shutdown` without
+  first warning the user and receiving explicit confirmation.
+- Concurrent SGLang/vLLM work uses separate AgentENV instances, worktrees,
+  branches, builds, caches, sockets, endpoints, tmp directories, SMI lease
+  namespaces, logs, and process groups. A sandbox must not mutate another
+  sandbox or the host main worktree.
+- TP1 has a hard budget of one live gem5 process per sandbox. Preflight refuses
+  launch if the target command would create or reuse another gem5 process.
+- Parallel lanes discover bugs independently but never commit to main in
+  parallel. Each shared-layer fix receives focused tests and an explicit impact
+  review for both engines, then enters main serially; the other lane rebases
+  before continuing.
+- Main is the integration authority. Every coherent feature/fix is committed
+  promptly, and no handoff leaves staged, unstaged, or untracked source files.
+
+## Fast-copy model policy
+
+- Model bring-up defaults to the generic two-gate fast-copy mode selected by
+  `source scripts/fastcopy_mode.sh fast`. It may bypass an AQL copy only for a
+  fully eligible host-accessible allocation and range; dependency-bearing,
+  profiling-sensitive, private, imported, VMM, D2D, invalid, or unsupported
+  copies retain the specified fallback/error behavior.
+- Legacy mode remains available through `source scripts/fastcopy_mode.sh
+  legacy`. Use it for one bounded A/B or diagnosis, not as the default long-run
+  path.
+- Fast-copy acceptance requires byte-exact small/MB probes and model-level
+  equality against legacy for loaded parameters, deterministic outputs/logits,
+  token IDs, and cleanup before reporting weight-load speedup.
+
+## Active model ladder
+
+- First pass unchanged-upstream SGLang TP1 and vLLM TP1, then both engines at
+  TP2. Qwen3.5-0.8B TP4 is cancelled and must not be scheduled.
+- After both 0.8B TP2 gates pass, continue directly to Qwen3.5-9B TP16 on the
+  upstream AMD execution path. No custom engine operator/model implementation
+  can substitute for these gates.
 
 ## Upstream-zero-diff compiler integration
 

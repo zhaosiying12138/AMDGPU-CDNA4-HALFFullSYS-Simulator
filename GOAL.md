@@ -2,11 +2,51 @@
 
 **Goal ID:** `GSIM-001`
 
-**Plan:** `AMDGPU-SIM-V1`, revision `15`
+**Plan:** `AMDGPU-SIM-V1`, revision `16`
 
-**Current state:** `runtime-gem5-bridge replacement product accepted for diverse operators, strict live-input layers 0..23, exact final norm, device CCL N=2/3/4/8/16, pinned-vLLM GroupCoordinator communicator, one formally accepted upstream RowParallelLinear TP2 prerequisite, continuous 834-dispatch teacher-forced backbone production, fork-safe 16-slot rocm-smi, formally accepted unchanged-upstream ROCr standard-AQL execution, ordinary public-HIP generic kernel execution, official ROCm PyTorch eager copy/add/sigmoid/sum, and unchanged upstream Triton AMD add/branching-transform/reduction through a fresh private JIT cache; full-model TP2/TP4, SGLang TP4, and the 9B torch.compile lane remain`
+**Current state:** `AgentENV and generic model-backed fast copy are integrated on main; the corrected custom-kernel config awaits a user-controlled WSL restart; unchanged-upstream SGLang/vLLM TP1 and TP2 plus Qwen3.5-9B TP16 remain unaccepted`
 
-**Current phase:** `complete the full Qwen3.5-0.8B model on the accepted upstream vLLM TP2 boundary, expand the same generic path to vLLM TP4, then unchanged SGLang TP4 and the 9B TP16 torch.compile scale gate`
+**Current phase:** `activate AgentENV isolation on main, then complete unchanged-upstream SGLang and vLLM Qwen3.5-0.8B at TP1 and TP2 with generic fast copy enabled; cancel the 0.8B TP4 lane and continue directly to Qwen3.5-9B TP16`
+
+## 2026-08-17 authoritative resumed goal
+
+This section supersedes the CP-0029 resume pointer and every older scheduling
+statement that requires Qwen3.5-0.8B TP4. The active goal has resumed on
+`main`; historical checkpoints remain evidence, not execution authority.
+
+1. AgentENV and generic model-backed fast copy are mandatory foundations for
+   subsequent model bring-up. AgentENV isolates filesystem, PID, network,
+   cache, socket, endpoint, log, SMI, build, and temporary state. Fast copy is
+   enabled explicitly with `source scripts/fastcopy_mode.sh fast`; legacy mode
+   remains available for a bounded A/B or fallback investigation.
+2. SGLang and vLLM are pinned, unchanged upstream inference engines. Accepted
+   runs do not edit either engine, register project replacement Triton
+   operators, copy model code, monkey-patch framework behavior, or branch on a
+   model/operator/shape/kernel/PC. Required repairs belong only at a generic
+   self-runtime, ROCr/HIP facade, runtime-gem5 bridge, memory, queue,
+   synchronization, collective, or ISA boundary.
+3. A TP1 sandbox may own exactly one live `gem5.opt` process. Launch
+   orchestration must refuse extra managed simulators instead of silently
+   consuming them. Parallel tests use distinct AgentENV sandboxes and must not
+   share worktrees, builds, caches, endpoints, SMI leases, or process groups.
+4. SGLang TP1 and vLLM TP1 may discover failures concurrently on independent
+   branches. Each generic fix is a small committed change, receives an impact
+   review against both engines, and enters `main` serially. The other branch
+   rebases onto that new main before continuing; sandboxes never write main
+   concurrently.
+5. The model ladder is: unchanged-upstream SGLang TP1 and vLLM TP1, then both
+   engines at TP2, then Qwen3.5-9B TP16 on the upstream AMD path. The
+   Qwen3.5-0.8B TP4 tasks are cancelled. No successful custom-operator vLLM
+   probe counts as upstream vLLM TP1 or TP2 acceptance.
+6. Model acceptance with fast copy requires the same model revision, inputs,
+   seed, decoding settings, parameter bytes, output/logit checks, token IDs,
+   and cleanup behavior as the legacy path. A speedup is reported only after
+   correctness equality; a fast-copy failure falls back through the explicit
+   legacy switch rather than widening framework-specific code.
+7. The corrected AgentENV `.wslconfig` is staged, but the running kernel is
+   still stock until the user performs the separately announced second
+   `wsl --shutdown`. The assistant must never invoke that shutdown implicitly
+   or while unrelated important work is running.
 
 **Execution checkpoint (2026-08-15):** the simulator-aware 16-slot
 `rocm-smi` lease inventory passes focused tests and a real managed-gem5

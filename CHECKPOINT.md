@@ -1,11 +1,44 @@
-# Active Checkpoint: Qwen3.5 TP1 gfx950 MFMA
+# Active Checkpoint: AgentENV + fastcopy upstream model bring-up
 
-Updated: 2026-08-16 16:30 Asia/Shanghai
+Updated: 2026-08-17 Asia/Shanghai
 
 This is the blank-context entry point for the active GSIM-001 work. Read this
-file after `GOAL.md`, `PLAN.md`, and `ENGINEERING_CONSTRAINTS.md`. The archived
+file first, then `GOAL.md`, `PLAN.md`, `ENGINEERING_CONSTRAINTS.md`,
+`AGENTENV_CHECKPOINT.md`, and `FASTCOPY_CHECKPOINT.md`. The archived
 CP-0030 pointer in `state/current.json` is historical and is not the active
 execution authority.
+
+## 2026-08-17 Resumed Authority
+
+The resumed goal is not the legacy CP-0029 vecadd continuation. The current
+authority is revision 16 of `GOAL.md` and `PLAN.md`:
+
+- AgentENV integration and generic fast copy are now on `main` and are required
+  foundations for subsequent model tests.
+- The active Windows `.wslconfig` contains the corrected literal doubled path
+  separators and points at the staged 6.18.40.1 kernel/modules. The running WSL
+  kernel is still stock `6.18.33.2-microsoft-standard-WSL2`; the user must
+  perform the separately announced second `wsl --shutdown`. The assistant must
+  not invoke it.
+- Until that restart, do not start AgentENV, Firecracker, or a model. After it,
+  verify the kernel, `/dev/ublk-control`, `/dev/kvm`, service ownership, and a
+  sandbox create/collect/stop cycle first.
+- Model tests default to `source scripts/fastcopy_mode.sh fast`. Legacy remains
+  an explicit A/B/fallback, not the default long-run configuration.
+- SGLang and vLLM must both be unchanged upstream. Project replacement Triton
+  operators, copied model code, monkey patches, or engine edits do not count.
+- A TP1 sandbox may own exactly one live gem5 process. SGLang and vLLM may run
+  concurrently only in separate AgentENV instances and worktree branches.
+  Shared fixes are reviewed against both engines and enter main serially.
+- The active ladder is SGLang TP1 + vLLM TP1, then both TP2, then
+  Qwen3.5-9B TP16. All Qwen3.5-0.8B TP4 tasks are cancelled.
+
+AgentENV host-only code and its 25 focused tests have been integrated. The
+main gem5 gitlink remains at `d9c1aa6e5a7ee0df0819c99301cd091d0d48f331`,
+preserving the later Claude-era fixes. One inherited uncommitted
+`wavefront.cc` LGKM-underflow panic guard is under separate review and must be
+committed with focused evidence or explicitly rejected before the clean
+handoff; it must never be silently discarded.
 
 ## Non-Negotiable Engineering Rule
 
@@ -15,7 +48,7 @@ model, framework, operator, tensor shape, kernel hash, code address, PC, or
 golden output. Use the unchanged upstream SGLang/vLLM model path to expose the
 next weak shared boundary.
 
-## Current Position
+## Historical Model Position Before AgentENV
 
 The active diagnostic is unchanged-upstream SGLang 0.5.17 running local
 `Qwen3.5-0.8B`, BF16, TP1, AITER attention, Triton linear attention, disabled
@@ -79,6 +112,54 @@ requested token, and cleanly tear down. Do not start topology/TP work before
 that model boundary is known.
 
 ## Resume From Zero Context
+
+1. Read the active contracts in this order and verify source state:
+
+   ```bash
+   cd /home/zhaosiying/amdgpu-sim
+   sed -n '1,280p' CHECKPOINT.md
+   sed -n '1,260p' GOAL.md
+   sed -n '1,300p' PLAN.md
+   sed -n '1,300p' ENGINEERING_CONSTRAINTS.md
+   sed -n '1,260p' AGENTENV_CHECKPOINT.md
+   sed -n '1,240p' FASTCOPY_CHECKPOINT.md
+   git status --short --branch
+   git -C projects/gem5 status --short --branch
+   ```
+
+2. If `uname -r` is still stock, stop. Show a fresh process snapshot and the
+   original `.wslconfig` rollback path, then ask the user to run
+   `wsl --shutdown` from Windows. Never invoke it from the agent.
+
+3. After the user returns, verify the custom kernel and AgentENV prerequisites,
+   then run only host/lifecycle checks before any model:
+
+   ```bash
+   uname -r
+   test -c /dev/ublk-control
+   test -r /dev/kvm && test -w /dev/kvm
+   python3 -m unittest \
+     tests.test_agentenv_wslconfig \
+     tests.test_agentenv_bundle \
+     tests.test_agentenv_manager \
+     tests.test_agentenv_service -q
+   python3 tools/agentenv_service.py plan
+   ```
+
+4. Build/verify the immutable runtime bundle and one sandbox lifecycle. Do not
+   launch SGLang/vLLM until service ownership, rollback, collection, namespace,
+   and host-process guards are green.
+
+5. Create independent SGLang/vLLM branches and AgentENV instances. Enable fast
+   copy with `source scripts/fastcopy_mode.sh fast`, run byte-exact probes, and
+   enforce exactly one live gem5 process per TP1 sandbox. On failure freeze the
+   first shared-layer traceback and make one generic committed fix. Review its
+   impact on the peer engine before serially integrating it into main.
+
+6. Require both unchanged-upstream TP1 paths to generate and tear down, then
+   both TP2 paths. Skip 0.8B TP4 and proceed directly to the 9B TP16 gate.
+
+## Historical Host Resume Command (Do Not Execute As Current Plan)
 
 1. Open the repository and read the active contracts:
 
@@ -155,9 +236,10 @@ that model boundary is known.
 
 ## Remaining High-Level Work
 
-1. Complete unchanged-upstream SGLang Qwen3.5-0.8B TP1 generation and teardown.
-2. Generalize logical GPU capacity to 1..16 and validate TP2/TP4.
-3. Complete lease-backed 16-slot `rocm-smi`/`gemsim-smi` product behavior.
-4. Run unchanged-upstream SGLang TP4 and vLLM TP4 for Qwen3.5-0.8B.
-5. Run upstream AMD vLLM Qwen3.5-9B TP16 with `torch.compile` after the smaller
-   path is stable.
+1. Activate and validate AgentENV after the user-controlled WSL restart.
+2. Complete unchanged-upstream SGLang and vLLM Qwen3.5-0.8B TP1 with fast copy,
+   one gem5 process per sandbox, generation, equality checks, and teardown.
+3. Generalize logical GPU capacity to 1..16 and validate both engines at TP2.
+4. Complete lease-backed 16-slot `rocm-smi`/`gemsim-smi` product behavior.
+5. Run upstream AMD Qwen3.5-9B TP16 with `torch.compile` after both TP2 paths
+   are stable.
