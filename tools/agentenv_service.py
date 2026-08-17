@@ -5,9 +5,11 @@ The wrapper deliberately avoids system-wide installation and service managers.
 Its config, dependency cache, runtime sockets, logs, and ownership record all
 live below ``build/agentenv-integration/server`` in this worktree.
 
-Only a process whose PID, Linux start-time tick, and executable all match the
-feature-local ownership record may be signalled by ``stop``.  This prevents a
-stale or edited PID file from targeting another workload after PID reuse.
+Only a process whose PID, boot identity, Linux start-time tick, and stored
+launch-executable identity all match the feature-local ownership record may be
+signalled by ``stop``.  This prevents a stale or edited PID file from targeting
+another workload after PID reuse without depending on ``/proc/PID/exe``, which
+is intentionally unreadable for capability-bearing processes on some hosts.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import argparse
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import errno
 import fcntl
 import hashlib
 import ipaddress
@@ -23,19 +26,19 @@ import json
 import os
 from pathlib import Path
 import re
+import select
 import shlex
 import signal
 import stat
 import subprocess
 import sys
-import time
-from typing import Any, Iterator, Sequence
+from typing import Any, Callable, Iterator, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
 SERVICE_SCHEMA = "amdgpu-sim.agentenv-service.v1"
-PROCESS_SCHEMA = "amdgpu-sim.agentenv-service-process.v1"
+PROCESS_SCHEMA = "amdgpu-sim.agentenv-service-process.v2"
 DEFAULT_API_ADDR = "127.0.0.1:18080"
 DEFAULT_GUEST_IMAGE = "ubuntu:26.04"
 DEFAULT_STATE_RELATIVE = Path("build/agentenv-integration/server")
@@ -47,6 +50,19 @@ IMAGE_LINE_RE = re.compile(r'^default_image\s*=\s*"[^"]+"\s*$', re.MULTILINE)
 POOL_LOW_LINE_RE = re.compile(r'^low_watermark\s*=\s*\d+\s*$', re.MULTILINE)
 POOL_HIGH_LINE_RE = re.compile(r'^high_watermark\s*=\s*\d+\s*$', re.MULTILINE)
 IMAGE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]*$")
+BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
+PROC_STATUS_PATH = Path("/proc/self/status")
+IP_FORWARD_PATH = Path("/proc/sys/net/ipv4/ip_forward")
+OVERLAYBD_CONFIG_PATH = Path("/etc/overlaybd/overlaybd.json")
+DEVICE_PATHS = (
+    ("kvm", Path("/dev/kvm")),
+    ("ublk_control", Path("/dev/ublk-control")),
+    ("tun", Path("/dev/net/tun")),
+)
+REQUIRED_CAPABILITIES = (
+    ("cap_net_admin", 12),
+    ("cap_sys_admin", 21),
+)
 
 
 class ServiceError(RuntimeError):
@@ -319,7 +335,15 @@ def desired_plan(
             "system_install": False,
             "wsl_configuration_changes": False,
             "wsl_shutdown": False,
-            "signal_identity": ["pid", "starttime_ticks", "executable"],
+            "signal_identity": [
+                "boot_id",
+                "pid",
+                "starttime_ticks",
+                "executable_path",
+                "executable_device",
+                "executable_inode",
+            ],
+            "signal_transport": "pidfd-required",
         },
     }
 
@@ -369,45 +393,229 @@ def prepare_layout(
     }
 
 
-def prerequisite_report() -> dict[str, Any]:
-    devices: dict[str, Any] = {}
-    for name, path in (("kvm", Path("/dev/kvm")), ("ublk_control", Path("/dev/ublk-control"))):
+def _device_report(path: Path) -> dict[str, Any]:
+    try:
+        metadata = path.stat()
+        present = True
+        error = None
+    except OSError as exception:
+        metadata = None
+        present = False
+        error = str(exception)
+    is_character_device = bool(metadata and stat.S_ISCHR(metadata.st_mode))
+    readable = present and os.access(path, os.R_OK)
+    writable = present and os.access(path, os.W_OK)
+    openable = False
+    if is_character_device:
         try:
-            metadata = path.stat()
-            present = True
-            error = None
+            descriptor = os.open(path, os.O_RDWR | os.O_CLOEXEC)
         except OSError as exception:
-            metadata = None
-            present = False
             error = str(exception)
-        is_character_device = bool(metadata and stat.S_ISCHR(metadata.st_mode))
-        readable = present and os.access(path, os.R_OK)
-        writable = present and os.access(path, os.W_OK)
-        devices[name] = {
-            "path": str(path),
-            "present": present,
-            "character_device": is_character_device,
-            "readable": readable,
-            "writable": writable,
-            "ready": present and is_character_device and readable and writable,
-            "error": error,
+        else:
+            os.close(descriptor)
+            openable = True
+    return {
+        "path": str(path),
+        "present": present,
+        "character_device": is_character_device,
+        "readable": readable,
+        "writable": writable,
+        "openable_read_write": openable,
+        "ready": present and is_character_device and openable,
+        "error": error,
+    }
+
+
+def _ip_forward_report(path: Path) -> dict[str, Any]:
+    try:
+        value = path.read_text(encoding="ascii").strip()
+        error = None
+    except (OSError, UnicodeError) as exception:
+        value = None
+        error = str(exception)
+    return {
+        "path": str(path),
+        "value": value,
+        "ready": value == "1",
+        "error": error,
+    }
+
+
+def _capability_report(path: Path) -> dict[str, Any]:
+    masks: dict[str, int] = {}
+    error: str | None = None
+    try:
+        text = path.read_text(encoding="ascii")
+        labels = {
+            "CapInh": "inheritable",
+            "CapPrm": "permitted",
+            "CapEff": "effective",
+            "CapAmb": "ambient",
         }
+        for line in text.splitlines():
+            label, separator, value = line.partition(":")
+            if separator and label in labels:
+                masks[labels[label]] = int(value.strip(), 16)
+        missing_sets = sorted(set(labels.values()) - set(masks))
+        if missing_sets:
+            raise ValueError(f"missing capability sets: {', '.join(missing_sets)}")
+    except (OSError, UnicodeError, ValueError) as exception:
+        error = str(exception)
+        masks = {
+            "inheritable": 0,
+            "permitted": 0,
+            "effective": 0,
+            "ambient": 0,
+        }
+
+    euid = os.geteuid()
+    is_root = euid == 0
+    required_sets = (
+        ("effective", "ambient")
+        if is_root
+        else ("inheritable", "permitted", "effective", "ambient")
+    )
+    required: dict[str, Any] = {}
+    for name, number in REQUIRED_CAPABILITIES:
+        present = {
+            set_name: bool(masks[set_name] & (1 << number))
+            for set_name in ("inheritable", "permitted", "effective", "ambient")
+        }
+        required[name] = {
+            "number": number,
+            **present,
+            "ready": error is None and all(present[name] for name in required_sets),
+        }
+    return {
+        "path": str(path),
+        "euid": euid,
+        "required_sets": list(required_sets),
+        "sets": {name: f"{value:016x}" for name, value in masks.items()},
+        "required": required,
+        "ready": all(value["ready"] for value in required.values()),
+        "error": error,
+    }
+
+
+def _overlaybd_config_report(path: Path) -> dict[str, Any]:
+    try:
+        metadata = path.stat()
+        present = True
+        error = None
+    except OSError as exception:
+        metadata = None
+        present = False
+        error = str(exception)
+    regular_file = bool(metadata and stat.S_ISREG(metadata.st_mode))
+    readable = present and os.access(path, os.R_OK)
+    valid_json_object = False
+    if regular_file and readable:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            valid_json_object = isinstance(value, dict)
+            if not valid_json_object:
+                error = "config root is not a JSON object"
+        except (OSError, UnicodeError, json.JSONDecodeError) as exception:
+            error = str(exception)
+    return {
+        "path": str(path),
+        "present": present,
+        "regular_file": regular_file,
+        "readable": readable,
+        "valid_json_object": valid_json_object,
+        "ready": present and regular_file and readable and valid_json_object,
+        "error": error,
+    }
+
+
+def _pidfd_report() -> dict[str, Any]:
+    if _pidfd_api() is None:
+        return {
+            "python": sys.executable,
+            "ready": False,
+            "error": "Python does not expose pidfd_open and pidfd_send_signal",
+        }
+    try:
+        handle = _open_pidfd(os.getpid())
+    except (ProcessLookupError, ServiceError) as error:
+        return {"python": sys.executable, "ready": False, "error": str(error)}
+    if handle is None:
+        return {
+            "python": sys.executable,
+            "ready": False,
+            "error": "the running kernel does not support pidfd signaling",
+        }
+    try:
+        os.close(handle.descriptor)
+    except OSError as error:
+        return {"python": sys.executable, "ready": False, "error": str(error)}
+    return {"python": sys.executable, "ready": True, "error": None}
+
+
+def prerequisite_report() -> dict[str, Any]:
+    devices = {name: _device_report(path) for name, path in DEVICE_PATHS}
+    ip_forward = _ip_forward_report(IP_FORWARD_PATH)
+    capabilities = _capability_report(PROC_STATUS_PATH)
+    overlaybd_config = _overlaybd_config_report(OVERLAYBD_CONFIG_PATH)
+    pidfd = _pidfd_report()
+
     blockers = [name for name, value in devices.items() if not value["ready"]]
-    return {"ready": not blockers, "blockers": blockers, "devices": devices}
+    if not ip_forward["ready"]:
+        blockers.append("ip_forward")
+    blockers.extend(
+        name
+        for name, value in capabilities["required"].items()
+        if not value["ready"]
+    )
+    if not overlaybd_config["ready"]:
+        blockers.append("overlaybd_config")
+    if not pidfd["ready"]:
+        blockers.append("pidfd_api")
+    return {
+        "ready": not blockers,
+        "blockers": blockers,
+        "devices": devices,
+        "ip_forward": ip_forward,
+        "capabilities": capabilities,
+        "overlaybd_config": overlaybd_config,
+        "pidfd": pidfd,
+    }
+
+
+@dataclass(frozen=True)
+class ExecutableIdentity:
+    path: str
+    device: int
+    inode: int
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "path": self.path,
+            "device": self.device,
+            "inode": self.inode,
+        }
 
 
 @dataclass(frozen=True)
 class ProcessIdentity:
     pid: int
     starttime_ticks: int
-    executable: str
+    boot_id: str
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "pid": self.pid,
             "starttime_ticks": self.starttime_ticks,
-            "executable": self.executable,
+            "boot_id": self.boot_id,
         }
+
+
+def boot_identity() -> str | None:
+    try:
+        value = BOOT_ID_PATH.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeError):
+        return None
+    return value or None
 
 
 def process_identity(pid: int) -> ProcessIdentity | None:
@@ -416,28 +624,53 @@ def process_identity(pid: int) -> ProcessIdentity | None:
     directory = Path("/proc") / str(pid)
     try:
         stat_text = (directory / "stat").read_text(encoding="ascii")
-        executable = os.readlink(directory / "exe")
-    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError, UnicodeError):
+    except (FileNotFoundError, ProcessLookupError):
         return None
+    except (PermissionError, OSError, UnicodeError) as error:
+        raise ServiceError(f"cannot inspect Linux start time for PID {pid}: {error}") from error
     closing_parenthesis = stat_text.rfind(")")
     if closing_parenthesis < 0:
-        return None
+        raise ServiceError(f"malformed /proc/{pid}/stat while checking ownership")
     fields = stat_text[closing_parenthesis + 1 :].split()
     if len(fields) <= 19:
-        return None
+        raise ServiceError(f"incomplete /proc/{pid}/stat while checking ownership")
     try:
         starttime_ticks = int(fields[19])
-    except ValueError:
-        return None
+    except ValueError as error:
+        raise ServiceError(
+            f"invalid Linux start time in /proc/{pid}/stat"
+        ) from error
+    boot_id = boot_identity()
+    if not boot_id:
+        raise ServiceError("cannot inspect Linux boot identity")
     return ProcessIdentity(
         pid=pid,
         starttime_ticks=starttime_ticks,
-        executable=os.path.realpath(executable),
+        boot_id=boot_id,
     )
 
 
-def _expected_executable(paths: ServicePaths) -> str:
-    return os.path.realpath(paths.binary)
+def executable_identity(path: Path) -> ExecutableIdentity | None:
+    resolved = os.path.realpath(path)
+    try:
+        metadata = Path(resolved).stat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(metadata.st_mode):
+        return None
+    return ExecutableIdentity(
+        path=resolved,
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+    )
+
+
+def _expected_executable(paths: ServicePaths) -> ExecutableIdentity | None:
+    return executable_identity(paths.binary)
+
+
+def _is_integer(value: Any, *, minimum: int) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
 
 
 def _read_process_record(paths: ServicePaths) -> dict[str, Any] | None:
@@ -453,12 +686,23 @@ def _read_process_record(paths: ServicePaths) -> dict[str, Any] | None:
         raise ServiceError(f"invalid AgentENV process record: {paths.pidfile}") from error
     if not isinstance(record, dict) or record.get("schema") != PROCESS_SCHEMA:
         raise ServiceError(f"unsupported AgentENV process record: {paths.pidfile}")
-    if not isinstance(record.get("pid"), int) or not isinstance(
-        record.get("starttime_ticks"), int
+    if not _is_integer(record.get("pid"), minimum=1) or not _is_integer(
+        record.get("starttime_ticks"), minimum=1
     ):
         raise ServiceError(f"incomplete AgentENV process identity: {paths.pidfile}")
-    if not isinstance(record.get("executable"), str):
+    if not isinstance(record.get("boot_id"), str) or not record["boot_id"]:
+        raise ServiceError(f"missing AgentENV boot identity: {paths.pidfile}")
+    executable = record.get("executable")
+    if (
+        not isinstance(executable, dict)
+        or not isinstance(executable.get("path"), str)
+        or not executable["path"]
+    ):
         raise ServiceError(f"missing AgentENV executable identity: {paths.pidfile}")
+    if not _is_integer(executable.get("device"), minimum=0) or not _is_integer(
+        executable.get("inode"), minimum=1
+    ):
+        raise ServiceError(f"incomplete AgentENV executable identity: {paths.pidfile}")
     return record
 
 
@@ -466,16 +710,28 @@ def _record_match(
     paths: ServicePaths, record: dict[str, Any]
 ) -> tuple[bool, str, ProcessIdentity | None]:
     expected = _expected_executable(paths)
-    if os.path.realpath(record["executable"]) != expected:
-        return False, "recorded executable differs from configured server binary", None
+    if expected is None:
+        raise ServiceError(
+            "configured AgentENV server binary is unavailable; ownership record retained"
+        )
+    recorded = ExecutableIdentity(
+        path=record["executable"]["path"],
+        device=record["executable"]["device"],
+        inode=record["executable"]["inode"],
+    )
+    if recorded != expected:
+        raise ServiceError(
+            "configured AgentENV server binary differs from the stored launch identity; "
+            "ownership record retained"
+        )
     current = process_identity(record["pid"])
     if current is None:
-        return False, "recorded process no longer exists or is not inspectable", None
+        return False, "recorded process no longer exists", None
+    if current.boot_id != record["boot_id"]:
+        return False, "Linux boot identity differs from the launch record", current
     if current.starttime_ticks != record["starttime_ticks"]:
         return False, "PID was reused (Linux start time differs)", current
-    if current.executable != expected:
-        return False, "live executable differs from the ownership record", current
-    return True, "pid, start time, and executable match", current
+    return True, "pid, boot ID, start time, and stored launch identity match", current
 
 
 def health_probe(api_addr: str, timeout: float = 0.5) -> dict[str, Any]:
@@ -569,6 +825,14 @@ def start_service(
         raise ServiceError(
             "stale AgentENV process record requires `stop --confirm` before restart"
         )
+    if not prerequisites["pidfd"]["ready"]:
+        if dry_run:
+            plan["result"] = "would-refuse-pidfd-unavailable"
+            return plan
+        raise ServiceError(
+            "AgentENV lifecycle requires pidfd_open and pidfd_send_signal; "
+            "use a Python interpreter that exposes both APIs"
+        )
     if not prerequisites["ready"] and not allow_missing_prereqs:
         if not dry_run:
             names = ", ".join(prerequisites["blockers"])
@@ -592,6 +856,11 @@ def start_service(
         environment = os.environ.copy()
         environment.update(environment_overrides(paths, api_addr))
         argv = [str(paths.binary), "--config", str(paths.config)]
+        launch_executable = _expected_executable(paths)
+        if launch_executable is None:
+            raise ServiceError(
+                "AgentENV server launch identity is unavailable; no process was started"
+            )
         log_descriptor = os.open(
             paths.server_log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600
         )
@@ -609,29 +878,58 @@ def start_service(
         finally:
             os.close(log_descriptor)
 
-        identity = process_identity(process.pid)
-        if process.poll() is not None:
-            raise ServiceError(
-                f"AgentENV server exited during launch; inspect {paths.server_log}"
-            )
-        expected = _expected_executable(paths)
-        if identity is None or identity.executable != expected:
-            raise ServiceError(
-                "launched AgentENV PID could not be verified; no ownership record was written"
-            )
-        record = {
-            "schema": PROCESS_SCHEMA,
-            "pid": identity.pid,
-            "starttime_ticks": identity.starttime_ticks,
-            "executable": identity.executable,
-            "argv": argv,
-            "api_addr": validate_api_addr(api_addr),
-            "state_root": str(paths.root),
-            "started_at": now_utc(),
-            "config_sha256": generated["config_sha256"],
-            "environment_sha256": generated["environment_sha256"],
-        }
-        atomic_write(paths.pidfile, canonical_json(record), mode=0o600)
+        pidfd: PidfdHandle | None = None
+        try:
+            pidfd = _open_pidfd(process.pid)
+            if pidfd is None:
+                raise ServiceError(
+                    "pidfd signaling became unavailable during AgentENV launch"
+                )
+            if process.poll() is not None:
+                raise ServiceError(
+                    f"AgentENV server exited during launch; inspect {paths.server_log}"
+                )
+            identity = process_identity(process.pid)
+            if identity is None:
+                raise ServiceError(
+                    "launched AgentENV PID could not be verified; "
+                    "no ownership record was written"
+                )
+            if _expected_executable(paths) != launch_executable:
+                raise ServiceError(
+                    "AgentENV server binary changed during launch; "
+                    "no ownership record was written"
+                )
+            record = {
+                "schema": PROCESS_SCHEMA,
+                "pid": identity.pid,
+                "starttime_ticks": identity.starttime_ticks,
+                "boot_id": identity.boot_id,
+                "executable": launch_executable.as_dict(),
+                "argv": argv,
+                "api_addr": validate_api_addr(api_addr),
+                "state_root": str(paths.root),
+                "started_at": now_utc(),
+                "config_sha256": generated["config_sha256"],
+                "environment_sha256": generated["environment_sha256"],
+            }
+            atomic_write(paths.pidfile, canonical_json(record), mode=0o600)
+        except BaseException as error:
+            try:
+                _terminate_failed_launch(process, pidfd)
+            except ServiceError as cleanup_error:
+                raise ServiceError(
+                    f"AgentENV launch failed ({error}); {cleanup_error}"
+                ) from error
+            paths.pidfile.unlink(missing_ok=True)
+            if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                raise
+            if isinstance(error, ServiceError):
+                raise
+            raise ServiceError(f"AgentENV launch failed: {error}") from error
+        finally:
+            if pidfd is not None:
+                os.close(pidfd.descriptor)
 
     plan.update({"result": "started", "process": record, "generated": generated})
     return plan
@@ -644,20 +942,100 @@ def _remove_record(paths: ServicePaths, record: dict[str, Any], result: str) -> 
     paths.pidfile.unlink(missing_ok=True)
 
 
-def _wait_until_identity_changes(record: dict[str, Any], timeout: float) -> bool:
-    deadline = time.monotonic() + max(0.0, timeout)
-    while True:
-        current = process_identity(record["pid"])
-        if current is None:
-            return True
-        if (
-            current.starttime_ticks != record["starttime_ticks"]
-            or current.executable != os.path.realpath(record["executable"])
-        ):
-            return True
-        if time.monotonic() >= deadline:
-            return False
-        time.sleep(0.1)
+@dataclass(frozen=True)
+class PidfdHandle:
+    descriptor: int
+    send_signal: Callable[[int, int, Any, int], Any]
+
+
+def _pidfd_api() -> tuple[
+    Callable[[int, int], int], Callable[[int, int, Any, int], Any]
+] | None:
+    open_pidfd = getattr(os, "pidfd_open", None)
+    send_signal = getattr(signal, "pidfd_send_signal", None)
+    if not callable(open_pidfd) or not callable(send_signal):
+        return None
+    return open_pidfd, send_signal
+
+
+def _open_pidfd(pid: int) -> PidfdHandle | None:
+    api = _pidfd_api()
+    if api is None:
+        return None
+    open_pidfd, send_signal = api
+    try:
+        descriptor = open_pidfd(pid, 0)
+    except ProcessLookupError:
+        raise
+    except OSError as error:
+        if error.errno == errno.ENOSYS:
+            return None
+        raise ServiceError(f"cannot open pidfd for AgentENV PID {pid}: {error}") from error
+    return PidfdHandle(descriptor=descriptor, send_signal=send_signal)
+
+
+def _terminate_failed_launch(
+    process: subprocess.Popen[Any], pidfd: PidfdHandle | None
+) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        if pidfd is not None:
+            pidfd.send_signal(pidfd.descriptor, signal.SIGKILL, None, 0)
+        else:
+            # This is still the wrapper's unreaped direct child, so its PID
+            # cannot be reused before wait() completes.
+            process.kill()
+    except ProcessLookupError:
+        pass
+    except OSError as error:
+        try:
+            process.kill()
+        except (ProcessLookupError, OSError) as fallback_error:
+            raise ServiceError(
+                "failed AgentENV launch could not be terminated; "
+                f"pidfd error: {error}; child error: {fallback_error}"
+            ) from fallback_error
+    try:
+        process.wait(timeout=5.0)
+    except subprocess.TimeoutExpired as error:
+        raise ServiceError(
+            "failed AgentENV launch did not exit after SIGKILL"
+        ) from error
+
+
+def _signal_if_owned(
+    paths: ServicePaths,
+    record: dict[str, Any],
+    requested_signal: int,
+    pidfd: PidfdHandle,
+) -> tuple[bool, str, ProcessIdentity | None]:
+    matched, reason, current = _record_match(paths, record)
+    if not matched:
+        return False, reason, current
+    try:
+        pidfd.send_signal(pidfd.descriptor, requested_signal, None, 0)
+    except ProcessLookupError:
+        return False, "recorded process exited before the signal was sent", None
+    except OSError as error:
+        name = signal.Signals(requested_signal).name
+        raise ServiceError(
+            f"cannot send {name} to owned AgentENV PID {record['pid']}: {error}; "
+            "ownership record retained"
+        ) from error
+    return True, reason, current
+
+
+def _wait_for_pidfd_exit(pidfd: PidfdHandle, timeout: float) -> bool:
+    poller = select.poll()
+    poller.register(pidfd.descriptor, select.POLLIN)
+    milliseconds = int(max(0.0, timeout) * 1000 + 0.999)
+    try:
+        return bool(poller.poll(milliseconds))
+    except OSError as error:
+        raise ServiceError(
+            f"cannot wait on AgentENV pidfd: {error}; ownership record retained"
+        ) from error
 
 
 def stop_service(
@@ -693,7 +1071,13 @@ def stop_service(
         }
     )
     if dry_run:
-        base["result"] = "would-signal-sigterm" if matched else "would-clear-stale-record"
+        if not matched:
+            base["result"] = "would-clear-stale-record"
+        elif not _pidfd_report()["ready"]:
+            base["result"] = "would-refuse-pidfd-unavailable"
+        else:
+            base["result"] = "would-signal-sigterm"
+            base["signal_method"] = "pidfd"
         return base
     if not confirm:
         raise ServiceError("stop requires explicit --confirm; no signal was sent")
@@ -713,28 +1097,75 @@ def stop_service(
                 "current_identity": current.as_dict() if current else None,
             }
 
-        # Revalidation above is immediately adjacent to the only signal site.
-        os.kill(record["pid"], signal.SIGTERM)
-        if _wait_until_identity_changes(record, timeout):
-            _remove_record(paths, record, "stopped-after-sigterm")
-            return {**base, "result": "stopped-after-sigterm", "owned": True}
+        pidfd: PidfdHandle | None = None
+        try:
+            try:
+                pidfd = _open_pidfd(record["pid"])
+            except ProcessLookupError:
+                _remove_record(paths, record, "stopped-before-sigterm")
+                return {**base, "result": "stopped-before-sigterm", "owned": True}
+            if pidfd is None:
+                raise ServiceError(
+                    "AgentENV stop requires pidfd signaling; ownership record retained"
+                )
 
-        if not kill_after_timeout:
-            raise ServiceError(
-                "AgentENV did not exit before timeout; ownership record was retained"
+            # Opening a pidfd and then revalidating start ticks binds the signal
+            # to the same process even if the numeric PID is later reused.
+            sent, reason, current = _signal_if_owned(
+                paths, record, signal.SIGTERM, pidfd
             )
+            if not sent:
+                _remove_record(paths, record, "stale-record-cleared-without-signal")
+                return {
+                    **base,
+                    "result": "stale-record-cleared-without-signal",
+                    "owned": False,
+                    "reason": reason,
+                    "current_identity": current.as_dict() if current else None,
+                }
+            signal_method = "pidfd"
+            if _wait_for_pidfd_exit(pidfd, timeout):
+                _remove_record(paths, record, "stopped-after-sigterm")
+                return {
+                    **base,
+                    "result": "stopped-after-sigterm",
+                    "owned": True,
+                    "signal_method": signal_method,
+                }
 
-        matched, reason, _ = _record_match(paths, record)
-        if not matched:
-            _remove_record(paths, record, "stopped-before-sigkill")
-            return {**base, "result": "stopped-before-sigkill", "owned": True}
-        os.kill(record["pid"], signal.SIGKILL)
-        if not _wait_until_identity_changes(record, min(max(timeout, 0.1), 5.0)):
-            raise ServiceError(
-                "AgentENV still appears live after SIGKILL; ownership record was retained"
+            if not kill_after_timeout:
+                raise ServiceError(
+                    "AgentENV did not exit before timeout; ownership record was retained"
+                )
+
+            sent, reason, current = _signal_if_owned(
+                paths, record, signal.SIGKILL, pidfd
             )
-        _remove_record(paths, record, "stopped-after-sigkill")
-        return {**base, "result": "stopped-after-sigkill", "owned": True}
+            if not sent:
+                _remove_record(paths, record, "stopped-before-sigkill")
+                return {
+                    **base,
+                    "result": "stopped-before-sigkill",
+                    "owned": True,
+                    "reason": reason,
+                    "current_identity": current.as_dict() if current else None,
+                    "signal_method": signal_method,
+                }
+            if not _wait_for_pidfd_exit(pidfd, min(max(timeout, 0.1), 5.0)):
+                raise ServiceError(
+                    "AgentENV still appears live after SIGKILL; "
+                    "ownership record was retained"
+                )
+            _remove_record(paths, record, "stopped-after-sigkill")
+            return {
+                **base,
+                "result": "stopped-after-sigkill",
+                "owned": True,
+                "signal_method": signal_method,
+            }
+        finally:
+            if pidfd is not None:
+                os.close(pidfd.descriptor)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -767,7 +1198,7 @@ def build_parser() -> argparse.ArgumentParser:
     start_parser.add_argument(
         "--allow-missing-prereqs",
         action="store_true",
-        help="diagnostic override for unavailable /dev/kvm or /dev/ublk-control",
+        help="diagnostic override for unavailable host prerequisites",
     )
 
     stop_parser = subparsers.add_parser("stop", help="stop only the owned server")
