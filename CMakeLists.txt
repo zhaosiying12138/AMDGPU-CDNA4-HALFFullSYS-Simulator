@@ -185,6 +185,19 @@ if(SELF_AMDGPU_RUNTIME_BUILD_HSAKMT_MODEL)
       PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
   endif()
   install(TARGETS self_amdgpu_amd_smi LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+
+  # Simulator-aware rocminfo. Some frameworks shell out to rocminfo and parse
+  # its output for the live arch (aiter's get_gfx_runtime deliberately ignores
+  # GPU_ARCHS). Upstream rocminfo refuses before reaching ROCr because it looks
+  # for the amdgpu kernel module, which cannot exist here.
+  add_executable(sagr-rocminfo src/rocminfo_model.c)
+  set_target_properties(sagr-rocminfo PROPERTIES C_VISIBILITY_PRESET hidden)
+  target_compile_features(sagr-rocminfo PRIVATE c_std_11)
+  if(NOT MSVC)
+    target_compile_options(
+      sagr-rocminfo PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+  endif()
+  install(TARGETS sagr-rocminfo RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
 
 if(SELF_AMDGPU_RUNTIME_BUILD_OPENCL)
