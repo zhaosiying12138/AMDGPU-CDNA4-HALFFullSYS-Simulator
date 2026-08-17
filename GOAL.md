@@ -60,6 +60,55 @@ statement that requires Qwen3.5-0.8B TP4. The active goal has resumed on
    mutate the binary or source under a live run. Full-model generation and
    teardown remain the acceptance gate; replay and microtests cannot replace it.
 
+## 2026-08-17T22 execution-efficiency mandate
+
+This section is a standing user requirement. It refines, and where they
+conflict overrides, the scheduling language above. It does not relax any
+correctness, evidence, or upstream-zero-diff rule.
+
+1. **Binary identity is a precondition, not a formality.** Every model or
+   acceptance run must begin by recording the resolved ROCr, HIP, model DSO and
+   gem5 identities (path, symlink target, SHA-256) into its own log. A run whose
+   loaded binary does not descend from the commit under test is void and may not
+   be cited as evidence for or against a fix. In particular, a diagnostic
+   `LD_PRELOAD` must be *prepended* to the existing value, never assigned over
+   it, and the conda product prefix must be rebuilt or explicitly repointed when
+   `projects/rocm-systems` advances.
+2. **Prove every fix on the cheapest reproduction first.** A public-HIP capsule
+   that reproduces the same failure shape in seconds outranks a 50--70 minute
+   model run. Full-model execution remains the acceptance gate, but it is spent
+   only after the focused gate has already accepted the repair.
+3. **Never idle-wait during a long run.** While a 50--70 minute lane executes,
+   bounded parallel work runs concurrently: failure capsules, replay and
+   snapshot tooling, launch-overhead measurement, AgentENV closure, and the peer
+   engine lane. Subagents for this work use `opus-5` with 1M context at `max`
+   reasoning. Speculative busywork purely to occupy concurrency or consume
+   tokens is forbidden.
+4. **Exactly one live `gem5.opt` per TP1 lane.** Orphaned simulators left by a
+   crashed host process must be reaped before every launch; they spin at full
+   CPU, hold their run directory and SMI lease, and distort timing comparisons.
+5. **AgentENV isolation and generic fast copy are the two foundations** on which
+   all remaining model bring-up is built. Parallel lanes run in distinct AgentENV
+   sandboxes with fast copy enabled and no shared worktree, build directory,
+   cache, endpoint, SMI lease, or process group.
+6. **Both engines are unchanged upstream.** SGLang and vLLM alike. The historical
+   vLLM TP1 result that depended on registering project Triton operators is
+   diagnostic history and does not satisfy this gate. Only self-runtime, ROCr/HIP
+   facade, bridge, memory, queue, synchronization, collective and ISA adaptation
+   is permitted; the objective is that one self-runtime generalizes across
+   inference engines.
+7. **Independent discovery, serialized merge.** The two engine lanes may find
+   self-runtime and gem5 defects concurrently on separate branches. Each fix is
+   reviewed for its effect on *both* engines, tested narrowly, and merged into
+   `main` one at a time; the peer lane then rebases before resuming.
+8. **Ladder:** SGLang TP1 and vLLM TP1, then both at TP2, then Qwen3.5-9B TP16.
+   Qwen3.5-0.8B TP4 is cancelled.
+9. **Sanctioned acceleration investments:** the public-HIP capsule ladder,
+   bridge/AQL record and point-in-time replay, post-weight-load state snapshot
+   reuse, and generic gem5 kernel-launch overhead reduction. Each must preserve
+   dispatch, memory, ordering, completion, profiling and failure semantics, and
+   must be generic across operators and models.
+
 **Execution checkpoint (2026-08-15):** the simulator-aware 16-slot
 `rocm-smi` lease inventory passes focused tests and a real managed-gem5
 OFF -> ON -> OFF lifecycle probe. The official ROCr Model Interface path now

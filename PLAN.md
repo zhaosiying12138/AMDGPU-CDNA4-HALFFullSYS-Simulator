@@ -67,6 +67,45 @@ AgentENV isolation is not model correctness, fast copy is not model
 correctness, and a custom-operator vLLM probe is not upstream-engine
 acceptance. Each claim retains its own evidence boundary.
 
+## 0.0.1 Execution-efficiency mandate (2026-08-17T22)
+
+Standing user requirement. It constrains *how* every step below is executed and
+overrides conflicting scheduling language; it relaxes no correctness, evidence,
+or upstream-zero-diff rule. The normative statement is GOAL.md section
+"2026-08-17T22 execution-efficiency mandate".
+
+The tiered debug loop in item 9 above is amended as follows.
+
+1. **Identity gate before execution.** A run records the resolved ROCr, HIP,
+   model DSO and gem5 identity (path, symlink target, SHA-256) as the first
+   lines of its own log, and asserts that they descend from the commit under
+   test. Two concrete traps are now known and must be checked explicitly:
+   assigning `LD_PRELOAD=<diagnostic>.so` silently displaces the product ROCr
+   preload that carries the fix under test, and the content-addressed
+   `env/rocm/product-v1-*` prefix named by the conda activate script is not
+   rebuilt when `projects/rocm-systems` advances. A run that fails this gate is
+   void as evidence in either direction.
+2. **Capsule-first repair.** Every memory, copy, dispatch or ISA repair is first
+   reproduced and then accepted on the cheapest artifact that exhibits the same
+   failure shape — preferably a public-HIP program of a few seconds. Full-model
+   runs are spent only on the acceptance gate, never on hypothesis search.
+   A capsule must additionally assert that the intended path was actually taken
+   (for fast copy: at least one `Fast copy success` and zero blit dispatch
+   packets), so a silent fallback cannot masquerade as a pass.
+3. **Concurrent bounded work is mandatory during long runs**, using `opus-5`
+   subagents with 1M context at `max` reasoning, on: failure capsules, bridge/AQL
+   replay, post-weight-load snapshot reuse, launch-overhead measurement, AgentENV
+   closure, and the peer engine lane. Findings enter the next iteration only
+   after review and never mutate binaries or source under a live run.
+4. **One `gem5.opt` per TP1 lane**, with orphan reaping before each launch.
+5. **Acceleration backlog**, each generic and semantics-preserving: the capsule
+   ladder (done for the copy family), bridge-level record and point-in-time
+   replay, post-weight-load device-memory snapshot reuse, and generic
+   kernel-launch overhead reduction in gem5.
+6. **vLLM parity requirement.** The vLLM lane is re-scoped to unchanged upstream
+   with no project Triton operator registration, matching the SGLang lane. The
+   earlier operator-registration result is retained as diagnostic history only.
+
 ## 0.1 Execution checkpoint (2026-08-14)
 
 This checkpoint records the executable boundary today and prevents an
