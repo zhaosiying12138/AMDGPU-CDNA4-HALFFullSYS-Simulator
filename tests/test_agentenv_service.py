@@ -29,6 +29,10 @@ home_path = "/var/lib/aenv"
 
 [image.resolver]
 default_image = "ubuntu:24.04"
+
+[pool]
+low_watermark = 2
+high_watermark = 64
 '''
 
 
@@ -77,6 +81,9 @@ class AgentEnvServiceTest(unittest.TestCase):
 
             self.assertIn('default_image = "ubuntu:26.04"', rendered)
             self.assertNotIn('default_image = "ubuntu:24.04"', rendered)
+            self.assertIn("low_watermark = 0", rendered)
+            self.assertIn("high_watermark = 0", rendered)
+            self.assertNotIn("high_watermark = 64", rendered)
             self.assertEqual(environment["API_ADDR"], "127.0.0.1:18080")
             self.assertEqual(environment["E2B_API_URL"], "http://127.0.0.1:18080")
             self.assertTrue(environment["AENV_HOME_PATH"].startswith(str(paths.root)))
