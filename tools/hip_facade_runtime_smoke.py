@@ -18,6 +18,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any
 
 
@@ -25,6 +26,7 @@ SCHEMA = "amdgpu-sim.hip-facade-runtime-smoke.v1"
 HIP_SUCCESS = 0
 HIP_MEMCPY_HOST_TO_DEVICE = 1
 HIP_MEMCPY_DEVICE_TO_HOST = 2
+HIP_MEMCPY_DEVICE_TO_DEVICE = 3
 KERNEL_SOURCE = r"""
 #include <hip/hip_runtime.h>
 
@@ -66,8 +68,14 @@ def require_absolute_environment(name: str) -> Path:
     return Path(raw).resolve(strict=True)
 
 
-def load_hip(hip_root: Path) -> tuple[ctypes.CDLL, Path]:
-    library_path = (hip_root / "lib/libamdhip64.so.7").resolve(strict=True)
+def load_hip(hip_root: Path, library_override: Path | None = None) -> tuple[ctypes.CDLL, Path]:
+    library_path = (
+        library_override.resolve(strict=True)
+        if library_override is not None
+        else (hip_root / "lib/libamdhip64.so.7").resolve(strict=True)
+    )
+    if not library_path.is_file():
+        raise HipSmokeError(f"HIP runtime library is not a regular file: {library_path}")
     try:
         library = ctypes.CDLL(str(library_path), mode=os.RTLD_NOW | os.RTLD_LOCAL)
     except OSError as error:
@@ -256,20 +264,79 @@ def run_vector_add(library: ctypes.CDLL, image: bytes, count: int) -> dict[str, 
             library.hipStreamDestroy(stream)
 
 
+def run_copy_roundtrip(library: ctypes.CDLL, byte_count: int) -> dict[str, Any]:
+    host_type = ctypes.c_ubyte * byte_count
+    source = host_type(*((index ^ (index >> 8) ^ 0x5A) & 0xFF for index in range(byte_count)))
+    output = host_type(*([0] * byte_count))
+    device_source = ctypes.c_void_p()
+    device_destination = ctypes.c_void_p()
+    allocated: list[ctypes.c_void_p] = []
+    timings: dict[str, float] = {}
+
+    def timed_copy(name: str, destination: ctypes.c_void_p, origin: ctypes.c_void_p, kind: int) -> None:
+        started = time.perf_counter()
+        hip_check(library.hipMemcpy(destination, origin, byte_count, kind), name)
+        timings[name] = time.perf_counter() - started
+
+    try:
+        for name, pointer in (
+            ("source", device_source),
+            ("destination", device_destination),
+        ):
+            hip_check(library.hipMalloc(ctypes.byref(pointer), byte_count), f"hipMalloc({name})")
+            allocated.append(pointer)
+        timed_copy(
+            "h2d",
+            device_source,
+            ctypes.cast(source, ctypes.c_void_p),
+            HIP_MEMCPY_HOST_TO_DEVICE,
+        )
+        timed_copy("d2d", device_destination, device_source, HIP_MEMCPY_DEVICE_TO_DEVICE)
+        timed_copy(
+            "d2h",
+            ctypes.cast(output, ctypes.c_void_p),
+            device_destination,
+            HIP_MEMCPY_DEVICE_TO_HOST,
+        )
+        source_bytes = bytes(source)
+        output_bytes = bytes(output)
+        return {
+            "bytes": byte_count,
+            "correct": output_bytes == source_bytes,
+            "source_sha256": sha256_bytes(source_bytes),
+            "output_sha256": sha256_bytes(output_bytes),
+            "wall_seconds": timings,
+        }
+    finally:
+        for pointer in reversed(allocated):
+            library.hipFree(pointer)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("discover", "vector-add"), default="discover")
+    parser.add_argument(
+        "--mode", choices=("discover", "vector-add", "copy-roundtrip"), default="discover"
+    )
     parser.add_argument("--count", type=int, default=256)
+    parser.add_argument("--copy-bytes", type=int, default=2 * 1024 * 1024)
     arguments = parser.parse_args(argv)
     try:
         if arguments.count < 1 or arguments.count > 1_048_576:
             raise HipSmokeError("count is outside the bounded smoke range")
+        if arguments.copy_bytes < 1 or arguments.copy_bytes > 16 * 1024 * 1024:
+            raise HipSmokeError("copy byte count is outside the bounded smoke range")
         hip_root = require_absolute_environment("HIP_PATH")
         rocm_root = require_absolute_environment("ROCM_PATH")
         compiler_root = require_absolute_environment("HIP_CLANG_PATH")
         if os.environ.get("HIP_PLATFORM") != "amd":
             raise HipSmokeError("HIP_PLATFORM must be amd")
-        library, library_path = load_hip(hip_root)
+        library_override_raw = os.environ.get("HIP_RUNTIME_LIBRARY")
+        library_override = None
+        if library_override_raw:
+            if not library_override_raw.startswith("/"):
+                raise HipSmokeError("HIP_RUNTIME_LIBRARY must be an absolute path")
+            library_override = Path(library_override_raw)
+        library, library_path = load_hip(hip_root, library_override)
         device_count = discover(library)
         compilation = None
         execution = None
@@ -278,6 +345,10 @@ def main(argv: list[str] | None = None) -> int:
             execution = run_vector_add(library, image, arguments.count)
             if not execution["correct"]:
                 raise HipSmokeError("HIP vector-add output mismatch")
+        elif arguments.mode == "copy-roundtrip":
+            execution = run_copy_roundtrip(library, arguments.copy_bytes)
+            if not execution["correct"]:
+                raise HipSmokeError("HIP copy roundtrip output mismatch")
         result = {
             "schema": SCHEMA,
             "mode": arguments.mode,

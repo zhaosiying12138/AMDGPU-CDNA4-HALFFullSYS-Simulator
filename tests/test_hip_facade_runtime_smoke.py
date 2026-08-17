@@ -29,6 +29,17 @@ class HipFacadeRuntimeSmokeTest(unittest.TestCase):
         self.assertEqual(MODULE.main(["--count", "0"]), 1)
         self.assertEqual(MODULE.main(["--count", "1048577"]), 1)
 
+    def test_copy_byte_gate_is_bounded(self) -> None:
+        self.assertEqual(
+            MODULE.main(["--mode", "copy-roundtrip", "--copy-bytes", "0"]), 1
+        )
+        self.assertEqual(
+            MODULE.main(
+                ["--mode", "copy-roundtrip", "--copy-bytes", str(16 * 1024 * 1024 + 1)]
+            ),
+            1,
+        )
+
     def test_public_hip_contract_has_no_private_runtime_symbol(self) -> None:
         source = (ROOT / "tools/hip_facade_runtime_smoke.py").read_text(encoding="ascii")
         self.assertNotIn("ctypes.CDLL(str(runtime", source)
@@ -42,6 +53,8 @@ class HipFacadeRuntimeSmokeTest(unittest.TestCase):
             "hipModuleLaunchKernel",
         ):
             self.assertIn(symbol, source)
+        self.assertIn("HIP_RUNTIME_LIBRARY", source)
+        self.assertIn("HIP_MEMCPY_DEVICE_TO_DEVICE", source)
 
     def test_compiler_uses_standard_raw_device_code_object_options(self) -> None:
         source = (ROOT / "tools/hip_facade_runtime_smoke.py").read_text(encoding="ascii")
