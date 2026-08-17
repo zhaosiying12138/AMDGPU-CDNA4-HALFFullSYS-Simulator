@@ -113,6 +113,7 @@ class Entry:
     size: int = 0
     sha256: str | None = None
     link_target: str | None = None
+    link_target_present: bool | None = None
 
 
 class BundleBuilder:
@@ -214,21 +215,29 @@ class BundleBuilder:
         mode = stat.S_IMODE(metadata.st_mode)
         if stat.S_ISLNK(metadata.st_mode):
             target = os.readlink(lexical)
+            resolved = Path(os.path.realpath(lexical))
+            target_present = os.path.lexists(resolved)
             entry = Entry(
                 source=lexical,
                 archive_name=archive_name,
                 kind="symlink",
                 mode=mode,
                 link_target=target,
+                link_target_present=target_present,
             )
             self._merge_entry(entry)
-            resolved = Path(os.path.realpath(lexical))
             if self._allowed(resolved):
                 # Include the target closure, while retaining the original
                 # symlink in the archive.  Absolute links continue to work in
                 # the guest because extraction preserves the documented guest
                 # path (/home/zhaosiying/amdgpu-sim).
-                self._walk(resolved)
+                # Package trees can intentionally ship platform-specific
+                # dangling links. Preserve those links without trying to walk
+                # a nonexistent target, and make that state explicit in the
+                # manifest. A target outside the allowed roots is still
+                # rejected below even when it does not exist.
+                if target_present:
+                    self._walk(resolved)
             elif self.follow_external_symlinks:
                 raise BundleError(
                     "external symlink targets need an explicit source-root mapping "
@@ -461,6 +470,7 @@ class BundleBuilder:
                 total_bytes += entry.size
             elif entry.kind == "symlink":
                 item["target"] = entry.link_target
+                item["target_present"] = entry.link_target_present
             entries.append(item)
         source_roots = [str(item.path) for item in self.roots]
         source_mappings = [

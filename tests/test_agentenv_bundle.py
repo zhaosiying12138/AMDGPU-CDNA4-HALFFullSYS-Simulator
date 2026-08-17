@@ -93,6 +93,31 @@ class AgentEnvBundleTest(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.BundleError, "allowed roots"):
                 builder.add(link, label="unsafe")
 
+    def test_in_root_dangling_symlink_is_preserved_and_recorded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            link = root / "bin" / "platform-tool.bat"
+            link.parent.mkdir()
+            link.symlink_to("../missing/platform-tool.bat")
+            builder = self.builder(root)
+            builder.add(root / "bin", label="runtime")
+            manifest = builder.manifest(hash_files=True)
+
+        by_path = {entry["path"]: entry for entry in manifest["entries"]}
+        item = by_path["/guest/work/bin/platform-tool.bat"]
+        self.assertEqual(item["kind"], "symlink")
+        self.assertEqual(item["target"], "../missing/platform-tool.bat")
+        self.assertFalse(item["target_present"])
+
+    def test_external_dangling_symlink_is_rejected_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            link = root / "escape.so"
+            link.symlink_to("/definitely-outside-agentenv/missing.so")
+            builder = self.builder(root)
+            with self.assertRaisesRegex(MODULE.BundleError, "allowed roots"):
+                builder.add(link, label="unsafe")
+
     def test_guest_root_mapping_keeps_absolute_runtime_layout(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
