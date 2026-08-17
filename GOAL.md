@@ -101,8 +101,25 @@ correctness, evidence, or upstream-zero-diff rule.
    self-runtime and gem5 defects concurrently on separate branches. Each fix is
    reviewed for its effect on *both* engines, tested narrowly, and merged into
    `main` one at a time; the peer lane then rebases before resuming.
-8. **Ladder:** SGLang TP1 and vLLM TP1, then both at TP2, then Qwen3.5-9B TP16.
-   Qwen3.5-0.8B TP4 is cancelled.
+8. **Ladder, with the model pinned to each TP degree:** Qwen3.5-0.8B at TP1 for
+   SGLang and vLLM, then Qwen3.5-0.8B at TP2 for both, then **Qwen3.5-9B at
+   TP16**. Qwen3.5-0.8B TP4 is cancelled. TP16 is a 9B target only; TP1 and TP2
+   are 0.8B targets only.
+
+10. **AgentENV execution target (2026-08-18).** AgentENV is an experimental
+    research lane and must reach TP1 there; TP1 and TP2 proceed on the host with
+    namespace isolation in parallel rather than waiting for it. Only gem5,
+    self-runtime and the product are baked into the template; the Python stack
+    is installed fresh inside the sandbox over the host Clash proxy and then
+    snapshotted as a reusable template. SGLang is the first engine to run
+    inside a sandbox. The sandbox is also the clean answer to this host's real
+    NVIDIA RTX 5090: it exposes no `/dev/kfd`, no `/dev/dri` and no
+    `/usr/lib/wsl`, so upstream vLLM auto-selects ROCm with no masking.
+    Attempting Qwen3.5-9B TP16 inside AgentENV is an explicit stretch demo. The
+    binding constraint is not simulated VRAM -- a measured `gem5.opt` is only
+    160 MB PSS because device memory is a sparse memfd -- but the per-rank
+    PyTorch/aiter runtime. If a measured TP2 marginal cost puts TP16 over the
+    host's 58 GB, add swap rather than dropping the demo.
 9. **Sanctioned acceleration investments:** the public-HIP capsule ladder,
    bridge/AQL record and point-in-time replay, post-weight-load state snapshot
    reuse, and generic gem5 kernel-launch overhead reduction. Each must preserve

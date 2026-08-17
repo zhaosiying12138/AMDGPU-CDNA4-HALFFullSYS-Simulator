@@ -105,6 +105,21 @@ The tiered debug loop in item 9 above is amended as follows.
 6. **vLLM parity requirement.** The vLLM lane is re-scoped to unchanged upstream
    with no project Triton operator registration, matching the SGLang lane. The
    earlier operator-registration result is retained as diagnostic history only.
+7. **Model/TP pinning.** TP1 and TP2 are Qwen3.5-0.8B lanes; TP16 is a
+   Qwen3.5-9B lane. No other pairing is in scope, and 0.8B TP4 is cancelled.
+8. **AgentENV lane contract (2026-08-18).** AgentENV is experimental research
+   whose required gate is TP1 only; host execution with namespace isolation
+   proceeds in parallel and is not blocked on it. The template bakes gem5,
+   self-runtime and the product; the Python stack is installed inside the
+   sandbox over the host proxy and snapshotted for reuse. Three enablement
+   defects are fixed and must not regress: the base image comes from
+   `quay.io` because `docker.io` is unreachable, `/dev/ublkc*` needs group
+   access through a udev rule because ambient capabilities do not bypass DAC on
+   a device node, and `AENV_HOME_PATH` must be published as a short symlink
+   because firecracker's API socket otherwise exceeds `sockaddr_un.sun_path`.
+   Qwen3.5-9B TP16 inside a sandbox is a stretch demo; simulated VRAM is not the
+   constraint because device memory is a sparse memfd, so scale it by measured
+   per-rank runtime cost and add swap if required.
 
 ## 0.1 Execution checkpoint (2026-08-14)
 

@@ -1,0 +1,7 @@
+# AgentENV creates a ublk char/block device per overlaybd runtime device. The
+# server runs unprivileged (uid 1000 with ambient CAP_NET_ADMIN/CAP_SYS_ADMIN),
+# which does not bypass DAC on a device node, so the default root:root 0600
+# nodes made template builds fail with EACCES on /dev/ublkc0.
+KERNEL=="ublkc[0-9]*", SUBSYSTEM=="ublk_char", OWNER="root", GROUP="zhaosiying", MODE="0660"
+KERNEL=="ublkb[0-9]*", OWNER="root", GROUP="zhaosiying", MODE="0660"
+KERNEL=="ublkc[0-9]*", OWNER="root", GROUP="zhaosiying", MODE="0660"

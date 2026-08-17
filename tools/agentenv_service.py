@@ -242,6 +242,42 @@ def credential_metadata(api_addr: str) -> dict[str, Any]:
     }
 
 
+# A Unix socket address is bounded by sockaddr_un.sun_path, 108 bytes on Linux.
+# Firecracker appends roughly 55 bytes of its own beneath AENV_HOME_PATH before
+# binding, e.g. /firecracker-work/agentenv-fc-XXXXXX/firecracker.socket, so the
+# feature-local state root under this worktree is too long to hand it directly:
+# a build fails late with RunWithApi(FailedToBindAndRunHttpServer(... "path must
+# be shorter than SUN_LEN")). Keep every artefact in the worktree as designed and
+# give the server a short symlink to the same directory instead.
+SUN_PATH_MAX = 108
+FIRECRACKER_SOCKET_SUFFIX_BUDGET = 64
+
+
+def short_state_link(target: Path, tag: str) -> Path:
+    """Return a short, stable symlink that resolves to ``target``."""
+    digest = hashlib.sha256(str(target).encode("utf-8")).hexdigest()[:8]
+    link = Path(f"/tmp/aenv-{os.getuid()}-{tag}-{digest}")
+    budget = SUN_PATH_MAX - FIRECRACKER_SOCKET_SUFFIX_BUDGET
+    if len(str(link)) > budget:
+        raise ServiceError(
+            f"AgentENV {tag} path {link} exceeds the {budget}-byte Unix socket budget"
+        )
+    target.mkdir(parents=True, exist_ok=True)
+    try:
+        if link.is_symlink():
+            if link.readlink() == target:
+                return link
+            link.unlink()
+        elif link.exists():
+            raise ServiceError(
+                f"AgentENV {tag} link {link} exists and is not a symlink"
+            )
+        link.symlink_to(target, target_is_directory=True)
+    except OSError as error:
+        raise ServiceError(f"could not publish AgentENV {tag} link: {error}") from error
+    return link
+
+
 def environment_overrides(paths: ServicePaths, api_addr: str) -> dict[str, str]:
     api_addr = validate_api_addr(api_addr)
     credentials = credential_metadata(api_addr)
@@ -250,9 +286,9 @@ def environment_overrides(paths: ServicePaths, api_addr: str) -> dict[str, str]:
         "AENV_API_URL": credentials["api_url"],
         "AENV_API_KEY": credentials["api_key"],
         "AENV_DEPS_PATH": str(paths.deps),
-        "AENV_HOME_PATH": str(paths.home),
+        "AENV_HOME_PATH": str(short_state_link(paths.home, "home")),
         "AENV_LOG_FORMAT": "json",
-        "AENV_RUNTIME_PATH": str(paths.runtime),
+        "AENV_RUNTIME_PATH": str(short_state_link(paths.runtime, "run")),
         "AENV_VIRTUALIZATION_MODE": "kvm",
         "API_ADDR": api_addr,
         "E2B_ACCESS_TOKEN": credentials["access_token"],
