@@ -157,6 +157,34 @@ if(SELF_AMDGPU_RUNTIME_BUILD_HSAKMT_MODEL)
       PRIVATE
         "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/src/hsakmt_model.map")
   endif()
+
+  # Simulator-aware AMD SMI device discovery. Unchanged upstream vLLM and
+  # PyTorch decide whether they are on ROCm by asking AMD SMI to enumerate
+  # processors; with the KMD replaced, the production library reports
+  # DRIVER_NOT_LOADED and ROCm auto-selection fails before HIP is consulted.
+  # The soname matches what the upstream amdsmi Python package searches for.
+  add_library(self_amdgpu_amd_smi SHARED src/amd_smi_model.c
+                                          src/amd_smi_unsupported.c)
+  add_library(SelfAmdgpuRuntime::AmdSmi ALIAS self_amdgpu_amd_smi)
+  set_target_properties(
+    self_amdgpu_amd_smi
+    PROPERTIES C_VISIBILITY_PRESET hidden
+               EXPORT_NAME AmdSmi
+               INSTALL_RPATH "$ORIGIN"
+               OUTPUT_NAME amd_smi
+               VERSION "26.0.0"
+               SOVERSION "26"
+               VISIBILITY_INLINES_HIDDEN YES)
+  target_compile_features(self_amdgpu_amd_smi PRIVATE c_std_11)
+  target_link_libraries(self_amdgpu_amd_smi PRIVATE Threads::Threads)
+  if(MSVC)
+    target_compile_options(self_amdgpu_amd_smi PRIVATE /W4 /WX)
+  else()
+    target_compile_options(
+      self_amdgpu_amd_smi
+      PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+  endif()
+  install(TARGETS self_amdgpu_amd_smi LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 endif()
 
 if(SELF_AMDGPU_RUNTIME_BUILD_OPENCL)
