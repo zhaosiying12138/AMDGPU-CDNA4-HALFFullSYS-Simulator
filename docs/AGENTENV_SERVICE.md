@@ -61,6 +61,28 @@ Before any activation, record the running process snapshot, current config
 hash/content, candidate diff, and rollback. Tell the user before invoking
 `wsl --shutdown`, then wait for explicit approval.
 
+WSL 2.7.10 mounts the root of the `kernelModules` VHD directly at
+`/usr/lib/modules/$(uname -r)`, while the generator in the pinned 6.18 kernel
+source targets a newer `<kernelrelease>/{modules,linux-headers,perf}` artifact
+layout. `build` now generates both views without copying module payloads: the
+nested artifacts remain canonical and the VHD root contains relative aliases
+for every installed-module entry (`modules.dep`, `kernel/`, and so on). An
+existing installed module tree can be repacked without recompiling the kernel:
+
+```bash
+tools/build_agentenv_wsl_kernel.sh pack-modules
+```
+
+`status` reports `dual-compatible` for the effective combined view and
+`nested-release` when the flat compatibility aliases are absent. Repacking does
+not change the VHD currently attached to a running WSL VM. The default `stage`
+target is therefore the new versioned directory
+`agentenv-6.18.40.1-dual-v1`, leaving the attached
+`agentenv-6.18.40.1` artifacts untouched as rollback. Any
+`AGENTENV_KERNEL_WIN_STAGE` override must likewise name a detached path. Use
+the separately approved activation procedure before claiming boot-time module
+availability.
+
 ## Two Sandbox Plan
 
 After the service and bundle gates pass, use the manager in dry-run mode first:

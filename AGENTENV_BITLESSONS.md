@@ -13,3 +13,10 @@
 11. Public source pins must use HTTPS rather than host SSH credentials. A fresh
     AgentENV guest must be able to initialize the pinned sources without
     inheriting the host's private key or agent socket.
+12. WSL 2.7.10 overlays the root of a custom `kernelModules` VHD directly on
+    `/usr/lib/modules/<kernelrelease>`, but the pinned 6.18 generator targets a
+    newer `<kernelrelease>/{modules,linux-headers,perf}` contract. The nested
+    layout alone makes `mini_init` module loads fail on 2.7.10. Preserve it for
+    newer runtimes and add relative root aliases (`modules.dep`, `kernel/`,
+    ...) for older runtimes; this is dual-compatible without duplicating the
+    module payload.
