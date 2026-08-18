@@ -135,6 +135,21 @@ export LD_PRELOAD="${ROOT}/build/rocr_logging_preload.so:$(echo "${LD_PRELOAD:-}
 export LD_PRELOAD="${LD_PRELOAD%:}"
 export HSA_MODEL_LIB="${RUNTIME_BUILD}/libself_amdgpu_hsakmt_model.so.1"
 
+# Device discovery belongs to this product, and some consumers reach it by
+# running a *tool* rather than by calling a library: aiter resolves the live
+# gfx arch with shutil.which("rocminfo") and parses its output, and documents
+# that get_gfx_runtime() ignores GPU_ARCHS, so no environment variable can
+# stand in. Upstream rocminfo cannot answer here -- it needs the amdgpu kernel
+# module, and on this host it prints "hsa_init Failed" with no gfx line at all,
+# which made aiter deduce an arch of [''] and abort a lane after 1447 retired
+# dispatches. Put the product's own rocminfo first on PATH. The product prefix
+# is immutable and the upstream sysroot is not ours to overwrite, so the shim
+# lives in a directory this runner owns and regenerates.
+TOOL_SHIM="${ROOT}/artifacts/tool-shim"
+mkdir -p "$TOOL_SHIM"
+ln -sfn "${RUNTIME_BUILD}/sagr-rocminfo" "${TOOL_SHIM}/rocminfo"
+export PATH="${TOOL_SHIM}:${PATH}"
+
 export SAGR_MANAGED_GEM5="$gem5"
 export SAGR_MANAGED_GEM5_CONFIG="${ROOT}/projects/gem5/configs/example/gemsim/host_dispatch.py"
 export SAGR_MANAGED_REPO_ROOT="${ROOT}"
@@ -158,17 +173,26 @@ if [[ $engine == sglang ]]; then
   export SGLANG_USE_AITER=1
   export FLA_CACHE_RESULTS=1
 else
-  # A minimal Triton overlay: the gemsim_hip backend and its dist-info only.
-  # The SGLang overlay is 306 MB of SGLang-pinned wheels that would shadow
-  # vLLM's own pinned dependencies. gemsim_hip subclasses triton.backends.amd
-  # and changes autotune timing policy; it registers no operators.
-  OVERLAY="/tmp/vllm-triton-overlay-tp${tp}"
-  SGL_OVERLAY="${ROOT}/env/sglang-overlay-cp312"
-  rm -rf "$OVERLAY"; mkdir -p "$OVERLAY"
-  ln -s "${SGL_OVERLAY}/gemsim_hip" "${OVERLAY}/gemsim_hip"
-  ln -s "${SGL_OVERLAY}/gemsim_hip_triton_backend-0.1.0.dist-info" \
-        "${OVERLAY}/gemsim_hip_triton_backend-0.1.0.dist-info"
-  export PYTHONPATH="$OVERLAY"
+  # vLLM runs on the formal Triton path: the unchanged upstream AMD hip
+  # compiler and driver, which is what GOAL.md designates and what leaves
+  # gemsim_hip as a regression/migration backend only.
+  #
+  # It must not merely be *preferred* here, it must be the only backend
+  # present. GemsimHIPDriver.is_active() gates itself on
+  # TRITON_DEFAULT_BACKEND, but that does not make the in-tree amd driver
+  # inactive, so both claim the same device. Triton's own selector is happy --
+  # it consults TRITON_DEFAULT_BACKEND directly -- but any consumer that counts
+  # active drivers is not: vLLM requires exactly one, and on finding two it
+  # disables Triton outright, after which the run dies at the first use with
+  #   AttributeError: module 'triton' has no attribute 'next_power_of_2'
+  # having already retired 447 dispatches. Discovering only in-tree backends
+  # leaves exactly one active driver for every consumer.
+  export TRITON_BACKENDS_IN_TREE=1
+  # Name the in-tree backend explicitly: the shared block above selects
+  # gemsim_hip, which is no longer discovered here, and Triton rejects an
+  # unknown TRITON_DEFAULT_BACKEND outright.
+  export TRITON_DEFAULT_BACKEND=amd
+  export PYTHONPATH=""
   # Empty allowlist: vllm/plugins/__init__.py loads a plugin only when its name
   # is in VLLM_PLUGINS, and an empty value parses to a list matching nothing.
   # This is the hard kill switch for both vllm.platform_plugins and
