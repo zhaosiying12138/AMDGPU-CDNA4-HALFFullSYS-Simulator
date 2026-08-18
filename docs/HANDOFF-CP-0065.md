@@ -93,6 +93,45 @@ commit trailer 参照 git log。
 === END PROMPT ===
 ```
 
+## Trap: `GEMSIM_*` environment knobs cannot reach a managed simulator
+
+`configs/example/gemsim/host_dispatch.py` reads `GEMSIM_LDS_BYTES_PER_CU`
+(default 160 KiB, line 47) and `GEMSIM_NUM_COMPUTE_UNITS` (default 1, line 237).
+Neither can be set from a lane. `projects/self-amdgpu-runtime/src/managed_session.c`
+(~lines 446-463) builds a **fixed seven-entry environment** for the gem5
+`posix_spawn` — `PATH`, `HOME`, `TMPDIR`, `XDG_CACHE_HOME`, `LC_ALL`,
+`PYTHONNOUSERSITE`, `PYTHONDONTWRITEBYTECODE` — and nothing else is inherited.
+
+So exporting a `GEMSIM_*` variable before a lane silently does nothing; the
+defaults always apply. The capsules under `tools/*_capsule/` work around this by
+launching gem5 through a wrapper script that injects the variable itself. If you
+need a different LDS size or CU count in a lane, either extend the environment
+in `managed_session.c` or use the wrapper approach — do not assume an export
+took effect.
+
+## Known defect in this history: `60aede62f` does not build standalone
+
+Verified, and it is mine. `60aede62f` (CP-0063) added the definition of
+`ComputeUnit::dispatchResourceReport` to `src/gpu-compute/compute_unit.cc`, but
+its declaration in `compute_unit.hh` — and the `LdsState` accessors it calls —
+only arrive in `e0c9dd267` (CP-0065). `git log -S` confirms the split:
+
+```
+declaration added by  e0c9dd267   src/gpu-compute/compute_unit.hh
+definition  added by  60aede62f   src/gpu-compute/compute_unit.cc
+```
+
+`git -C projects/gem5 HEAD` **does** build: rebuilt at handoff, exit 0, zero
+errors. So the tree is sound and only the intermediate commit is not
+independently compilable. The consequence is a **bisect hazard**: a bisect that
+lands on `60aede62f` or `0f27ef552` will fail to build for a reason unrelated to
+whatever is being bisected. Rebase the declaration back into `60aede62f` before
+relying on bisect across this range.
+
+This is worth stating plainly because the house rule was met at the mechanism
+level — the fix was general, not case-by-case — but not at the level of commit
+atomicity.
+
 ## What changed under CP-0065
 
 Nine commits, grouped by functional layer, across four repositories.
