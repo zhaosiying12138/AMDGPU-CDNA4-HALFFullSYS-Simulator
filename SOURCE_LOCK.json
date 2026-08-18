@@ -101,6 +101,474 @@
       }
     },
     {
+      "administrative_git_dir": "modules/llvm-project",
+      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
+      "baseline_tag_payload": "object 73f2a21fe16b34e35fd0e149564b8664e59da392\ntype commit\ntag upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392\ntagger zhaosiying12138 <neucszhaopeng2016@163.com> 1786127830 +0800\n\nUpstream-URL: https://github.com/ROCm/llvm-project.git\nUpstream-Ref: amd-staging\nBaseline-Commit: 73f2a21fe16b34e35fd0e149564b8664e59da392\nBaseline-Tree: d589480097e8a30fd1df38435ccc9a9fca71f489\nCommit-Time: 2026-08-07T06:57:36-04:00\nObserved-At: 2026-08-08T01:45:26+08:00\n",
+      "baseline_tag_payload_sha256": "fe129443cebc1c78f15c85d014cd63b38d318206086b524873a335c9b592fff4",
+      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "baseline_verification": {
+        "alternates_required": false,
+        "offline_archive_verified": true,
+        "tree_object_verified": true
+      },
+      "commit_time": "2026-08-07T06:57:36-04:00",
+      "expected_push_urls": {
+        "upstream": "no_push"
+      },
+      "expected_remotes": {
+        "upstream": "git@github.com:ROCm/llvm-project.git"
+      },
+      "history": {
+        "commit_ancestry_offline_traversable": true,
+        "commit_ancestry_scope": "all commits reachable from the locked baseline head",
+        "fresh_offline_clone_bundle_available": false,
+        "historical_tree_blob_scope": "promisor-filtered",
+        "locked_baseline_tree_fully_hydrated": true,
+        "partial_clone_filter": "tree:0",
+        "promisor_remote": true,
+        "reachable_commit_count": 613934,
+        "shallow": false
+      },
+      "hooks_path": "../../.githooks",
+      "id": "llvm-project",
+      "license": "Apache-2.0 WITH LLVM-exception plus third-party terms",
+      "license_files": [
+        {
+          "path": "LICENSE.TXT",
+          "sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
+        },
+        {
+          "path": "amd/device-libs/LICENSE.TXT",
+          "sha256": "a4e8e3ba6e9255928a29d3085f929de402e61413cb0c49276e16b558effa8a2a"
+        }
+      ],
+      "materialization": "gitlink",
+      "nested_submodules": {
+        "declared_count": 0,
+        "declared_paths": [],
+        "gitlink_count": 0,
+        "gitlink_paths": [],
+        "materialized": false,
+        "offline_build_closure": false,
+        "stale_declarations": [],
+        "undeclared_gitlinks": []
+      },
+      "observed_head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "offline_tree_verified": true,
+      "path": "projects/llvm-project",
+      "resolution_evidence_id": "EV-0002",
+      "resolution_record_id": "llvm-project",
+      "role": "llvm-clang-device-libs",
+      "transport_url": "git@github.com:ROCm/llvm-project.git",
+      "upstream_ref": "amd-staging",
+      "upstream_tracking_ref": "refs/amdgpu-sim/resolved/amd-staging",
+      "upstream_url": "https://github.com/ROCm/llvm-project.git",
+      "work_branch": "amdgpu-sim/gemsim-llvm",
+      "work_head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
+      "work_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
+      "worktree_verification": {
+        "full_checkout": true,
+        "skip_worktree_entries": 0,
+        "sparse_checkout": false
+      }
+    },
+    {
+      "administrative_git_dir": "modules/pytorch",
+      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
+      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
+      "baseline_tag_payload": "object 411e87a93704f547e5146c74c95fa11acf13d646\ntype commit\ntag upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646\ntagger amdgpu-sim source lock <source-lock@amdgpu-sim.invalid> 1786104815 +0800\n\nPristine upstream baseline for pytorch\n\nUpstream-URL: https://github.com/pytorch/pytorch.git\nUpstream-Ref: main\nBaseline-Commit: 411e87a93704f547e5146c74c95fa11acf13d646\nBaseline-Tree: b742566ccb3cc783c2c99176939076831f4e8315\nObserved-At: 2026-08-07T19:39:00+08:00\nResolved-At: 2026-08-07T20:13:35+08:00\n",
+      "baseline_tag_payload_sha256": "e23ba55858a16a4a9710a28daa1da14e53d70ab9be3bad7773ffabec78083e18",
+      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "baseline_verification": {
+        "alternates_required": false,
+        "offline_archive_verified": true,
+        "tree_object_verified": true
+      },
+      "commit_time": "2026-08-07T11:18:49Z",
+      "expected_push_urls": {
+        "upstream": "no_push"
+      },
+      "expected_remotes": {
+        "upstream": "git@github.com:pytorch/pytorch.git"
+      },
+      "history": {
+        "commit_ancestry_offline_traversable": true,
+        "commit_ancestry_scope": "all commits reachable from the locked baseline head",
+        "fresh_offline_clone_bundle_available": false,
+        "historical_tree_blob_scope": "promisor-filtered",
+        "locked_baseline_tree_fully_hydrated": true,
+        "partial_clone_filter": "blob:none",
+        "promisor_remote": true,
+        "reachable_commit_count": 108662,
+        "shallow": false
+      },
+      "hooks_path": "../../.githooks",
+      "id": "pytorch",
+      "license": "BSD-style; preserve third-party notices",
+      "license_files": [
+        {
+          "path": "LICENSE",
+          "sha256": "bd018feef8825e88181c84eb7e3aa4eafb8f08a20d9fd6ef948569610c4a3e43"
+        }
+      ],
+      "materialization": "gitlink",
+      "nested_submodules": {
+        "declared_count": 37,
+        "declared_paths": [
+          "android/libs/fbjni",
+          "third_party/FP16",
+          "third_party/FXdiv",
+          "third_party/NNPACK",
+          "third_party/NVTX",
+          "third_party/VulkanMemoryAllocator",
+          "third_party/XNNPACK",
+          "third_party/aiter",
+          "third_party/benchmark",
+          "third_party/composable_kernel",
+          "third_party/cpp-httplib",
+          "third_party/cpuinfo",
+          "third_party/cudnn_frontend",
+          "third_party/cutlass",
+          "third_party/fbgemm",
+          "third_party/flash-attention",
+          "third_party/flatbuffers",
+          "third_party/fmt",
+          "third_party/gemmlowp/gemmlowp",
+          "third_party/gloo",
+          "third_party/googletest",
+          "third_party/ideep",
+          "third_party/ittapi",
+          "third_party/kineto",
+          "third_party/kleidiai",
+          "third_party/mimalloc",
+          "third_party/mslk",
+          "third_party/nlohmann",
+          "third_party/onnx",
+          "third_party/pocketfft",
+          "third_party/protobuf",
+          "third_party/psimd",
+          "third_party/pthreadpool",
+          "third_party/pybind11",
+          "third_party/python-peachpy",
+          "third_party/sleef",
+          "third_party/tensorpipe"
+        ],
+        "gitlink_count": 37,
+        "gitlink_paths": [
+          "android/libs/fbjni",
+          "third_party/FP16",
+          "third_party/FXdiv",
+          "third_party/NNPACK",
+          "third_party/NVTX",
+          "third_party/VulkanMemoryAllocator",
+          "third_party/XNNPACK",
+          "third_party/aiter",
+          "third_party/benchmark",
+          "third_party/composable_kernel",
+          "third_party/cpp-httplib",
+          "third_party/cpuinfo",
+          "third_party/cudnn_frontend",
+          "third_party/cutlass",
+          "third_party/fbgemm",
+          "third_party/flash-attention",
+          "third_party/flatbuffers",
+          "third_party/fmt",
+          "third_party/gemmlowp/gemmlowp",
+          "third_party/gloo",
+          "third_party/googletest",
+          "third_party/ideep",
+          "third_party/ittapi",
+          "third_party/kineto",
+          "third_party/kleidiai",
+          "third_party/mimalloc",
+          "third_party/mslk",
+          "third_party/nlohmann",
+          "third_party/onnx",
+          "third_party/pocketfft",
+          "third_party/protobuf",
+          "third_party/psimd",
+          "third_party/pthreadpool",
+          "third_party/pybind11",
+          "third_party/python-peachpy",
+          "third_party/sleef",
+          "third_party/tensorpipe"
+        ],
+        "materialized": false,
+        "offline_build_closure": false,
+        "stale_declarations": [],
+        "undeclared_gitlinks": []
+      },
+      "observed_head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "offline_tree_verified": true,
+      "path": "projects/pytorch",
+      "resolution_evidence_id": "EV-0002",
+      "resolution_record_id": "pytorch",
+      "role": "tensor-runtime",
+      "transport_url": "git@github.com:pytorch/pytorch.git",
+      "triton_pin_at_observed_head": "675c59878aa2280b31f722aaf42b825fcee21de8",
+      "upstream_ref": "main",
+      "upstream_tracking_ref": "refs/amdgpu-sim/resolved/main",
+      "upstream_url": "https://github.com/pytorch/pytorch.git",
+      "work_branch": "amdgpu-sim/gemsim-pytorch",
+      "work_head": "411e87a93704f547e5146c74c95fa11acf13d646",
+      "work_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
+      "worktree_verification": {
+        "full_checkout": true,
+        "skip_worktree_entries": 0,
+        "sparse_checkout": false
+      }
+    },
+    {
+      "download_method": "huggingface_hub.snapshot_download with resolved immutable revision",
+      "download_status": "not-downloaded",
+      "files": [
+        {
+          "blob_id": "52373fe24473b1aa44333d318f578ae6bf04b49b",
+          "path": ".gitattributes",
+          "size": 1570
+        },
+        {
+          "blob_id": "f938136e3adacfd92be087f6e113b5d6d97f678f",
+          "path": "LICENSE",
+          "size": 11544
+        },
+        {
+          "blob_id": "5824f1761b2b3a55a2141a9a1172a7f92c7c2ad9",
+          "path": "README.md",
+          "size": 61705
+        },
+        {
+          "blob_id": "0ef09f214eaa6d9bca297988afc1454b5827b2c7",
+          "path": "chat_template.jinja",
+          "size": 7755
+        },
+        {
+          "blob_id": "715f0448b9d38103211f0ad88bbb4d6e4f4be8c9",
+          "path": "config.json",
+          "size": 2907
+        },
+        {
+          "blob_id": "a494e019ca1502219fd0128658b979e5f05ae8e8",
+          "path": "merges.txt",
+          "size": 3353259
+        },
+        {
+          "blob_id": "969da4e6aa85b4e224739020212b7cb0d09cee14",
+          "lfs": {
+            "pointer_size": 135,
+            "sha256": "04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696",
+            "size": 1746942600,
+            "xet_reconstruction_hash": "f0140d845aced424f17b1c75ebc5a67ef75fe309c68d2f613acda2eb551db7dd"
+          },
+          "path": "model.safetensors-00001-of-00001.safetensors",
+          "size": 1746942600
+        },
+        {
+          "blob_id": "f691cefdb79d73270895ebd6d9594ddcecfc1838",
+          "path": "model.safetensors.index.json",
+          "size": 50900
+        },
+        {
+          "blob_id": "2ea84a437d448ff71b08df68fdd949d5cc4ebb64",
+          "path": "preprocessor_config.json",
+          "size": 390
+        },
+        {
+          "blob_id": "a73a846725794819aa6e1c9e97d8dc9671c2006d",
+          "lfs": {
+            "pointer_size": 133,
+            "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+            "size": 12807982,
+            "xet_reconstruction_hash": "8f06040c24d0d6efc263cf398806debbf20d732031ba128349d086f6a7b8bab2"
+          },
+          "path": "tokenizer.json",
+          "size": 12807982
+        },
+        {
+          "blob_id": "fae3ce993e07c092ad024dde45e592379fde91bb",
+          "path": "tokenizer_config.json",
+          "size": 16709
+        },
+        {
+          "blob_id": "3ba673a5ad7d4d13f54155ecd38b2a94a6dac8fe",
+          "path": "video_preprocessor_config.json",
+          "size": 385
+        },
+        {
+          "blob_id": "0aa0ce0658d60ac4a5d609f4eadb0e8e43514176",
+          "path": "vocab.json",
+          "size": 6722759
+        }
+      ],
+      "id": "qwen3.5-0.8b",
+      "license": "Apache-2.0",
+      "local_official_api_status": "network-unreachable; fail-closed evidence retained",
+      "materialization": "external-download",
+      "materialized_size": 1769980465,
+      "mirror_metadata": {
+        "endpoint": "https://hf-mirror.com",
+        "mirror_api_manifest_sha256": "b39151c83d2fe9eeef51d10c0e84da46b9143cb6afb7f83605974dccf5fd33f8",
+        "normalization": "sorted compact JSON over path, blobId, size, and LFS sha256/size/pointerSize",
+        "normalized_revision_manifest_sha256": "a75f357a84fbec475d54f7b4e2eedc808af21405c23206e16cc6057453b2c9d6",
+        "revision": "2fc06364715b967f1860aea9cf38778875588b17",
+        "status": "cross-check-only; never substitutes for official revision evidence"
+      },
+      "model_manifest_provenance": "mirror metadata cryptographically normalized and cross-checked against official fixed-revision pages; no raw official API archive",
+      "official_evidence": [
+        "https://huggingface.co/Qwen/Qwen3.5-0.8B/tree/main",
+        "https://huggingface.co/Qwen/Qwen3.5-0.8B/commit/2fc06364715b967f1860aea9cf38778875588b17",
+        "https://huggingface.co/Qwen/Qwen3.5-0.8B/blob/2fc06364715b967f1860aea9cf38778875588b17/model.safetensors-00001-of-00001.safetensors",
+        "https://huggingface.co/Qwen/Qwen3.5-0.8B/blob/2fc06364715b967f1860aea9cf38778875588b17/tokenizer.json"
+      ],
+      "official_evidence_observed_at": "2026-08-07T21:10:00+08:00",
+      "official_raw_response_sha256": null,
+      "official_revision": "2fc06364715b967f1860aea9cf38778875588b17",
+      "official_revision_status": "frozen-from-official-fixed-revision-pages",
+      "path": "models/Qwen3.5-0.8B",
+      "repo_id": "Qwen/Qwen3.5-0.8B",
+      "resolution_evidence_id": "EV-0002",
+      "resolution_record_id": "qwen3.5-0.8b",
+      "role": "acceptance-model",
+      "upstream_ref": "main",
+      "upstream_url": "https://huggingface.co/Qwen/Qwen3.5-0.8B",
+      "weights_in_git": false
+    },
+    {
+      "download_method": "huggingface_hub.snapshot_download with resolved immutable revision",
+      "download_status": "not-downloaded",
+      "files": [
+        {
+          "blob_id": "52373fe24473b1aa44333d318f578ae6bf04b49b",
+          "path": ".gitattributes",
+          "size": 1570
+        },
+        {
+          "blob_id": "f938136e3adacfd92be087f6e113b5d6d97f678f",
+          "path": "LICENSE",
+          "size": 11544
+        },
+        {
+          "blob_id": "0f3972cb2c995a86bde9ac92440da530fe2b2c68",
+          "path": "README.md",
+          "size": 77643
+        },
+        {
+          "blob_id": "a585dec894e63da457d9440ec6aa7caa16d20860",
+          "path": "chat_template.jinja",
+          "size": 7756
+        },
+        {
+          "blob_id": "273ce437e01baf96a07cd9eb3d5f48bac8d7c657",
+          "path": "config.json",
+          "size": 3126
+        },
+        {
+          "blob_id": "a494e019ca1502219fd0128658b979e5f05ae8e8",
+          "path": "merges.txt",
+          "size": 3353259
+        },
+        {
+          "blob_id": "dfcd6f97b641f0447db5697eca1f4e227c84449c",
+          "lfs": {
+            "pointer_size": 135,
+            "sha256": "db6f444b43d318c92f360a13a25561a6a65b10c0631b8ed305a426dbaa6c380e",
+            "size": 5276436216
+          },
+          "path": "model.safetensors-00001-of-00004.safetensors",
+          "size": 5276436216
+        },
+        {
+          "blob_id": "645b45d883adaee57a4dbbf75577fa634d20c6b5",
+          "lfs": {
+            "pointer_size": 135,
+            "sha256": "31c7d7e2dd5d207840b31cc59083c8f4c4718959149e0358c0364052bb9a0330",
+            "size": 5335161512
+          },
+          "path": "model.safetensors-00002-of-00004.safetensors",
+          "size": 5335161512
+        },
+        {
+          "blob_id": "20f21fdc49bdca8f021badede1ec436d8241f1e2",
+          "lfs": {
+            "pointer_size": 135,
+            "sha256": "7ec36ba3a4176a44c3c0876ad80c56a2f70c84bf008d82e9501df642f17dadec",
+            "size": 5368717440
+          },
+          "path": "model.safetensors-00003-of-00004.safetensors",
+          "size": 5368717440
+        },
+        {
+          "blob_id": "5a0f71d358bf91155d46e610dc32db45989a1a5f",
+          "lfs": {
+            "pointer_size": 135,
+            "sha256": "b62b0c4cd7e44edee103ee8f4fe225f246d5e768e07bfd5f25b63a8aa1fdd0c6",
+            "size": 3325995712
+          },
+          "path": "model.safetensors-00004-of-00004.safetensors",
+          "size": 3325995712
+        },
+        {
+          "blob_id": "e4c1cb7dba5096b43b9d92bc781aba5e3aa8acd8",
+          "path": "model.safetensors.index.json",
+          "size": 79657
+        },
+        {
+          "blob_id": "2ea84a437d448ff71b08df68fdd949d5cc4ebb64",
+          "path": "preprocessor_config.json",
+          "size": 390
+        },
+        {
+          "blob_id": "a73a846725794819aa6e1c9e97d8dc9671c2006d",
+          "lfs": {
+            "pointer_size": 133,
+            "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+            "size": 12807982
+          },
+          "path": "tokenizer.json",
+          "size": 12807982
+        },
+        {
+          "blob_id": "eda48d3e75a8e59a8479ee4ec8b37f76e711d9c1",
+          "path": "tokenizer_config.json",
+          "size": 16710
+        },
+        {
+          "blob_id": "3ba673a5ad7d4d13f54155ecd38b2a94a6dac8fe",
+          "path": "video_preprocessor_config.json",
+          "size": 385
+        },
+        {
+          "blob_id": "0aa0ce0658d60ac4a5d609f4eadb0e8e43514176",
+          "path": "vocab.json",
+          "size": 6722759
+        }
+      ],
+      "frozen_by_checkpoint": "CP-0063",
+      "id": "qwen3.5-9b",
+      "materialization": "external-download",
+      "materialized_size": 19329393661,
+      "model_manifest_provenance": "official Hugging Face API response at a resolved immutable revision; raw response bytes hashed into this entry",
+      "normalization": "sorted compact JSON over path, blobId, size, and LFS sha256/size/pointerSize",
+      "normalized_revision_manifest_sha256": "2c88a4e8898061048b2f6796089da56e7b9a5e66257a60156cd56809d6946a1a",
+      "official_evidence": [
+        "https://huggingface.co/Qwen/Qwen3.5-9B/tree/c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+        "https://huggingface.co/Qwen/Qwen3.5-9B/commit/c202236235762e1c871ad0ccb60c8ee5ba337b9a"
+      ],
+      "official_evidence_observed_at": "2026-08-18T09:33:25+08:00",
+      "official_raw_response_sha256": "5d56aaedeb86043d56ef4c845c36f0d0d0d80713922131883e1433e97b444e4c",
+      "official_revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+      "official_revision_status": "frozen-from-official-api-at-resolved-revision",
+      "path": "models/Qwen3.5-9B",
+      "repo_id": "Qwen/Qwen3.5-9B",
+      "role": "acceptance-model",
+      "upstream_ref": "main",
+      "upstream_url": "https://huggingface.co/Qwen/Qwen3.5-9B",
+      "weights_in_git": false
+    },
+    {
       "administrative_git_dir": "modules/rocm-systems",
       "baseline_commit": "92115a2941982a384de161be3f78cf9bff547027",
       "baseline_tag": "upstream-baseline/rocm-systems/92115a2941982a384de161be3f78cf9bff547027",
@@ -276,80 +744,6 @@
       }
     },
     {
-      "administrative_git_dir": "modules/llvm-project",
-      "baseline_commit": "73f2a21fe16b34e35fd0e149564b8664e59da392",
-      "baseline_tag": "upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392",
-      "baseline_tag_object": "0ed4649b7df80bc2a97c350fb0ad46e7a7aefa41",
-      "baseline_tag_payload": "object 73f2a21fe16b34e35fd0e149564b8664e59da392\ntype commit\ntag upstream-baseline/llvm-project/73f2a21fe16b34e35fd0e149564b8664e59da392\ntagger zhaosiying12138 <neucszhaopeng2016@163.com> 1786127830 +0800\n\nUpstream-URL: https://github.com/ROCm/llvm-project.git\nUpstream-Ref: amd-staging\nBaseline-Commit: 73f2a21fe16b34e35fd0e149564b8664e59da392\nBaseline-Tree: d589480097e8a30fd1df38435ccc9a9fca71f489\nCommit-Time: 2026-08-07T06:57:36-04:00\nObserved-At: 2026-08-08T01:45:26+08:00\n",
-      "baseline_tag_payload_sha256": "fe129443cebc1c78f15c85d014cd63b38d318206086b524873a335c9b592fff4",
-      "baseline_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
-      "baseline_verification": {
-        "alternates_required": false,
-        "offline_archive_verified": true,
-        "tree_object_verified": true
-      },
-      "commit_time": "2026-08-07T06:57:36-04:00",
-      "expected_push_urls": {
-        "upstream": "no_push"
-      },
-      "expected_remotes": {
-        "upstream": "git@github.com:ROCm/llvm-project.git"
-      },
-      "history": {
-        "commit_ancestry_offline_traversable": true,
-        "commit_ancestry_scope": "all commits reachable from the locked baseline head",
-        "fresh_offline_clone_bundle_available": false,
-        "historical_tree_blob_scope": "promisor-filtered",
-        "locked_baseline_tree_fully_hydrated": true,
-        "partial_clone_filter": "tree:0",
-        "promisor_remote": true,
-        "reachable_commit_count": 613934,
-        "shallow": false
-      },
-      "hooks_path": "../../.githooks",
-      "id": "llvm-project",
-      "license": "Apache-2.0 WITH LLVM-exception plus third-party terms",
-      "license_files": [
-        {
-          "path": "LICENSE.TXT",
-          "sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
-        },
-        {
-          "path": "amd/device-libs/LICENSE.TXT",
-          "sha256": "a4e8e3ba6e9255928a29d3085f929de402e61413cb0c49276e16b558effa8a2a"
-        }
-      ],
-      "materialization": "gitlink",
-      "nested_submodules": {
-        "declared_count": 0,
-        "declared_paths": [],
-        "gitlink_count": 0,
-        "gitlink_paths": [],
-        "materialized": false,
-        "offline_build_closure": false,
-        "stale_declarations": [],
-        "undeclared_gitlinks": []
-      },
-      "observed_head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
-      "offline_tree_verified": true,
-      "path": "projects/llvm-project",
-      "resolution_evidence_id": "EV-0002",
-      "resolution_record_id": "llvm-project",
-      "role": "llvm-clang-device-libs",
-      "transport_url": "git@github.com:ROCm/llvm-project.git",
-      "upstream_ref": "amd-staging",
-      "upstream_tracking_ref": "refs/amdgpu-sim/resolved/amd-staging",
-      "upstream_url": "https://github.com/ROCm/llvm-project.git",
-      "work_branch": "amdgpu-sim/gemsim-llvm",
-      "work_head": "73f2a21fe16b34e35fd0e149564b8664e59da392",
-      "work_tree": "d589480097e8a30fd1df38435ccc9a9fca71f489",
-      "worktree_verification": {
-        "full_checkout": true,
-        "skip_worktree_entries": 0,
-        "sparse_checkout": false
-      }
-    },
-    {
       "administrative_git_dir": "modules/triton",
       "baseline_commit": "cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
       "baseline_tag": "upstream-baseline/triton/cd513e2798db0f4675b3d1205c8e76eb3381a0b3",
@@ -437,153 +831,6 @@
       }
     },
     {
-      "administrative_git_dir": "modules/pytorch",
-      "baseline_commit": "411e87a93704f547e5146c74c95fa11acf13d646",
-      "baseline_tag": "upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646",
-      "baseline_tag_object": "f646d65ca98038c2f7e4648972a35d72d58c579f",
-      "baseline_tag_payload": "object 411e87a93704f547e5146c74c95fa11acf13d646\ntype commit\ntag upstream-baseline/pytorch/411e87a93704f547e5146c74c95fa11acf13d646\ntagger amdgpu-sim source lock <source-lock@amdgpu-sim.invalid> 1786104815 +0800\n\nPristine upstream baseline for pytorch\n\nUpstream-URL: https://github.com/pytorch/pytorch.git\nUpstream-Ref: main\nBaseline-Commit: 411e87a93704f547e5146c74c95fa11acf13d646\nBaseline-Tree: b742566ccb3cc783c2c99176939076831f4e8315\nObserved-At: 2026-08-07T19:39:00+08:00\nResolved-At: 2026-08-07T20:13:35+08:00\n",
-      "baseline_tag_payload_sha256": "e23ba55858a16a4a9710a28daa1da14e53d70ab9be3bad7773ffabec78083e18",
-      "baseline_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
-      "baseline_verification": {
-        "alternates_required": false,
-        "offline_archive_verified": true,
-        "tree_object_verified": true
-      },
-      "commit_time": "2026-08-07T11:18:49Z",
-      "expected_push_urls": {
-        "upstream": "no_push"
-      },
-      "expected_remotes": {
-        "upstream": "git@github.com:pytorch/pytorch.git"
-      },
-      "history": {
-        "commit_ancestry_offline_traversable": true,
-        "commit_ancestry_scope": "all commits reachable from the locked baseline head",
-        "fresh_offline_clone_bundle_available": false,
-        "historical_tree_blob_scope": "promisor-filtered",
-        "locked_baseline_tree_fully_hydrated": true,
-        "partial_clone_filter": "blob:none",
-        "promisor_remote": true,
-        "reachable_commit_count": 108662,
-        "shallow": false
-      },
-      "hooks_path": "../../.githooks",
-      "id": "pytorch",
-      "license": "BSD-style; preserve third-party notices",
-      "license_files": [
-        {
-          "path": "LICENSE",
-          "sha256": "bd018feef8825e88181c84eb7e3aa4eafb8f08a20d9fd6ef948569610c4a3e43"
-        }
-      ],
-      "materialization": "gitlink",
-      "nested_submodules": {
-        "declared_count": 37,
-        "declared_paths": [
-          "android/libs/fbjni",
-          "third_party/FP16",
-          "third_party/FXdiv",
-          "third_party/NNPACK",
-          "third_party/NVTX",
-          "third_party/VulkanMemoryAllocator",
-          "third_party/XNNPACK",
-          "third_party/aiter",
-          "third_party/benchmark",
-          "third_party/composable_kernel",
-          "third_party/cpp-httplib",
-          "third_party/cpuinfo",
-          "third_party/cudnn_frontend",
-          "third_party/cutlass",
-          "third_party/fbgemm",
-          "third_party/flash-attention",
-          "third_party/flatbuffers",
-          "third_party/fmt",
-          "third_party/gemmlowp/gemmlowp",
-          "third_party/gloo",
-          "third_party/googletest",
-          "third_party/ideep",
-          "third_party/ittapi",
-          "third_party/kineto",
-          "third_party/kleidiai",
-          "third_party/mimalloc",
-          "third_party/mslk",
-          "third_party/nlohmann",
-          "third_party/onnx",
-          "third_party/pocketfft",
-          "third_party/protobuf",
-          "third_party/psimd",
-          "third_party/pthreadpool",
-          "third_party/pybind11",
-          "third_party/python-peachpy",
-          "third_party/sleef",
-          "third_party/tensorpipe"
-        ],
-        "gitlink_count": 37,
-        "gitlink_paths": [
-          "android/libs/fbjni",
-          "third_party/FP16",
-          "third_party/FXdiv",
-          "third_party/NNPACK",
-          "third_party/NVTX",
-          "third_party/VulkanMemoryAllocator",
-          "third_party/XNNPACK",
-          "third_party/aiter",
-          "third_party/benchmark",
-          "third_party/composable_kernel",
-          "third_party/cpp-httplib",
-          "third_party/cpuinfo",
-          "third_party/cudnn_frontend",
-          "third_party/cutlass",
-          "third_party/fbgemm",
-          "third_party/flash-attention",
-          "third_party/flatbuffers",
-          "third_party/fmt",
-          "third_party/gemmlowp/gemmlowp",
-          "third_party/gloo",
-          "third_party/googletest",
-          "third_party/ideep",
-          "third_party/ittapi",
-          "third_party/kineto",
-          "third_party/kleidiai",
-          "third_party/mimalloc",
-          "third_party/mslk",
-          "third_party/nlohmann",
-          "third_party/onnx",
-          "third_party/pocketfft",
-          "third_party/protobuf",
-          "third_party/psimd",
-          "third_party/pthreadpool",
-          "third_party/pybind11",
-          "third_party/python-peachpy",
-          "third_party/sleef",
-          "third_party/tensorpipe"
-        ],
-        "materialized": false,
-        "offline_build_closure": false,
-        "stale_declarations": [],
-        "undeclared_gitlinks": []
-      },
-      "observed_head": "411e87a93704f547e5146c74c95fa11acf13d646",
-      "offline_tree_verified": true,
-      "path": "projects/pytorch",
-      "resolution_evidence_id": "EV-0002",
-      "resolution_record_id": "pytorch",
-      "role": "tensor-runtime",
-      "transport_url": "git@github.com:pytorch/pytorch.git",
-      "triton_pin_at_observed_head": "675c59878aa2280b31f722aaf42b825fcee21de8",
-      "upstream_ref": "main",
-      "upstream_tracking_ref": "refs/amdgpu-sim/resolved/main",
-      "upstream_url": "https://github.com/pytorch/pytorch.git",
-      "work_branch": "amdgpu-sim/gemsim-pytorch",
-      "work_head": "411e87a93704f547e5146c74c95fa11acf13d646",
-      "work_tree": "b742566ccb3cc783c2c99176939076831f4e8315",
-      "worktree_verification": {
-        "full_checkout": true,
-        "skip_worktree_entries": 0,
-        "sparse_checkout": false
-      }
-    },
-    {
       "administrative_git_dir": "modules/vllm",
       "baseline_commit": "8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
       "baseline_tag": "upstream-baseline/vllm/8d9b52f7c2514490bdadfd5eb0c931e58625df2e",
@@ -652,121 +899,6 @@
         "skip_worktree_entries": 0,
         "sparse_checkout": false
       }
-    },
-    {
-      "download_method": "huggingface_hub.snapshot_download with resolved immutable revision",
-      "download_status": "not-downloaded",
-      "files": [
-        {
-          "blob_id": "52373fe24473b1aa44333d318f578ae6bf04b49b",
-          "path": ".gitattributes",
-          "size": 1570
-        },
-        {
-          "blob_id": "f938136e3adacfd92be087f6e113b5d6d97f678f",
-          "path": "LICENSE",
-          "size": 11544
-        },
-        {
-          "blob_id": "5824f1761b2b3a55a2141a9a1172a7f92c7c2ad9",
-          "path": "README.md",
-          "size": 61705
-        },
-        {
-          "blob_id": "0ef09f214eaa6d9bca297988afc1454b5827b2c7",
-          "path": "chat_template.jinja",
-          "size": 7755
-        },
-        {
-          "blob_id": "715f0448b9d38103211f0ad88bbb4d6e4f4be8c9",
-          "path": "config.json",
-          "size": 2907
-        },
-        {
-          "blob_id": "a494e019ca1502219fd0128658b979e5f05ae8e8",
-          "path": "merges.txt",
-          "size": 3353259
-        },
-        {
-          "blob_id": "969da4e6aa85b4e224739020212b7cb0d09cee14",
-          "lfs": {
-            "pointer_size": 135,
-            "sha256": "04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696",
-            "size": 1746942600,
-            "xet_reconstruction_hash": "f0140d845aced424f17b1c75ebc5a67ef75fe309c68d2f613acda2eb551db7dd"
-          },
-          "path": "model.safetensors-00001-of-00001.safetensors",
-          "size": 1746942600
-        },
-        {
-          "blob_id": "f691cefdb79d73270895ebd6d9594ddcecfc1838",
-          "path": "model.safetensors.index.json",
-          "size": 50900
-        },
-        {
-          "blob_id": "2ea84a437d448ff71b08df68fdd949d5cc4ebb64",
-          "path": "preprocessor_config.json",
-          "size": 390
-        },
-        {
-          "blob_id": "a73a846725794819aa6e1c9e97d8dc9671c2006d",
-          "lfs": {
-            "pointer_size": 133,
-            "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
-            "size": 12807982,
-            "xet_reconstruction_hash": "8f06040c24d0d6efc263cf398806debbf20d732031ba128349d086f6a7b8bab2"
-          },
-          "path": "tokenizer.json",
-          "size": 12807982
-        },
-        {
-          "blob_id": "fae3ce993e07c092ad024dde45e592379fde91bb",
-          "path": "tokenizer_config.json",
-          "size": 16709
-        },
-        {
-          "blob_id": "3ba673a5ad7d4d13f54155ecd38b2a94a6dac8fe",
-          "path": "video_preprocessor_config.json",
-          "size": 385
-        },
-        {
-          "blob_id": "0aa0ce0658d60ac4a5d609f4eadb0e8e43514176",
-          "path": "vocab.json",
-          "size": 6722759
-        }
-      ],
-      "id": "qwen3.5-0.8b",
-      "license": "Apache-2.0",
-      "local_official_api_status": "network-unreachable; fail-closed evidence retained",
-      "materialization": "external-download",
-      "materialized_size": 1769980465,
-      "mirror_metadata": {
-        "endpoint": "https://hf-mirror.com",
-        "mirror_api_manifest_sha256": "b39151c83d2fe9eeef51d10c0e84da46b9143cb6afb7f83605974dccf5fd33f8",
-        "normalization": "sorted compact JSON over path, blobId, size, and LFS sha256/size/pointerSize",
-        "normalized_revision_manifest_sha256": "a75f357a84fbec475d54f7b4e2eedc808af21405c23206e16cc6057453b2c9d6",
-        "revision": "2fc06364715b967f1860aea9cf38778875588b17",
-        "status": "cross-check-only; never substitutes for official revision evidence"
-      },
-      "model_manifest_provenance": "mirror metadata cryptographically normalized and cross-checked against official fixed-revision pages; no raw official API archive",
-      "official_evidence": [
-        "https://huggingface.co/Qwen/Qwen3.5-0.8B/tree/main",
-        "https://huggingface.co/Qwen/Qwen3.5-0.8B/commit/2fc06364715b967f1860aea9cf38778875588b17",
-        "https://huggingface.co/Qwen/Qwen3.5-0.8B/blob/2fc06364715b967f1860aea9cf38778875588b17/model.safetensors-00001-of-00001.safetensors",
-        "https://huggingface.co/Qwen/Qwen3.5-0.8B/blob/2fc06364715b967f1860aea9cf38778875588b17/tokenizer.json"
-      ],
-      "official_evidence_observed_at": "2026-08-07T21:10:00+08:00",
-      "official_raw_response_sha256": null,
-      "official_revision": "2fc06364715b967f1860aea9cf38778875588b17",
-      "official_revision_status": "frozen-from-official-fixed-revision-pages",
-      "path": "models/Qwen3.5-0.8B",
-      "repo_id": "Qwen/Qwen3.5-0.8B",
-      "resolution_evidence_id": "EV-0002",
-      "resolution_record_id": "qwen3.5-0.8b",
-      "role": "acceptance-model",
-      "upstream_ref": "main",
-      "upstream_url": "https://huggingface.co/Qwen/Qwen3.5-0.8B",
-      "weights_in_git": false
     }
   ],
   "status": "frozen"
