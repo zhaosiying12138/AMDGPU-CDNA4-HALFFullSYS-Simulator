@@ -148,7 +148,25 @@ export HSA_MODEL_LIB="${RUNTIME_BUILD}/libself_amdgpu_hsakmt_model.so.1"
 TOOL_SHIM="${ROOT}/artifacts/tool-shim"
 mkdir -p "$TOOL_SHIM"
 ln -sfn "${RUNTIME_BUILD}/sagr-rocminfo" "${TOOL_SHIM}/rocminfo"
+ln -sfn "${ROOT}/tools/sim_amdgpu_arch.sh" "${TOOL_SHIM}/amdgpu-arch"
+export SAGR_SIM_ROCMINFO="${TOOL_SHIM}/rocminfo"
 export PATH="${TOOL_SHIM}:${PATH}"
+
+# AITER's aiter_meta helper evaluates amdgpu-arch at module import time. The
+# upstream utility returns success with no output when no real KMD is present,
+# which turns its DEFAULT_GPU_ARCH (and later GPU_ARCHS) into an empty string.
+# Resolve an empty/unset value from the same topology-backed product tool that
+# get_gfx_runtime() uses. This is a temporary bring-up adapter and remains
+# architecture-generic: the shim reports every GPU name the topology exposes.
+gpu_archs_value=${GPU_ARCHS:-}
+if [[ -z "${gpu_archs_value//[[:space:]]/}" ]]; then
+  GPU_ARCHS="$(${TOOL_SHIM}/amdgpu-arch | tr '\n' ';' | sed 's/;$//')"
+  if [[ -z "$GPU_ARCHS" ]]; then
+    printf 'could not derive GPU_ARCHS from simulator device discovery\n' >&2
+    exit 2
+  fi
+  export GPU_ARCHS
+fi
 
 export SAGR_MANAGED_GEM5="$gem5"
 export SAGR_MANAGED_GEM5_CONFIG="${ROOT}/projects/gem5/configs/example/gemsim/host_dispatch.py"
@@ -216,6 +234,9 @@ fi
   echo "product=${HEAD_PRODUCT}"
   echo "runtime_sha256=$(sha256sum "${RUNTIME_BUILD}/libself_amdgpu_runtime.so.0.8.0" | cut -d' ' -f1)"
   echo "model_lib_sha256=$(sha256sum "${HSA_MODEL_LIB}" | cut -d' ' -f1)"
+  echo "gpu_archs=${GPU_ARCHS}"
+  echo "sim_amdgpu_arch_sha256=$(sha256sum "${ROOT}/tools/sim_amdgpu_arch.sh" | cut -d' ' -f1)"
+  echo "rocminfo_sha256=$(sha256sum "${TOOL_SHIM}/rocminfo" | cut -d' ' -f1)"
   echo "gem5=${SAGR_MANAGED_GEM5}"
   echo "gem5_sha256=$(sha256sum "${SAGR_MANAGED_GEM5}" | cut -d' ' -f1)"
   echo "fastcopy=HSA_ENABLE_DTIF_FAST_COPY=${HSA_ENABLE_DTIF_FAST_COPY} SAGR_HSAKMT_MODEL_FAST_COPY=${SAGR_HSAKMT_MODEL_FAST_COPY}"
