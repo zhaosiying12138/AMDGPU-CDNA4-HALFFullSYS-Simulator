@@ -40,7 +40,16 @@ class ModelError(RuntimeError):
     pass
 
 
-def load_lock() -> dict[str, Any]:
+DEFAULT_SOURCE_ID = "qwen3.5-0.8b"
+
+
+def load_lock(source_id: str = DEFAULT_SOURCE_ID) -> dict[str, Any]:
+    """Return the frozen lock entry for one model.
+
+    The acceptance ladder spans more than one model -- TP1 and TP2 run
+    Qwen3.5-0.8B while TP16 runs Qwen3.5-9B -- so the entry is selected by id
+    rather than hardcoded. The default keeps existing callers on 0.8B.
+    """
     try:
         lock = json.loads((ROOT / "SOURCE_LOCK.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -48,9 +57,9 @@ def load_lock() -> dict[str, Any]:
     if lock.get("status") != "frozen":
         raise ModelError("SOURCE_LOCK.json must be frozen before model download")
     for source in lock.get("sources", []):
-        if source.get("id") == "qwen3.5-0.8b":
+        if source.get("id") == source_id:
             return source
-    raise ModelError("Qwen model is absent from SOURCE_LOCK.json")
+    raise ModelError(f"{source_id} is absent from SOURCE_LOCK.json")
 
 
 def ignored_storage_root(name: str) -> Path:
@@ -309,7 +318,9 @@ def fsync_tree(directory: Path, paths: Iterable[str]) -> None:
 
 
 def download(args: argparse.Namespace) -> dict[str, Any]:
-    source = load_lock()
+    # getattr, not args.source_id: callers that predate multi-model support
+    # build the namespace by hand and must keep working unchanged.
+    source = load_lock(getattr(args, "source_id", DEFAULT_SOURCE_ID))
     revision = source.get("official_revision")
     if not isinstance(revision, str) or len(revision) != 40:
         raise ModelError("official model revision is not frozen")
@@ -366,12 +377,13 @@ def download(args: argparse.Namespace) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="models/Qwen3.5-0.8B")
+    parser.add_argument("--source-id", default=DEFAULT_SOURCE_ID)
     parser.add_argument("--endpoint", default=OFFICIAL_ENDPOINT)
     parser.add_argument("--allow-mirror", action="store_true")
     parser.add_argument("--verify-only", action="store_true")
     args = parser.parse_args()
     try:
-        source = load_lock()
+        source = load_lock(getattr(args, "source_id", DEFAULT_SOURCE_ID))
         if args.verify_only:
             manifest = verify_snapshot(model_output_path(args.output), source)
         else:

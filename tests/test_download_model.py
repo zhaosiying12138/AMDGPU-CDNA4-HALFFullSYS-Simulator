@@ -405,3 +405,36 @@ class ModelVerificationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MultiModelSourceSelectionTest(unittest.TestCase):
+    """The ladder spans two models: 0.8B for TP1/TP2, 9B for TP16."""
+
+    def test_lock_entry_is_selected_by_id(self) -> None:
+        nine = download_model.load_lock("qwen3.5-9b")
+        self.assertEqual(nine["repo_id"], "Qwen/Qwen3.5-9B")
+        self.assertEqual(nine["path"], "models/Qwen3.5-9B")
+        self.assertEqual(len(nine["official_revision"]), 40)
+
+    def test_default_id_stays_on_the_original_model(self) -> None:
+        self.assertEqual(download_model.DEFAULT_SOURCE_ID, "qwen3.5-0.8b")
+        self.assertEqual(download_model.load_lock()["repo_id"], "Qwen/Qwen3.5-0.8B")
+
+    def test_unknown_id_is_rejected_by_name(self) -> None:
+        with self.assertRaises(download_model.ModelError) as caught:
+            download_model.load_lock("qwen3.5-nonexistent")
+        self.assertIn("qwen3.5-nonexistent", str(caught.exception))
+
+    def test_every_locked_model_pins_payload_hashes(self) -> None:
+        # An entry without per-file hashes cannot detect a corrupted or
+        # substituted download, which is the whole point of freezing it.
+        for source_id in ("qwen3.5-0.8b", "qwen3.5-9b"):
+            source = download_model.load_lock(source_id)
+            weights = [
+                f for f in source["files"] if f["path"].endswith(".safetensors")
+            ]
+            self.assertTrue(weights, f"{source_id} locks no weight files")
+            for entry in weights:
+                self.assertEqual(
+                    len(entry["lfs"]["sha256"]), 64, f"{source_id}:{entry['path']}"
+                )

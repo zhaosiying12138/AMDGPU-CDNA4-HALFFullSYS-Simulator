@@ -19,6 +19,8 @@
 
     {"path":"projects/gem5/src/dev/amdgpu/host_gpu_bridge.cc","classification":"migrate","owner":"gem5-current-bridge","target":"runtime-gem5-bridge"},
     {"path":"projects/gem5/src/dev/amdgpu/host_gpu_bridge.hh","classification":"migrate","owner":"gem5-current-bridge","target":"runtime-gem5-bridge"},
+    {"path":"projects/gem5/src/dev/amdgpu/host_gpu_bridge_tape.cc","classification":"migrate","owner":"gem5-current-bridge","target":"runtime-gem5-bridge"},
+    {"path":"projects/gem5/src/dev/amdgpu/host_gpu_bridge_tape.hh","classification":"migrate","owner":"gem5-current-bridge","target":"runtime-gem5-bridge"},
     {"path":"projects/gem5/src/dev/amdgpu/host_gpu_connection_state.hh","classification":"migrate","owner":"gem5-current-bridge","target":"runtime-gem5-bridge"},
     {"path":"projects/gem5/src/dev/amdgpu/host_gpu_protocol.cc","classification":"migrate","owner":"gem5-current-bridge","target":"runtime-gem5-bridge"},
     {"path":"projects/gem5/src/dev/amdgpu/host_gpu_protocol.hh","classification":"migrate","owner":"gem5-current-bridge","target":"runtime-gem5-bridge"},
@@ -88,6 +90,7 @@
     {"path":"projects/gem5/src/dev/amdgpu/host_gpu_native_ptload_main.cc","classification":"evidence-only","owner":"historical-evidence","target":"historical-evidence"},
     {"path":"projects/gem5/src/dev/amdgpu/host_gpu_triton_code_object_main.cc","classification":"evidence-only","owner":"historical-evidence","target":"historical-evidence"},
 
+    {"path":"projects/gem5/src/dev/amdgpu/host_gpu_bridge_tape.test.cc","classification":"keep","owner":"gem5-adapter-tests","target":"gem5-adapter-tests"},
     {"path":"projects/gem5/src/dev/amdgpu/host_gpu_code_object_state.test.cc","classification":"keep","owner":"gem5-adapter-tests","target":"gem5-adapter-tests"},
     {"path":"projects/gem5/src/dev/amdgpu/host_gpu_dispatch_state.test.cc","classification":"keep","owner":"gem5-adapter-tests","target":"gem5-adapter-tests"},
     {"path":"projects/gem5/src/dev/amdgpu/host_gpu_kmt_state.test.cc","classification":"compatibility","owner":"gem5-compatibility-tests","target":"gem5-compatibility-tests"},
