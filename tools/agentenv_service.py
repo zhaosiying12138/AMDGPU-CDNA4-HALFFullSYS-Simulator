@@ -253,8 +253,17 @@ SUN_PATH_MAX = 108
 FIRECRACKER_SOCKET_SUFFIX_BUDGET = 64
 
 
-def short_state_link(target: Path, tag: str) -> Path:
-    """Return a short, stable symlink that resolves to ``target``."""
+def short_state_link_path(target: Path, tag: str) -> Path:
+    """Return the short link path for ``target`` without touching the disk.
+
+    ``plan``, ``status`` and ``start --dry-run`` all render the server's
+    environment, and they must stay side-effect free: a planning call that
+    creates the state root or republishes a global ``/tmp`` symlink is not a
+    plan.  Deriving the name here and publishing it separately keeps the budget
+    check -- the reason this indirection exists at all -- on the pure path,
+    so an unusable path is still rejected before anything is created.
+    """
+
     digest = hashlib.sha256(str(target).encode("utf-8")).hexdigest()[:8]
     link = Path(f"/tmp/aenv-{os.getuid()}-{tag}-{digest}")
     budget = SUN_PATH_MAX - FIRECRACKER_SOCKET_SUFFIX_BUDGET
@@ -262,6 +271,13 @@ def short_state_link(target: Path, tag: str) -> Path:
         raise ServiceError(
             f"AgentENV {tag} path {link} exceeds the {budget}-byte Unix socket budget"
         )
+    return link
+
+
+def publish_short_state_link(target: Path, tag: str) -> Path:
+    """Create the short symlink that resolves to ``target``."""
+
+    link = short_state_link_path(target, tag)
     target.mkdir(parents=True, exist_ok=True)
     try:
         if link.is_symlink():
@@ -286,9 +302,9 @@ def environment_overrides(paths: ServicePaths, api_addr: str) -> dict[str, str]:
         "AENV_API_URL": credentials["api_url"],
         "AENV_API_KEY": credentials["api_key"],
         "AENV_DEPS_PATH": str(paths.deps),
-        "AENV_HOME_PATH": str(short_state_link(paths.home, "home")),
+        "AENV_HOME_PATH": str(short_state_link_path(paths.home, "home")),
         "AENV_LOG_FORMAT": "json",
-        "AENV_RUNTIME_PATH": str(short_state_link(paths.runtime, "run")),
+        "AENV_RUNTIME_PATH": str(short_state_link_path(paths.runtime, "run")),
         "AENV_VIRTUALIZATION_MODE": "kvm",
         "API_ADDR": api_addr,
         "E2B_ACCESS_TOKEN": credentials["access_token"],
@@ -409,6 +425,20 @@ def prepare_layout(
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
         os.chmod(directory, 0o700)
+
+    # Publishing happens here and nowhere else: this is the one code path that
+    # is already allowed to create state, and the server is launched with the
+    # environment computed above, so the two must agree exactly.
+    for target, tag, variable in (
+        (paths.home, "home", "AENV_HOME_PATH"),
+        (paths.runtime, "run", "AENV_RUNTIME_PATH"),
+    ):
+        link = publish_short_state_link(target, tag)
+        if str(link) != environment[variable]:
+            raise ServiceError(
+                f"published AgentENV {tag} link {link} does not match "
+                f"{variable}={environment[variable]}"
+            )
 
     atomic_write(paths.config, rendered, mode=0o600)
     atomic_write(paths.environment_json, canonical_json(environment), mode=0o600)

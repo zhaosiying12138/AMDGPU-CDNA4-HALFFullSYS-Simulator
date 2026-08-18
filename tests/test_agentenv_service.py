@@ -80,8 +80,17 @@ class AgentEnvServiceTest(unittest.TestCase):
         state = repo / "build" / "agentenv-integration" / "server"
         self.assertEqual(result["state_root"], str(state))
         self.assertEqual(result["api_addr"], "127.0.0.1:18080")
-        self.assertEqual(result["environment"]["AENV_HOME_PATH"], str(state / "home"))
-        self.assertEqual(result["environment"]["AENV_RUNTIME_PATH"], str(state / "runtime"))
+        # AENV_HOME_PATH and AENV_RUNTIME_PATH are short /tmp aliases because
+        # firecracker binds its API socket beneath them and sun_path is capped
+        # at 108 bytes; every artefact still lives in the worktree.
+        self.assertEqual(
+            result["environment"]["AENV_HOME_PATH"],
+            str(MODULE.short_state_link_path(state / "home", "home")),
+        )
+        self.assertEqual(
+            result["environment"]["AENV_RUNTIME_PATH"],
+            str(MODULE.short_state_link_path(state / "runtime", "run")),
+        )
         self.assertEqual(result["environment"]["AENV_DEPS_PATH"], str(state / "deps"))
         self.assertTrue(result["safety"]["loopback_only"])
         self.assertFalse(result["safety"]["wsl_shutdown"])
@@ -93,6 +102,85 @@ class AgentEnvServiceTest(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(MODULE.ServiceError, "loopback|invalid"):
                     MODULE.validate_api_addr(value)
+
+    def test_plan_and_status_create_no_state_and_no_short_link(self) -> None:
+        """Rendering the environment must not publish anything.
+
+        The short ``/tmp`` alias is a global, per-uid name.  If deriving it also
+        created it, then ``plan``, ``status`` and ``start --dry-run`` would
+        silently repoint the alias of a *running* server at a different
+        worktree's state root.
+        """
+
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = fixture_repo(temporary)
+            paths = MODULE.service_paths(repo)
+            links = [
+                MODULE.short_state_link_path(paths.home, "home"),
+                MODULE.short_state_link_path(paths.runtime, "run"),
+            ]
+            for link in links:
+                self.assertFalse(link.exists() or link.is_symlink(), link)
+
+            plan = MODULE.desired_plan(paths, "127.0.0.1:18080", "ubuntu:26.04")
+            status = MODULE.service_status(
+                paths, "127.0.0.1:18080", check_health=False
+            )
+
+            self.assertEqual(status["state"], "stopped")
+            self.assertEqual(plan["operation"], "plan")
+            self.assertFalse(paths.root.exists())
+            for link in links:
+                self.assertFalse(link.exists() or link.is_symlink(), link)
+
+    def test_short_state_link_leaves_room_for_the_firecracker_socket(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = MODULE.service_paths(fixture_repo(temporary))
+            for target, tag in ((paths.home, "home"), (paths.runtime, "run")):
+                link = MODULE.short_state_link_path(target, tag)
+                # firecracker appends its own working directory and socket name
+                # beneath this path before bind(); sun_path is 108 bytes.
+                self.assertLessEqual(
+                    len(os.fsencode(link))
+                    + MODULE.FIRECRACKER_SOCKET_SUFFIX_BUDGET,
+                    MODULE.SUN_PATH_MAX,
+                )
+                self.assertFalse(link.exists() or link.is_symlink(), link)
+
+    def test_short_state_link_rejects_a_path_over_the_socket_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = MODULE.service_paths(fixture_repo(temporary))
+            with mock.patch.object(
+                MODULE, "FIRECRACKER_SOCKET_SUFFIX_BUDGET", MODULE.SUN_PATH_MAX
+            ):
+                with self.assertRaisesRegex(MODULE.ServiceError, "socket budget"):
+                    MODULE.short_state_link_path(paths.home, "home")
+
+    def test_publish_short_state_link_is_idempotent_and_repoints(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = MODULE.service_paths(fixture_repo(temporary))
+            link = MODULE.short_state_link_path(paths.home, "home")
+            self.addCleanup(lambda: link.unlink(missing_ok=True))
+            other = Path(temporary) / "other"
+            other.mkdir()
+            link.symlink_to(other, target_is_directory=True)
+
+            self.assertEqual(MODULE.publish_short_state_link(paths.home, "home"), link)
+            self.assertEqual(link.readlink(), paths.home)
+            self.assertTrue(paths.home.is_dir())
+            # A second publish of the same target is a no-op.
+            self.assertEqual(MODULE.publish_short_state_link(paths.home, "home"), link)
+            self.assertEqual(link.readlink(), paths.home)
+
+    def test_publish_short_state_link_refuses_a_non_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = MODULE.service_paths(fixture_repo(temporary))
+            link = MODULE.short_state_link_path(paths.home, "home")
+            self.addCleanup(lambda: link.unlink(missing_ok=True))
+            link.write_bytes(b"")
+
+            with self.assertRaisesRegex(MODULE.ServiceError, "not a symlink"):
+                MODULE.publish_short_state_link(paths.home, "home")
 
     def test_prepare_generates_private_config_and_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -109,7 +197,18 @@ class AgentEnvServiceTest(unittest.TestCase):
             self.assertNotIn("high_watermark = 64", rendered)
             self.assertEqual(environment["API_ADDR"], "127.0.0.1:18080")
             self.assertEqual(environment["E2B_API_URL"], "http://127.0.0.1:18080")
-            self.assertTrue(environment["AENV_HOME_PATH"].startswith(str(paths.root)))
+            # The short alias is published by prepare_layout and must resolve
+            # back into the feature-local state root.
+            for variable, target in (
+                ("AENV_HOME_PATH", paths.home),
+                ("AENV_RUNTIME_PATH", paths.runtime),
+            ):
+                link = Path(environment[variable])
+                self.assertTrue(link.is_symlink(), variable)
+                self.assertEqual(link.readlink(), target, variable)
+                self.assertTrue(
+                    str(link.resolve()).startswith(str(paths.root.resolve())), variable
+                )
             self.assertEqual(len(hashes["config_sha256"]), 64)
             self.assertEqual(paths.config.stat().st_mode & 0o777, 0o600)
             self.assertEqual(paths.environment_sh.stat().st_mode & 0o777, 0o600)
