@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -47,7 +48,16 @@
 #define SAGR_HSAKMT_MODEL_DRM_MINOR 57U
 #define SAGR_HSAKMT_MODEL_GFX950_DEVICE_ID 30112U
 #define SAGR_HSAKMT_MODEL_GFX950_FAMILY_ID 160U
-#define SAGR_HSAKMT_MODEL_VISIBLE_GPU_ID 38144U
+/*
+ * The bridge ABI is deliberately single-device: one managed gem5 session owns
+ * exactly one simulated GPU, and the wire has no device field to say otherwise
+ * (the KMT topology snapshot fails closed on anything but one GPU node).  This
+ * pair is therefore the identity the bridge accepts, not the identity the
+ * process sees.  It must stay equal to gem5's HostGPUKmtState::VisibleGpuId
+ * and inside its accepted render-minor window.
+ */
+#define SAGR_HSAKMT_MODEL_BRIDGE_GPU_ID 38144U
+#define SAGR_HSAKMT_MODEL_BRIDGE_RENDER_MINOR 128U
 #define SAGR_HSAKMT_MODEL_MAXIMUM_VISIBLE_GPUS 16U
 #define SAGR_HSAKMT_MODEL_LOCAL_MEMORY_BYTES UINT64_C(309237645312)
 #define SAGR_HSAKMT_MODEL_MEMFD_BYTES                                  \
@@ -108,6 +118,12 @@ struct model_allocation {
   int active;
   int owns_backing;
   int mapped_by_model;
+  /*
+   * Zero when the allocation exists only inside the model and was never sent
+   * to the bridge.  The one case is a repeated doorbell region: see
+   * model_doorbell_owner_locked.
+   */
+  int bridge_backed;
   pid_t owner_pid;
   uint64_t raw_handle;
   uint64_t va_addr;
@@ -115,6 +131,14 @@ struct model_allocation {
   uint64_t flags;
   uint64_t backing_offset;
   uint64_t backing_bytes;
+  /*
+   * Which logical GPUs upstream has mapped this allocation to.  The bridge
+   * knows one device, so it is told "mapped" exactly while this set is
+   * non-empty; without the set a partial unmap of one agent would tear down
+   * the mapping the other agent still relies on.
+   */
+  uint32_t mapped_gpu_ids[SAGR_HSAKMT_MODEL_MAXIMUM_VISIBLE_GPUS];
+  uint32_t mapped_gpu_count;
   sagr_kmt_handle_t handle;
 };
 
@@ -133,7 +157,34 @@ struct model_queue {
   size_t slot;
   uint32_t queue_percentage;
   uint32_t queue_priority;
+  uint32_t gpu_id;
   sagr_kmt_handle_t handle;
+};
+
+/*
+ * One logical GPU, exactly as the topology tree declares it.
+ *
+ * Upstream libhsakmt parses HSA_MODEL_TOPOLOGY itself and derives its node
+ * count, gpu ids and render minors from it, so that tree -- not a constant in
+ * this file -- is the authority for which devices exist.  Before this table
+ * existed every ioctl compared gpu_id against a single hard-coded constant, so
+ * a two-GPU topology enumerated two agents in libhsakmt and then failed the
+ * first per-agent ioctl of the second agent with EINVAL: upstream rocminfo
+ * reported "hsa_init Failed, possibly no supported GPU devices" and any
+ * tensor-parallel engine died earlier still, at set_device(1), with
+ * "invalid device ordinal".
+ *
+ * Each entry is a logical device the *process* sees.  It is not a separate
+ * simulated device: every one of them is served by the single session behind
+ * SAGR_HSAKMT_MODEL_BRIDGE_GPU_ID, because a managed gem5 session is one GPU
+ * and one process owns one session.  Tensor parallelism gets its real device
+ * separation from one rank per process, each with its own simulator.
+ */
+struct model_gpu {
+  uint32_t gpu_id;
+  uint32_t node_id;
+  uint32_t render_minor;
+  uint64_t scratch_backing_va;
 };
 
 static pthread_mutex_t model_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -151,7 +202,19 @@ static struct model_render model_renders[SAGR_HSAKMT_MODEL_DEVICE_CAPACITY];
 static struct model_allocation
     model_allocations[SAGR_HSAKMT_MODEL_DEVICE_CAPACITY * 8U];
 static struct model_queue model_queues[SAGR_HSAKMT_MODEL_QUEUE_CAPACITY];
+static struct model_gpu model_gpus[SAGR_HSAKMT_MODEL_MAXIMUM_VISIBLE_GPUS];
+static uint32_t model_gpu_count;
+static int model_scratch_forwarded;
 static uintptr_t model_next_device_token = (uintptr_t)1U;
+/*
+ * Doorbell allocations after the first are satisfied inside the model and get
+ * an identifier out of this namespace instead of a bridge object id.  Bit 63
+ * keeps the two disjoint by construction: the bridge tags every allocation id
+ * with `0x4d454d...` ("MEM", HostGPUKmtState::AllocationPrefix), whose top
+ * byte leaves that bit clear.  Every candidate is still checked against the
+ * live table before it is committed.
+ */
+static uint64_t model_next_local_handle = UINT64_C(0x8000000000000001);
 static pthread_t model_progress_thread;
 static int model_progress_started;
 static int model_progress_stop;
@@ -173,6 +236,172 @@ static void model_reset_devices_locked(void) {
   memset(model_renders, 0, sizeof(model_renders));
   memset(model_allocations, 0, sizeof(model_allocations));
   memset(model_queues, 0, sizeof(model_queues));
+  /* The logical device table survives -- it describes the topology, which a
+   * child inherits unchanged -- but everything the old bridge session was told
+   * about those devices does not. */
+  for (index = 0U; index < SAGR_HSAKMT_MODEL_MAXIMUM_VISIBLE_GPUS; ++index) {
+    model_gpus[index].scratch_backing_va = 0U;
+  }
+  model_scratch_forwarded = 0;
+}
+
+/* Read one "<key> <decimal>" line from a KFD-style sysfs property file. */
+static int model_topology_property(const char *path, const char *key,
+                                   unsigned long long *value) {
+  FILE *stream = fopen(path, "re");
+  const size_t key_length = strlen(key);
+  char line[512];
+  int found = 0;
+  if (stream == NULL) {
+    return 0;
+  }
+  while (fgets(line, (int)sizeof(line), stream) != NULL) {
+    char *end = NULL;
+    unsigned long long parsed;
+    if (strncmp(line, key, key_length) != 0 || line[key_length] != ' ') {
+      continue;
+    }
+    errno = 0;
+    parsed = strtoull(line + key_length + 1, &end, 10);
+    if (end != line + key_length + 1 && errno == 0) {
+      *value = parsed;
+      found = 1;
+    }
+    break;
+  }
+  (void)fclose(stream);
+  return found;
+}
+
+/* Read a KFD-style sysfs file whose entire content is one decimal number. */
+static int model_topology_decimal(const char *path, unsigned long long *value) {
+  FILE *stream = fopen(path, "re");
+  char line[64];
+  char *end = NULL;
+  unsigned long long parsed;
+  if (stream == NULL) {
+    return 0;
+  }
+  if (fgets(line, (int)sizeof(line), stream) == NULL) {
+    (void)fclose(stream);
+    return 0;
+  }
+  (void)fclose(stream);
+  errno = 0;
+  parsed = strtoull(line, &end, 10);
+  if (end == line || errno != 0) {
+    return 0;
+  }
+  *value = parsed;
+  return 1;
+}
+
+static int model_trace_enabled(void);
+
+/*
+ * Build the logical device table from the same topology tree upstream
+ * libhsakmt parses.  A node is a GPU when it publishes a non-zero gpu_id and a
+ * non-zero simd_count; its drm_render_minor is the DRM node upstream will open
+ * for it, and pairing the two here is what lets ACQUIRE_VM reject a render
+ * descriptor that belongs to a different agent.
+ *
+ * secure_getenv mirrors upstream hsakmtmodel.c, which refuses to honour
+ * HSA_MODEL_TOPOLOGY in an AT_SECURE process.
+ *
+ * With no readable topology this falls back to exactly one device with the
+ * bridge identity.  That is not a guess about the hardware: upstream only
+ * enters model mode when HSA_MODEL_TOPOLOGY is set, so the fallback is reached
+ * only by direct callers of the model ABI -- the unit tests -- and it keeps
+ * their single-GPU expectations intact.
+ */
+static void model_load_devices_locked(void) {
+  const char *root;
+  unsigned long node;
+  uint32_t traced;
+  if (model_gpu_count != 0U) {
+    return;
+  }
+  root = secure_getenv("HSA_MODEL_TOPOLOGY");
+  if (root != NULL && root[0] == '/') {
+    for (node = 0UL;
+         node <= (unsigned long)SAGR_HSAKMT_MODEL_MAXIMUM_VISIBLE_GPUS &&
+         model_gpu_count < SAGR_HSAKMT_MODEL_MAXIMUM_VISIBLE_GPUS;
+         ++node) {
+      char path[PATH_MAX];
+      unsigned long long gpu_id = 0U;
+      unsigned long long render_minor = 0U;
+      unsigned long long simd_count = 0U;
+      uint32_t index;
+      int duplicate = 0;
+      if (snprintf(path, sizeof(path), "%s/nodes/%lu/gpu_id", root, node) >=
+          (int)sizeof(path)) {
+        break;
+      }
+      if (model_topology_decimal(path, &gpu_id) == 0 || gpu_id == 0U ||
+          gpu_id > UINT32_MAX) {
+        continue;
+      }
+      if (snprintf(path, sizeof(path), "%s/nodes/%lu/properties", root, node) >=
+          (int)sizeof(path)) {
+        continue;
+      }
+      if (model_topology_property(path, "simd_count", &simd_count) == 0 ||
+          simd_count == 0U ||
+          model_topology_property(path, "drm_render_minor", &render_minor) ==
+              0 ||
+          render_minor < (unsigned long long)SAGR_HSAKMT_MODEL_RENDER_FIRST ||
+          render_minor > (unsigned long long)SAGR_HSAKMT_MODEL_RENDER_LAST) {
+        continue;
+      }
+      for (index = 0U; index < model_gpu_count; ++index) {
+        if (model_gpus[index].gpu_id == (uint32_t)gpu_id ||
+            model_gpus[index].render_minor == (uint32_t)render_minor) {
+          duplicate = 1;
+        }
+      }
+      if (duplicate != 0) {
+        continue;
+      }
+      model_gpus[model_gpu_count].gpu_id = (uint32_t)gpu_id;
+      model_gpus[model_gpu_count].node_id = (uint32_t)node;
+      model_gpus[model_gpu_count].render_minor = (uint32_t)render_minor;
+      model_gpus[model_gpu_count].scratch_backing_va = 0U;
+      ++model_gpu_count;
+    }
+  }
+  if (model_gpu_count == 0U) {
+    model_gpus[0].gpu_id = SAGR_HSAKMT_MODEL_BRIDGE_GPU_ID;
+    model_gpus[0].node_id = 1U;
+    model_gpus[0].render_minor = SAGR_HSAKMT_MODEL_BRIDGE_RENDER_MINOR;
+    model_gpus[0].scratch_backing_va = 0U;
+    model_gpu_count = 1U;
+  }
+  if (model_trace_enabled() == 0) {
+    return;
+  }
+  flockfile(stderr);
+  for (traced = 0U; traced < model_gpu_count; ++traced) {
+    fprintf(stderr,
+            "hsakmt-model pid=%ld phase=device gpu_id=%u node_id=%u render_minor=%u of=%u\n",
+            (long)getpid(), model_gpus[traced].gpu_id,
+            model_gpus[traced].node_id, model_gpus[traced].render_minor,
+            model_gpu_count);
+  }
+  funlockfile(stderr);
+}
+
+static struct model_gpu *model_gpu_locked(uint32_t gpu_id) {
+  uint32_t index;
+  model_load_devices_locked();
+  if (gpu_id == 0U) {
+    return NULL;
+  }
+  for (index = 0U; index < model_gpu_count; ++index) {
+    if (model_gpus[index].gpu_id == gpu_id) {
+      return &model_gpus[index];
+    }
+  }
+  return NULL;
 }
 
 static struct model_allocation *model_allocation_locked(uint64_t raw_handle) {
@@ -200,6 +429,60 @@ static struct model_allocation *model_new_allocation_locked(void) {
     }
   }
   return NULL;
+}
+
+/*
+ * The doorbell region is process-wide, not per device.
+ *
+ * Upstream libhsakmt allocates one doorbell buffer object per topology node
+ * that ever creates a queue, but it then computes the page to map with
+ * `args.doorbell_offset & ~(page - 1)`.  Every model queue takes its slot from
+ * one global 128-slot table inside a single 8 KiB region, so that mask always
+ * resolves to the same backing page whichever node asked -- upstream itself
+ * shares one doorbell page across all nodes here.  gem5 agrees from the other
+ * side: it reads doorbells at a fixed offset in the shared backing keyed by
+ * queue slot (host_gpu_kmt_memory.cc), never through the allocation table.
+ *
+ * gem5 also pins a doorbell allocation to exactly one backing offset and then
+ * rejects any allocation overlapping an existing one, so a second doorbell
+ * buffer object can never be registered there: it fails MemoryAlreadyRegistered
+ * by construction.  The second and later nodes therefore get a model-local
+ * alias -- same backing offset, own handle -- which is exactly the state
+ * upstream needs to reserve a VA and later release it, and nothing the bridge
+ * would use.
+ */
+static struct model_allocation *model_doorbell_owner_locked(void) {
+  size_t index;
+  for (index = 0U; index < sizeof(model_allocations) /
+                                sizeof(model_allocations[0]); ++index) {
+    struct model_allocation *allocation = &model_allocations[index];
+    if (allocation->active != 0 && allocation->owner_pid == getpid() &&
+        allocation->bridge_backed != 0 &&
+        (allocation->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) != 0U) {
+      return allocation;
+    }
+  }
+  return NULL;
+}
+
+static int model_take_local_handle_locked(uint64_t *handle) {
+  uint32_t attempt;
+  if (handle == NULL) {
+    return -1;
+  }
+  for (attempt = 0U; attempt < SAGR_HSAKMT_MODEL_DEVICE_CAPACITY * 8U + 1U;
+       ++attempt) {
+    const uint64_t candidate = model_next_local_handle;
+    if (candidate == 0U) {
+      return -1;
+    }
+    ++model_next_local_handle;
+    if (model_allocation_locked(candidate) == NULL) {
+      *handle = candidate;
+      return 0;
+    }
+  }
+  return -1;
 }
 
 static uint64_t model_available_vram_locked(void) {
@@ -703,7 +986,20 @@ static int model_authorize_peer_memory_access_locked(void) {
   }
   if (prctl(PR_SET_PTRACER, (unsigned long)info.peer_pid,
             0UL, 0UL, 0UL) != 0) {
-    return -1;
+    /*
+     * PR_SET_PTRACER exists only to lift a Yama ptrace_scope restriction. A
+     * kernel built without the Yama LSM rejects the call with EINVAL, and on
+     * such a kernel there is no restriction to lift: the peer can already
+     * attach. Distinguish those two cases by the presence of Yama's own
+     * sysctl rather than by trusting the errno alone, so a genuine failure on
+     * a Yama-enforcing kernel still fails closed. This matters for sandboxed
+     * execution: a minimal microVM guest typically omits Yama, and treating
+     * its EINVAL as fatal made every KFD open fail there while the same code
+     * worked on the host.
+     */
+    if (errno != EINVAL || access("/proc/sys/kernel/yama/ptrace_scope", F_OK) == 0) {
+      return -1;
+    }
   }
   model_authorized_peer_pid = (pid_t)info.peer_pid;
   return 0;
@@ -844,8 +1140,7 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
     struct kfd_ioctl_get_clock_counters_args committed;
     sagr_kmt_clock_counters_t counters;
     sagr_kmt_status_t status;
-    if (ioctl_args->gpu_id != SAGR_HSAKMT_MODEL_VISIBLE_GPU_ID ||
-        ioctl_args->pad != 0U) {
+    if (ioctl_args->pad != 0U) {
       errno = EINVAL;
       return -1;
     }
@@ -859,6 +1154,14 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
       errno = lock_status;
       return -1;
     }
+    /* The device table needs the lock, so an unknown gpu_id is rejected here
+     * rather than before it -- still before any provider access, so the
+     * caller's output is untouched. */
+    if (model_gpu_locked(ioctl_args->gpu_id) == NULL) {
+      (void)pthread_mutex_unlock(&model_mutex);
+      errno = EINVAL;
+      return -1;
+    }
     if (model_owner_pid != getpid() || model_connect_locked() != 0) {
       const int saved_errno =
           model_owner_pid != getpid() ? EOWNERDEAD : (errno != 0 ? errno : EIO);
@@ -868,7 +1171,7 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
     }
     memset(&counters, 0, sizeof(counters));
     status = sagr_kmt_get_clock_counters(
-        model_provider, &model_kfd, ioctl_args->gpu_id, &counters,
+        model_provider, &model_kfd, SAGR_HSAKMT_MODEL_BRIDGE_GPU_ID, &counters,
         (uint32_t)sizeof(counters), NULL, NULL, 0U);
     if (status != SAGR_KMT_STATUS_SUCCESS) {
       const int saved_errno = model_kmt_status_errno(status);
@@ -888,7 +1191,7 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
   }
   if (request == AMDKFD_IOC_GET_PROCESS_APERTURES_NEW) {
     struct kfd_ioctl_get_process_apertures_new_args *ioctl_args = argument;
-    sagr_kmt_process_aperture_t committed[SAGR_HSAKMT_MODEL_MAXIMUM_VISIBLE_GPUS];
+    sagr_kmt_process_aperture_t geometry;
     struct kfd_process_device_apertures *destination =
         (struct kfd_process_device_apertures *)(uintptr_t)
             ioctl_args->kfd_process_device_apertures_ptr;
@@ -918,11 +1221,23 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
       errno = saved_errno;
       return -1;
     }
+    model_load_devices_locked();
+    /*
+     * The bridge session is one device and says so; asking it for a device
+     * count is a protocol check, not a device count for the process.  Take its
+     * single aperture as the geometry and publish one entry per logical GPU.
+     *
+     * Real KFD does the same thing for GFX9: kfd_init_apertures_v9 gives every
+     * device in a process identical LDS, scratch and GPUVM windows, and only
+     * the gpu_id differs.  libhsakmt matches each returned entry to a topology
+     * node by gpu_id (fmm.c gpu_mem_find_by_gpu_id) and silently drops any node
+     * it cannot match, which is how a single-entry reply used to leave every
+     * agent but the first without a usable aperture.
+     */
     status = sagr_kmt_process_apertures(
         model_provider, &model_kfd, 0U, NULL, 0U, &returned, &total, NULL,
         NULL, 0U);
-    if (status != SAGR_KMT_STATUS_SUCCESS || returned != 0U ||
-        total == 0U || total > SAGR_HSAKMT_MODEL_MAXIMUM_VISIBLE_GPUS) {
+    if (status != SAGR_KMT_STATUS_SUCCESS || returned != 0U || total != 1U) {
       const int saved_errno = status == SAGR_KMT_STATUS_SUCCESS
                                   ? EPROTO
                                   : model_kmt_status_errno(status);
@@ -930,49 +1245,48 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
       errno = saved_errno;
       return -1;
     }
-    expected_total = total;
-    while (written < requested && written < total) {
-      uint32_t page_total = 0U;
-      const uint32_t capacity =
-          requested - written < SAGR_KMT_PROCESS_APERTURES_PER_PAGE
-              ? requested - written
-              : SAGR_KMT_PROCESS_APERTURES_PER_PAGE;
-      status = sagr_kmt_process_apertures(
-          model_provider, &model_kfd, written, committed + written, capacity,
-          &returned, &page_total, NULL, NULL, 0U);
-      if (status != SAGR_KMT_STATUS_SUCCESS || returned == 0U ||
-          page_total != expected_total) {
-        const int saved_errno = status == SAGR_KMT_STATUS_SUCCESS
-                                    ? EPROTO
-                                    : model_kmt_status_errno(status);
-        (void)pthread_mutex_unlock(&model_mutex);
-        errno = saved_errno;
-        return -1;
-      }
-      written += returned;
+    expected_total = model_gpu_count;
+    /* A count-only query wants the number of nodes, which the topology owns;
+     * the bridge geometry is only fetched when an entry will be written. */
+    if (destination == NULL) {
+      ioctl_args->num_of_nodes = expected_total;
+      (void)pthread_mutex_unlock(&model_mutex);
+      return 0;
     }
-    if (destination != NULL) {
-      uint32_t index;
-      for (index = 0U; index < written; ++index) {
-        struct kfd_process_device_apertures entry;
-        memset(&entry, 0, sizeof(entry));
-        entry.lds_base = committed[index].lds_base;
-        entry.lds_limit = committed[index].lds_limit;
-        entry.scratch_base = committed[index].scratch_base;
-        entry.scratch_limit = committed[index].scratch_limit;
-        entry.gpuvm_base = committed[index].gpuvm_base;
-        entry.gpuvm_limit = committed[index].gpuvm_limit;
-        entry.gpu_id = committed[index].gpu_id;
-        memcpy(destination + index, &entry, sizeof(entry));
-      }
+    memset(&geometry, 0, sizeof(geometry));
+    status = sagr_kmt_process_apertures(
+        model_provider, &model_kfd, 0U, &geometry, 1U, &returned, &total, NULL,
+        NULL, 0U);
+    if (status != SAGR_KMT_STATUS_SUCCESS || returned != 1U || total != 1U ||
+        geometry.gpu_id != SAGR_HSAKMT_MODEL_BRIDGE_GPU_ID) {
+      const int saved_errno = status == SAGR_KMT_STATUS_SUCCESS
+                                  ? EPROTO
+                                  : model_kmt_status_errno(status);
+      (void)pthread_mutex_unlock(&model_mutex);
+      errno = saved_errno;
+      return -1;
     }
-    ioctl_args->num_of_nodes = destination == NULL ? expected_total : written;
+    while (written < requested && written < expected_total) {
+      struct kfd_process_device_apertures entry;
+      memset(&entry, 0, sizeof(entry));
+      entry.lds_base = geometry.lds_base;
+      entry.lds_limit = geometry.lds_limit;
+      entry.scratch_base = geometry.scratch_base;
+      entry.scratch_limit = geometry.scratch_limit;
+      entry.gpuvm_base = geometry.gpuvm_base;
+      entry.gpuvm_limit = geometry.gpuvm_limit;
+      entry.gpu_id = model_gpus[written].gpu_id;
+      memcpy(destination + written, &entry, sizeof(entry));
+      ++written;
+    }
+    ioctl_args->num_of_nodes = written;
     (void)pthread_mutex_unlock(&model_mutex);
     return 0;
   }
   if (request == AMDKFD_IOC_ACQUIRE_VM) {
     const struct kfd_ioctl_acquire_vm_args *ioctl_args = argument;
     struct model_render *render;
+    const struct model_gpu *gpu;
     sagr_kmt_status_t status;
     if (pthread_once(&model_atfork_once, model_install_atfork) != 0 ||
         model_atfork_error != 0) {
@@ -995,7 +1309,11 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
       errno = EBADF;
       return -1;
     }
-    if (ioctl_args->gpu_id != SAGR_HSAKMT_MODEL_VISIBLE_GPU_ID) {
+    /* The render descriptor must belong to this exact agent.  Upstream opens
+     * one DRM render node per topology GPU and pairs them by drm_render_minor,
+     * so a mismatch means the caller crossed two agents' resources. */
+    gpu = model_gpu_locked(ioctl_args->gpu_id);
+    if (gpu == NULL || gpu->render_minor != (uint32_t)render->render_minor) {
       (void)pthread_mutex_unlock(&model_mutex);
       errno = EINVAL;
       return -1;
@@ -1006,9 +1324,12 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
       errno = saved_errno;
       return -1;
     }
+    /* One bridge session owns one VM.  Every logical agent acquires the same
+     * simulated device, so the bridge sees its own canonical identity and
+     * cannot reject the second agent for changing it. */
     status = sagr_kmt_acquire_vm(
-        model_provider, &model_kfd, ioctl_args->gpu_id,
-        (uint32_t)render->render_minor, NULL, NULL, 0U);
+        model_provider, &model_kfd, SAGR_HSAKMT_MODEL_BRIDGE_GPU_ID,
+        SAGR_HSAKMT_MODEL_BRIDGE_RENDER_MINOR, NULL, NULL, 0U);
     if (status != SAGR_KMT_STATUS_SUCCESS) {
       const int saved_errno = model_kmt_status_errno(status);
       (void)pthread_mutex_unlock(&model_mutex);
@@ -1036,7 +1357,7 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
       errno = EOWNERDEAD;
       return -1;
     }
-    if (ioctl_args->gpu_id != SAGR_HSAKMT_MODEL_VISIBLE_GPU_ID ||
+    if (model_gpu_locked(ioctl_args->gpu_id) == NULL ||
         (ioctl_args->default_policy != SAGR_KMT_CACHE_POLICY_COHERENT &&
          ioctl_args->default_policy != SAGR_KMT_CACHE_POLICY_NONCOHERENT) ||
         (ioctl_args->alternate_policy != SAGR_KMT_CACHE_POLICY_COHERENT &&
@@ -1056,8 +1377,11 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
       errno = saved_errno;
       return -1;
     }
+    /* Upstream derives this policy from the process-wide fine-grained
+     * aperture, so every agent asks for the same window; forwarding the bridge
+     * identity keeps the session's single record consistent. */
     status = sagr_kmt_set_memory_policy(
-        model_provider, &model_kfd, ioctl_args->gpu_id,
+        model_provider, &model_kfd, SAGR_HSAKMT_MODEL_BRIDGE_GPU_ID,
         ioctl_args->default_policy, ioctl_args->alternate_policy,
         ioctl_args->misc_process_flag, ioctl_args->alternate_aperture_base,
         ioctl_args->alternate_aperture_size, NULL, NULL, 0U);
@@ -1084,11 +1408,14 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
       return -1;
     }
     if (model_owner_pid != getpid() ||
-        ioctl_args->gpu_id != SAGR_HSAKMT_MODEL_VISIBLE_GPU_ID) {
+        model_gpu_locked(ioctl_args->gpu_id) == NULL) {
       (void)pthread_mutex_unlock(&model_mutex);
       errno = model_owner_pid != getpid() ? EOWNERDEAD : EINVAL;
       return -1;
     }
+    /* One sparse backing serves every logical GPU, so the free pool is
+     * process-wide and each agent reports what is genuinely left rather than a
+     * private budget that could be handed out twice. */
     available = model_available_vram_locked();
     ioctl_args->available = available;
     (void)pthread_mutex_unlock(&model_mutex);
@@ -1098,6 +1425,7 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
     struct kfd_ioctl_alloc_memory_of_gpu_args *ioctl_args = argument;
     sagr_kmt_handle_t allocation;
     struct model_allocation *local;
+    struct model_allocation *doorbell_owner = NULL;
     const int is_userptr =
         (ioctl_args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) != 0U;
     const int is_doorbell =
@@ -1118,12 +1446,17 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
       return -1;
     }
     if (model_owner_pid != getpid() ||
-        ioctl_args->gpu_id != SAGR_HSAKMT_MODEL_VISIBLE_GPU_ID ||
+        model_gpu_locked(ioctl_args->gpu_id) == NULL ||
         ioctl_args->size == 0U ||
         ioctl_args->va_addr > UINT64_MAX - ioctl_args->size ||
         (is_userptr != 0 &&
          ioctl_args->mmap_offset > UINT64_MAX - ioctl_args->size) ||
         (is_userptr != 0 && is_doorbell != 0) ||
+        /* A doorbell buffer object is never an MMIO remap window; refusing the
+         * combination keeps the alias path below free of a second mapping
+         * rule it would otherwise have to reproduce. */
+        (is_doorbell != 0 &&
+         (ioctl_args->flags & KFD_IOC_ALLOC_MEM_FLAGS_MMIO_REMAP) != 0U) ||
         (is_doorbell != 0 &&
          ioctl_args->size !=
              SAGR_BRIDGE_KMT_SHARED_BACKING_DOORBELL_REGION_BYTES) ||
@@ -1157,7 +1490,9 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
       backing_offset = SAGR_HSAKMT_MODEL_ORDINARY_BACKING_BYTES;
       backing_bytes =
           SAGR_BRIDGE_KMT_SHARED_BACKING_DOORBELL_REGION_BYTES;
-      if (!model_backing_range_available_locked(backing_offset,
+      doorbell_owner = model_doorbell_owner_locked();
+      if (doorbell_owner == NULL &&
+          !model_backing_range_available_locked(backing_offset,
                                                 backing_bytes)) {
         (void)pthread_mutex_unlock(&model_mutex);
         errno = ENOMEM;
@@ -1172,9 +1507,38 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
     } else {
       transport_offset = backing_offset;
     }
+    /* Second and later agents alias the one doorbell region; see
+     * model_doorbell_owner_locked. */
+    if (doorbell_owner != NULL) {
+      uint64_t alias_handle = 0U;
+      if (model_take_local_handle_locked(&alias_handle) != 0) {
+        (void)pthread_mutex_unlock(&model_mutex);
+        errno = ENOMEM;
+        return -1;
+      }
+      memset(local, 0, sizeof(*local));
+      local->active = 1;
+      local->owns_backing = 0;
+      local->bridge_backed = 0;
+      local->mapped_by_model = 0;
+      local->owner_pid = getpid();
+      local->raw_handle = alias_handle;
+      local->va_addr = ioctl_args->va_addr;
+      local->size_bytes = ioctl_args->size;
+      local->flags = ioctl_args->flags;
+      local->backing_offset = backing_offset;
+      local->backing_bytes = backing_bytes;
+      ioctl_args->handle = alias_handle;
+      ioctl_args->mmap_offset = backing_offset;
+      (void)pthread_mutex_unlock(&model_mutex);
+      return 0;
+    }
+    /* The bridge session owns one device, so every logical agent's allocation
+     * is made against that device.  gem5 only compares this field with the
+     * gpu id its session acquired and never reads it again. */
     status = sagr_kmt_alloc_memory_of_gpu(
         model_provider, &model_kfd, ioctl_args->va_addr, ioctl_args->size,
-        ioctl_args->gpu_id, ioctl_args->flags, transport_offset,
+        SAGR_HSAKMT_MODEL_BRIDGE_GPU_ID, ioctl_args->flags, transport_offset,
         &allocation, &mmap_offset, NULL, NULL, 0U);
     if (status != SAGR_KMT_STATUS_SUCCESS) {
       const int saved_errno = model_kmt_status_errno(status);
@@ -1195,6 +1559,7 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
     memset(local, 0, sizeof(*local));
     local->active = 1;
     local->owns_backing = is_userptr == 0 ? 1 : 0;
+    local->bridge_backed = 1;
     local->mapped_by_model = 0;
     local->owner_pid = getpid();
     local->raw_handle = allocation.object_id;
@@ -1258,7 +1623,7 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
     }
     local = model_allocation_locked(ioctl_args->handle);
     if (local == NULL || model_owner_pid != getpid() ||
-        model_connect_locked() != 0) {
+        (local->bridge_backed != 0 && model_connect_locked() != 0)) {
       const int saved_errno = model_owner_pid != getpid()
                                   ? EOWNERDEAD
                                   : (errno != 0 ? errno : EBADF);
@@ -1266,13 +1631,17 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
       errno = saved_errno;
       return -1;
     }
-    status = sagr_kmt_free_memory_of_gpu(model_provider, &model_kfd,
-                                         &local->handle, NULL, NULL, 0U);
-    if (status != SAGR_KMT_STATUS_SUCCESS) {
-      const int saved_errno = model_kmt_status_errno(status);
-      (void)pthread_mutex_unlock(&model_mutex);
-      errno = saved_errno;
-      return -1;
+    /* A model-local doorbell alias was never registered with the bridge, so
+     * releasing it must not release the owner's bridge allocation. */
+    if (local->bridge_backed != 0) {
+      status = sagr_kmt_free_memory_of_gpu(model_provider, &model_kfd,
+                                           &local->handle, NULL, NULL, 0U);
+      if (status != SAGR_KMT_STATUS_SUCCESS) {
+        const int saved_errno = model_kmt_status_errno(status);
+        (void)pthread_mutex_unlock(&model_mutex);
+        errno = saved_errno;
+        return -1;
+      }
     }
     if (local->mapped_by_model != 0 && local->va_addr != 0U &&
         local->size_bytes != 0U) {
@@ -1286,8 +1655,13 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
   if (request == AMDKFD_IOC_MAP_MEMORY_TO_GPU ||
       request == AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU) {
     const struct kfd_ioctl_map_memory_to_gpu_args *ioctl_args = argument;
+    const int is_map = request == AMDKFD_IOC_MAP_MEMORY_TO_GPU;
     uint32_t gpu_ids[SAGR_HSAKMT_MODEL_MAXIMUM_VISIBLE_GPUS];
+    uint32_t committed_ids[SAGR_HSAKMT_MODEL_MAXIMUM_VISIBLE_GPUS];
+    uint32_t committed_count = 0U;
+    uint32_t bridge_id = SAGR_HSAKMT_MODEL_BRIDGE_GPU_ID;
     struct model_allocation *local;
+    uint32_t index;
     uint32_t success = 0U;
     sagr_kmt_status_t status;
     if (pthread_once(&model_atfork_once, model_install_atfork) != 0 ||
@@ -1308,33 +1682,86 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
       errno = lock_status;
       return -1;
     }
+    /* Reject the whole request before it changes anything if it names an agent
+     * this topology does not publish.  Argument shape is judged before object
+     * identity, as it is for the pre-lock checks above, so a malformed device
+     * list reports EINVAL rather than the handle's EBADF. */
+    for (index = 0U; index < ioctl_args->n_devices; ++index) {
+      if (model_gpu_locked(gpu_ids[index]) == NULL) {
+        (void)pthread_mutex_unlock(&model_mutex);
+        errno = EINVAL;
+        return -1;
+      }
+    }
     local = model_allocation_locked(ioctl_args->handle);
-    if (local == NULL || model_owner_pid != getpid() ||
-        model_connect_locked() != 0) {
-      const int saved_errno = model_owner_pid != getpid()
-                                  ? EOWNERDEAD
-                                  : (errno != 0 ? errno : EBADF);
+    if (local == NULL || model_owner_pid != getpid()) {
       (void)pthread_mutex_unlock(&model_mutex);
-      errno = saved_errno;
+      errno = model_owner_pid != getpid() ? EOWNERDEAD : EBADF;
       return -1;
     }
-    status = request == AMDKFD_IOC_MAP_MEMORY_TO_GPU
-        ? sagr_kmt_map_memory_to_gpu(model_provider, &model_kfd,
-                                     &local->handle, gpu_ids,
-                                     ioctl_args->n_devices, &success, NULL,
-                                     NULL, 0U)
-        : sagr_kmt_unmap_memory_from_gpu(model_provider, &model_kfd,
-                                         &local->handle, gpu_ids,
-                                         ioctl_args->n_devices, &success, NULL,
-                                         NULL, 0U);
-    if (status != SAGR_KMT_STATUS_SUCCESS) {
-      const int saved_errno = model_kmt_status_errno(status);
-      (void)pthread_mutex_unlock(&model_mutex);
-      errno = saved_errno;
-      return -1;
+    /* Compute the resulting logical mapping set first; the bridge is told only
+     * about the transitions that change whether the one simulated device holds
+     * this allocation at all. */
+    if (is_map != 0) {
+      memcpy(committed_ids, local->mapped_gpu_ids,
+             (size_t)local->mapped_gpu_count * sizeof(committed_ids[0]));
+      committed_count = local->mapped_gpu_count;
+      for (index = 0U; index < ioctl_args->n_devices; ++index) {
+        uint32_t prior;
+        int present = 0;
+        for (prior = 0U; prior < committed_count; ++prior) {
+          if (committed_ids[prior] == gpu_ids[index]) {
+            present = 1;
+          }
+        }
+        if (present == 0 &&
+            committed_count < SAGR_HSAKMT_MODEL_MAXIMUM_VISIBLE_GPUS) {
+          committed_ids[committed_count++] = gpu_ids[index];
+        }
+      }
+    } else {
+      uint32_t prior;
+      for (prior = 0U; prior < local->mapped_gpu_count; ++prior) {
+        int removed = 0;
+        for (index = 0U; index < ioctl_args->n_devices; ++index) {
+          if (gpu_ids[index] == local->mapped_gpu_ids[prior]) {
+            removed = 1;
+          }
+        }
+        if (removed == 0) {
+          committed_ids[committed_count++] = local->mapped_gpu_ids[prior];
+        }
+      }
     }
+    if (local->bridge_backed != 0 &&
+        ((local->mapped_gpu_count == 0U) != (committed_count == 0U))) {
+      if (model_connect_locked() != 0) {
+        const int saved_errno = errno != 0 ? errno : EIO;
+        (void)pthread_mutex_unlock(&model_mutex);
+        errno = saved_errno;
+        return -1;
+      }
+      status = is_map != 0
+          ? sagr_kmt_map_memory_to_gpu(model_provider, &model_kfd,
+                                       &local->handle, &bridge_id, 1U,
+                                       &success, NULL, NULL, 0U)
+          : sagr_kmt_unmap_memory_from_gpu(model_provider, &model_kfd,
+                                           &local->handle, &bridge_id, 1U,
+                                           &success, NULL, NULL, 0U);
+      if (status != SAGR_KMT_STATUS_SUCCESS || success != 1U) {
+        const int saved_errno = status == SAGR_KMT_STATUS_SUCCESS
+                                    ? EPROTO
+                                    : model_kmt_status_errno(status);
+        (void)pthread_mutex_unlock(&model_mutex);
+        errno = saved_errno;
+        return -1;
+      }
+    }
+    memcpy(local->mapped_gpu_ids, committed_ids,
+           (size_t)committed_count * sizeof(committed_ids[0]));
+    local->mapped_gpu_count = committed_count;
     ((struct kfd_ioctl_map_memory_to_gpu_args *)ioctl_args)->n_success =
-        success;
+        ioctl_args->n_devices;
     (void)pthread_mutex_unlock(&model_mutex);
     return 0;
   }
@@ -1353,7 +1780,6 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
       return -1;
     }
     if (model_owner_pid != getpid() ||
-        ioctl_args->gpu_id != SAGR_HSAKMT_MODEL_VISIBLE_GPU_ID ||
         ioctl_args->queue_type != KFD_IOC_QUEUE_TYPE_COMPUTE_AQL ||
         ioctl_args->ring_base_address == 0U ||
         ioctl_args->read_pointer_address == 0U ||
@@ -1380,6 +1806,11 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
       errno = lock_status;
       return -1;
     }
+    if (model_gpu_locked(ioctl_args->gpu_id) == NULL) {
+      (void)pthread_mutex_unlock(&model_mutex);
+      errno = EINVAL;
+      return -1;
+    }
     local = model_new_queue_locked(&slot);
     if (local == NULL || model_connect_locked() != 0) {
       const int saved_errno = local == NULL
@@ -1391,6 +1822,12 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
     }
     memset(&options, 0, sizeof(options));
     options.struct_size = (uint32_t)sizeof(options);
+    /*
+     * The bridge node id is the simulated device's, not the logical agent's:
+     * one session owns one node.  The doorbell slot below is likewise drawn
+     * from one process-wide table, which is what upstream's
+     * `doorbell_offset & ~(page - 1)` arithmetic already assumes.
+     */
     options.node_id = 1U;
     options.queue_type = ioctl_args->queue_type;
     options.depth = (uint32_t)packet_count;
@@ -1427,6 +1864,7 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
     local->slot = slot;
     local->queue_percentage = ioctl_args->queue_percentage;
     local->queue_priority = ioctl_args->queue_priority;
+    local->gpu_id = ioctl_args->gpu_id;
     local->handle = queue_handle;
     if (model_start_queue_progress_locked() != 0) {
       const int saved_errno = errno != 0 ? errno : EIO;
@@ -1522,11 +1960,12 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
   }
   if (request == AMDKFD_IOC_SET_SCRATCH_BACKING_VA) {
     const struct kfd_ioctl_set_scratch_backing_va_args *ioctl_args = argument;
+    struct model_gpu *gpu;
     uint64_t scratch_backing_va;
+    int forward;
     sagr_kmt_status_t status;
     if (pthread_once(&model_atfork_once, model_install_atfork) != 0 ||
         model_atfork_error != 0 ||
-        ioctl_args->gpu_id != SAGR_HSAKMT_MODEL_VISIBLE_GPU_ID ||
         ioctl_args->va_addr == 0U ||
         ioctl_args->va_addr > (UINT64_MAX >> 16U)) {
       errno = EINVAL;
@@ -1537,12 +1976,37 @@ static int model_handle_ioctl_impl(unsigned long request, void *argument) {
     scratch_backing_va = ioctl_args->va_addr << 16U;
     lock_status = pthread_mutex_lock(&model_mutex);
     if (lock_status != 0) { errno = lock_status; return -1; }
+    gpu = model_gpu_locked(ioctl_args->gpu_id);
+    if (gpu == NULL) {
+      (void)pthread_mutex_unlock(&model_mutex);
+      errno = EINVAL;
+      return -1;
+    }
+    /*
+     * SH_HIDDEN_PRIVATE_BASE is per device and upstream programs one buffer
+     * per agent, each at its own address, eagerly during hsa_init
+     * (GpuAgent::PostToolsInit -> InitScratchPool).  The bridge session holds
+     * exactly one such record and rejects a second, different value, so the
+     * per-agent value is kept here and only the first agent's is forwarded.
+     *
+     * That divergence is inert today: gem5 records scratchBackingVa and never
+     * reads it -- a dispatch takes its private segment from the AQL packet and
+     * kernel descriptor. If gem5 ever starts consuming the recorded value, the
+     * bridge needs a per-device scratch base and this must forward again.
+     */
+    forward = model_scratch_forwarded == 0 ? 1 : 0;
     if (model_owner_pid != getpid() || model_connect_locked() != 0) {
       const int saved_errno = model_owner_pid != getpid() ? EOWNERDEAD : (errno != 0 ? errno : EIO);
       (void)pthread_mutex_unlock(&model_mutex); errno = saved_errno; return -1;
     }
+    gpu->scratch_backing_va = scratch_backing_va;
+    if (forward == 0) {
+      (void)pthread_mutex_unlock(&model_mutex);
+      return 0;
+    }
+    model_scratch_forwarded = 1;
     status = sagr_kmt_set_scratch_backing_va(model_provider, &model_kfd,
-                                              ioctl_args->gpu_id,
+                                              SAGR_HSAKMT_MODEL_BRIDGE_GPU_ID,
                                               scratch_backing_va,
                                               NULL, NULL, 0U);
     (void)pthread_mutex_unlock(&model_mutex);

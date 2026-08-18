@@ -948,8 +948,25 @@ static sagr_status_t open_managed_session(
         goto failure;
       }
     } else {
+      /* The run directory is the only durable identity a managed gem5 carries:
+         its own environment is scrubbed down to five variables, and once the
+         owning process dies the simulator is reparented to init.  Attributing
+         a gem5 back to the run that started it therefore has to happen through
+         this path.  With every run under a single /tmp, concurrent runs are
+         indistinguishable -- which has twice caused real damage here: retired
+         dispatches summed across unrelated runs (reporting 396% of a run that
+         had barely started), and a cleanup that killed a healthy run because
+         it could not tell that run's simulators from an abandoned one's.
+         Giving each run its own root makes both operations exact. */
+      const char *run_root = selected_path("SAGR_MANAGED_RUN_ROOT",
+                                           "SAGR_OPENCL_RUN_ROOT", "/tmp");
+      if (mkdir(run_root, S_IRWXU) != 0 && errno != EEXIST) {
+        status = fail(out_error, error_size, SAGR_STATUS_OUT_OF_RESOURCES,
+                      errno, "could not create managed simulator run root");
+        goto failure;
+      }
       count = snprintf(template_path, sizeof(template_path),
-                       "/tmp/self-amdgpu-opencl-run.%lu.XXXXXX",
+                       "%s/self-amdgpu-opencl-run.%lu.XXXXXX", run_root,
                        (unsigned long)getuid());
       if (count < 0 || (size_t)count >= sizeof(template_path) ||
           mkdtemp(template_path) == NULL ||

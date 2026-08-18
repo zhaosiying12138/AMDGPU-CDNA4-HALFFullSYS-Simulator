@@ -77,6 +77,77 @@ static void format_gfx_name(unsigned long long version, char *out, size_t size)
     snprintf(out, size, "gfx%llu%llu%llu", major, minor, step);
 }
 
+/*
+ * Report the node's memory banks as rocminfo memory pools. Callers parse this:
+ * SGLang derives the device memory capacity with
+ *   rocminfo | grep gfx -A 100 | grep 'Pool 1' -A 5 | grep 'Size:' | awk '{print $2}'
+ * and then splits the field on '(' and divides by 1024, so the size must be
+ * printed in KB followed by its hex form, exactly as upstream rocminfo does.
+ */
+static void print_memory_pools(const char *topology, unsigned long node_id)
+{
+    char banks_path[PATH_MAX];
+    if (snprintf(banks_path, sizeof(banks_path), "%s/nodes/%lu/mem_banks",
+                 topology, node_id) >= (int)sizeof(banks_path)) {
+        return;
+    }
+    DIR *directory = opendir(banks_path);
+    if (directory == NULL) {
+        return;
+    }
+
+    unsigned long banks[SAGR_ROCMINFO_MAX_NODES];
+    size_t bank_count = 0;
+    const struct dirent *entry = NULL;
+    while ((entry = readdir(directory)) != NULL && bank_count < SAGR_ROCMINFO_MAX_NODES) {
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        char *end = NULL;
+        errno = 0;
+        const unsigned long bank_id = strtoul(entry->d_name, &end, 10);
+        if (end == entry->d_name || *end != '\0' || errno != 0) {
+            continue;
+        }
+        banks[bank_count++] = bank_id;
+    }
+    closedir(directory);
+
+    for (size_t i = 1; i < bank_count; ++i) {
+        const unsigned long key = banks[i];
+        size_t j = i;
+        while (j > 0 && banks[j - 1] > key) {
+            banks[j] = banks[j - 1];
+            --j;
+        }
+        banks[j] = key;
+    }
+
+    printf("  Pool Info:\n");
+    for (size_t i = 0; i < bank_count; ++i) {
+        char properties[PATH_MAX];
+        if (snprintf(properties, sizeof(properties), "%s/nodes/%lu/mem_banks/%lu/properties",
+                     topology, node_id, banks[i]) >= (int)sizeof(properties)) {
+            continue;
+        }
+        unsigned long long size_in_bytes = 0;
+        unsigned long long heap_type = 0;
+        if (!read_property(properties, "size_in_bytes", &size_in_bytes) ||
+            size_in_bytes == 0) {
+            continue;
+        }
+        (void)read_property(properties, "heap_type", &heap_type);
+        const unsigned long long size_kb = size_in_bytes / 1024ull;
+        printf("    Pool %zu\n", i + 1);
+        printf("      Segment:                 GLOBAL; FLAGS: COARSE GRAINED\n");
+        printf("      Size:                    %llu(0x%llx) KB\n", size_kb, size_kb);
+        printf("      Allocatable:             TRUE\n");
+        printf("      Alloc Granule:           4KB\n");
+        printf("      Alloc Alignment:         4KB\n");
+        printf("      Accessible by all:       FALSE\n");
+    }
+}
+
 int main(void)
 {
     const char *topology = getenv("HSA_MODEL_TOPOLOGY");
@@ -181,6 +252,7 @@ int main(void)
             printf("  Marketing Name:          AMD Simulated GPU\n");
             printf("  Device Type:             GPU\n");
             printf("  Compute Unit:            %llu\n", nodes[i].simd_count / 4ull);
+            print_memory_pools(topology, nodes[i].node_id);
             printf("  ISA Info:\n");
             printf("    ISA 1\n");
             printf("      Name:                  amdgcn-amd-amdhsa--%s\n", gfx);

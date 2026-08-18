@@ -166,6 +166,41 @@ if(SELF_AMDGPU_RUNTIME_BUILD_HSAKMT_MODEL)
   add_dependencies(
     self_amdgpu_runtime_hsakmt_model_test
     self_amdgpu_hsakmt_model)
+  # The model derives its logical device table from the same topology tree
+  # upstream libhsakmt parses, so the multi-GPU cases need real trees rather
+  # than a stub: one GPU is the regression baseline and two is the smallest
+  # tensor-parallel width.
+  set(_model_topology_tool
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tools/hsakmt-model-topology.py")
+  file(SHA256 "${_model_topology_tool}" _model_topology_sha256)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  set(_model_topology_stamps)
+  foreach(_model_gpu_count IN ITEMS 1 2)
+    set(_model_topology_directory
+        "${CMAKE_CURRENT_BINARY_DIR}/hsakmt-model-devices-${_model_gpu_count}-${_model_topology_sha256}")
+    set(_model_topology_stamp "${_model_topology_directory}.stamp")
+    add_custom_command(
+      OUTPUT "${_model_topology_stamp}"
+      COMMAND
+        "${Python3_EXECUTABLE}" "${_model_topology_tool}"
+        --output-dir "${_model_topology_directory}"
+        --gpu-count "${_model_gpu_count}"
+      COMMAND "${CMAKE_COMMAND}" -E touch "${_model_topology_stamp}"
+      DEPENDS "${_model_topology_tool}"
+      VERBATIM)
+    list(APPEND _model_topology_stamps "${_model_topology_stamp}")
+    if(_model_gpu_count EQUAL 1)
+      set(_model_topology_single "${_model_topology_directory}")
+    else()
+      set(_model_topology_pair "${_model_topology_directory}")
+    endif()
+  endforeach()
+  add_custom_target(
+    self_amdgpu_runtime_hsakmt_model_devices
+    DEPENDS ${_model_topology_stamps})
+  add_dependencies(
+    self_amdgpu_runtime_hsakmt_model_test
+    self_amdgpu_runtime_hsakmt_model_devices)
   target_compile_features(
     self_amdgpu_runtime_hsakmt_model_test PRIVATE c_std_11)
   target_include_directories(
@@ -174,7 +209,9 @@ if(SELF_AMDGPU_RUNTIME_BUILD_HSAKMT_MODEL)
   target_compile_definitions(
     self_amdgpu_runtime_hsakmt_model_test
     PRIVATE
-      SAGR_HSAKMT_MODEL_PATH="$<TARGET_FILE:self_amdgpu_hsakmt_model>")
+      SAGR_HSAKMT_MODEL_PATH="$<TARGET_FILE:self_amdgpu_hsakmt_model>"
+      SAGR_HSAKMT_MODEL_TOPOLOGY_SINGLE_PATH="${_model_topology_single}"
+      SAGR_HSAKMT_MODEL_TOPOLOGY_PAIR_PATH="${_model_topology_pair}")
   target_link_libraries(
     self_amdgpu_runtime_hsakmt_model_test
     PRIVATE ${CMAKE_DL_LIBS})
@@ -865,3 +902,21 @@ else()
       "Installed-package consumer test disabled by "
       "SELF_AMDGPU_RUNTIME_TEST_INSTALLED_PACKAGE=OFF")
 endif()
+
+add_executable(
+  self_amdgpu_runtime_managed_run_root_test managed_run_root_test.c)
+target_compile_features(
+  self_amdgpu_runtime_managed_run_root_test PRIVATE c_std_11)
+target_link_libraries(
+  self_amdgpu_runtime_managed_run_root_test PRIVATE SelfAmdgpuRuntime::runtime)
+if(MSVC)
+  target_compile_options(
+    self_amdgpu_runtime_managed_run_root_test PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    self_amdgpu_runtime_managed_run_root_test
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
+endif()
+add_test(
+  NAME self_amdgpu_runtime.managed_run_root
+  COMMAND self_amdgpu_runtime_managed_run_root_test)

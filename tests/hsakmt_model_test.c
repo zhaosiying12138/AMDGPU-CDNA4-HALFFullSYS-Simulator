@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -186,6 +187,148 @@ static int check_drm_lifecycle(const struct hsakmt_model_functions *functions) {
   return failures;
 }
 
+/*
+ * Every check below reaches a decision before the model would contact a
+ * provider, so the suite still needs no gem5 and no network of any kind.
+ * AMDKFD_IOC_AVAILABLE_MEMORY is the clean probe for the device table: it
+ * validates gpu_id and then answers from local accounting only.
+ */
+static int check_visible_gpus(const struct hsakmt_model_functions *functions,
+                              uint32_t expected_gpus) {
+  struct kfd_ioctl_get_available_memory_args memory;
+  struct kfd_ioctl_map_memory_to_gpu_args map;
+  struct hsakmt_drm_open_render_args open_request;
+  struct kfd_ioctl_acquire_vm_args acquire_vm;
+  struct hsakmt_drm_close_args close_request;
+  uint32_t device_ids[2];
+  uint32_t index;
+  int render_fd = -1;
+  int failures = 0;
+
+  for (index = 0U; index < expected_gpus; ++index) {
+    memset(&memory, 0xa5, sizeof(memory));
+    memory.gpu_id = 38144U + index;
+    memory.pad = 0U;
+    errno = 0;
+    failures += expect(functions->handle_ioctl(
+                           AMDKFD_IOC_AVAILABLE_MEMORY, &memory) == 0 &&
+                           memory.available == MODEL_LOCAL_MEMORY_BYTES,
+                       "every topology GPU answers for its own free memory");
+  }
+
+  /* The first gpu_id past the topology, and the reserved zero id, must both
+   * fail atomically -- this is the guard that used to reject every agent but
+   * the first. */
+  memset(&memory, 0xa5, sizeof(memory));
+  memory.gpu_id = 38144U + expected_gpus;
+  memory.pad = 0U;
+  errno = 0;
+  failures += expect(functions->handle_ioctl(
+                         AMDKFD_IOC_AVAILABLE_MEMORY, &memory) == -1 &&
+                         errno == EINVAL &&
+                         memory.available == UINT64_C(0xa5a5a5a5a5a5a5a5),
+                     "a GPU beyond the topology is rejected atomically");
+  memset(&memory, 0xa5, sizeof(memory));
+  memory.gpu_id = 0U;
+  memory.pad = 0U;
+  errno = 0;
+  failures += expect(functions->handle_ioctl(
+                         AMDKFD_IOC_AVAILABLE_MEMORY, &memory) == -1 &&
+                         errno == EINVAL &&
+                         memory.available == UINT64_C(0xa5a5a5a5a5a5a5a5),
+                     "the reserved zero GPU id is rejected atomically");
+
+  /* A mapping request names agents before it names an object, so an agent the
+   * topology does not publish is EINVAL while a published one gets as far as
+   * the unknown handle. */
+  device_ids[0] = 38144U;
+  device_ids[1] = 38144U + expected_gpus;
+  memset(&map, 0, sizeof(map));
+  map.handle = UINT64_C(0xdeadbeef);
+  map.device_ids_array_ptr = (uint64_t)(uintptr_t)device_ids;
+  map.n_devices = 2U;
+  map.n_success = UINT32_C(0xa5a5a5a5);
+  errno = 0;
+  failures += expect(functions->handle_ioctl(
+                         AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map) == -1 &&
+                         errno == EINVAL &&
+                         map.n_success == UINT32_C(0xa5a5a5a5),
+                     "mapping to an absent agent fails before the handle");
+  map.n_devices = 1U;
+  errno = 0;
+  failures += expect(functions->handle_ioctl(
+                         AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map) == -1 &&
+                         errno == EBADF &&
+                         map.n_success == UINT32_C(0xa5a5a5a5),
+                     "mapping a foreign handle to a known agent reports EBADF");
+
+  /* VM acquisition pairs an agent with the DRM render node the topology gives
+   * it, so a descriptor belonging to node 1 cannot acquire node 2. */
+  open_request.minor = 128;
+  open_request.fd_out = &render_fd;
+  failures += expect(functions->handle_drm_call(HSAKMT_DRM_OPEN_RENDER,
+                                                &open_request) == 0 &&
+                         render_fd >= 0,
+                     "the first agent's render node opens");
+  if (render_fd >= 0 && expected_gpus > 1U) {
+    memset(&acquire_vm, 0, sizeof(acquire_vm));
+    acquire_vm.drm_fd = (uint32_t)render_fd;
+    acquire_vm.gpu_id = 38145U;
+    errno = 0;
+    failures += expect(functions->handle_ioctl(
+                           AMDKFD_IOC_ACQUIRE_VM, &acquire_vm) == -1 &&
+                           errno == EINVAL,
+                       "a render descriptor cannot acquire a peer agent's VM");
+  }
+  if (render_fd >= 0) {
+    memset(&acquire_vm, 0, sizeof(acquire_vm));
+    acquire_vm.drm_fd = (uint32_t)render_fd;
+    acquire_vm.gpu_id = 38144U + expected_gpus;
+    errno = 0;
+    failures += expect(functions->handle_ioctl(
+                           AMDKFD_IOC_ACQUIRE_VM, &acquire_vm) == -1 &&
+                           errno == EINVAL,
+                       "an absent agent cannot acquire a VM");
+    close_request.fd = render_fd;
+    failures += expect(functions->handle_drm_call(HSAKMT_DRM_CLOSE,
+                                                  &close_request) == 0,
+                       "the render descriptor closes again");
+  }
+  return failures;
+}
+
+/*
+ * The device table is process-wide and loaded once, so each topology needs its
+ * own process.  Running the scenarios in forked children before the parent
+ * issues any ioctl of its own keeps every table independent without a second
+ * binary.
+ */
+static int check_topology_scenario(const struct hsakmt_model_functions *functions,
+                                   const char *topology,
+                                   uint32_t expected_gpus,
+                                   const char *message) {
+  pid_t child;
+  int status = 0;
+  child = fork();
+  if (child < 0) {
+    return expect(0, message);
+  }
+  if (child == 0) {
+    int failures;
+    if (topology == NULL) {
+      (void)unsetenv("HSA_MODEL_TOPOLOGY");
+    } else if (setenv("HSA_MODEL_TOPOLOGY", topology, 1) != 0) {
+      _exit(3);
+    }
+    failures = check_visible_gpus(functions, expected_gpus);
+    _exit(failures == 0 ? 0 : 1);
+  }
+  if (waitpid(child, &status, 0) != child) {
+    return expect(0, message);
+  }
+  return expect(WIFEXITED(status) && WEXITSTATUS(status) == 0, message);
+}
+
 int main(void) {
   get_hsakmt_model_functions_t getter;
   const struct hsakmt_model_functions *functions;
@@ -218,6 +361,22 @@ int main(void) {
                          functions->handle_ioctl != NULL &&
                          functions->handle_drm_call != NULL,
                      "model ABI 1.1 function table is complete");
+
+  /* Run every topology scenario before this process touches a gpu_id of its
+   * own: the device table is loaded once per process. */
+  failures += check_topology_scenario(
+      functions, NULL, 1U,
+      "an absent topology still publishes exactly one bridge GPU");
+#ifdef SAGR_HSAKMT_MODEL_TOPOLOGY_SINGLE_PATH
+  failures += check_topology_scenario(
+      functions, SAGR_HSAKMT_MODEL_TOPOLOGY_SINGLE_PATH, 1U,
+      "a one-GPU topology publishes exactly one GPU");
+#endif
+#ifdef SAGR_HSAKMT_MODEL_TOPOLOGY_PAIR_PATH
+  failures += check_topology_scenario(
+      functions, SAGR_HSAKMT_MODEL_TOPOLOGY_PAIR_PATH, 2U,
+      "a two-GPU topology publishes both GPUs");
+#endif
 
   descriptor = functions->create_memfd();
   failures += expect(
