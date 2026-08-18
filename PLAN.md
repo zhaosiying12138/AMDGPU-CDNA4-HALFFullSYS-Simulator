@@ -121,6 +121,111 @@ The tiered debug loop in item 9 above is amended as follows.
    constraint because device memory is a sparse memfd, so scale it by measured
    per-rank runtime cost and add swap if required.
 
+## 0.0.2 Functional fast simulation mandate (2026-08-18)
+
+The user has explicitly authorised **non-cycle-accurate simulation** in gem5 in
+order to cut model bring-up wall-clock substantially. This overrides any earlier
+text that treats timing fidelity as unconditional during functional bring-up.
+
+1. **Correctness first, timing second.** A functional fast mode may drop or
+   approximate anything that only affects *timing* fidelity: DRAM power
+   modelling, refresh accounting, detailed memory scheduling, per-instruction
+   pipeline occupancy. It may **not** change architectural results, dispatch
+   semantics, memory ordering, synchronisation, completion, or failure
+   behaviour. Every accepted output must remain identical to the accurate mode.
+2. **Mode is explicit and recorded.** The fast mode is selected by an explicit
+   flag, is named in the run's identity header, and is recorded in evidence. A
+   result produced under it may satisfy *functional* gates (kernels execute,
+   token generated, clean teardown) but may never be cited for any timing,
+   TPOT, or performance claim.
+3. **Gate every fast-mode change on a differential.** The same workload under
+   accurate and fast mode must produce byte-identical outputs and an identical
+   retired-dispatch sequence. A capsule with a numerical oracle is the cheapest
+   place to prove this before a model run.
+4. **Target the measured dominant cost, not a guess.** Measurement to date:
+   with the deadlock defect fixed, a Qwen3.5-0.8B TP1 lane retires ~4.0
+   dispatches per minute, and a single launch geometry --
+   `grid=[524288,1,1]`, `workgroup=[256,1,1]`, 2048 workgroups -- accounts for
+   **99.5%** of simulated execution across the surrounding dispatches. Any fast
+   mode that does not move that number has not addressed the bottleneck.
+5. **Hybrid CTA execution is the sanctioned fast-mode design.** When a dispatch
+   has more than one workgroup, workgroup 0 runs through the full timing
+   pipeline and workgroups 1..N-1 execute functionally. This keeps one
+   representative timing sample while collapsing the cost of the rest, and its
+   predicate is the workgroup index, never a kernel name, grid, shape or code
+   hash. Required safeguards, all of which fail closed:
+   - Each functional workgroup keeps its own LDS allocation and honours its own
+     `s_barrier`: waves advance round-robin and no wave passes a barrier until
+     every wave of that workgroup has arrived.
+   - Serialising workgroups changes the interleaving of anything they share, so
+     a kernel whose static instruction stream contains global atomics or any
+     cross-workgroup synchronisation runs entirely through the timing path
+     instead. Floating-point atomic reductions are order-dependent, and a
+     cross-workgroup spin-wait would deadlock under serialisation. The decision
+     is derived from instruction flags and is logged.
+   - Everything the host observes is unchanged: completion, signal decrement,
+     queue retirement, pin release, `workgroups_completed`, and the dispatch
+     trace record. The runtime must not be able to tell which mode ran.
+   - Acceptance requires capsules with more than one workgroup covering the
+     plain data-parallel case, a barrier+LDS case that reads a sibling wave's
+     slot, and a global-atomic case that must be declined; each byte-identical
+     against accurate mode.
+
+6. **Attribute cost to a named kernel before optimising it.** gem5's dispatch
+   trace records launch geometry but no kernel identity, and inferring identity
+   from grid arithmetic has repeatedly been wrong. Use the Triton launch probe
+   (`tools/triton_launch_probe/`) so the expensive kernel is named, then run
+   that kernel standalone and compare its isolated cost against its in-model
+   cost. A large divergence indicates an integration defect rather than an
+   operator that is merely expensive.
+
+## 0.0.3 Acceptance-lane execution model (2026-08-18)
+
+Six lanes carry the acceptance ladder: `{SGLang, vLLM}` x `{TP1, TP2, TP16}`,
+with Qwen3.5-0.8B on TP1/TP2 and Qwen3.5-9B on TP16. Both engines are stock
+upstream; the only adaptation is to the self-runtime interface.
+
+**One runner, one supervisor, one owner per simulator.**
+
+- `scripts/run_engine_lane.sh --engine sglang|vllm --tp N [--fast]` is the
+  single runner. Six near-identical scripts previously drifted apart: one
+  prepended the freshly built runtime to `LD_LIBRARY_PATH` and the other did
+  not, so one silently tested a stale library. The identity header now records
+  what actually loaded.
+- `scripts/run_model_lane.sh --name N --runner PATH` supervises a lane
+  detached, so a dropped network or an assistant outage cannot orphan a
+  50-70 minute run.
+- `scripts/lane_ownership.sh` attributes every simulator to its lane through
+  `SAGR_MANAGED_RUN_ROOT` (`/tmp/sagr-lane-<name>`), which
+  `self-amdgpu-runtime/src/managed_session.c` honours. This is the only durable
+  identity a managed gem5 has: its environment is scrubbed to five variables
+  and it is reparented to init when its owner dies. Without it, progress was
+  summed across unrelated lanes (one lane at 38% reported as 92%) and a cleanup
+  matching a command-line substring killed a healthy lane at 500/900.
+
+**Liveness is completed wavefronts, not dispatches and not instructions.** The
+watchdog probes at `--warn-minutes` (10) and only kills after `--stall-minutes`
+(45) without a completed wavefront, because one kernel legitimately retires
+nothing for tens of minutes. A simulator `panic:`/`fatal:` aborts the lane
+immediately with the cause, since a dead simulator can leave the engine above
+it waiting forever while the lane still reports progress from dead workers'
+traces. See the wavefront-hang triage memory for the three signatures.
+
+**Library ordering is load-bearing and counter-intuitive.** Prepend only the
+self-runtime build directory. Prepending the product's `lib/` makes HIP resolve
+to the HEAD product instead of the stock ROCm 7.2.3 that PyTorch's precompiled
+device code was built against, and every engine then dies at the first device
+allocation with `hipErrorInvalidImage`. The working combination is stock ROCm
+7.2.3 HIP plus the HEAD product's ROCr.
+
+**Multi-GPU is topology-driven.** `tools/hsakmt-model-topology.py --gpu-count N`
+generates the tree (`artifacts/topology/gpu-N`); the KFD model builds its device
+table from it rather than from a constant. Ceilings to respect: the model
+supports 16 visible GPUs, the SMI registry has 16 slots — exactly TP16's width,
+so a TP16 lane leaves no headroom for a concurrent simulator — and gem5's
+`HostGPUKmtState::MaximumQueues = 8` limits a *single process* to four logical
+GPUs, which does not bind TP16 because each rank is its own process.
+
 ## 0.1 Execution checkpoint (2026-08-14)
 
 This checkpoint records the executable boundary today and prevents an
