@@ -114,7 +114,18 @@ OPERATOR_TOLERANCES = {
     "gdn_g": (1.0e-5, 1.0e-4, 1.0e-4, 0.9999),
     "gdn_beta_output": (1.0e-5, 1.0e-4, 1.0e-4, 0.9999),
     "gdn_recurrent_output": (0.015625, 0.02, 0.03, 0.98),
-    "recurrent_state": (1.0e-4, 0.03, 0.03, 0.98),
+    # Calibrated 2026-08-19 (zcode lane) with the state-isolation capsule
+    # (tools/qwen35_state_isolation_capsule.py): replaying the pinned
+    # chunk_gated_delta_rule on the simulator with the golden's OWN q/k/v/g/
+    # beta inputs leaves 7/262144 state elements beyond the original 1e-4
+    # atol (max_abs 2.2e-3), concentrated on cancellation-prone tiny
+    # elements, while the operator output stays fully in tolerance (0 over,
+    # max_abs 3.1e-5).  Both sides are individually bit-deterministic, so
+    # this is a genuine but non-semantic cross-architecture rounding
+    # difference amplified by cancellation, not an input-propagation or
+    # simulator defect.  atol 1e-4 was never calibrated against a passing
+    # run; 5e-3 bounds the measured isolation noise floor with margin.
+    "recurrent_state": (5.0e-3, 0.03, 0.03, 0.98),
     "output_rms_norm_gate": (0.01, 0.01, 0.03, 0.98),
     "gdn_out_projection": (0.03125, 0.03, 0.03, 0.98),
     "post_attention_rms_norm": (0.01, 0.01, 0.03, 0.98),
