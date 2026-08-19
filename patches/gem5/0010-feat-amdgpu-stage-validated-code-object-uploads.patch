@@ -1,0 +1,3577 @@
+From 638f70650b5556be2ee04220e86da69dc850c201 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sun, 9 Aug 2026 13:28:42 +0800
+Subject: [PATCH 10/42] feat(amdgpu): stage validated code-object uploads
+
+Add fixed-width code-object begin/chunk/commit routing and owner-scoped staging with CRC/SHA checks. Validate staged ELF identity, PT_LOAD and descriptor facts before commit while keeping A1 mapping and execution explicitly out of scope.
+
+Checkpoint-ID: CP-0013
+Goal-ID: GSIM-001
+Plan-Revision: 2
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: d118c3aa42674a2fb5c4aaa0271368427ea32d2adb374e44d5313036c486d9a6
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/dev/amdgpu/SConscript                     |   5 +
+ src/dev/amdgpu/host_gpu_bridge.cc             |  83 ++
+ src/dev/amdgpu/host_gpu_bridge.hh             |   4 +
+ src/dev/amdgpu/host_gpu_code_object_image.cc  | 852 ++++++++++++++++++
+ src/dev/amdgpu/host_gpu_code_object_image.hh  |  53 ++
+ src/dev/amdgpu/host_gpu_code_object_state.cc  | 518 +++++++++++
+ src/dev/amdgpu/host_gpu_code_object_state.hh  | 131 +++
+ .../amdgpu/host_gpu_code_object_state.test.cc | 713 +++++++++++++++
+ src/dev/amdgpu/host_gpu_connection_state.hh   |  19 +
+ src/dev/amdgpu/host_gpu_protocol.cc           | 501 ++++++++++
+ src/dev/amdgpu/host_gpu_protocol.hh           | 149 +++
+ src/dev/amdgpu/host_gpu_protocol.test.cc      | 231 +++++
+ src/dev/amdgpu/host_gpu_socket_utils.test.cc  |  20 +
+ 13 files changed, 3279 insertions(+)
+ create mode 100644 src/dev/amdgpu/host_gpu_code_object_image.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_code_object_image.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_code_object_state.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_code_object_state.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_code_object_state.test.cc
+
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index ad402d5a9..b6d03ad72 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -49,6 +49,8 @@ Source('amdgpu_smu.cc', tags=['x86 isa'])
+ Source('amdgpu_vm.cc', tags=['x86 isa'])
+ Source('host_gpu_protocol.cc', tags=['x86 isa'])
+ Source('host_gpu_bridge.cc', tags=['x86 isa'])
++Source('host_gpu_code_object_image.cc', tags=['x86 isa'])
++Source('host_gpu_code_object_state.cc', tags=['x86 isa'])
+ Source('host_gpu_dispatch_state.cc', tags=['x86 isa'])
+ Source('host_gpu_memory_state.cc', tags=['x86 isa'])
+ Source('host_gpu_queue_state.cc', tags=['x86 isa'])
+@@ -64,6 +66,9 @@ Source('system_hub.cc', tags=['x86 isa'])
+ 
+ GTest('host_gpu_protocol.test', 'host_gpu_protocol.test.cc',
+       'host_gpu_protocol.cc')
++GTest('host_gpu_code_object_state.test',
++      'host_gpu_code_object_state.test.cc', 'host_gpu_code_object_image.cc',
++      'host_gpu_code_object_state.cc', 'host_gpu_protocol.cc')
+ GTest('host_gpu_memory_state.test', 'host_gpu_memory_state.test.cc',
+       'host_gpu_memory_state.cc', 'host_gpu_protocol.cc')
+ GTest('host_gpu_dispatch_state.test', 'host_gpu_dispatch_state.test.cc',
+diff --git a/src/dev/amdgpu/host_gpu_bridge.cc b/src/dev/amdgpu/host_gpu_bridge.cc
+index bad899c7b..69fabd3ad 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.cc
++++ b/src/dev/amdgpu/host_gpu_bridge.cc
+@@ -547,6 +547,8 @@ HostGPUBridge::HostGPUBridge(const HostGPUBridgeParams &params)
+         protocol::SignalEventCapabilityMask;
+     identity.supported[protocol::KmtOperationCapabilityByte] |=
+         protocol::KmtOperationCapabilityMask;
++    identity.supported[protocol::CodeObjectTransferCapabilityByte] |=
++        protocol::CodeObjectTransferCapabilityMask;
+     if (dispatchEnabled) {
+         identity.supported[protocol::PinnedDispatchCapabilityByte] |=
+             protocol::PinnedDispatchCapabilityMask;
+@@ -1974,6 +1976,7 @@ HostGPUBridge::shutdown()
+         queueState.clear();
+         memoryState.clear();
+         kmtState.clear();
++        codeObjectState.clear();
+         signalState.clear();
+         if (internalQueueRegistered) {
+             hsaPacketProcessor->unregisterHostQueue(
+@@ -2335,6 +2338,7 @@ HostGPUBridge::closeClient(int fd)
+     queueState.disconnect(owner);
+     memoryState.disconnect({owner.fd, owner.clientGeneration});
+     kmtState.disconnect({owner.fd, owner.clientGeneration});
++    codeObjectState.disconnect({owner.fd, owner.clientGeneration});
+     signalState.disconnect({owner.fd, owner.clientGeneration});
+     clients.erase(found);
+     pendingRecords.erase(std::remove_if(
+@@ -2399,6 +2403,11 @@ HostGPUBridge::processRecords()
+                    hasWireMessageType(record.bytes,
+                                       protocol::MessageType::DispatchRequest)) {
+             processDispatchRecord(record);
++        } else if (found->second->state.phase() ==
++                       ConnectionPhase::Established &&
++                   hasWireMessageType(record.bytes,
++                                      protocol::MessageType::CodeObjectRequest)) {
++            processCodeObjectRecord(record);
+         } else {
+             processHelloRecord(record);
+         }
+@@ -2862,6 +2871,79 @@ HostGPUBridge::processKmtRecord(const PendingRecord &record)
+     enqueueOutbound(record.clientFd, record.generation, std::move(outbound));
+ }
+ 
++void
++HostGPUBridge::processCodeObjectRecord(const PendingRecord &record)
++{
++    auto found = clients.find(record.clientFd);
++    if (found == clients.end() ||
++        found->second->generation != record.generation) {
++        return;
++    }
++    Client &client = *found->second;
++    const auto decoded = protocol::decodeCodeObjectRequestRecord(
++        record.bytes.data(), record.bytes.size(), maximumRecord);
++    if (decoded.action == protocol::DecodeAction::Drop) {
++        if (decoded.closeConnection)
++            closeClient(record.clientFd);
++        return;
++    }
++
++    protocol::Status sessionStatus = protocol::Status::Ok;
++    const bool codeObjectSelected =
++        (client.selectedCapabilities[
++             protocol::CodeObjectTransferCapabilityByte] &
++         protocol::CodeObjectTransferCapabilityMask) != 0;
++    if (decoded.header.daemonUuid != identity.daemonUuid) {
++        sessionStatus = protocol::Status::InstanceMismatch;
++    } else if (decoded.header.connectionId != client.connectionId) {
++        sessionStatus = protocol::Status::ProtocolState;
++    } else if (decoded.header.jobEpoch != identity.jobEpoch) {
++        sessionStatus = protocol::Status::ProtocolState;
++    } else if (!codeObjectSelected) {
++        sessionStatus = protocol::Status::UnsupportedCapability;
++    }
++    protocol::Status status = codeObjectRequestStatus(
++        decoded.status, sessionStatus);
++    if (status == protocol::Status::Ok &&
++        client.requestIds.observe(decoded.header.requestId) !=
++            RequestIdResult::Fresh) {
++        status = protocol::Status::ProtocolState;
++    }
++
++    protocol::CodeObjectResponse response =
++        HostGPUCodeObjectState::failureResponse(
++            decoded.request, status, curTick());
++    /* A correlated payload or request-ID failure poisons the mutable upload.
++     * Session identity/capability failures must not mutate a transaction. */
++    if (sessionStatus == protocol::Status::Ok) {
++        const HostGPUCodeObjectState::Owner owner{
++            record.clientFd, record.generation};
++        if (status == protocol::Status::Ok) {
++            response = codeObjectState.submit(
++                owner, decoded.request, curTick()).response;
++        } else if (decoded.status != protocol::Status::Ok ||
++                   status == protocol::Status::ProtocolState) {
++            codeObjectState.abortMutable(owner);
++        }
++    }
++
++    found = clients.find(record.clientFd);
++    if (found == clients.end() ||
++        found->second->generation != record.generation) {
++        return;
++    }
++    found->second->state.finishEstablishedRecord();
++    const auto responseHeader = protocol::queueResponseHeader(
++        decoded.header, identity, found->second->connectionId);
++    auto encoded = protocol::encodeCodeObjectAck(responseHeader, response);
++    OutboundRecord outbound;
++    outbound.bytes = std::move(encoded);
++    outbound.kind = OutboundKind::CodeObjectAck;
++    outbound.status = response.status;
++    outbound.success = response.status == protocol::Status::Ok;
++    enqueueOutbound(record.clientFd, record.generation, std::move(outbound));
++}
++
+ void
+ HostGPUBridge::processSignalRecord(const PendingRecord &record)
+ {
+@@ -3422,6 +3504,7 @@ HostGPUBridge::completeOutbound(int fd, uint64_t generation,
+       case OutboundKind::QueueAck:
+       case OutboundKind::KmtAck:
+       case OutboundKind::SignalAck:
++      case OutboundKind::CodeObjectAck:
+         if (found->second->state.phase() == ConnectionPhase::Established &&
+             found->second->state.canReceive()) {
+             found->second->socketEvent->setReadable(true);
+diff --git a/src/dev/amdgpu/host_gpu_bridge.hh b/src/dev/amdgpu/host_gpu_bridge.hh
+index 252cb70c1..66a8e6c5b 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.hh
++++ b/src/dev/amdgpu/host_gpu_bridge.hh
+@@ -43,6 +43,7 @@
+ #include "base/pollevent.hh"
+ #include "base/statistics.hh"
+ #include "dev/amdgpu/host_gpu_connection_state.hh"
++#include "dev/amdgpu/host_gpu_code_object_state.hh"
+ #include "dev/amdgpu/host_gpu_dispatch_state.hh"
+ #include "dev/amdgpu/host_gpu_memory_state.hh"
+ #include "dev/amdgpu/host_gpu_kmt_state.hh"
+@@ -159,6 +160,7 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+         SignalCompletion,
+         DispatchAck,
+         DispatchCompletion,
++        CodeObjectAck,
+     };
+ 
+     enum class DispatchTraceWriteResult
+@@ -231,6 +233,7 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+     void processKmtRecord(const PendingRecord &record);
+     void processSignalRecord(const PendingRecord &record);
+     void processDispatchRecord(const PendingRecord &record);
++    void processCodeObjectRecord(const PendingRecord &record);
+     void scheduleRecordService();
+     void scheduleQueueService();
+     void processQueueCommands();
+@@ -358,6 +361,7 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+     EventFunctionWrapper queueServiceEvent;
+     HostGPUMemoryState memoryState;
+     HostGPUKmtState kmtState;
++    HostGPUCodeObjectState codeObjectState;
+     HostGPUSignalState signalState;
+     HostGPUDispatchState dispatchState;
+     EventFunctionWrapper signalServiceEvent;
+diff --git a/src/dev/amdgpu/host_gpu_code_object_image.cc b/src/dev/amdgpu/host_gpu_code_object_image.cc
+new file mode 100644
+index 000000000..fe50cba18
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_code_object_image.cc
+@@ -0,0 +1,852 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_code_object_image.hh"
++
++#include <gelf.h>
++#include <libelf.h>
++
++#include <algorithm>
++#include <array>
++#include <climits>
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <limits>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++namespace
++{
++
++constexpr uint16_t AmdgpuMachine = 224;
++constexpr uint8_t AmdgpuHsaOsabi = 64;
++constexpr uint32_t AmdgpuMetadataNoteType = 32;
++constexpr size_t MaximumMetadataKernels = 16;
++constexpr uint64_t MaximumContainerElements = 65536;
++constexpr unsigned MaximumMessageDepth = 32;
++
++class ElfHandle
++{
++  public:
++    explicit ElfHandle(Elf *value) : value(value) {}
++    ~ElfHandle()
++    {
++        if (value != nullptr)
++            elf_end(value);
++    }
++
++    Elf *get() const { return value; }
++
++  private:
++    Elf *value;
++};
++
++struct StringView
++{
++    const uint8_t *data = nullptr;
++    size_t size = 0;
++};
++
++class ByteCursor
++{
++  public:
++    ByteCursor(const uint8_t *data, size_t size) : current(data), remaining(size)
++    {}
++
++    bool take(size_t size, const uint8_t *&result)
++    {
++        if (size > remaining)
++            return false;
++        result = current;
++        current += size;
++        remaining -= size;
++        return true;
++    }
++
++    size_t bytesRemaining() const { return remaining; }
++
++  private:
++    const uint8_t *current;
++    size_t remaining;
++};
++
++enum class MessageKind
++{
++    Other,
++    Unsigned,
++    Signed,
++    String,
++    Array,
++    Map,
++};
++
++struct Message
++{
++    MessageKind kind = MessageKind::Other;
++    uint64_t value = 0;
++    int64_t signedValue = 0;
++    StringView string;
++};
++
++uint32_t
++loadLittle32(const uint8_t *data)
++{
++    return static_cast<uint32_t>(data[0]) |
++        static_cast<uint32_t>(data[1]) << 8 |
++        static_cast<uint32_t>(data[2]) << 16 |
++        static_cast<uint32_t>(data[3]) << 24;
++}
++
++uint64_t
++loadLittle64(const uint8_t *data)
++{
++    return static_cast<uint64_t>(loadLittle32(data)) |
++        static_cast<uint64_t>(loadLittle32(data + 4)) << 32;
++}
++
++int64_t
++loadLittleSigned64(const uint8_t *data)
++{
++    const uint64_t raw = loadLittle64(data);
++    if (raw <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
++        return static_cast<int64_t>(raw);
++    return -1 - static_cast<int64_t>(
++        std::numeric_limits<uint64_t>::max() - raw);
++}
++
++bool
++readBigUnsigned(ByteCursor &cursor, size_t width, uint64_t &value)
++{
++    const uint8_t *bytes = nullptr;
++    if (width == 0 || width > sizeof(value) || !cursor.take(width, bytes))
++        return false;
++    value = 0;
++    for (size_t index = 0; index < width; ++index)
++        value = (value << 8) | bytes[index];
++    return true;
++}
++
++bool
++takeString(ByteCursor &cursor, uint64_t length, StringView &result)
++{
++    if (length > std::numeric_limits<size_t>::max())
++        return false;
++    const uint8_t *bytes = nullptr;
++    if (!cursor.take(static_cast<size_t>(length), bytes))
++        return false;
++    result = {bytes, static_cast<size_t>(length)};
++    return true;
++}
++
++bool
++readMessage(ByteCursor &cursor, Message &message)
++{
++    const uint8_t *raw = nullptr;
++    if (!cursor.take(1, raw))
++        return false;
++    const uint8_t tag = raw[0];
++    message = {};
++
++    if (tag <= 0x7f) {
++        message.kind = MessageKind::Unsigned;
++        message.value = tag;
++        return true;
++    }
++    if (tag >= 0xe0) {
++        message.kind = MessageKind::Signed;
++        message.signedValue = static_cast<int8_t>(tag);
++        return true;
++    }
++    if (tag >= 0x80 && tag <= 0x8f) {
++        message.kind = MessageKind::Map;
++        message.value = tag & 0x0f;
++        return true;
++    }
++    if (tag >= 0x90 && tag <= 0x9f) {
++        message.kind = MessageKind::Array;
++        message.value = tag & 0x0f;
++        return true;
++    }
++    if (tag >= 0xa0 && tag <= 0xbf) {
++        message.kind = MessageKind::String;
++        return takeString(cursor, tag & 0x1f, message.string);
++    }
++
++    uint64_t value = 0;
++    switch (tag) {
++      case 0xc0:
++        return true;
++      case 0xc2:
++      case 0xc3:
++        message.kind = MessageKind::Unsigned;
++        message.value = tag - 0xc2;
++        return true;
++      case 0xcc:
++      case 0xcd:
++      case 0xce:
++      case 0xcf: {
++        const size_t width = size_t(1) << (tag - 0xcc);
++        if (!readBigUnsigned(cursor, width, value))
++            return false;
++        message.kind = MessageKind::Unsigned;
++        message.value = value;
++        return true;
++      }
++      case 0xd0:
++      case 0xd1:
++      case 0xd2:
++      case 0xd3: {
++        const size_t width = size_t(1) << (tag - 0xd0);
++        if (!readBigUnsigned(cursor, width, value))
++            return false;
++        if (width < sizeof(value) && (value & (uint64_t(1) <<
++                (width * CHAR_BIT - 1)))) {
++            value |= std::numeric_limits<uint64_t>::max() <<
++                (width * CHAR_BIT);
++        }
++        message.kind = MessageKind::Signed;
++        std::memcpy(&message.signedValue, &value, sizeof(value));
++        return true;
++      }
++      case 0xd9:
++      case 0xda:
++      case 0xdb: {
++        const size_t width = size_t(1) << (tag - 0xd9);
++        if (!readBigUnsigned(cursor, width, value))
++            return false;
++        message.kind = MessageKind::String;
++        return takeString(cursor, value, message.string);
++      }
++      case 0xdc:
++      case 0xdd: {
++        const size_t width = tag == 0xdc ? 2 : 4;
++        if (!readBigUnsigned(cursor, width, value))
++            return false;
++        message.kind = MessageKind::Array;
++        message.value = value;
++        return true;
++      }
++      case 0xde:
++      case 0xdf: {
++        const size_t width = tag == 0xde ? 2 : 4;
++        if (!readBigUnsigned(cursor, width, value))
++            return false;
++        message.kind = MessageKind::Map;
++        message.value = value;
++        return true;
++      }
++      default:
++        break;
++    }
++
++    if (tag >= 0xc4 && tag <= 0xc6) {
++        const size_t width = size_t(1) << (tag - 0xc4);
++        if (!readBigUnsigned(cursor, width, value))
++            return false;
++        StringView ignored;
++        return takeString(cursor, value, ignored);
++    }
++    if (tag == 0xca || tag == 0xcb) {
++        const size_t width = tag == 0xca ? 4 : 8;
++        return cursor.take(width, raw);
++    }
++    if (tag >= 0xd4 && tag <= 0xd8) {
++        const size_t payload = size_t(1) << (tag - 0xd4);
++        return cursor.take(payload + 1, raw);
++    }
++    if (tag >= 0xc7 && tag <= 0xc9) {
++        const size_t width = size_t(1) << (tag - 0xc7);
++        if (!readBigUnsigned(cursor, width, value) ||
++            !cursor.take(1, raw) ||
++            value > std::numeric_limits<size_t>::max()) {
++            return false;
++        }
++        return cursor.take(static_cast<size_t>(value), raw);
++    }
++    return false;
++}
++
++bool skipMessage(ByteCursor &cursor, unsigned depth);
++
++bool
++skipMessageBody(ByteCursor &cursor, const Message &message, unsigned depth)
++{
++    if (depth > MaximumMessageDepth ||
++        message.value > MaximumContainerElements) {
++        return message.kind != MessageKind::Array &&
++            message.kind != MessageKind::Map;
++    }
++    if (message.kind == MessageKind::Array) {
++        for (uint64_t index = 0; index < message.value; ++index) {
++            if (!skipMessage(cursor, depth + 1))
++                return false;
++        }
++    } else if (message.kind == MessageKind::Map) {
++        for (uint64_t index = 0; index < message.value; ++index) {
++            if (!skipMessage(cursor, depth + 1) ||
++                !skipMessage(cursor, depth + 1)) {
++                return false;
++            }
++        }
++    }
++    return true;
++}
++
++bool
++skipMessage(ByteCursor &cursor, unsigned depth)
++{
++    Message message;
++    return depth <= MaximumMessageDepth && readMessage(cursor, message) &&
++        skipMessageBody(cursor, message, depth);
++}
++
++bool
++stringIs(const Message &message, const char *text)
++{
++    const size_t length = std::strlen(text);
++    return message.kind == MessageKind::String &&
++        message.string.size == length &&
++        std::memcmp(message.string.data, text, length) == 0;
++}
++
++bool
++number(const Message &message, uint32_t &value)
++{
++    uint64_t raw = 0;
++    if (message.kind == MessageKind::Unsigned) {
++        raw = message.value;
++    } else if (message.kind == MessageKind::Signed &&
++               message.signedValue >= 0) {
++        raw = static_cast<uint64_t>(message.signedValue);
++    } else {
++        return false;
++    }
++    if (raw > std::numeric_limits<uint32_t>::max())
++        return false;
++    value = static_cast<uint32_t>(raw);
++    return true;
++}
++
++struct KernelMetadata
++{
++    StringView name;
++    StringView symbol;
++    uint32_t kernargSize = 0;
++    uint32_t kernargAlign = 0;
++    uint32_t groupSize = 0;
++    uint32_t privateSize = 0;
++    uint32_t maxWorkgroupSize = 0;
++    uint32_t wavefrontSize = 0;
++    uint32_t sgprCount = 0;
++    uint32_t vgprCount = 0;
++    uint32_t usesDynamicStack = 0;
++};
++
++bool
++parseKernel(ByteCursor &cursor, KernelMetadata &kernel)
++{
++    Message map;
++    if (!readMessage(cursor, map) || map.kind != MessageKind::Map ||
++        map.value > MaximumContainerElements) {
++        return false;
++    }
++    bool haveName = false;
++    bool haveSymbol = false;
++    bool haveKernargSize = false;
++    bool haveKernargAlign = false;
++    bool haveGroupSize = false;
++    bool havePrivateSize = false;
++    bool haveMaxWorkgroup = false;
++    bool haveWavefront = false;
++    bool haveSgpr = false;
++    bool haveVgpr = false;
++
++    for (uint64_t index = 0; index < map.value; ++index) {
++        Message key;
++        Message value;
++        if (!readMessage(cursor, key) || key.kind != MessageKind::String ||
++            !readMessage(cursor, value)) {
++            return false;
++        }
++        if (stringIs(key, ".name")) {
++            if (value.kind != MessageKind::String)
++                return false;
++            kernel.name = value.string;
++            haveName = true;
++        } else if (stringIs(key, ".symbol")) {
++            if (value.kind != MessageKind::String)
++                return false;
++            kernel.symbol = value.string;
++            haveSymbol = true;
++        } else if (stringIs(key, ".kernarg_segment_size")) {
++            haveKernargSize = number(value, kernel.kernargSize);
++            if (!haveKernargSize)
++                return false;
++        } else if (stringIs(key, ".kernarg_segment_align")) {
++            haveKernargAlign = number(value, kernel.kernargAlign);
++            if (!haveKernargAlign)
++                return false;
++        } else if (stringIs(key, ".group_segment_fixed_size")) {
++            haveGroupSize = number(value, kernel.groupSize);
++            if (!haveGroupSize)
++                return false;
++        } else if (stringIs(key, ".private_segment_fixed_size")) {
++            havePrivateSize = number(value, kernel.privateSize);
++            if (!havePrivateSize)
++                return false;
++        } else if (stringIs(key, ".max_flat_workgroup_size")) {
++            haveMaxWorkgroup = number(value, kernel.maxWorkgroupSize);
++            if (!haveMaxWorkgroup)
++                return false;
++        } else if (stringIs(key, ".wavefront_size")) {
++            haveWavefront = number(value, kernel.wavefrontSize);
++            if (!haveWavefront)
++                return false;
++        } else if (stringIs(key, ".sgpr_count")) {
++            haveSgpr = number(value, kernel.sgprCount);
++            if (!haveSgpr)
++                return false;
++        } else if (stringIs(key, ".vgpr_count")) {
++            haveVgpr = number(value, kernel.vgprCount);
++            if (!haveVgpr)
++                return false;
++        } else if (stringIs(key, ".uses_dynamic_stack")) {
++            if (!number(value, kernel.usesDynamicStack) ||
++                kernel.usesDynamicStack > 1) {
++                return false;
++            }
++        } else if (!skipMessageBody(cursor, value, 1)) {
++            return false;
++        }
++    }
++
++    return haveName && haveSymbol && haveKernargSize && haveKernargAlign &&
++        haveGroupSize && havePrivateSize && haveMaxWorkgroup && haveWavefront &&
++        haveSgpr && haveVgpr;
++}
++
++struct Metadata
++{
++    StringView target;
++    uint32_t major = 0;
++    uint32_t minor = 0;
++    uint32_t kernelCount = 0;
++    KernelMetadata selected;
++};
++
++bool
++parseMetadata(const uint8_t *data, size_t size, uint32_t selectedIndex,
++              Metadata &metadata)
++{
++    ByteCursor cursor(data, size);
++    Message root;
++    if (!readMessage(cursor, root) || root.kind != MessageKind::Map ||
++        root.value > MaximumContainerElements) {
++        return false;
++    }
++    bool haveTarget = false;
++    bool haveVersion = false;
++    bool haveKernels = false;
++
++    for (uint64_t index = 0; index < root.value; ++index) {
++        Message key;
++        Message value;
++        if (!readMessage(cursor, key) || key.kind != MessageKind::String ||
++            !readMessage(cursor, value)) {
++            return false;
++        }
++        if (stringIs(key, "amdhsa.target")) {
++            if (value.kind != MessageKind::String)
++                return false;
++            metadata.target = value.string;
++            haveTarget = true;
++        } else if (stringIs(key, "amdhsa.version")) {
++            Message major;
++            Message minor;
++            if (value.kind != MessageKind::Array || value.value != 2 ||
++                !readMessage(cursor, major) || !number(major, metadata.major) ||
++                !readMessage(cursor, minor) || !number(minor, metadata.minor)) {
++                return false;
++            }
++            haveVersion = true;
++        } else if (stringIs(key, "amdhsa.kernels")) {
++            if (value.kind != MessageKind::Array || value.value == 0 ||
++                value.value > MaximumMetadataKernels ||
++                selectedIndex >= value.value) {
++                return false;
++            }
++            metadata.kernelCount = static_cast<uint32_t>(value.value);
++            for (uint32_t kernelIndex = 0;
++                 kernelIndex < metadata.kernelCount; ++kernelIndex) {
++                KernelMetadata kernel;
++                if (!parseKernel(cursor, kernel))
++                    return false;
++                if (kernelIndex == selectedIndex)
++                    metadata.selected = kernel;
++            }
++            haveKernels = true;
++        } else if (!skipMessageBody(cursor, value, 1)) {
++            return false;
++        }
++    }
++    return haveTarget && haveVersion && haveKernels &&
++        cursor.bytesRemaining() == 0;
++}
++
++bool
++targetMatches(const StringView &target, uint32_t gfxTarget)
++{
++    constexpr char Target[] = "amdgcn-amd-amdhsa--gfx950";
++    return gfxTarget == 950 && target.size == sizeof(Target) - 1 &&
++        std::memcmp(target.data, Target, sizeof(Target) - 1) == 0;
++}
++
++template <size_t Size>
++bool
++metadataStringMatches(const StringView &value,
++                      const std::array<uint8_t, Size> &manifestValue)
++{
++    const auto end = std::find(manifestValue.begin(), manifestValue.end(), 0);
++    const size_t length = static_cast<size_t>(end - manifestValue.begin());
++    return end != manifestValue.end() && value.size == length &&
++        std::equal(value.data, value.data + value.size, manifestValue.begin());
++}
++
++bool
++metadataMatches(const Metadata &metadata,
++                const protocol::CodeObjectManifest &manifest)
++{
++    const auto &kernel = metadata.selected;
++    return targetMatches(metadata.target, manifest.gfxTarget) &&
++        metadata.major == manifest.metadataMajor &&
++        metadata.minor == manifest.metadataMinor &&
++        metadataStringMatches(kernel.name, manifest.kernelName) &&
++        metadataStringMatches(kernel.symbol, manifest.descriptorSymbol) &&
++        kernel.kernargSize == manifest.kernargSegmentSize &&
++        kernel.kernargAlign == manifest.kernargSegmentAlign &&
++        kernel.groupSize == manifest.groupSegmentFixedSize &&
++        kernel.privateSize == manifest.privateSegmentFixedSize &&
++        kernel.maxWorkgroupSize == manifest.maxFlatWorkgroupSize &&
++        kernel.wavefrontSize == manifest.wavefrontSize &&
++        kernel.sgprCount == manifest.sgprCount &&
++        kernel.vgprCount == manifest.vgprCount &&
++        kernel.usesDynamicStack == manifest.usesDynamicStack;
++}
++
++bool
++rangeWithinImage(uint64_t offset, uint64_t size,
++                 const std::vector<uint8_t> &image)
++{
++    return offset <= image.size() && size <= image.size() - offset;
++}
++
++bool
++findMetadataNote(const std::vector<uint8_t> &image, uint64_t offset,
++                 uint64_t size, const uint8_t *&metadata, size_t &metadataSize,
++                 bool &found)
++{
++    if (!rangeWithinImage(offset, size, image))
++        return false;
++    size_t cursor = static_cast<size_t>(offset);
++    const size_t end = cursor + static_cast<size_t>(size);
++    while (cursor < end) {
++        if (end - cursor < 12)
++            return false;
++        const uint32_t nameSize = loadLittle32(image.data() + cursor);
++        const uint32_t descriptionSize = loadLittle32(image.data() + cursor + 4);
++        const uint32_t type = loadLittle32(image.data() + cursor + 8);
++        cursor += 12;
++        if (nameSize > std::numeric_limits<size_t>::max() - 3 ||
++            descriptionSize > std::numeric_limits<size_t>::max() - 3) {
++            return false;
++        }
++        const size_t paddedName = (static_cast<size_t>(nameSize) + 3) & ~size_t(3);
++        const size_t paddedDescription =
++            (static_cast<size_t>(descriptionSize) + 3) & ~size_t(3);
++        if (paddedName > end - cursor)
++            return false;
++        const uint8_t *name = image.data() + cursor;
++        cursor += paddedName;
++        if (paddedDescription > end - cursor)
++            return false;
++        if (type == AmdgpuMetadataNoteType && nameSize == 7 &&
++            std::memcmp(name, "AMDGPU\0", 7) == 0) {
++            if (found)
++                return false;
++            found = true;
++            metadata = image.data() + cursor;
++            metadataSize = descriptionSize;
++        }
++        cursor += paddedDescription;
++    }
++    return cursor == end;
++}
++
++bool
++segmentTableMatches(Elf *elf, const std::vector<uint8_t> &image,
++                    const protocol::CodeObjectManifest &manifest)
++{
++    size_t programCount = 0;
++    if (elf_getphdrnum(elf, &programCount) != 0)
++        return false;
++    size_t loadIndex = 0;
++    for (size_t index = 0; index < programCount; ++index) {
++        if (index > static_cast<size_t>(INT_MAX))
++            return false;
++        GElf_Phdr header;
++        if (gelf_getphdr(elf, static_cast<int>(index), &header) == nullptr)
++            return false;
++        if (header.p_type != PT_LOAD)
++            continue;
++        if (loadIndex >= manifest.segmentCount ||
++            !rangeWithinImage(header.p_offset, header.p_filesz, image)) {
++            return false;
++        }
++        const auto &segment = manifest.segments[loadIndex++];
++        if (header.p_type != segment.type || header.p_flags != segment.flags ||
++            header.p_offset != segment.fileOffset ||
++            header.p_vaddr != segment.virtualAddress ||
++            header.p_filesz != segment.fileSize ||
++            header.p_memsz != segment.memorySize ||
++            header.p_align != segment.alignment) {
++            return false;
++        }
++    }
++    return loadIndex == manifest.segmentCount;
++}
++
++bool
++symbolFileOffset(Elf *elf, const GElf_Sym &symbol,
++                 const std::vector<uint8_t> &image, uint64_t &fileOffset,
++                 bool requireExecutable)
++{
++    if (symbol.st_shndx == SHN_UNDEF || symbol.st_shndx >= SHN_LORESERVE)
++        return false;
++    Elf_Scn *section = elf_getscn(elf, symbol.st_shndx);
++    GElf_Shdr header;
++    if (section == nullptr || gelf_getshdr(section, &header) == nullptr ||
++        header.sh_type == SHT_NOBITS ||
++        (requireExecutable && (header.sh_flags & SHF_EXECINSTR) == 0) ||
++        symbol.st_value < header.sh_addr) {
++        return false;
++    }
++    const uint64_t delta = symbol.st_value - header.sh_addr;
++    if (delta > header.sh_size || symbol.st_size > header.sh_size - delta ||
++        header.sh_offset > std::numeric_limits<uint64_t>::max() - delta) {
++        return false;
++    }
++    fileOffset = header.sh_offset + delta;
++    return rangeWithinImage(fileOffset, symbol.st_size, image);
++}
++
++bool
++scanSectionsAndSymbols(Elf *elf, const std::vector<uint8_t> &image,
++                       const protocol::CodeObjectManifest &manifest,
++                       const uint8_t *&metadata, size_t &metadataSize)
++{
++    bool foundMetadata = false;
++    uint64_t relocationCount = 0;
++    unsigned codeMatches = 0;
++    unsigned descriptorMatches = 0;
++    const char *kernelName =
++        reinterpret_cast<const char *>(manifest.kernelName.data());
++    const char *descriptorName =
++        reinterpret_cast<const char *>(manifest.descriptorSymbol.data());
++
++    size_t sectionCount = 0;
++    if (elf_getshdrnum(elf, &sectionCount) != 0 || sectionCount == 0)
++        return false;
++    size_t sectionNamesIndex = 0;
++    if (elf_getshdrstrndx(elf, &sectionNamesIndex) != 0 ||
++        sectionNamesIndex >= sectionCount) {
++        return false;
++    }
++    Elf_Scn *section = nullptr;
++    while ((section = elf_nextscn(elf, section)) != nullptr) {
++        GElf_Shdr header;
++        if (gelf_getshdr(section, &header) == nullptr)
++            return false;
++        const char *sectionName = elf_strptr(
++            elf, sectionNamesIndex, header.sh_name);
++        if (sectionName == nullptr ||
++            (header.sh_type == SHT_NOTE &&
++             std::strcmp(sectionName, ".note") != 0)) {
++            return false;
++        }
++        if (header.sh_type != SHT_NOBITS &&
++            !rangeWithinImage(header.sh_offset, header.sh_size, image)) {
++            return false;
++        }
++        if (header.sh_type == SHT_NOTE &&
++            !findMetadataNote(image, header.sh_offset, header.sh_size,
++                              metadata, metadataSize, foundMetadata)) {
++            return false;
++        }
++        if (header.sh_type == SHT_REL || header.sh_type == SHT_RELA) {
++            if (header.sh_size != 0 &&
++                (header.sh_entsize == 0 ||
++                 header.sh_size % header.sh_entsize != 0)) {
++                return false;
++            }
++            const uint64_t count = header.sh_size == 0 ? 0 :
++                header.sh_size / header.sh_entsize;
++            if (count > std::numeric_limits<uint64_t>::max() - relocationCount)
++                return false;
++            relocationCount += count;
++        }
++        if (header.sh_type != SHT_SYMTAB)
++            continue;
++        if (header.sh_entsize == 0 ||
++            header.sh_size % header.sh_entsize != 0)
++            return false;
++        const uint64_t count = header.sh_size / header.sh_entsize;
++        if (count > static_cast<uint64_t>(INT_MAX))
++            return false;
++        Elf_Data *data = elf_getdata(section, nullptr);
++        if (data == nullptr || elf_getdata(section, data) != nullptr)
++            return false;
++        for (uint64_t index = 0; index < count; ++index) {
++            GElf_Sym symbol;
++            if (gelf_getsym(data, static_cast<int>(index), &symbol) == nullptr)
++                return false;
++            const char *name = elf_strptr(elf, header.sh_link, symbol.st_name);
++            if (name == nullptr)
++                return false;
++            const bool isCode = std::strcmp(name, kernelName) == 0;
++            const bool isDescriptor = std::strcmp(name, descriptorName) == 0;
++            if (!isCode && !isDescriptor)
++                continue;
++            uint64_t fileOffset = 0;
++            if (GELF_ST_BIND(symbol.st_info) != STB_GLOBAL ||
++                (symbol.st_other & 0x3) != STV_PROTECTED ||
++                !symbolFileOffset(elf, symbol, image, fileOffset, isCode)) {
++                return false;
++            }
++            if (isCode) {
++                ++codeMatches;
++                if (GELF_ST_TYPE(symbol.st_info) != STT_FUNC ||
++                    symbol.st_value != manifest.codeVirtualAddress ||
++                    symbol.st_size != manifest.codeSize ||
++                    fileOffset != manifest.codeFileOffset) {
++                    return false;
++                }
++            }
++            if (isDescriptor) {
++                ++descriptorMatches;
++                if (GELF_ST_TYPE(symbol.st_info) != STT_OBJECT ||
++                    symbol.st_value != manifest.descriptorVirtualAddress ||
++                    symbol.st_size != manifest.descriptorSize ||
++                    fileOffset != manifest.descriptorFileOffset) {
++                    return false;
++                }
++            }
++        }
++    }
++    return foundMetadata && relocationCount == manifest.relocationCount &&
++        codeMatches == 1 && descriptorMatches == 1;
++}
++
++bool
++descriptorMatches(const std::vector<uint8_t> &image,
++                  const protocol::CodeObjectManifest &manifest)
++{
++    if (!rangeWithinImage(manifest.descriptorFileOffset,
++                          protocol::CodeObjectDescriptorBytes, image)) {
++        return false;
++    }
++    const uint8_t *descriptor =
++        image.data() + static_cast<size_t>(manifest.descriptorFileOffset);
++    return std::equal(manifest.descriptor.begin(), manifest.descriptor.end(),
++                      descriptor) &&
++        loadLittle32(descriptor) == manifest.groupSegmentFixedSize &&
++        loadLittle32(descriptor + 4) == manifest.privateSegmentFixedSize &&
++        loadLittle32(descriptor + 8) == manifest.kernargSegmentSize &&
++        loadLittleSigned64(descriptor + 16) ==
++            manifest.kernelCodeEntryByteOffset;
++}
++
++} // anonymous namespace
++
++bool
++validateCodeObjectImage(
++    const std::vector<uint8_t> &image,
++    const protocol::CodeObjectManifest &manifest)
++{
++    if (image.empty() || image.size() != manifest.imageSize ||
++        elf_version(EV_CURRENT) == EV_NONE) {
++        return false;
++    }
++    ElfHandle elf(elf_memory(
++        reinterpret_cast<char *>(const_cast<uint8_t *>(image.data())),
++        image.size()));
++    if (elf.get() == nullptr || elf_kind(elf.get()) != ELF_K_ELF ||
++        gelf_getclass(elf.get()) != ELFCLASS64) {
++        return false;
++    }
++    GElf_Ehdr header;
++    if (gelf_getehdr(elf.get(), &header) == nullptr ||
++        header.e_ident[EI_CLASS] != ELFCLASS64 ||
++        header.e_ident[EI_DATA] != ELFDATA2LSB ||
++        header.e_ident[EI_VERSION] != EV_CURRENT ||
++        header.e_ident[EI_OSABI] != AmdgpuHsaOsabi ||
++        header.e_ident[EI_OSABI] != manifest.elfOsabi ||
++        header.e_ident[EI_ABIVERSION] != manifest.elfAbiVersion ||
++        header.e_version != EV_CURRENT || header.e_type != ET_DYN ||
++        header.e_type != manifest.elfType ||
++        header.e_machine != AmdgpuMachine ||
++        header.e_machine != manifest.elfMachine ||
++        header.e_entry != 0 ||
++        header.e_flags != manifest.elfFlags ||
++        !segmentTableMatches(elf.get(), image, manifest)) {
++        return false;
++    }
++
++    const uint8_t *metadataBytes = nullptr;
++    size_t metadataSize = 0;
++    if (!scanSectionsAndSymbols(elf.get(), image, manifest,
++                                metadataBytes, metadataSize) ||
++        !descriptorMatches(image, manifest)) {
++        return false;
++    }
++    Metadata metadata;
++    if (!parseMetadata(metadataBytes, metadataSize, manifest.kernelIndex,
++                       metadata) || !metadataMatches(metadata, manifest)) {
++        return false;
++    }
++    const uint8_t abiVersion = header.e_ident[EI_ABIVERSION];
++    const uint32_t expectedCodeObjectVersion = abiVersion + 2;
++    const uint32_t expectedMetadataMinor = abiVersion == 2 ? 1 : 2;
++    return manifest.codeObjectVersion == expectedCodeObjectVersion &&
++        metadata.major == 1 && metadata.minor == expectedMetadataMinor;
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_code_object_image.hh b/src/dev/amdgpu/host_gpu_code_object_image.hh
+new file mode 100644
+index 000000000..40ff8cecb
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_code_object_image.hh
+@@ -0,0 +1,53 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_CODE_OBJECT_IMAGE_HH__
++#define __DEV_AMDGPU_HOST_GPU_CODE_OBJECT_IMAGE_HH__
++
++#include <cstdint>
++#include <vector>
++
++#include "dev/amdgpu/host_gpu_protocol.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++/**
++ * Bind a staged AMDGPU ELF image to every identity claim in its A1 manifest.
++ * This function validates bytes only; it never maps, relocates, or publishes
++ * executable state.
++ */
++bool validateCodeObjectImage(
++    const std::vector<uint8_t> &image,
++    const protocol::CodeObjectManifest &manifest);
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_CODE_OBJECT_IMAGE_HH__
+diff --git a/src/dev/amdgpu/host_gpu_code_object_state.cc b/src/dev/amdgpu/host_gpu_code_object_state.cc
+new file mode 100644
+index 000000000..895ddc263
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_code_object_state.cc
+@@ -0,0 +1,518 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer; neither the name of the copyright holders nor the
++ * names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_code_object_state.hh"
++
++#include "dev/amdgpu/host_gpu_code_object_image.hh"
++
++#include <algorithm>
++#include <array>
++#include <cassert>
++#include <limits>
++#include <new>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++namespace
++{
++
++constexpr std::array<uint32_t, 64> Sha256Constants = {
++    0x428a2f98U, 0x71374491U, 0xb5c0fbcf, 0xe9b5dba5U,
++    0x3956c25bU, 0x59f111f1U, 0x923f82a4U, 0xab1c5ed5U,
++    0xd807aa98U, 0x12835b01U, 0x243185beU, 0x550c7dc3U,
++    0x72be5d74U, 0x80deb1feU, 0x9bdc06a7U, 0xc19bf174U,
++    0xe49b69c1U, 0xefbe4786U, 0x0fc19dc6U, 0x240ca1ccU,
++    0x2de92c6fU, 0x4a7484aaU, 0x5cb0a9dcU, 0x76f988daU,
++    0x983e5152U, 0xa831c66dU, 0xb00327c8U, 0xbf597fc7U,
++    0xc6e00bf3U, 0xd5a79147U, 0x06ca6351U, 0x14292967U,
++    0x27b70a85U, 0x2e1b2138U, 0x4d2c6dfcU, 0x53380d13U,
++    0x650a7354U, 0x766a0abbU, 0x81c2c92eU, 0x92722c85U,
++    0xa2bfe8a1U, 0xa81a664bU, 0xc24b8b70U, 0xc76c51a3U,
++    0xd192e819U, 0xd6990624U, 0xf40e3585U, 0x106aa070U,
++    0x19a4c116U, 0x1e376c08U, 0x2748774cU, 0x34b0bcb5U,
++    0x391c0cb3U, 0x4ed8aa4aU, 0x5b9cca4fU, 0x682e6ff3U,
++    0x748f82eeU, 0x78a5636fU, 0x84c87814U, 0x8cc70208U,
++    0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U,
++};
++
++inline uint32_t
++rotateRight(uint32_t value, unsigned amount)
++{
++    return (value >> amount) | (value << (32 - amount));
++}
++
++} // anonymous namespace
++
++protocol::CodeObjectResponse
++HostGPUCodeObjectState::responseFor(
++    const protocol::CodeObjectRequest &request, protocol::Status status,
++    uint64_t now)
++{
++    protocol::CodeObjectResponse response;
++    response.status = status;
++    response.opcode = request.opcode;
++    response.simTick = now;
++    if (status != protocol::Status::Ok) {
++        response.errorCode = static_cast<uint32_t>(status);
++        return response;
++    }
++    response.objectId = request.objectId;
++    response.generation = request.generation;
++    response.acceptedOffset = request.imageOffset;
++    response.byteCount = request.byteCount;
++    response.chunkIndex = request.chunkIndex;
++    return response;
++}
++
++bool
++HostGPUCodeObjectState::manifestValid(
++    const protocol::CodeObjectManifest &manifest)
++{
++    return protocol::validateCodeObjectManifest(manifest) ==
++        protocol::CodeObjectManifestValidation::Valid;
++}
++
++uint64_t
++HostGPUCodeObjectState::expectedChunkCount(uint64_t imageSize)
++{
++    if (imageSize == 0)
++        return 0;
++    return (imageSize + protocol::CodeObjectChunkDataBytes - 1) /
++        protocol::CodeObjectChunkDataBytes;
++}
++
++uint32_t
++HostGPUCodeObjectState::expectedChunkBytes(const Object &object)
++{
++    const uint64_t remaining = object.manifest.imageSize -
++        object.acceptedOffset;
++    return static_cast<uint32_t>(std::min<uint64_t>(
++        remaining, protocol::CodeObjectChunkDataBytes));
++}
++
++bool
++HostGPUCodeObjectState::takeGeneration(uint64_t &generation)
++{
++    if (generationExhausted || nextGeneration == 0)
++        return false;
++    generation = nextGeneration;
++    if (nextGeneration == std::numeric_limits<uint64_t>::max())
++        generationExhausted = true;
++    else
++        ++nextGeneration;
++    return true;
++}
++
++HostGPUCodeObjectState::Object *
++HostGPUCodeObjectState::resolve(const Owner &owner, uint64_t objectId,
++                                uint64_t generation)
++{
++    if (objectId == 0 || objectId > objects.size())
++        return nullptr;
++    auto &slot = objects[objectId - 1];
++    if (!slot || !(slot->owner == owner) || slot->generation != generation)
++        return nullptr;
++    return &*slot;
++}
++
++const HostGPUCodeObjectState::Object *
++HostGPUCodeObjectState::resolve(const Owner &owner, uint64_t objectId,
++                                uint64_t generation) const
++{
++    if (objectId == 0 || objectId > objects.size())
++        return nullptr;
++    const auto &slot = objects[objectId - 1];
++    if (!slot || !(slot->owner == owner) || slot->generation != generation)
++        return nullptr;
++    return &*slot;
++}
++
++HostGPUCodeObjectState::Object *
++HostGPUCodeObjectState::resolveOwned(const Owner &owner, uint64_t objectId)
++{
++    if (objectId == 0 || objectId > objects.size())
++        return nullptr;
++    auto &slot = objects[objectId - 1];
++    if (!slot || !(slot->owner == owner))
++        return nullptr;
++    return &*slot;
++}
++
++void
++HostGPUCodeObjectState::abortObject(uint64_t objectId)
++{
++    if (objectId == 0 || objectId > objects.size())
++        return;
++    auto &slot = objects[objectId - 1];
++    if (!slot || slot->committed)
++        return;
++    std::fill(slot->image.begin(), slot->image.end(), uint8_t(0));
++    slot->image.clear();
++    slot.reset();
++    assert(liveObjects > 0);
++    --liveObjects;
++}
++
++protocol::Sha256
++HostGPUCodeObjectState::sha256(const std::vector<uint8_t> &image)
++{
++    std::array<uint32_t, 8> state = {
++        0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
++        0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U,
++    };
++    const uint64_t bitLength = static_cast<uint64_t>(image.size()) * 8;
++    const size_t paddedSize = ((image.size() + 9 + 63) / 64) * 64;
++    std::vector<uint8_t> padded(paddedSize, 0);
++    std::copy(image.begin(), image.end(), padded.begin());
++    padded[image.size()] = 0x80;
++    for (unsigned byte = 0; byte < 8; ++byte)
++        padded[paddedSize - byte - 1] =
++            static_cast<uint8_t>(bitLength >> (byte * 8));
++
++    for (size_t block = 0; block < paddedSize; block += 64) {
++        std::array<uint32_t, 64> words = {};
++        for (unsigned index = 0; index < 16; ++index) {
++            const size_t offset = block + index * 4;
++            words[index] = static_cast<uint32_t>(padded[offset]) << 24 |
++                static_cast<uint32_t>(padded[offset + 1]) << 16 |
++                static_cast<uint32_t>(padded[offset + 2]) << 8 |
++                padded[offset + 3];
++        }
++        for (unsigned index = 16; index < words.size(); ++index) {
++            const uint32_t s0 = rotateRight(words[index - 15], 7) ^
++                rotateRight(words[index - 15], 18) ^
++                (words[index - 15] >> 3);
++            const uint32_t s1 = rotateRight(words[index - 2], 17) ^
++                rotateRight(words[index - 2], 19) ^
++                (words[index - 2] >> 10);
++            words[index] = words[index - 16] + s0 + words[index - 7] + s1;
++        }
++
++        auto working = state;
++        for (unsigned index = 0; index < words.size(); ++index) {
++            const uint32_t s1 = rotateRight(working[4], 6) ^
++                rotateRight(working[4], 11) ^ rotateRight(working[4], 25);
++            const uint32_t choose =
++                (working[4] & working[5]) ^ (~working[4] & working[6]);
++            const uint32_t temp1 = working[7] + s1 + choose +
++                Sha256Constants[index] + words[index];
++            const uint32_t s0 = rotateRight(working[0], 2) ^
++                rotateRight(working[0], 13) ^ rotateRight(working[0], 22);
++            const uint32_t majority =
++                (working[0] & working[1]) ^
++                (working[0] & working[2]) ^ (working[1] & working[2]);
++            const uint32_t temp2 = s0 + majority;
++            working = {temp1 + temp2, working[0], working[1], working[2],
++                       working[3] + temp1, working[4], working[5], working[6]};
++        }
++        for (size_t index = 0; index < state.size(); ++index)
++            state[index] += working[index];
++    }
++
++    protocol::Sha256 result = {};
++    for (size_t index = 0; index < state.size(); ++index) {
++        result[index * 4] = static_cast<uint8_t>(state[index] >> 24);
++        result[index * 4 + 1] = static_cast<uint8_t>(state[index] >> 16);
++        result[index * 4 + 2] = static_cast<uint8_t>(state[index] >> 8);
++        result[index * 4 + 3] = static_cast<uint8_t>(state[index]);
++    }
++    return result;
++}
++
++HostGPUCodeObjectState::Decision
++HostGPUCodeObjectState::submit(
++    const Owner &owner, const protocol::CodeObjectRequest &request,
++    uint64_t now)
++{
++    Decision decision;
++    decision.response = responseFor(request, protocol::Status::ProtocolState,
++                                     now);
++
++    auto reject = [&](protocol::Status status, bool abort) {
++        if (abort)
++            abortMutable(owner);
++        decision.response = responseFor(request, status, now);
++        return decision;
++    };
++    auto ownedByAnother = [&]() {
++        if (request.objectId == 0 || request.objectId > objects.size())
++            return false;
++        const auto &slot = objects[request.objectId - 1];
++        return slot && !(slot->owner == owner);
++    };
++
++    const uint16_t rawOpcode = static_cast<uint16_t>(request.opcode);
++    if (request.major != protocol::CodeObjectTransferMajor ||
++        request.minor != protocol::CodeObjectTransferMinor) {
++        return reject(protocol::Status::UnsupportedVersion, true);
++    }
++    if (request.flags != 0 || request.reserved != 0 ||
++        rawOpcode < static_cast<uint16_t>(protocol::CodeObjectOpcode::Begin) ||
++        rawOpcode > static_cast<uint16_t>(protocol::CodeObjectOpcode::Commit)) {
++        return reject(protocol::Status::Malformed, true);
++    }
++
++    switch (request.opcode) {
++      case protocol::CodeObjectOpcode::Begin: {
++        if (request.objectId != 0 || request.generation != 0 ||
++            request.imageOffset != 0 || request.byteCount != 0 ||
++            request.chunkIndex != 0 || request.chunkCrc32c != 0) {
++            return reject(protocol::Status::Malformed, true);
++        }
++        const auto manifestStatus = protocol::validateCodeObjectManifest(
++            request.manifest);
++        if (manifestStatus !=
++            protocol::CodeObjectManifestValidation::Valid) {
++            return reject(
++                manifestStatus ==
++                        protocol::CodeObjectManifestValidation::UnsupportedVersion ?
++                    protocol::Status::UnsupportedVersion :
++                manifestStatus ==
++                        protocol::CodeObjectManifestValidation::TopologyMismatch ?
++                    protocol::Status::TopologyMismatch :
++                    protocol::Status::Malformed,
++                true);
++        }
++        for (const auto &slot : objects) {
++            if (slot && slot->owner == owner && !slot->committed)
++                return reject(protocol::Status::Busy, false);
++        }
++        if (liveObjects >= objects.size()) {
++            return reject(protocol::Status::ResourceExhausted, false);
++        }
++        size_t slot = 0;
++        while (slot < objects.size() && objects[slot])
++            ++slot;
++        uint64_t generation = 0;
++        if (slot == objects.size() || !takeGeneration(generation)) {
++            return reject(protocol::Status::ResourceExhausted, false);
++        }
++        try {
++            Object object;
++            object.owner = owner;
++            object.generation = generation;
++            object.manifest = request.manifest;
++            object.image.reserve(static_cast<size_t>(request.manifest.imageSize));
++            objects[slot].emplace(std::move(object));
++        } catch (const std::bad_alloc &) {
++            return reject(protocol::Status::Internal, false);
++        }
++        ++liveObjects;
++        decision.response.status = protocol::Status::Ok;
++        decision.response.objectId = slot + 1;
++        decision.response.generation = generation;
++        decision.response.acceptedOffset = 0;
++        decision.response.imageBytes = request.manifest.imageSize;
++        decision.response.kernelIndex = request.manifest.kernelIndex;
++        decision.response.segmentCount = request.manifest.segmentCount;
++        decision.response.imageSha256 = request.manifest.imageSha256;
++        decision.accepted = true;
++        return decision;
++      }
++
++      case protocol::CodeObjectOpcode::Chunk: {
++        if (ownedByAnother())
++            return reject(protocol::Status::Unauthorized, false);
++        Object *object = resolve(owner, request.objectId, request.generation);
++        if (object == nullptr || object->committed) {
++            const bool staleOwned = resolveOwned(owner, request.objectId) !=
++                nullptr;
++            return reject(protocol::Status::ProtocolState, staleOwned);
++        }
++        const uint32_t expectedBytes = expectedChunkBytes(*object);
++        const bool rangeValid = request.imageOffset == object->acceptedOffset &&
++            request.chunkIndex == object->nextChunk &&
++            request.byteCount == expectedBytes && request.byteCount != 0 &&
++            request.byteCount <= protocol::CodeObjectChunkDataBytes;
++        const bool paddingValid = request.byteCount <=
++            protocol::CodeObjectChunkDataBytes &&
++            std::all_of(request.chunkData.begin() + request.byteCount,
++                        request.chunkData.end(),
++                        [](uint8_t byte) { return byte == 0; });
++        const bool crcValid = rangeValid &&
++            protocol::crc32c(request.chunkData.data(), request.byteCount) ==
++                request.chunkCrc32c;
++        if (!rangeValid || !paddingValid || !crcValid)
++            return reject(protocol::Status::ProtocolState, true);
++        try {
++            object->image.insert(object->image.end(), request.chunkData.begin(),
++                                 request.chunkData.begin() + request.byteCount);
++        } catch (const std::bad_alloc &) {
++            return reject(protocol::Status::Internal, true);
++        }
++        object->acceptedOffset += request.byteCount;
++        ++object->nextChunk;
++        decision.response.status = protocol::Status::Ok;
++        decision.response.objectId = request.objectId;
++        decision.response.generation = request.generation;
++        decision.response.acceptedOffset = request.imageOffset;
++        decision.response.byteCount = request.byteCount;
++        decision.response.chunkIndex = request.chunkIndex;
++        decision.response.imageBytes = object->manifest.imageSize;
++        decision.response.kernelIndex = object->manifest.kernelIndex;
++        decision.response.segmentCount = object->manifest.segmentCount;
++        decision.response.imageSha256 = object->manifest.imageSha256;
++        decision.accepted = true;
++        return decision;
++      }
++
++      case protocol::CodeObjectOpcode::Commit: {
++        if (ownedByAnother())
++            return reject(protocol::Status::Unauthorized, false);
++        Object *object = resolve(owner, request.objectId, request.generation);
++        if (object == nullptr || object->committed) {
++            const bool staleOwned = resolveOwned(owner, request.objectId) !=
++                nullptr;
++            return reject(protocol::Status::ProtocolState, staleOwned);
++        }
++        if (request.imageOffset != 0 ||
++            request.byteCount != object->manifest.imageSize ||
++            request.chunkIndex != object->manifest.chunkCount ||
++            request.chunkCrc32c != 0 ||
++            request.commitSha256 != object->manifest.imageSha256 ||
++            object->acceptedOffset != object->manifest.imageSize ||
++            object->nextChunk != object->manifest.chunkCount ||
++            object->image.size() != object->manifest.imageSize) {
++            return reject(protocol::Status::ProtocolState, true);
++        }
++        const auto digest = sha256(object->image);
++        if (digest != object->manifest.imageSha256) {
++            return reject(protocol::Status::ProtocolState, true);
++        }
++        if (!validateCodeObjectImage(object->image, object->manifest)) {
++            return reject(protocol::Status::ProtocolState, true);
++        }
++        object->committed = true;
++        decision.response.status = protocol::Status::Ok;
++        decision.response.objectId = request.objectId;
++        decision.response.generation = request.generation;
++        decision.response.acceptedOffset = object->manifest.imageSize;
++        decision.response.byteCount = object->manifest.imageSize;
++        decision.response.chunkIndex = object->manifest.chunkCount;
++        decision.response.imageBytes = object->manifest.imageSize;
++        decision.response.kernelIndex = object->manifest.kernelIndex;
++        decision.response.segmentCount = object->manifest.segmentCount;
++        decision.response.imageSha256 = digest;
++        decision.accepted = true;
++        decision.committed = true;
++        return decision;
++      }
++    }
++
++    decision.response.status = protocol::Status::Malformed;
++    return decision;
++}
++
++protocol::CodeObjectResponse
++HostGPUCodeObjectState::failureResponse(
++    const protocol::CodeObjectRequest &request, protocol::Status status,
++    uint64_t now)
++{
++    return responseFor(request, status, now);
++}
++
++bool
++HostGPUCodeObjectState::readCommittedImage(
++    const Owner &owner, uint64_t objectId, uint64_t generation,
++    std::vector<uint8_t> &image) const
++{
++    const Object *object = resolve(owner, objectId, generation);
++    if (object == nullptr || !object->committed)
++        return false;
++    image = object->image;
++    return true;
++}
++
++std::optional<protocol::CodeObjectManifest>
++HostGPUCodeObjectState::committedManifest(
++    const Owner &owner, uint64_t objectId, uint64_t generation) const
++{
++    const Object *object = resolve(owner, objectId, generation);
++    if (object == nullptr || !object->committed)
++        return std::nullopt;
++    return object->manifest;
++}
++
++void
++HostGPUCodeObjectState::abortMutable(const Owner &owner)
++{
++    for (size_t index = 0; index < objects.size(); ++index) {
++        const auto &slot = objects[index];
++        if (slot && slot->owner == owner && !slot->committed)
++            abortObject(index + 1);
++    }
++}
++
++void
++HostGPUCodeObjectState::disconnect(const Owner &owner)
++{
++    for (auto &slot : objects) {
++        if (slot && slot->owner == owner) {
++            std::fill(slot->image.begin(), slot->image.end(), uint8_t(0));
++            slot->image.clear();
++            slot.reset();
++            assert(liveObjects > 0);
++            --liveObjects;
++        }
++    }
++}
++
++void
++HostGPUCodeObjectState::clear()
++{
++    for (auto &slot : objects) {
++        if (slot) {
++            std::fill(slot->image.begin(), slot->image.end(), uint8_t(0));
++            slot->image.clear();
++        }
++        slot.reset();
++    }
++    liveObjects = 0;
++}
++
++size_t
++HostGPUCodeObjectState::committedCount() const
++{
++    size_t count = 0;
++    for (const auto &slot : objects)
++        count += slot && slot->committed;
++    return count;
++}
++
++size_t
++HostGPUCodeObjectState::activeUploadCount() const
++{
++    size_t count = 0;
++    for (const auto &slot : objects)
++        count += slot && !slot->committed;
++    return count;
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_code_object_state.hh b/src/dev/amdgpu/host_gpu_code_object_state.hh
+new file mode 100644
+index 000000000..7a0182351
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_code_object_state.hh
+@@ -0,0 +1,131 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_CODE_OBJECT_STATE_HH__
++#define __DEV_AMDGPU_HOST_GPU_CODE_OBJECT_STATE_HH__
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <optional>
++#include <vector>
++
++#include "dev/amdgpu/host_gpu_protocol.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++/**
++ * Connection-owned code-object staging.
++ *
++ * A1 parses and validates code-object identity before an integrity-checked
++ * host-side commit. It does not map PT_LOAD ranges, apply relocations, publish
++ * executable memory, construct an AQL packet, or execute the image.
++ */
++class HostGPUCodeObjectState
++{
++  public:
++    static constexpr size_t MaximumObjects = 16;
++
++    struct Owner
++    {
++        int fd = -1;
++        uint64_t clientGeneration = 0;
++
++        bool operator==(const Owner &other) const
++        {
++            return fd == other.fd &&
++                clientGeneration == other.clientGeneration;
++        }
++    };
++
++    struct Decision
++    {
++        protocol::CodeObjectResponse response;
++        bool accepted = false;
++        bool committed = false;
++    };
++
++    Decision submit(const Owner &owner, const protocol::CodeObjectRequest &request,
++                    uint64_t now);
++    static protocol::CodeObjectResponse failureResponse(
++        const protocol::CodeObjectRequest &request, protocol::Status status,
++        uint64_t now);
++
++    bool readCommittedImage(const Owner &owner, uint64_t objectId,
++                            uint64_t generation,
++                            std::vector<uint8_t> &image) const;
++    std::optional<protocol::CodeObjectManifest> committedManifest(
++        const Owner &owner, uint64_t objectId, uint64_t generation) const;
++
++    void abortMutable(const Owner &owner);
++    void disconnect(const Owner &owner);
++    void clear();
++
++    size_t objectCount() const { return liveObjects; }
++    size_t committedCount() const;
++    size_t activeUploadCount() const;
++
++  private:
++    struct Object
++    {
++        Owner owner;
++        uint64_t generation = 0;
++        protocol::CodeObjectManifest manifest;
++        std::vector<uint8_t> image;
++        uint64_t acceptedOffset = 0;
++        uint32_t nextChunk = 0;
++        bool committed = false;
++    };
++
++    static protocol::CodeObjectResponse responseFor(
++        const protocol::CodeObjectRequest &request, protocol::Status status,
++        uint64_t now);
++    static bool manifestValid(const protocol::CodeObjectManifest &manifest);
++    static uint64_t expectedChunkCount(uint64_t imageSize);
++    static uint32_t expectedChunkBytes(const Object &object);
++    static protocol::Sha256 sha256(const std::vector<uint8_t> &image);
++    Object *resolve(const Owner &owner, uint64_t objectId,
++                    uint64_t generation);
++    const Object *resolve(const Owner &owner, uint64_t objectId,
++                          uint64_t generation) const;
++    Object *resolveOwned(const Owner &owner, uint64_t objectId);
++    void abortObject(uint64_t objectId);
++    bool takeGeneration(uint64_t &generation);
++
++    std::array<std::optional<Object>, MaximumObjects> objects;
++    uint64_t nextGeneration = 1;
++    bool generationExhausted = false;
++    size_t liveObjects = 0;
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_CODE_OBJECT_STATE_HH__
+diff --git a/src/dev/amdgpu/host_gpu_code_object_state.test.cc b/src/dev/amdgpu/host_gpu_code_object_state.test.cc
+new file mode 100644
+index 000000000..c4016eb1e
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_code_object_state.test.cc
+@@ -0,0 +1,713 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ */
++
++#include "dev/amdgpu/host_gpu_code_object_state.hh"
++
++#include "dev/amdgpu/host_gpu_code_object_image.hh"
++
++#include <gtest/gtest.h>
++
++#include <algorithm>
++#include <array>
++#include <cstdint>
++#include <cstring>
++#include <filesystem>
++#include <fstream>
++#include <iterator>
++#include <string>
++#include <vector>
++
++namespace gem5
++{
++namespace hostgpu
++{
++namespace
++{
++
++using protocol::CodeObjectOpcode;
++
++HostGPUCodeObjectState::Owner
++owner(int fd = 7, uint64_t generation = 9)
++{
++    return {fd, generation};
++}
++
++protocol::Sha256
++imageSha256()
++{
++    return {
++        0x7b, 0x55, 0xb7, 0xae, 0x2a, 0x2e, 0x2c, 0x2c,
++        0x27, 0x10, 0x57, 0xd0, 0xf0, 0xad, 0x6c, 0xaa,
++        0x46, 0x97, 0x6d, 0x69, 0xb8, 0x71, 0xed, 0xae,
++        0xd5, 0x79, 0xba, 0xd3, 0xac, 0x9a, 0x19, 0x41,
++    };
++}
++
++void
++put16(std::vector<uint8_t> &bytes, size_t offset, uint16_t value)
++{
++    bytes[offset] = static_cast<uint8_t>(value);
++    bytes[offset + 1] = static_cast<uint8_t>(value >> 8);
++}
++
++void
++put32(std::vector<uint8_t> &bytes, size_t offset, uint32_t value)
++{
++    for (unsigned index = 0; index < 4; ++index)
++        bytes[offset + index] = static_cast<uint8_t>(value >> (index * 8));
++}
++
++void
++put64(std::vector<uint8_t> &bytes, size_t offset, uint64_t value)
++{
++    for (unsigned index = 0; index < 8; ++index)
++        bytes[offset + index] = static_cast<uint8_t>(value >> (index * 8));
++}
++
++void
++appendMessageString(std::vector<uint8_t> &bytes, const char *text)
++{
++    const size_t size = std::strlen(text);
++    ASSERT_LE(size, 31U);
++    bytes.push_back(static_cast<uint8_t>(0xa0 | size));
++    bytes.insert(bytes.end(), text, text + size);
++}
++
++void
++appendMessageNumber(std::vector<uint8_t> &bytes, uint8_t value)
++{
++    ASSERT_LE(value, 0x7f);
++    bytes.push_back(value);
++}
++
++std::vector<uint8_t>
++imageBytes()
++{
++    constexpr size_t ImageSize = 0xa00;
++    constexpr size_t NoteOffset = 0x200;
++    constexpr size_t DescriptorOffset = 0x500;
++    constexpr size_t CodeOffset = 0x600;
++    constexpr size_t SymbolOffset = 0x680;
++    constexpr size_t StringOffset = 0x6d0;
++    constexpr size_t SectionStringOffset = 0x720;
++    constexpr size_t SectionHeaderOffset = 0x800;
++    std::vector<uint8_t> image(ImageSize, 0);
++
++    image[0] = 0x7f;
++    image[1] = 'E';
++    image[2] = 'L';
++    image[3] = 'F';
++    image[4] = 2;
++    image[5] = 1;
++    image[6] = 1;
++    image[7] = 64;
++    image[8] = 4;
++    put16(image, 16, 3);
++    put16(image, 18, 224);
++    put32(image, 20, 1);
++    put64(image, 32, 64);
++    put64(image, 40, SectionHeaderOffset);
++    put32(image, 48, 0x54f);
++    put16(image, 52, 64);
++    put16(image, 54, 56);
++    put16(image, 56, 2);
++    put16(image, 58, 64);
++    put16(image, 60, 7);
++    put16(image, 62, 6);
++
++    put32(image, 64, 1);
++    put32(image, 68, 4);
++    put64(image, 96, 0x540);
++    put64(image, 104, 0x540);
++    put64(image, 112, 0x100);
++    put32(image, 120, 1);
++    put32(image, 124, 5);
++    put64(image, 128, CodeOffset);
++    put64(image, 136, 0x1600);
++    put64(image, 144, 0x1600);
++    put64(image, 152, 0x80);
++    put64(image, 160, 0x80);
++    put64(image, 168, 0x100);
++
++    std::vector<uint8_t> metadata;
++    metadata.push_back(0x83);
++    appendMessageString(metadata, "amdhsa.kernels");
++    metadata.push_back(0x91);
++    metadata.push_back(0x8b);
++    appendMessageString(metadata, ".name");
++    appendMessageString(metadata, "vecadd");
++    appendMessageString(metadata, ".symbol");
++    appendMessageString(metadata, "vecadd.kd");
++    appendMessageString(metadata, ".kernarg_segment_size");
++    appendMessageNumber(metadata, 8);
++    appendMessageString(metadata, ".kernarg_segment_align");
++    appendMessageNumber(metadata, 8);
++    appendMessageString(metadata, ".group_segment_fixed_size");
++    appendMessageNumber(metadata, 0);
++    appendMessageString(metadata, ".private_segment_fixed_size");
++    appendMessageNumber(metadata, 0);
++    appendMessageString(metadata, ".max_flat_workgroup_size");
++    appendMessageNumber(metadata, 64);
++    appendMessageString(metadata, ".wavefront_size");
++    appendMessageNumber(metadata, 64);
++    appendMessageString(metadata, ".sgpr_count");
++    appendMessageNumber(metadata, 12);
++    appendMessageString(metadata, ".vgpr_count");
++    appendMessageNumber(metadata, 8);
++    appendMessageString(metadata, ".uses_dynamic_stack");
++    appendMessageNumber(metadata, 0);
++    appendMessageString(metadata, "amdhsa.target");
++    appendMessageString(metadata, "amdgcn-amd-amdhsa--gfx950");
++    appendMessageString(metadata, "amdhsa.version");
++    metadata.push_back(0x92);
++    appendMessageNumber(metadata, 1);
++    appendMessageNumber(metadata, 2);
++
++    const size_t paddedMetadataSize = (metadata.size() + 3) & ~size_t(3);
++    const size_t noteSize = 20 + paddedMetadataSize;
++    EXPECT_LT(NoteOffset + noteSize, DescriptorOffset);
++    put32(image, NoteOffset, 7);
++    put32(image, NoteOffset + 4, static_cast<uint32_t>(metadata.size()));
++    put32(image, NoteOffset + 8, 32);
++    std::copy_n(reinterpret_cast<const uint8_t *>("AMDGPU"), 7,
++                image.begin() + NoteOffset + 12);
++    std::copy(metadata.begin(), metadata.end(), image.begin() + NoteOffset + 20);
++
++    put32(image, DescriptorOffset, 0);
++    put32(image, DescriptorOffset + 4, 0);
++    put32(image, DescriptorOffset + 8, 8);
++    put64(image, DescriptorOffset + 16, 0x1100);
++    put32(image, DescriptorOffset + 48, 0x00af0080);
++    put32(image, DescriptorOffset + 52, 0x88);
++    for (size_t index = 0; index < 0x80; ++index)
++        image[CodeOffset + index] = static_cast<uint8_t>(0x80 + index);
++
++    const char strings[] = "\0vecadd\0vecadd.kd\0";
++    std::copy_n(reinterpret_cast<const uint8_t *>(strings), sizeof(strings),
++                image.begin() + StringOffset);
++    put32(image, SymbolOffset + 24, 1);
++    image[SymbolOffset + 28] = 0x12;
++    image[SymbolOffset + 29] = 3;
++    put16(image, SymbolOffset + 30, 3);
++    put64(image, SymbolOffset + 32, 0x1600);
++    put64(image, SymbolOffset + 40, 0x80);
++    put32(image, SymbolOffset + 48, 8);
++    image[SymbolOffset + 52] = 0x11;
++    image[SymbolOffset + 53] = 3;
++    put16(image, SymbolOffset + 54, 2);
++    put64(image, SymbolOffset + 56, 0x500);
++    put64(image, SymbolOffset + 64, 64);
++
++    std::vector<uint8_t> sectionStrings = {0};
++    auto addSectionName = [&sectionStrings](const char *name) {
++        const uint32_t offset = sectionStrings.size();
++        sectionStrings.insert(sectionStrings.end(), name,
++                              name + std::strlen(name) + 1);
++        return offset;
++    };
++    const uint32_t noteName = addSectionName(".note");
++    const uint32_t rodataName = addSectionName(".rodata");
++    const uint32_t textName = addSectionName(".text");
++    const uint32_t symtabName = addSectionName(".symtab");
++    const uint32_t strtabName = addSectionName(".strtab");
++    const uint32_t shstrtabName = addSectionName(".shstrtab");
++    std::copy(sectionStrings.begin(), sectionStrings.end(),
++              image.begin() + SectionStringOffset);
++
++    auto section = [&image](size_t index) {
++        return size_t(0x800 + index * 64);
++    };
++    put32(image, section(1), noteName);
++    put32(image, section(1) + 4, 7);
++    put64(image, section(1) + 8, 2);
++    put64(image, section(1) + 16, NoteOffset);
++    put64(image, section(1) + 24, NoteOffset);
++    put64(image, section(1) + 32, noteSize);
++    put64(image, section(1) + 48, 4);
++    put32(image, section(2), rodataName);
++    put32(image, section(2) + 4, 1);
++    put64(image, section(2) + 8, 2);
++    put64(image, section(2) + 16, 0x500);
++    put64(image, section(2) + 24, DescriptorOffset);
++    put64(image, section(2) + 32, 64);
++    put64(image, section(2) + 48, 64);
++    put32(image, section(3), textName);
++    put32(image, section(3) + 4, 1);
++    put64(image, section(3) + 8, 6);
++    put64(image, section(3) + 16, 0x1600);
++    put64(image, section(3) + 24, CodeOffset);
++    put64(image, section(3) + 32, 0x80);
++    put64(image, section(3) + 48, 0x100);
++    put32(image, section(4), symtabName);
++    put32(image, section(4) + 4, 2);
++    put64(image, section(4) + 24, SymbolOffset);
++    put64(image, section(4) + 32, 72);
++    put32(image, section(4) + 40, 5);
++    put32(image, section(4) + 44, 1);
++    put64(image, section(4) + 48, 8);
++    put64(image, section(4) + 56, 24);
++    put32(image, section(5), strtabName);
++    put32(image, section(5) + 4, 3);
++    put64(image, section(5) + 24, StringOffset);
++    put64(image, section(5) + 32, sizeof(strings));
++    put64(image, section(5) + 48, 1);
++    put32(image, section(6), shstrtabName);
++    put32(image, section(6) + 4, 3);
++    put64(image, section(6) + 24, SectionStringOffset);
++    put64(image, section(6) + 32, sectionStrings.size());
++    put64(image, section(6) + 48, 1);
++    return image;
++}
++
++protocol::CodeObjectManifest
++manifest()
++{
++    protocol::CodeObjectManifest result;
++    result.imageSize = imageBytes().size();
++    result.chunkDataBytes = protocol::CodeObjectChunkDataBytes;
++    result.chunkCount = 1;
++    result.segmentCount = 2;
++    result.imageSha256 = imageSha256();
++    result.elfMachine = 224;
++    result.elfType = 3;
++    result.elfOsabi = 64;
++    result.elfAbiVersion = 4;
++    result.elfFlags = 0x54f;
++    result.gfxTarget = 950;
++    result.codeObjectVersion = 6;
++    result.metadataMajor = 1;
++    result.metadataMinor = 2;
++    result.kernargSegmentSize = 8;
++    result.kernargSegmentAlign = 8;
++    result.sgprCount = 12;
++    result.vgprCount = 8;
++    result.maxFlatWorkgroupSize = 64;
++    result.wavefrontSize = 64;
++    result.kernelCodeEntryByteOffset = 0x1100;
++    result.codeVirtualAddress = 0x1600;
++    result.codeFileOffset = 0x600;
++    result.codeSize = 0x80;
++    result.descriptorVirtualAddress = 0x500;
++    result.descriptorFileOffset = 0x500;
++    const auto image = imageBytes();
++    std::copy_n(image.begin() + result.descriptorFileOffset,
++                protocol::CodeObjectDescriptorBytes,
++                result.descriptor.begin());
++    result.segments[0].type = 1;
++    result.segments[0].flags = 4;
++    result.segments[0].fileOffset = 0;
++    result.segments[0].virtualAddress = 0;
++    result.segments[0].fileSize = 0x540;
++    result.segments[0].memorySize = 0x540;
++    result.segments[0].alignment = 0x100;
++    result.segments[1].type = 1;
++    result.segments[1].flags = 5;
++    result.segments[1].fileOffset = 0x600;
++    result.segments[1].virtualAddress = 0x1600;
++    result.segments[1].fileSize = 0x80;
++    result.segments[1].memorySize = 0x80;
++    result.segments[1].alignment = 0x100;
++    const char *kernel = "vecadd";
++    const char *descriptor = "vecadd.kd";
++    std::copy(kernel, kernel + std::strlen(kernel), result.kernelName.begin());
++    std::copy(descriptor, descriptor + std::strlen(descriptor),
++              result.descriptorSymbol.begin());
++    return result;
++}
++
++protocol::CodeObjectRequest
++beginRequest()
++{
++    protocol::CodeObjectRequest request;
++    request.opcode = CodeObjectOpcode::Begin;
++    request.manifest = manifest();
++    return request;
++}
++
++protocol::CodeObjectRequest
++chunkRequest(uint64_t objectId, uint64_t generation)
++{
++    protocol::CodeObjectRequest request;
++    request.opcode = CodeObjectOpcode::Chunk;
++    request.objectId = objectId;
++    request.generation = generation;
++    const auto image = imageBytes();
++    request.byteCount = image.size();
++    request.chunkIndex = 0;
++    std::copy(image.begin(), image.end(), request.chunkData.begin());
++    request.chunkCrc32c = protocol::crc32c(request.chunkData.data(),
++                                            request.byteCount);
++    return request;
++}
++
++protocol::CodeObjectRequest
++commitRequest(uint64_t objectId, uint64_t generation)
++{
++    protocol::CodeObjectRequest request;
++    request.opcode = CodeObjectOpcode::Commit;
++    request.objectId = objectId;
++    request.generation = generation;
++    request.byteCount = imageBytes().size();
++    request.chunkIndex = 1;
++    request.commitSha256 = imageSha256();
++    return request;
++}
++
++void
++expectCommitIdentityFailure(const protocol::CodeObjectManifest &badManifest)
++{
++    HostGPUCodeObjectState state;
++    auto request = beginRequest();
++    request.manifest = badManifest;
++    const auto begin = state.submit(owner(), request, 1);
++    ASSERT_TRUE(begin.accepted);
++    ASSERT_TRUE(state.submit(
++        owner(), chunkRequest(begin.response.objectId,
++                              begin.response.generation), 2).accepted);
++    const auto commit = state.submit(
++        owner(), commitRequest(begin.response.objectId,
++                               begin.response.generation), 3);
++    EXPECT_FALSE(commit.accepted);
++    EXPECT_EQ(commit.response.status, protocol::Status::ProtocolState);
++    EXPECT_EQ(state.activeUploadCount(), 0U);
++    EXPECT_EQ(state.objectCount(), 0U);
++}
++
++TEST(HostGPUCodeObjectImage, AcceptsBoundMinimalAmdgpuElf)
++{
++    EXPECT_TRUE(validateCodeObjectImage(imageBytes(), manifest()));
++}
++
++TEST(HostGPUCodeObjectImage, RejectsMalformedAndUnboundElfIdentity)
++{
++    const auto expected = manifest();
++    auto image = imageBytes();
++    std::fill(image.begin(), image.end(), 0);
++    EXPECT_FALSE(validateCodeObjectImage(image, expected));
++
++    image = imageBytes();
++    image[18] ^= 1;
++    EXPECT_FALSE(validateCodeObjectImage(image, expected));
++
++    image = imageBytes();
++    put64(image, 96, 0x541);
++    EXPECT_FALSE(validateCodeObjectImage(image, expected));
++
++    image = imageBytes();
++    put64(image, 0x680 + 32, 0x1610);
++    EXPECT_FALSE(validateCodeObjectImage(image, expected));
++
++    image = imageBytes();
++    image[0x214] = 0x80;
++    EXPECT_FALSE(validateCodeObjectImage(image, expected));
++
++    image = imageBytes();
++    image[0x500] ^= 1;
++    EXPECT_FALSE(validateCodeObjectImage(image, expected));
++
++    auto wrongKernel = expected;
++    wrongKernel.kernelIndex = 1;
++    EXPECT_FALSE(validateCodeObjectImage(imageBytes(), wrongKernel));
++
++    auto wrongVersion = expected;
++    wrongVersion.codeObjectVersion = 5;
++    EXPECT_FALSE(validateCodeObjectImage(imageBytes(), wrongVersion));
++}
++
++TEST(HostGPUCodeObjectImage, ValidatesLockedRdcFixtureWhenAvailable)
++{
++    namespace fs = std::filesystem;
++    const fs::path sourcePath = fs::absolute(__FILE__);
++    const fs::path fixturePath = sourcePath.parent_path() /
++        "../../../../rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/"
++        "hsaco/gfx950/gpuReadWrite_kernels.hsaco";
++    std::ifstream input(fixturePath, std::ios::binary);
++    if (!input)
++        GTEST_SKIP() << "locked rocm-systems fixture is unavailable";
++    const std::vector<uint8_t> image{
++        std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
++    ASSERT_EQ(image.size(), 5528U);
++
++    auto expected = protocol::CodeObjectManifest();
++    expected.imageSize = image.size();
++    expected.chunkCount = 2;
++    expected.segmentCount = 3;
++    expected.imageSha256 = {
++        0x7b, 0x6a, 0x4d, 0x2b, 0xb7, 0xf9, 0xc4, 0xe7,
++        0x46, 0x6b, 0xcf, 0x69, 0xf3, 0x11, 0x0e, 0xcb,
++        0xfa, 0xb5, 0x4d, 0x07, 0xab, 0xd4, 0xc7, 0x0b,
++        0x6b, 0xd9, 0x6b, 0x6a, 0x6f, 0xb9, 0xde, 0x56,
++    };
++    expected.elfMachine = 224;
++    expected.elfType = 3;
++    expected.elfOsabi = 64;
++    expected.elfAbiVersion = 4;
++    expected.elfFlags = 0x54f;
++    expected.gfxTarget = 950;
++    expected.codeObjectVersion = 6;
++    expected.metadataMajor = 1;
++    expected.metadataMinor = 2;
++    expected.relocationCount = 0;
++    expected.kernargSegmentSize = 280;
++    expected.kernargSegmentAlign = 8;
++    expected.groupSegmentFixedSize = 0;
++    expected.privateSegmentFixedSize = 0;
++    expected.maxFlatWorkgroupSize = 256;
++    expected.wavefrontSize = 64;
++    expected.sgprCount = 22;
++    expected.vgprCount = 6;
++    expected.kernelCodeEntryByteOffset = 0x1100;
++    expected.codeVirtualAddress = 0x1900;
++    expected.codeFileOffset = 0x900;
++    expected.codeSize = 0x78;
++    expected.descriptorVirtualAddress = 0x800;
++    expected.descriptorFileOffset = 0x800;
++    std::copy_n(image.begin() + expected.descriptorFileOffset,
++                protocol::CodeObjectDescriptorBytes, expected.descriptor.begin());
++    const char *kernel = "gpuReadWrite";
++    const char *descriptor = "gpuReadWrite.kd";
++    std::copy(kernel, kernel + std::strlen(kernel), expected.kernelName.begin());
++    std::copy(descriptor, descriptor + std::strlen(descriptor),
++              expected.descriptorSymbol.begin());
++    expected.segments[0] = {1, 4, 0, 0, 0x840, 0x840, 0x1000};
++    expected.segments[1] = {1, 5, 0x900, 0x1900, 0x480, 0x480, 0x1000};
++    expected.segments[2] = {1, 6, 0xd80, 0x2d80, 0x70, 0x280, 0x1000};
++    ASSERT_TRUE(validateCodeObjectImage(image, expected));
++}
++
++TEST(HostGPUCodeObjectState, OrderedChunkAndShaCommit)
++{
++    HostGPUCodeObjectState state;
++    const auto begin = state.submit(owner(), beginRequest(), 1);
++    ASSERT_TRUE(begin.accepted);
++    ASSERT_EQ(begin.response.status, protocol::Status::Ok);
++    EXPECT_EQ(begin.response.objectId, 1U);
++    EXPECT_EQ(begin.response.generation, 1U);
++
++    auto chunk = chunkRequest(begin.response.objectId, begin.response.generation);
++    const auto chunkResult = state.submit(owner(), chunk, 2);
++    ASSERT_TRUE(chunkResult.accepted);
++    EXPECT_EQ(chunkResult.response.acceptedOffset, 0U);
++    EXPECT_EQ(chunkResult.response.byteCount, imageBytes().size());
++    EXPECT_EQ(chunkResult.response.chunkIndex, 0U);
++
++    const auto commit = state.submit(
++        owner(), commitRequest(begin.response.objectId,
++                               begin.response.generation), 3);
++    ASSERT_TRUE(commit.accepted);
++    ASSERT_TRUE(commit.committed);
++    EXPECT_EQ(commit.response.status, protocol::Status::Ok);
++    EXPECT_EQ(commit.response.imageSha256, imageSha256());
++    EXPECT_EQ(state.committedCount(), 1U);
++
++    std::vector<uint8_t> image;
++    ASSERT_TRUE(state.readCommittedImage(
++        owner(), begin.response.objectId, begin.response.generation, image));
++    EXPECT_EQ(image, imageBytes());
++}
++
++TEST(HostGPUCodeObjectState, ImageIdentityMismatchAbortsCommit)
++{
++    auto wrongSegment = manifest();
++    wrongSegment.segments[0].alignment = 0x200;
++    expectCommitIdentityFailure(wrongSegment);
++
++    auto wrongSymbol = manifest();
++    wrongSymbol.codeSize = 0x40;
++    expectCommitIdentityFailure(wrongSymbol);
++
++    auto wrongKernelIndex = manifest();
++    wrongKernelIndex.kernelIndex = 1;
++    expectCommitIdentityFailure(wrongKernelIndex);
++}
++
++TEST(HostGPUCodeObjectState, ChunkAckEchoesEachAcceptedRange)
++{
++    HostGPUCodeObjectState state;
++    auto request = beginRequest();
++    request.manifest.imageSize = protocol::CodeObjectChunkDataBytes + 32;
++    request.manifest.chunkCount = 2;
++    request.manifest.segments[1].fileSize =
++        request.manifest.imageSize - request.manifest.segments[1].fileOffset;
++    request.manifest.segments[1].memorySize =
++        request.manifest.segments[1].fileSize;
++    request.manifest.codeSize = request.manifest.segments[1].fileSize;
++    const auto begin = state.submit(owner(), request, 1);
++    ASSERT_TRUE(begin.accepted);
++
++    protocol::CodeObjectRequest first;
++    first.opcode = CodeObjectOpcode::Chunk;
++    first.objectId = begin.response.objectId;
++    first.generation = begin.response.generation;
++    first.byteCount = protocol::CodeObjectChunkDataBytes;
++    first.chunkCrc32c = protocol::crc32c(first.chunkData.data(),
++                                         first.byteCount);
++    const auto firstResult = state.submit(owner(), first, 2);
++    ASSERT_TRUE(firstResult.accepted);
++    EXPECT_EQ(firstResult.response.acceptedOffset, 0U);
++    EXPECT_EQ(firstResult.response.byteCount,
++              protocol::CodeObjectChunkDataBytes);
++    EXPECT_EQ(firstResult.response.chunkIndex, 0U);
++
++    protocol::CodeObjectRequest second;
++    second.opcode = CodeObjectOpcode::Chunk;
++    second.objectId = begin.response.objectId;
++    second.generation = begin.response.generation;
++    second.imageOffset = protocol::CodeObjectChunkDataBytes;
++    second.byteCount = 32;
++    second.chunkIndex = 1;
++    second.chunkCrc32c = protocol::crc32c(second.chunkData.data(),
++                                          second.byteCount);
++    const auto secondResult = state.submit(owner(), second, 3);
++    ASSERT_TRUE(secondResult.accepted);
++    EXPECT_EQ(secondResult.response.acceptedOffset,
++              protocol::CodeObjectChunkDataBytes);
++    EXPECT_EQ(secondResult.response.byteCount, 32U);
++    EXPECT_EQ(secondResult.response.chunkIndex, 1U);
++}
++
++TEST(HostGPUCodeObjectState, ForeignOwnerIsUnauthorizedWithoutMutation)
++{
++    HostGPUCodeObjectState state;
++    const auto begin = state.submit(owner(), beginRequest(), 1);
++    ASSERT_TRUE(begin.accepted);
++    const auto chunk = chunkRequest(
++        begin.response.objectId, begin.response.generation);
++    const auto foreign = state.submit(owner(8, 9), chunk, 2);
++    EXPECT_EQ(foreign.response.status, protocol::Status::Unauthorized);
++    EXPECT_EQ(state.activeUploadCount(), 1U);
++    EXPECT_EQ(state.objectCount(), 1U);
++    EXPECT_TRUE(state.submit(owner(), chunk, 3).accepted);
++}
++
++TEST(HostGPUCodeObjectState, OrderAndStaleGenerationAreProtocolState)
++{
++    HostGPUCodeObjectState state;
++    auto begin = state.submit(owner(), beginRequest(), 1);
++    ASSERT_TRUE(begin.accepted);
++    auto chunk = chunkRequest(begin.response.objectId,
++                              begin.response.generation);
++    chunk.chunkIndex = 1;
++    EXPECT_EQ(state.submit(owner(), chunk, 2).response.status,
++              protocol::Status::ProtocolState);
++    EXPECT_EQ(state.activeUploadCount(), 0U);
++
++    begin = state.submit(owner(), beginRequest(), 3);
++    ASSERT_TRUE(begin.accepted);
++    chunk = chunkRequest(begin.response.objectId,
++                         begin.response.generation + 1);
++    EXPECT_EQ(state.submit(owner(), chunk, 4).response.status,
++              protocol::Status::ProtocolState);
++    EXPECT_EQ(state.activeUploadCount(), 0U);
++}
++
++TEST(HostGPUCodeObjectState, InvalidSecondBeginAbortsMutableUpload)
++{
++    HostGPUCodeObjectState state;
++    ASSERT_TRUE(state.submit(owner(), beginRequest(), 1).accepted);
++    auto malformed = beginRequest();
++    malformed.manifest.segmentCount = 0;
++    EXPECT_EQ(state.submit(owner(), malformed, 2).response.status,
++              protocol::Status::Malformed);
++    EXPECT_EQ(state.activeUploadCount(), 0U);
++
++    ASSERT_TRUE(state.submit(owner(), beginRequest(), 3).accepted);
++    auto unsupported = beginRequest();
++    unsupported.manifest.elfAbiVersion = 9;
++    EXPECT_EQ(state.submit(owner(), unsupported, 4).response.status,
++              protocol::Status::UnsupportedVersion);
++    EXPECT_EQ(state.activeUploadCount(), 0U);
++
++    ASSERT_TRUE(state.submit(owner(), beginRequest(), 5).accepted);
++    auto topology = beginRequest();
++    topology.manifest.gfxTarget = 951;
++    EXPECT_EQ(state.submit(owner(), topology, 6).response.status,
++              protocol::Status::TopologyMismatch);
++    EXPECT_EQ(state.activeUploadCount(), 0U);
++}
++
++TEST(HostGPUCodeObjectState, ValidSecondBeginIsCanonicalBusy)
++{
++    HostGPUCodeObjectState state;
++    const auto begin = state.submit(owner(), beginRequest(), 1);
++    ASSERT_TRUE(begin.accepted);
++    const auto busy = state.submit(owner(), beginRequest(), 2);
++    EXPECT_FALSE(busy.accepted);
++    EXPECT_EQ(busy.response.status, protocol::Status::Busy);
++    EXPECT_EQ(busy.response.errorCode,
++              static_cast<uint32_t>(protocol::Status::Busy));
++    EXPECT_EQ(busy.response.objectId, 0U);
++    EXPECT_EQ(busy.response.generation, 0U);
++    EXPECT_EQ(state.activeUploadCount(), 1U);
++    EXPECT_EQ(state.objectCount(), 1U);
++    EXPECT_TRUE(state.submit(
++        owner(), chunkRequest(begin.response.objectId,
++                              begin.response.generation), 3).accepted);
++}
++
++TEST(HostGPUCodeObjectState, DigestMismatchDoesNotCommit)
++{
++    HostGPUCodeObjectState state;
++    const auto begin = state.submit(owner(), beginRequest(), 1);
++    ASSERT_TRUE(begin.accepted);
++    auto chunk = chunkRequest(begin.response.objectId, begin.response.generation);
++    ASSERT_TRUE(state.submit(owner(), chunk, 2).accepted);
++    auto commit = commitRequest(begin.response.objectId,
++                                begin.response.generation);
++    commit.commitSha256[0] ^= 1;
++    EXPECT_EQ(state.submit(owner(), commit, 3).response.status,
++              protocol::Status::ProtocolState);
++    EXPECT_EQ(state.committedCount(), 0U);
++}
++
++TEST(HostGPUCodeObjectState, MalformedChunkAbortsUpload)
++{
++    HostGPUCodeObjectState state;
++    const auto begin = state.submit(owner(), beginRequest(), 1);
++    ASSERT_TRUE(begin.accepted);
++    auto chunk = chunkRequest(begin.response.objectId,
++                              begin.response.generation);
++    chunk.chunkData[0] ^= 1;
++    EXPECT_EQ(state.submit(owner(), chunk, 2).response.status,
++              protocol::Status::ProtocolState);
++    EXPECT_EQ(state.activeUploadCount(), 0U);
++    EXPECT_EQ(state.objectCount(), 0U);
++}
++
++TEST(HostGPUCodeObjectState, DescriptorMismatchAbortsCommit)
++{
++    HostGPUCodeObjectState state;
++    auto beginRequestWithWrongDescriptor = beginRequest();
++    beginRequestWithWrongDescriptor.manifest.descriptor[0] ^= 1;
++    const auto begin = state.submit(owner(), beginRequestWithWrongDescriptor, 1);
++    ASSERT_TRUE(begin.accepted);
++    auto chunk = chunkRequest(begin.response.objectId,
++                              begin.response.generation);
++    ASSERT_TRUE(state.submit(owner(), chunk, 2).accepted);
++    const auto commit = state.submit(
++        owner(), commitRequest(begin.response.objectId,
++                               begin.response.generation), 3);
++    EXPECT_EQ(commit.response.status, protocol::Status::ProtocolState);
++    EXPECT_EQ(state.activeUploadCount(), 0U);
++    EXPECT_EQ(state.committedCount(), 0U);
++}
++
++TEST(HostGPUCodeObjectState, GfxTargetMismatchIsNotAnAcceptedBegin)
++{
++    HostGPUCodeObjectState state;
++    auto request = beginRequest();
++    request.manifest.gfxTarget = 951;
++    const auto result = state.submit(owner(), request, 1);
++    EXPECT_FALSE(result.accepted);
++    EXPECT_FALSE(result.committed);
++    EXPECT_EQ(result.response.status, protocol::Status::TopologyMismatch);
++    EXPECT_EQ(result.response.objectId, 0U);
++    EXPECT_EQ(result.response.generation, 0U);
++    EXPECT_EQ(state.objectCount(), 0U);
++}
++
++} // anonymous namespace
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_connection_state.hh b/src/dev/amdgpu/host_gpu_connection_state.hh
+index 465597075..4b5480306 100644
+--- a/src/dev/amdgpu/host_gpu_connection_state.hh
++++ b/src/dev/amdgpu/host_gpu_connection_state.hh
+@@ -219,6 +219,25 @@ queueRequestStatus(protocol::Status decodedStatus,
+     return decodedStatus;
+ }
+ 
++inline protocol::Status
++codeObjectRequestStatus(protocol::Status decodedStatus,
++                        protocol::Status sessionStatus)
++{
++    if (decodedStatus == protocol::Status::Malformed ||
++        decodedStatus == protocol::Status::UnsupportedVersion) {
++        return decodedStatus;
++    }
++    if (sessionStatus == protocol::Status::InstanceMismatch ||
++        sessionStatus == protocol::Status::ProtocolState) {
++        return sessionStatus;
++    }
++    if (decodedStatus == protocol::Status::TopologyMismatch)
++        return decodedStatus;
++    if (sessionStatus != protocol::Status::Ok)
++        return sessionStatus;
++    return decodedStatus;
++}
++
+ inline bool
+ terminalClientPollEvent(int revents)
+ {
+diff --git a/src/dev/amdgpu/host_gpu_protocol.cc b/src/dev/amdgpu/host_gpu_protocol.cc
+index 5702e4654..5b98490bc 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.cc
++++ b/src/dev/amdgpu/host_gpu_protocol.cc
+@@ -100,6 +100,87 @@ validKmtOperation(uint16_t raw)
+         raw <= static_cast<uint16_t>(KmtOperation::ModelDrmCall);
+ }
+ 
++bool
++validCodeObjectOpcode(uint16_t raw)
++{
++    return raw >= static_cast<uint16_t>(CodeObjectOpcode::Begin) &&
++        raw <= static_cast<uint16_t>(CodeObjectOpcode::Commit);
++}
++
++bool
++powerOfTwoOrZero(uint64_t value)
++{
++    return value == 0 || (value & (value - 1)) == 0;
++}
++
++bool
++rangeEnd(uint64_t start, uint64_t length, uint64_t &end)
++{
++    if (length > std::numeric_limits<uint64_t>::max() - start)
++        return false;
++    end = start + length;
++    return true;
++}
++
++bool
++rangeWithin(uint64_t start, uint64_t length, uint64_t containerStart,
++            uint64_t containerLength)
++{
++    uint64_t end = 0;
++    uint64_t containerEnd = 0;
++    return start >= containerStart && rangeEnd(start, length, end) &&
++        rangeEnd(containerStart, containerLength, containerEnd) &&
++        end <= containerEnd;
++}
++
++bool
++rangesOverlap(uint64_t leftStart, uint64_t leftLength,
++              uint64_t rightStart, uint64_t rightLength)
++{
++    uint64_t leftEnd = 0;
++    uint64_t rightEnd = 0;
++    if (!rangeEnd(leftStart, leftLength, leftEnd) ||
++        !rangeEnd(rightStart, rightLength, rightEnd)) {
++        return true;
++    }
++    return leftStart < rightEnd && rightStart < leftEnd;
++}
++
++template <size_t N>
++bool
++codeObjectNulPaddedAscii(const std::array<uint8_t, N> &text)
++{
++    const auto nul = std::find(text.begin(), text.end(), uint8_t(0));
++    if (nul == text.begin() || nul == text.end())
++        return false;
++    if (!std::all_of(text.begin(), nul,
++                     [](uint8_t byte) { return byte < 0x80; })) {
++        return false;
++    }
++    return std::all_of(nul + 1, text.end(),
++                       [](uint8_t byte) { return byte == 0; });
++}
++
++bool
++signedEntryRelationValid(const CodeObjectManifest &manifest)
++{
++    const int64_t offset = manifest.kernelCodeEntryByteOffset;
++    if (offset >= 0) {
++        const uint64_t positive = static_cast<uint64_t>(offset);
++        return manifest.descriptorVirtualAddress <=
++                std::numeric_limits<uint64_t>::max() - positive &&
++            manifest.descriptorVirtualAddress + positive ==
++                manifest.codeVirtualAddress;
++    }
++
++    /* -(INT64_MIN) is not representable; this form computes its magnitude
++     * without signed overflow. */
++    const uint64_t magnitude = static_cast<uint64_t>(-(offset + 1)) + 1;
++    return magnitude <= manifest.descriptorVirtualAddress &&
++        manifest.descriptorVirtualAddress - magnitude ==
++            manifest.codeVirtualAddress;
++}
++
+ uint16_t
+ load16(const uint8_t *data)
+ {
+@@ -469,6 +550,123 @@ kmtOperationCapability()
+     return capabilities;
+ }
+ 
++Capabilities
++codeObjectTransferCapability()
++{
++    Capabilities capabilities = {};
++    capabilities[CodeObjectTransferCapabilityByte] =
++        CodeObjectTransferCapabilityMask;
++    return capabilities;
++}
++
++CodeObjectManifestValidation
++validateCodeObjectManifest(const CodeObjectManifest &manifest)
++{
++    if (manifest.imageSize == 0 ||
++        manifest.imageSize > CodeObjectMaximumImageBytes ||
++        manifest.chunkDataBytes != CodeObjectChunkDataBytes ||
++        manifest.segmentCount == 0 ||
++        manifest.segmentCount > CodeObjectMaximumSegments ||
++        manifest.chunkCount == 0 || !codeObjectNulPaddedAscii(manifest.kernelName) ||
++        !codeObjectNulPaddedAscii(manifest.descriptorSymbol) ||
++        std::all_of(manifest.imageSha256.begin(), manifest.imageSha256.end(),
++                    [](uint8_t byte) { return byte == 0; }) ||
++        manifest.elfMachine != 224 || manifest.elfType != 3 ||
++        manifest.elfOsabi != 64 || manifest.elfReserved != 0 ||
++        (manifest.elfFlags & 0xffU) != 0x4fU ||
++        manifest.relocationCount != 0 || manifest.kernargSegmentSize == 0 ||
++        manifest.kernargSegmentAlign == 0 ||
++        (manifest.kernargSegmentAlign &
++         (manifest.kernargSegmentAlign - 1U)) != 0 ||
++        manifest.maxFlatWorkgroupSize == 0 || manifest.wavefrontSize != 64 ||
++        manifest.usesDynamicStack != 0 ||
++        manifest.descriptorSize != CodeObjectDescriptorBytes ||
++        (manifest.descriptorVirtualAddress & 63U) != 0 ||
++        manifest.codeSize == 0 || !signedEntryRelationValid(manifest)) {
++        return CodeObjectManifestValidation::Malformed;
++    }
++
++    const uint64_t expectedChunks =
++        (manifest.imageSize + CodeObjectChunkDataBytes - 1) /
++        CodeObjectChunkDataBytes;
++    if (expectedChunks > std::numeric_limits<uint32_t>::max() ||
++        manifest.chunkCount != expectedChunks) {
++        return CodeObjectManifestValidation::Malformed;
++    }
++
++    bool executableCodeRange = false;
++    bool readOnlyDescriptorRange = false;
++    for (size_t index = 0; index < CodeObjectMaximumSegments; ++index) {
++        const auto &segment = manifest.segments[index];
++        if (index >= manifest.segmentCount) {
++            if (segment.type != 0 || segment.flags != 0 ||
++                segment.fileOffset != 0 || segment.virtualAddress != 0 ||
++                segment.fileSize != 0 || segment.memorySize != 0 ||
++                segment.alignment != 0) {
++                return CodeObjectManifestValidation::Malformed;
++            }
++            continue;
++        }
++
++        if (segment.type != 1 || segment.memorySize < segment.fileSize ||
++            !powerOfTwoOrZero(segment.alignment) ||
++            (segment.flags != 4 && segment.flags != 5 && segment.flags != 6) ||
++            !rangeWithin(segment.fileOffset, segment.fileSize, 0,
++                         manifest.imageSize)) {
++            return CodeObjectManifestValidation::Malformed;
++        }
++
++        uint64_t ignoredVirtualEnd = 0;
++        if (!rangeEnd(segment.virtualAddress, segment.memorySize,
++                      ignoredVirtualEnd)) {
++            return CodeObjectManifestValidation::Malformed;
++        }
++
++        if (segment.flags == 5 &&
++            rangeWithin(manifest.codeFileOffset, manifest.codeSize,
++                        segment.fileOffset, segment.fileSize) &&
++            rangeWithin(manifest.codeVirtualAddress, manifest.codeSize,
++                        segment.virtualAddress, segment.memorySize)) {
++            executableCodeRange = true;
++        }
++        if (segment.flags == 4 &&
++            rangeWithin(manifest.descriptorFileOffset,
++                        CodeObjectDescriptorBytes, segment.fileOffset,
++                        segment.fileSize) &&
++            rangeWithin(manifest.descriptorVirtualAddress,
++                        CodeObjectDescriptorBytes, segment.virtualAddress,
++                        segment.memorySize)) {
++            readOnlyDescriptorRange = true;
++        }
++
++        for (size_t other = index + 1; other < manifest.segmentCount;
++             ++other) {
++            const auto &right = manifest.segments[other];
++            if (rangesOverlap(segment.fileOffset, segment.fileSize,
++                              right.fileOffset, right.fileSize) ||
++                rangesOverlap(segment.virtualAddress, segment.memorySize,
++                              right.virtualAddress, right.memorySize)) {
++                return CodeObjectManifestValidation::Malformed;
++            }
++        }
++    }
++
++    if (!executableCodeRange || !readOnlyDescriptorRange)
++        return CodeObjectManifestValidation::Malformed;
++
++    /* Version fields are reported separately only after all structural
++     * fields have passed malformed checks, preserving the wire precedence. */
++    if (manifest.elfAbiVersion < 2 || manifest.elfAbiVersion > 4 ||
++        manifest.codeObjectVersion < 4 || manifest.codeObjectVersion > 6 ||
++        manifest.metadataMajor != 1 ||
++        (manifest.metadataMinor != 1 && manifest.metadataMinor != 2)) {
++        return CodeObjectManifestValidation::UnsupportedVersion;
++    }
++    if (manifest.gfxTarget != 950)
++        return CodeObjectManifestValidation::TopologyMismatch;
++    return CodeObjectManifestValidation::Valid;
++}
++
+ bool
+ capabilitySubset(const Capabilities &subset, const Capabilities &superset)
+ {
+@@ -616,6 +814,11 @@ negotiate(const Header &header, const Hello &hello,
+         result.selected[PinnedDispatchCapabilityByte] &=
+             ~PinnedDispatchCapabilityMask;
+     }
++    if ((hello.required[CodeObjectTransferCapabilityByte] &
++         CodeObjectTransferCapabilityMask) == 0) {
++        result.selected[CodeObjectTransferCapabilityByte] &=
++            ~CodeObjectTransferCapabilityMask;
++    }
+     if (hello.unknownCriticalTlv ||
+         !capabilitySubset(hello.required, result.selected) ||
+         (hello.offered[0] & 1) == 0 ||
+@@ -1187,6 +1390,190 @@ decodeKmtRequestRecord(const uint8_t *record, size_t size,
+     return acknowledge(Status::Ok, "valid KMT request");
+ }
+ 
++CodeObjectDecodeResult
++decodeCodeObjectRequestRecord(const uint8_t *record, size_t size,
++                              uint32_t configuredMaximum)
++{
++    Header header;
++    const uint8_t *payload = nullptr;
++    std::string reason;
++    if (!decodeEstablishedEnvelope(record, size, configuredMaximum, header,
++                                   payload, reason)) {
++        CodeObjectDecodeResult result;
++        result.reason = reason;
++        return result;
++    }
++    if (header.messageType != MessageType::CodeObjectRequest) {
++        CodeObjectDecodeResult result;
++        result.reason = "expected CODE_OBJECT_REQUEST";
++        return result;
++    }
++    if (size - HeaderBytes != CodeObjectPayloadBytes) {
++        CodeObjectDecodeResult result;
++        result.reason = "code-object payload length";
++        return result;
++    }
++
++    CodeObjectRequest request;
++    request.major = load16(payload);
++    request.minor = load16(payload + 2);
++    const uint16_t rawOpcode = load16(payload + 4);
++    request.opcode = static_cast<CodeObjectOpcode>(rawOpcode);
++    request.flags = load16(payload + 6);
++    request.objectId = load64(payload + 8);
++    request.generation = load64(payload + 16);
++    request.imageOffset = load64(payload + 24);
++    request.byteCount = load32(payload + 32);
++    request.chunkIndex = load32(payload + 36);
++    request.chunkCrc32c = load32(payload + 40);
++    request.reserved = load32(payload + 44);
++
++    auto acknowledge = [&](Status status, const std::string &why) {
++        CodeObjectDecodeResult result;
++        result.action = DecodeAction::Acknowledge;
++        result.closeConnection = false;
++        result.status = status;
++        result.reason = why;
++        result.header = header;
++        result.request = request;
++        return result;
++    };
++
++    if (!validCodeObjectOpcode(rawOpcode) || request.flags != 0 ||
++        request.reserved != 0) {
++        return acknowledge(Status::Malformed,
++                           "invalid code-object request prefix");
++    }
++
++    switch (request.opcode) {
++      case CodeObjectOpcode::Begin: {
++        request.manifest.imageSize = load64(payload + 48);
++        request.manifest.chunkDataBytes = load32(payload + 56);
++        request.manifest.chunkCount = load32(payload + 60);
++        request.manifest.segmentCount = load32(payload + 64);
++        request.manifest.kernelIndex = load32(payload + 68);
++        request.manifest.imageSha256 = loadBytes<Sha256Bytes>(payload + 72);
++        request.manifest.elfMachine = load16(payload + 104);
++        request.manifest.elfType = load16(payload + 106);
++        request.manifest.elfOsabi = payload[108];
++        request.manifest.elfAbiVersion = payload[109];
++        request.manifest.elfReserved = load16(payload + 110);
++        request.manifest.elfFlags = load32(payload + 112);
++        request.manifest.gfxTarget = load32(payload + 116);
++        request.manifest.codeObjectVersion = load32(payload + 120);
++        request.manifest.metadataMajor = load32(payload + 124);
++        request.manifest.metadataMinor = load32(payload + 128);
++        request.manifest.relocationCount = load32(payload + 132);
++        request.manifest.kernargSegmentSize = load32(payload + 136);
++        request.manifest.kernargSegmentAlign = load32(payload + 140);
++        request.manifest.groupSegmentFixedSize = load32(payload + 144);
++        request.manifest.privateSegmentFixedSize = load32(payload + 148);
++        request.manifest.maxFlatWorkgroupSize = load32(payload + 152);
++        request.manifest.wavefrontSize = load32(payload + 156);
++        request.manifest.sgprCount = load32(payload + 160);
++        request.manifest.vgprCount = load32(payload + 164);
++        request.manifest.usesDynamicStack = load32(payload + 168);
++        request.manifest.descriptorSize = load32(payload + 172);
++        request.manifest.kernelCodeEntryByteOffset =
++            loadSigned64(payload + 176);
++        request.manifest.codeVirtualAddress = load64(payload + 184);
++        request.manifest.codeFileOffset = load64(payload + 192);
++        request.manifest.codeSize = load64(payload + 200);
++        request.manifest.descriptorVirtualAddress = load64(payload + 208);
++        request.manifest.descriptorFileOffset = load64(payload + 216);
++        std::copy_n(payload + 224, CodeObjectNameBytes,
++                    request.manifest.kernelName.begin());
++        std::copy_n(payload + 352, CodeObjectNameBytes,
++                    request.manifest.descriptorSymbol.begin());
++        std::copy_n(payload + 480, CodeObjectDescriptorBytes,
++                    request.manifest.descriptor.begin());
++        for (size_t index = 0; index < CodeObjectMaximumSegments; ++index) {
++            const size_t offset = 544 + index * 48;
++            auto &segment = request.manifest.segments[index];
++            segment.type = load32(payload + offset);
++            segment.flags = load32(payload + offset + 4);
++            segment.fileOffset = load64(payload + offset + 8);
++            segment.virtualAddress = load64(payload + offset + 16);
++            segment.fileSize = load64(payload + offset + 24);
++            segment.memorySize = load64(payload + offset + 32);
++            segment.alignment = load64(payload + offset + 40);
++        }
++
++        const bool prefixZero = request.objectId == 0 &&
++            request.generation == 0 && request.imageOffset == 0 &&
++            request.byteCount == 0 && request.chunkIndex == 0 &&
++            request.chunkCrc32c == 0;
++        const bool manifestTailZero = std::all_of(
++            payload + 1312, payload + CodeObjectPayloadBytes,
++            [](uint8_t byte) { return byte == 0; });
++        if (!prefixZero || !manifestTailZero) {
++            return acknowledge(Status::Malformed,
++                               "invalid code-object BEGIN manifest");
++        }
++        const auto manifestStatus =
++            validateCodeObjectManifest(request.manifest);
++        if (manifestStatus != CodeObjectManifestValidation::Valid) {
++            return acknowledge(
++                manifestStatus == CodeObjectManifestValidation::UnsupportedVersion ?
++                    Status::UnsupportedVersion :
++                manifestStatus == CodeObjectManifestValidation::TopologyMismatch ?
++                    Status::TopologyMismatch : Status::Malformed,
++                "invalid code-object BEGIN manifest");
++        }
++        break;
++      }
++      case CodeObjectOpcode::Chunk: {
++        std::copy_n(payload + CodeObjectChunkDataOffset,
++                    CodeObjectChunkDataBytes, request.chunkData.begin());
++        const bool countInRange =
++            request.byteCount <= CodeObjectChunkDataBytes;
++        const bool trailingZero = countInRange &&
++            std::all_of(request.chunkData.begin() + request.byteCount,
++                        request.chunkData.end(),
++                        [](uint8_t byte) { return byte == 0; });
++        const bool rangeValid = request.imageOffset <=
++                CodeObjectMaximumImageBytes &&
++            request.byteCount > 0 &&
++            request.byteCount <= CodeObjectChunkDataBytes &&
++            request.imageOffset <= CodeObjectMaximumImageBytes -
++                request.byteCount;
++        const bool crcValid = rangeValid &&
++            crc32c(request.chunkData.data(), request.byteCount) ==
++                request.chunkCrc32c;
++        if (request.objectId == 0 || request.generation == 0 ||
++            !rangeValid || !trailingZero || !crcValid) {
++            return acknowledge(Status::Malformed,
++                               "invalid code-object CHUNK fields");
++        }
++        break;
++      }
++      case CodeObjectOpcode::Commit: {
++        request.commitSha256 = loadBytes<Sha256Bytes>(payload + 48);
++        const bool digestNonzero = !std::all_of(
++            request.commitSha256.begin(), request.commitSha256.end(),
++            [](uint8_t byte) { return byte == 0; });
++        const bool tailZero = std::all_of(
++            payload + 80, payload + CodeObjectPayloadBytes,
++            [](uint8_t byte) { return byte == 0; });
++        if (request.objectId == 0 || request.generation == 0 ||
++            request.imageOffset != 0 || request.byteCount == 0 ||
++            request.byteCount > CodeObjectMaximumImageBytes ||
++            request.chunkIndex == 0 || request.chunkCrc32c != 0 ||
++            !digestNonzero || !tailZero) {
++            return acknowledge(Status::Malformed,
++                               "invalid code-object COMMIT fields");
++        }
++        break;
++      }
++    }
++    if (request.major != CodeObjectTransferMajor ||
++        request.minor != CodeObjectTransferMinor) {
++        return acknowledge(Status::UnsupportedVersion,
++                           "unsupported code-object transfer version");
++    }
++    return acknowledge(Status::Ok, "valid code-object request");
++}
++
+ std::vector<uint8_t>
+ encodeAck(const Header &request, const Ack &ack,
+           const ServerIdentity &server, uint64_t connectionId)
+@@ -1320,6 +1707,86 @@ encodeKmtRequest(const Header &header, const KmtRequest &request)
+     return encodeFrame(encoded, payload);
+ }
+ 
++std::vector<uint8_t>
++encodeCodeObjectRequest(const Header &header, const CodeObjectRequest &request)
++{
++    std::vector<uint8_t> payload(CodeObjectPayloadBytes, 0);
++    store16(payload, 0, request.major);
++    store16(payload, 2, request.minor);
++    store16(payload, 4, static_cast<uint16_t>(request.opcode));
++    store16(payload, 6, request.flags);
++    store64(payload, 8, request.objectId);
++    store64(payload, 16, request.generation);
++    store64(payload, 24, request.imageOffset);
++    store32(payload, 32, request.byteCount);
++    store32(payload, 36, request.chunkIndex);
++    store32(payload, 40, request.chunkCrc32c);
++    store32(payload, 44, request.reserved);
++
++    if (request.opcode == CodeObjectOpcode::Begin) {
++        const auto &manifest = request.manifest;
++        store64(payload, 48, manifest.imageSize);
++        store32(payload, 56, manifest.chunkDataBytes);
++        store32(payload, 60, manifest.chunkCount);
++        store32(payload, 64, manifest.segmentCount);
++        store32(payload, 68, manifest.kernelIndex);
++        storeBytes(payload, 72, manifest.imageSha256);
++        store16(payload, 104, manifest.elfMachine);
++        store16(payload, 106, manifest.elfType);
++        payload[108] = manifest.elfOsabi;
++        payload[109] = manifest.elfAbiVersion;
++        store16(payload, 110, manifest.elfReserved);
++        store32(payload, 112, manifest.elfFlags);
++        store32(payload, 116, manifest.gfxTarget);
++        store32(payload, 120, manifest.codeObjectVersion);
++        store32(payload, 124, manifest.metadataMajor);
++        store32(payload, 128, manifest.metadataMinor);
++        store32(payload, 132, manifest.relocationCount);
++        store32(payload, 136, manifest.kernargSegmentSize);
++        store32(payload, 140, manifest.kernargSegmentAlign);
++        store32(payload, 144, manifest.groupSegmentFixedSize);
++        store32(payload, 148, manifest.privateSegmentFixedSize);
++        store32(payload, 152, manifest.maxFlatWorkgroupSize);
++        store32(payload, 156, manifest.wavefrontSize);
++        store32(payload, 160, manifest.sgprCount);
++        store32(payload, 164, manifest.vgprCount);
++        store32(payload, 168, manifest.usesDynamicStack);
++        store32(payload, 172, manifest.descriptorSize);
++        storeSigned64(payload, 176, manifest.kernelCodeEntryByteOffset);
++        store64(payload, 184, manifest.codeVirtualAddress);
++        store64(payload, 192, manifest.codeFileOffset);
++        store64(payload, 200, manifest.codeSize);
++        store64(payload, 208, manifest.descriptorVirtualAddress);
++        store64(payload, 216, manifest.descriptorFileOffset);
++        std::copy(manifest.kernelName.begin(), manifest.kernelName.end(),
++                  payload.begin() + 224);
++        std::copy(manifest.descriptorSymbol.begin(),
++                  manifest.descriptorSymbol.end(), payload.begin() + 352);
++        std::copy(manifest.descriptor.begin(), manifest.descriptor.end(),
++                  payload.begin() + 480);
++        for (size_t index = 0; index < CodeObjectMaximumSegments; ++index) {
++            const size_t offset = 544 + index * 48;
++            const auto &segment = manifest.segments[index];
++            store32(payload, offset, segment.type);
++            store32(payload, offset + 4, segment.flags);
++            store64(payload, offset + 8, segment.fileOffset);
++            store64(payload, offset + 16, segment.virtualAddress);
++            store64(payload, offset + 24, segment.fileSize);
++            store64(payload, offset + 32, segment.memorySize);
++            store64(payload, offset + 40, segment.alignment);
++        }
++    } else if (request.opcode == CodeObjectOpcode::Chunk) {
++        std::copy(request.chunkData.begin(), request.chunkData.end(),
++                  payload.begin() + CodeObjectChunkDataOffset);
++    } else if (request.opcode == CodeObjectOpcode::Commit) {
++        storeBytes(payload, 48, request.commitSha256);
++    }
++
++    Header encoded = header;
++    encoded.messageType = MessageType::CodeObjectRequest;
++    return encodeFrame(encoded, payload);
++}
++
+ Header
+ queueResponseHeader(const Header &request, const ServerIdentity &server,
+                     uint64_t connectionId)
+@@ -1537,6 +2004,40 @@ encodeKmtAck(const Header &request, const KmtResponse &response)
+     return encodeFrame(encoded, payload);
+ }
+ 
++std::vector<uint8_t>
++encodeCodeObjectAck(const Header &request, const CodeObjectResponse &response)
++{
++    std::vector<uint8_t> payload(CodeObjectPayloadBytes, 0);
++    const bool success = response.status == Status::Ok;
++    store16(payload, 0, CodeObjectTransferMajor);
++    store16(payload, 2, CodeObjectTransferMinor);
++    store32(payload, 4, static_cast<uint32_t>(response.status));
++    store16(payload, 8, static_cast<uint16_t>(response.opcode));
++    store16(payload, 10, 0);
++    store64(payload, 16, success ? response.objectId : 0);
++    store64(payload, 24, success ? response.generation : 0);
++    store64(payload, 32, success ? response.acceptedOffset : 0);
++    store32(payload, 40, success ? response.byteCount : 0);
++    store32(payload, 44, success ? response.chunkIndex : 0);
++    /* A1 deliberately leaves all GPU-VA fields zero, regardless of a caller's
++     * stale response object. */
++    store64(payload, 48, 0);
++    store64(payload, 56, 0);
++    store64(payload, 64, 0);
++    store64(payload, 72, 0);
++    store64(payload, 80, success ? response.imageBytes : 0);
++    store32(payload, 88, success ? response.kernelIndex : 0);
++    store32(payload, 92, success ? response.segmentCount : 0);
++    store64(payload, 96, response.simTick);
++    if (success)
++        storeBytes(payload, 104, response.imageSha256);
++    store32(payload, 136, success ? 0 : response.errorCode);
++    store32(payload, 140, 0);
++    Header encoded = request;
++    encoded.messageType = MessageType::CodeObjectAck;
++    return encodeFrame(encoded, payload);
++}
++
+ const char *
+ statusName(Status status)
+ {
+diff --git a/src/dev/amdgpu/host_gpu_protocol.hh b/src/dev/amdgpu/host_gpu_protocol.hh
+index fd4e4cdde..979027598 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.hh
++++ b/src/dev/amdgpu/host_gpu_protocol.hh
+@@ -54,6 +54,16 @@ constexpr size_t KmtCopiedBufferBytes = 128;
+ constexpr size_t KmtArgumentWordCount = 8;
+ constexpr size_t CapabilityBytes = 32;
+ constexpr size_t UuidBytes = 16;
++/* CODE_OBJECT_TRANSFER_V1 is intentionally separate from CP8 dispatch. */
++constexpr size_t CodeObjectPayloadBytes = 4016;
++constexpr size_t CodeObjectRecordBytes = HeaderBytes + CodeObjectPayloadBytes;
++constexpr size_t CodeObjectChunkDataOffset = 48;
++constexpr size_t CodeObjectChunkDataBytes =
++    CodeObjectPayloadBytes - CodeObjectChunkDataOffset;
++constexpr size_t CodeObjectNameBytes = 128;
++constexpr size_t CodeObjectDescriptorBytes = 64;
++constexpr size_t CodeObjectMaximumSegments = 16;
++constexpr uint32_t CodeObjectMaximumImageBytes = 64U << 20;
+ constexpr uint32_t MinimumRecordBytes = 4096;
+ constexpr uint32_t MaximumRecordBytes = 65536;
+ constexpr uint32_t MaximumHandshakeBytes = 4096;
+@@ -81,6 +91,10 @@ constexpr uint16_t KmtOperationMajor = 1;
+ constexpr uint16_t KmtOperationMinor = 0;
+ constexpr uint8_t KmtOperationCapabilityByte = 0;
+ constexpr uint8_t KmtOperationCapabilityMask = 0x20;
++constexpr uint16_t CodeObjectTransferMajor = 1;
++constexpr uint16_t CodeObjectTransferMinor = 0;
++constexpr uint8_t CodeObjectTransferCapabilityByte = 0;
++constexpr uint8_t CodeObjectTransferCapabilityMask = 0x80;
+ constexpr uint64_t PinnedDispatchFixtureId = 1;
+ constexpr size_t Sha256Bytes = 32;
+ 
+@@ -108,6 +122,8 @@ enum class MessageType : uint16_t
+     DispatchCompletion = 13,
+     KmtRequest = 14,
+     KmtAck = 15,
++    CodeObjectRequest = 16,
++    CodeObjectAck = 17,
+ };
+ 
+ enum class KmtOperation : uint16_t
+@@ -486,6 +502,130 @@ struct DispatchDecodeResult
+     DispatchRequest request;
+ };
+ 
++enum class CodeObjectOpcode : uint16_t
++{
++    Begin = 1,
++    Chunk = 2,
++    Commit = 3,
++};
++
++struct CodeObjectSegment
++{
++    uint32_t type = 0;
++    uint32_t flags = 0;
++    uint64_t fileOffset = 0;
++    uint64_t virtualAddress = 0;
++    uint64_t fileSize = 0;
++    uint64_t memorySize = 0;
++    uint64_t alignment = 0;
++};
++
++/** Fixed manifest prefix carried in a BEGIN code-object record. */
++struct CodeObjectManifest
++{
++    uint64_t imageSize = 0;
++    uint32_t chunkDataBytes = CodeObjectChunkDataBytes;
++    uint32_t chunkCount = 0;
++    uint32_t segmentCount = 0;
++    uint32_t kernelIndex = 0;
++    Sha256 imageSha256 = {};
++    uint16_t elfMachine = 0;
++    uint16_t elfType = 0;
++    uint8_t elfOsabi = 0;
++    uint8_t elfAbiVersion = 0;
++    uint16_t elfReserved = 0;
++    uint32_t elfFlags = 0;
++    uint32_t gfxTarget = 0;
++    uint32_t codeObjectVersion = 0;
++    uint32_t metadataMajor = 0;
++    uint32_t metadataMinor = 0;
++    uint32_t relocationCount = 0;
++    uint32_t kernargSegmentSize = 0;
++    uint32_t kernargSegmentAlign = 0;
++    uint32_t groupSegmentFixedSize = 0;
++    uint32_t privateSegmentFixedSize = 0;
++    uint32_t maxFlatWorkgroupSize = 0;
++    uint32_t wavefrontSize = 0;
++    uint32_t sgprCount = 0;
++    uint32_t vgprCount = 0;
++    uint32_t usesDynamicStack = 0;
++    uint32_t descriptorSize = CodeObjectDescriptorBytes;
++    int64_t kernelCodeEntryByteOffset = 0;
++    uint64_t codeVirtualAddress = 0;
++    uint64_t codeFileOffset = 0;
++    uint64_t codeSize = 0;
++    uint64_t descriptorVirtualAddress = 0;
++    uint64_t descriptorFileOffset = 0;
++    std::array<uint8_t, CodeObjectNameBytes> kernelName = {};
++    std::array<uint8_t, CodeObjectNameBytes> descriptorSymbol = {};
++    std::array<uint8_t, CodeObjectDescriptorBytes> descriptor = {};
++    std::array<CodeObjectSegment, CodeObjectMaximumSegments> segments = {};
++};
++
++/** BEGIN, CHUNK, and COMMIT share this fixed-width request envelope. */
++struct CodeObjectRequest
++{
++    uint16_t major = CodeObjectTransferMajor;
++    uint16_t minor = CodeObjectTransferMinor;
++    CodeObjectOpcode opcode = CodeObjectOpcode::Begin;
++    uint16_t flags = 0;
++    uint64_t objectId = 0;
++    uint64_t generation = 0;
++    uint64_t imageOffset = 0;
++    uint32_t byteCount = 0;
++    uint32_t chunkIndex = 0;
++    uint32_t chunkCrc32c = 0;
++    uint32_t reserved = 0;
++    CodeObjectManifest manifest;
++    std::array<uint8_t, CodeObjectChunkDataBytes> chunkData = {};
++    Sha256 commitSha256 = {};
++};
++
++/** ACK for every code-object phase; A1 never assigns GPU virtual addresses. */
++struct CodeObjectResponse
++{
++    uint16_t major = CodeObjectTransferMajor;
++    uint16_t minor = CodeObjectTransferMinor;
++    Status status = Status::Internal;
++    CodeObjectOpcode opcode = CodeObjectOpcode::Begin;
++    uint16_t flags = 0;
++    uint64_t objectId = 0;
++    uint64_t generation = 0;
++    uint64_t acceptedOffset = 0;
++    uint32_t byteCount = 0;
++    uint32_t chunkIndex = 0;
++    uint64_t mappedGpuVa = 0;
++    uint64_t descriptorGpuVa = 0;
++    uint64_t codeGpuVa = 0;
++    uint64_t kernargGpuVa = 0;
++    uint64_t imageBytes = 0;
++    uint32_t kernelIndex = 0;
++    uint32_t segmentCount = 0;
++    uint64_t simTick = 0;
++    Sha256 imageSha256 = {};
++    uint32_t errorCode = 0;
++    uint32_t reserved = 0;
++};
++
++struct CodeObjectDecodeResult
++{
++    DecodeAction action = DecodeAction::Drop;
++    bool closeConnection = true;
++    Status status = Status::Malformed;
++    std::string reason;
++    Header header;
++    CodeObjectRequest request;
++};
++
++/** Structural BEGIN-manifest validation result used by the A1 state machine. */
++enum class CodeObjectManifestValidation
++{
++    Valid,
++    Malformed,
++    UnsupportedVersion,
++    TopologyMismatch,
++};
++
+ /** Fixed-width KFD/DRM operation request; no host pointer or FD appears. */
+ struct KmtRequest
+ {
+@@ -548,8 +688,11 @@ Capabilities memoryControlCapability();
+ Capabilities signalEventCapability();
+ Capabilities pinnedDispatchCapability();
+ Capabilities kmtOperationCapability();
++Capabilities codeObjectTransferCapability();
+ bool capabilitySubset(const Capabilities &subset,
+                       const Capabilities &superset);
++CodeObjectManifestValidation validateCodeObjectManifest(
++    const CodeObjectManifest &manifest);
+ 
+ uint32_t crc32c(const uint8_t *data, size_t size);
+ 
+@@ -565,6 +708,8 @@ DispatchDecodeResult decodeDispatchRequestRecord(
+     const uint8_t *record, size_t size, uint32_t configuredMaximum);
+ KmtDecodeResult decodeKmtRequestRecord(
+     const uint8_t *record, size_t size, uint32_t configuredMaximum);
++CodeObjectDecodeResult decodeCodeObjectRequestRecord(
++    const uint8_t *record, size_t size, uint32_t configuredMaximum);
+ NegotiationResult negotiate(const Header &header, const Hello &hello,
+                             const ServerIdentity &server,
+                             const NegotiationContext &context = {});
+@@ -605,6 +750,10 @@ std::vector<uint8_t> encodeKmtRequest(
+     const Header &header, const KmtRequest &request);
+ std::vector<uint8_t> encodeKmtAck(
+     const Header &request, const KmtResponse &response);
++std::vector<uint8_t> encodeCodeObjectRequest(
++    const Header &header, const CodeObjectRequest &request);
++std::vector<uint8_t> encodeCodeObjectAck(
++    const Header &request, const CodeObjectResponse &response);
+ 
+ const char *statusName(Status status);
+ 
+diff --git a/src/dev/amdgpu/host_gpu_protocol.test.cc b/src/dev/amdgpu/host_gpu_protocol.test.cc
+index 06457d374..197aea890 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.test.cc
++++ b/src/dev/amdgpu/host_gpu_protocol.test.cc
+@@ -1775,6 +1775,237 @@ TEST(HostGpuProtocol, KmtAckPublishesOnlySuccessfulProviderOutput)
+     EXPECT_EQ(load32(payload + 104), 0U);
+ }
+ 
++CodeObjectManifest
++goldenCodeObjectManifest()
++{
++    CodeObjectManifest manifest;
++    manifest.imageSize = 128;
++    manifest.chunkDataBytes = CodeObjectChunkDataBytes;
++    manifest.chunkCount = 1;
++    manifest.segmentCount = 2;
++    manifest.imageSha256[0] = 0x42;
++    manifest.elfMachine = 224;
++    manifest.elfType = 3;
++    manifest.elfOsabi = 64;
++    manifest.elfAbiVersion = 3;
++    manifest.elfFlags = 0x4f;
++    manifest.gfxTarget = 950;
++    manifest.codeObjectVersion = 5;
++    manifest.metadataMajor = 1;
++    manifest.metadataMinor = 2;
++    manifest.kernargSegmentSize = 8;
++    manifest.kernargSegmentAlign = 8;
++    manifest.maxFlatWorkgroupSize = 64;
++    manifest.wavefrontSize = 64;
++    manifest.kernelCodeEntryByteOffset = 0x40;
++    manifest.codeVirtualAddress = 0x80;
++    manifest.codeFileOffset = 64;
++    manifest.codeSize = 64;
++    manifest.descriptorVirtualAddress = 0x40;
++    manifest.descriptorFileOffset = 0;
++    std::copy_n(reinterpret_cast<const uint8_t *>("vecadd"), 6,
++                manifest.kernelName.begin());
++    std::copy_n(reinterpret_cast<const uint8_t *>("vecadd.kd"), 9,
++                manifest.descriptorSymbol.begin());
++    manifest.segments[0].type = 1;
++    manifest.segments[0].flags = 4;
++    manifest.segments[0].fileOffset = 0;
++    manifest.segments[0].virtualAddress = 0x40;
++    manifest.segments[0].fileSize = 64;
++    manifest.segments[0].memorySize = 64;
++    manifest.segments[0].alignment = 64;
++    manifest.segments[1].type = 1;
++    manifest.segments[1].flags = 5;
++    manifest.segments[1].fileOffset = 64;
++    manifest.segments[1].virtualAddress = 0x80;
++    manifest.segments[1].fileSize = 64;
++    manifest.segments[1].memorySize = 64;
++    manifest.segments[1].alignment = 64;
++    return manifest;
++}
++
++TEST(HostGpuProtocol, CodeObjectCapabilityUsesBitSevenOnly)
++{
++    const auto capability = codeObjectTransferCapability();
++    EXPECT_EQ(capability[CodeObjectTransferCapabilityByte],
++              CodeObjectTransferCapabilityMask);
++    for (size_t index = 1; index < capability.size(); ++index)
++        EXPECT_EQ(capability[index], 0U);
++
++    auto server = goldenServer();
++    server.supported[0] |= CodeObjectTransferCapabilityMask;
++    auto hello = goldenHello();
++    hello.offered[0] |= CodeObjectTransferCapabilityMask;
++    auto negotiated = negotiate(goldenHeader(), hello, server);
++    ASSERT_EQ(negotiated.status, Status::Ok);
++    EXPECT_EQ(negotiated.selected[0] & CodeObjectTransferCapabilityMask, 0U);
++    hello.required[0] |= CodeObjectTransferCapabilityMask;
++    negotiated = negotiate(goldenHeader(), hello, server);
++    ASSERT_EQ(negotiated.status, Status::Ok);
++    EXPECT_EQ(negotiated.selected[0] & CodeObjectTransferCapabilityMask,
++              CodeObjectTransferCapabilityMask);
++}
++
++TEST(HostGpuProtocol, CodeObjectManifestValidationCoversRangesAndVersions)
++{
++    const auto valid = goldenCodeObjectManifest();
++    EXPECT_EQ(validateCodeObjectManifest(valid),
++              CodeObjectManifestValidation::Valid);
++
++    auto malformed = valid;
++    malformed.segments[1].flags = 7;
++    EXPECT_EQ(validateCodeObjectManifest(malformed),
++              CodeObjectManifestValidation::Malformed);
++
++    malformed = valid;
++    malformed.segments[1].alignment = 3;
++    EXPECT_EQ(validateCodeObjectManifest(malformed),
++              CodeObjectManifestValidation::Malformed);
++
++    malformed = valid;
++    malformed.segments[1].fileOffset = 32;
++    EXPECT_EQ(validateCodeObjectManifest(malformed),
++              CodeObjectManifestValidation::Malformed);
++
++    malformed = valid;
++    malformed.descriptorVirtualAddress = 0x41;
++    malformed.kernelCodeEntryByteOffset = 0x3f;
++    EXPECT_EQ(validateCodeObjectManifest(malformed),
++              CodeObjectManifestValidation::Malformed);
++
++    auto unsupported = valid;
++    unsupported.elfAbiVersion = 9;
++    EXPECT_EQ(validateCodeObjectManifest(unsupported),
++              CodeObjectManifestValidation::UnsupportedVersion);
++
++    auto topology = valid;
++    topology.gfxTarget = 951;
++    EXPECT_EQ(validateCodeObjectManifest(topology),
++              CodeObjectManifestValidation::TopologyMismatch);
++
++    auto topologyWithUnsupportedVersion = topology;
++    topologyWithUnsupportedVersion.elfAbiVersion = 9;
++    EXPECT_EQ(validateCodeObjectManifest(topologyWithUnsupportedVersion),
++              CodeObjectManifestValidation::UnsupportedVersion);
++}
++
++TEST(HostGpuProtocol, CodeObjectRecordsAreFixedAndRoundTrip)
++{
++    CodeObjectRequest begin;
++    begin.opcode = CodeObjectOpcode::Begin;
++    begin.manifest = goldenCodeObjectManifest();
++    const auto header = goldenMemoryHeader(90);
++    auto frame = encodeCodeObjectRequest(header, begin);
++    ASSERT_EQ(frame.size(), CodeObjectRecordBytes);
++    auto decoded = decodeCodeObjectRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    ASSERT_EQ(decoded.action, DecodeAction::Acknowledge);
++    ASSERT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(decoded.header.messageType, MessageType::CodeObjectRequest);
++    EXPECT_EQ(decoded.request.manifest.imageSize, 128U);
++    EXPECT_EQ(decoded.request.manifest.segmentCount, 2U);
++    EXPECT_EQ(decoded.request.manifest.segments[0].alignment, 64U);
++
++    CodeObjectRequest chunk;
++    chunk.opcode = CodeObjectOpcode::Chunk;
++    chunk.objectId = 1;
++    chunk.generation = 2;
++    chunk.byteCount = 3;
++    chunk.chunkData[0] = 'a';
++    chunk.chunkData[1] = 'b';
++    chunk.chunkData[2] = 'c';
++    chunk.chunkCrc32c = crc32c(chunk.chunkData.data(), chunk.byteCount);
++    frame = encodeCodeObjectRequest(goldenMemoryHeader(91), chunk);
++    ASSERT_EQ(frame.size(), CodeObjectRecordBytes);
++    decoded = decodeCodeObjectRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    ASSERT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(decoded.request.chunkData[2], 'c');
++
++    CodeObjectRequest commit;
++    commit.opcode = CodeObjectOpcode::Commit;
++    commit.objectId = 1;
++    commit.generation = 2;
++    commit.byteCount = 128;
++    commit.chunkIndex = 1;
++    commit.commitSha256[0] = 0x42;
++    frame = encodeCodeObjectRequest(goldenMemoryHeader(92), commit);
++    ASSERT_EQ(frame.size(), CodeObjectRecordBytes);
++    decoded = decodeCodeObjectRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    EXPECT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(decoded.request.commitSha256[0], 0x42);
++
++    commit.imageOffset = 1;
++    frame = encodeCodeObjectRequest(goldenMemoryHeader(95), commit);
++    decoded = decodeCodeObjectRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    EXPECT_EQ(decoded.status, Status::Malformed);
++
++    auto topology = begin;
++    topology.manifest.gfxTarget = 951;
++    frame = encodeCodeObjectRequest(goldenMemoryHeader(96), topology);
++    decoded = decodeCodeObjectRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    EXPECT_EQ(decoded.status, Status::TopologyMismatch);
++}
++
++TEST(HostGpuProtocol, CodeObjectChunkPaddingAndAckAddressesAreStrict)
++{
++    CodeObjectRequest chunk;
++    chunk.opcode = CodeObjectOpcode::Chunk;
++    chunk.objectId = 1;
++    chunk.generation = 2;
++    chunk.byteCount = 1;
++    chunk.chunkData[0] = 0xa5;
++    chunk.chunkCrc32c = crc32c(chunk.chunkData.data(), chunk.byteCount);
++    auto frame = encodeCodeObjectRequest(goldenMemoryHeader(93), chunk);
++    frame[HeaderBytes + CodeObjectChunkDataOffset + 1] = 1;
++    recomputeCrc(frame);
++    const auto decoded = decodeCodeObjectRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    EXPECT_EQ(decoded.action, DecodeAction::Acknowledge);
++    EXPECT_EQ(decoded.status, Status::Malformed);
++
++    CodeObjectResponse response;
++    response.status = Status::Ok;
++    response.opcode = CodeObjectOpcode::Chunk;
++    response.objectId = 1;
++    response.generation = 2;
++    response.acceptedOffset = 3;
++    response.byteCount = 1;
++    response.chunkIndex = 7;
++    response.imageBytes = 128;
++    response.mappedGpuVa = response.descriptorGpuVa =
++        response.codeGpuVa = response.kernargGpuVa = 0xdeadbeef;
++    frame = encodeCodeObjectAck(goldenMemoryHeader(94), response);
++    ASSERT_EQ(frame.size(), CodeObjectRecordBytes);
++    const uint8_t *payload = frame.data() + HeaderBytes;
++    EXPECT_EQ(load64(payload + 32), 3U);
++    EXPECT_EQ(load32(payload + 40), 1U);
++    EXPECT_EQ(load32(payload + 44), 7U);
++    EXPECT_EQ(load64(payload + 48), 0U);
++    EXPECT_EQ(load64(payload + 56), 0U);
++    EXPECT_EQ(load64(payload + 64), 0U);
++    EXPECT_EQ(load64(payload + 72), 0U);
++    EXPECT_TRUE(std::all_of(payload + 141, payload + CodeObjectPayloadBytes,
++                            [](uint8_t byte) { return byte == 0; }));
++
++    response.status = Status::Malformed;
++    response.simTick = 99;
++    response.imageSha256.fill(0xa5);
++    response.errorCode = static_cast<uint32_t>(Status::Malformed);
++    frame = encodeCodeObjectAck(goldenMemoryHeader(97), response);
++    payload = frame.data() + HeaderBytes;
++    EXPECT_TRUE(std::all_of(payload + 16, payload + 96,
++                            [](uint8_t byte) { return byte == 0; }));
++    EXPECT_EQ(load64(payload + 96), 99U);
++    EXPECT_TRUE(std::all_of(payload + 104, payload + 136,
++                            [](uint8_t byte) { return byte == 0; }));
++    EXPECT_EQ(load32(payload + 136),
++              static_cast<uint32_t>(Status::Malformed));
++}
++
+ } // anonymous namespace
+ } // namespace protocol
+ } // namespace hostgpu
+diff --git a/src/dev/amdgpu/host_gpu_socket_utils.test.cc b/src/dev/amdgpu/host_gpu_socket_utils.test.cc
+index 8b59c46a0..1c4196dd2 100644
+--- a/src/dev/amdgpu/host_gpu_socket_utils.test.cc
++++ b/src/dev/amdgpu/host_gpu_socket_utils.test.cc
+@@ -807,6 +807,26 @@ TEST(HostGPUConnectionState, QueueMalformedPrecedesSessionErrors)
+     EXPECT_EQ(tracker.last(), 7U);
+ }
+ 
++TEST(HostGPUConnectionState, CodeObjectTopologyPrecedenceIsSpecific)
++{
++    EXPECT_EQ(codeObjectRequestStatus(
++                  protocol::Status::TopologyMismatch,
++                  protocol::Status::InstanceMismatch),
++              protocol::Status::InstanceMismatch);
++    EXPECT_EQ(codeObjectRequestStatus(
++                  protocol::Status::TopologyMismatch,
++                  protocol::Status::ProtocolState),
++              protocol::Status::ProtocolState);
++    EXPECT_EQ(codeObjectRequestStatus(
++                  protocol::Status::TopologyMismatch,
++                  protocol::Status::UnsupportedCapability),
++              protocol::Status::TopologyMismatch);
++    EXPECT_EQ(codeObjectRequestStatus(
++                  protocol::Status::Ok,
++                  protocol::Status::UnsupportedCapability),
++              protocol::Status::UnsupportedCapability);
++}
++
+ TEST(HostGPUConnectionState, TerminalPollEventsNeverWaitForOutboundDrain)
+ {
+     EXPECT_FALSE(terminalClientPollEvent(0));
+-- 
+2.53.0
+

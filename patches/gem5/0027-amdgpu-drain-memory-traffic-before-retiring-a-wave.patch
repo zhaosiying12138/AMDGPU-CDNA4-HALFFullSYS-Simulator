@@ -1,0 +1,246 @@
+From 000945a49704957991cc3ac8ef2bc02eb6229e8e Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 17 Aug 2026 01:58:39 +0800
+Subject: [PATCH 27/42] amdgpu: drain memory traffic before retiring a wave
+
+The implicit S_WAITCNT 0 ahead of S_ENDPGM only inspected the issued-instruction
+wait counters, which can reach zero while a response is still inside a return
+pipeline. Retiring released the wave's register region, so a later local-memory
+completion wrote back through a zero-length region and surfaced as a bogus
+"VGPR index out of range" panic several dispatches away from its cause.
+
+Require the wave's outstanding request count to have drained as well, and add a
+completion-time check in the local-memory pipeline so a completion that outlives
+its wave names the responsible wave, kernel, and instruction instead of failing
+later in register mapping.
+
+Also skip decoding buffered fetch bytes for a wave that no longer holds an
+execution context, and expose the existing periodic wave/pipeline progress
+report through the host-dispatch config for stall diagnosis.
+
+This is a partial repair: the same workload now advances past the former
+boundary but reaches a separate LGKM accounting stall where waves wait on
+s_waitcnt lgkmcnt with an empty local-memory pipeline. That imbalance is the
+next investigation and is not claimed as fixed here.
+
+Checkpoint-ID: CP-0032
+Goal-ID: GSIM-001
+Plan-Revision: 15
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 458368899b9122d48baf6268c84e035737cdb2e36776c5b374a26b176ed5df69
+Change-Kind: code
+Baseline-Commit: cd1efd9ce0f76a26e4b6c8bd0e0f7dd60ba1a03c
+---
+ configs/example/gemsim/host_dispatch.py       |  5 +++
+ src/gpu-compute/compute_unit.cc               | 35 ++++++++++++++++---
+ src/gpu-compute/fetch_unit.cc                 | 24 ++++++++++++-
+ src/gpu-compute/fetch_unit.hh                 |  8 +++++
+ src/gpu-compute/local_memory_pipeline.cc      | 15 ++++++++
+ src/gpu-compute/scoreboard_check_stage.cc     |  9 ++++-
+ .../static_register_manager_policy.cc         | 10 ++++--
+ 7 files changed, 98 insertions(+), 8 deletions(-)
+
+diff --git a/configs/example/gemsim/host_dispatch.py b/configs/example/gemsim/host_dispatch.py
+index d6b9be994..3ce17796f 100644
+--- a/configs/example/gemsim/host_dispatch.py
++++ b/configs/example/gemsim/host_dispatch.py
+@@ -174,6 +174,11 @@ def create_system(args):
+     # Match the advertised gfx950 topology: four SIMDs with eight resident
+     # wave slots each form the 32 physical scratch slots in a CU.
+     shader = Shader(n_wf=8, cu_per_sqc=1, clk_domain=gpu_clock)
++    # Periodic wave/pipeline status. Diagnostic only; set via environment so
++    # the default run is unchanged.
++    shader.progress_interval = int(
++        os.environ.get("GEMSIM_PROGRESS_INTERVAL", "20000000")
++    )
+     shader.impl_kern_launch_acq = True
+     shader.impl_kern_end_rel = False
+     shader.timing = True
+diff --git a/src/gpu-compute/compute_unit.cc b/src/gpu-compute/compute_unit.cc
+index dda0c1ba4..22a88eb97 100644
+--- a/src/gpu-compute/compute_unit.cc
++++ b/src/gpu-compute/compute_unit.cc
+@@ -609,13 +609,27 @@ ComputeUnit::doSQCInvalidate(RequestPtr req, int kernId){
+ }
+ 
+ // reseting SIMD register pools
+-// I couldn't think of any other place and
+-// I think it is needed in my implementation
++/**
++ * Return the register pools to their empty state.
++ *
++ * This discards every free-list record, so it is only valid when no wave
++ * holds a reservation. A kernel launch may otherwise overlap waves that are
++ * still executing an earlier dispatch: resetting under them desynchronizes
++ * the pool from the outstanding reservations, and the following release
++ * returns a region the pool no longer knows about. The pool then reports a
++ * capacity it does not have and eventually fails an allocation while
++ * claiming space is available.
++ */
+ void
+ ComputeUnit::resetRegisterPool()
+ {
+-    for (int i=0; i<numVectorALUs; i++)
+-    {
++    for (int i = 0; i < numVectorALUs; i++) {
++        if (vectorRegsReserved[i] || scalarRegsReserved[i]) {
++            DPRINTF(GPURename, "CU%d: SIMD[%d] skipping register pool reset "
++                    "while %d VGPRs and %d SGPRs remain reserved\n",
++                    cu_id, i, vectorRegsReserved[i], scalarRegsReserved[i]);
++            continue;
++        }
+         registerManager->vrfPoolMgrs[i]->resetRegion(numVecRegsPerSimd);
+         registerManager->srfPoolMgrs[i]->resetRegion(numScalarRegsPerSimd);
+     }
+@@ -692,6 +706,19 @@ ComputeUnit::dispWorkgroup(HSAQueueEntry *task, int num_wfs_in_wg)
+ 
+                 registerManager->allocateRegisters(w, vregDemand, sregDemand);
+ 
++                /*
++                 * startWavefront initializes register state, so the wave must
++                 * own a register region by now. Catch a lost reservation here,
++                 * where the responsible dispatch is still known, instead of
++                 * later as an out-of-range register index.
++                 */
++                panic_if(vregDemand && !w->reservedVectorRegs,
++                         "CU%d: SIMD[%d] WF[%d] wave[%d] kernel %d entered "
++                         "register init without a VGPR reservation "
++                         "(demand %d, sgprDemand %d)\n",
++                         cu_id, i, j, (int)w->wfDynId, task->dispatchId(),
++                         vregDemand, sregDemand);
++
+                 startWavefront(w, wave_id, ldsChunk, task, barrier_id);
+                 ++wave_id;
+             }
+diff --git a/src/gpu-compute/fetch_unit.cc b/src/gpu-compute/fetch_unit.cc
+index f2f9c64be..f6f8c589a 100644
+--- a/src/gpu-compute/fetch_unit.cc
++++ b/src/gpu-compute/fetch_unit.cc
+@@ -94,8 +94,19 @@ FetchUnit::exec()
+         if (!fetch_buf.hasFreeSpace()) {
+             fetch_buf.checkWaveReleaseBuf();
+         }
++        /**
++         * Decoding builds a dynamic instruction, which immediately maps its
++         * operands onto the wave's physical registers. A wave that has
++         * retired released that register region, so decoding leftover fetch
++         * data for it would map operands against a zero-length region. Drop
++         * the stale bytes instead and let the next dispatch refill the buffer.
++         */
+         if (fetch_buf.hasFetchDataToProcess()) {
+-            fetch_buf.decodeInsts();
++            if (fetch_buf.isWaveRunning()) {
++                fetch_buf.decodeInsts();
++            } else {
++                fetch_buf.flushBuf();
++            }
+         }
+     }
+ 
+@@ -381,6 +392,17 @@ FetchUnit::FetchBufDesc::allocateBuf(int fetch_depth, int cache_line_size,
+     }
+ }
+ 
++bool
++FetchUnit::FetchBufDesc::isWaveRunning() const
++{
++    if (!wavefront) {
++        return false;
++    }
++    const auto status = wavefront->getStatus();
++    return status != Wavefront::S_STOPPED &&
++           status != Wavefront::S_RETURNING;
++}
++
+ void
+ FetchUnit::FetchBufDesc::flushBuf()
+ {
+diff --git a/src/gpu-compute/fetch_unit.hh b/src/gpu-compute/fetch_unit.hh
+index 35882a5d2..cca967104 100644
+--- a/src/gpu-compute/fetch_unit.hh
++++ b/src/gpu-compute/fetch_unit.hh
+@@ -103,6 +103,14 @@ class FetchUnit
+         int bufferedBytes() const { return bufferedLines() * cacheLineSize; }
+         int reservedLines() const { return reservedPCs.size(); }
+         bool hasFreeSpace() const { return !freeList.empty(); }
++
++        /**
++         * True while the owning wave still holds its execution context. A
++         * retired wave has released its register region, so its buffered
++         * bytes must not be decoded into dynamic instructions.
++         */
++        bool isWaveRunning() const;
++
+         void flushBuf();
+         Addr nextFetchAddr();
+ 
+diff --git a/src/gpu-compute/local_memory_pipeline.cc b/src/gpu-compute/local_memory_pipeline.cc
+index 40098e10d..3ae0b246e 100644
+--- a/src/gpu-compute/local_memory_pipeline.cc
++++ b/src/gpu-compute/local_memory_pipeline.cc
+@@ -81,6 +81,21 @@ LocalMemPipeline::exec()
+ 
+         DPRINTF(GPUMem, "CU%d: WF[%d][%d]: Completing local mem instr %s\n",
+                 m->cu_id, m->simdId, m->wfSlotId, m->disassemble());
++        /*
++         * Writing back a load result maps operands onto the wave's physical
++         * register region, so the wave must still own one. A completion that
++         * outlives its wave means the retire path released registers with
++         * local-memory traffic still in flight.
++         */
++        panic_if((m->isLoad() || m->isAtomicRet()) &&
++                     w->reservedVectorRegs <= 0,
++                 "CU%d: WF[%d][%d] wave[%d] kernel %d completing %s after its "
++                 "register region was released (status %d, reservedVgprs %d, "
++                 "reservedSgprs %d, outstandingReqs %d)\n",
++                 m->cu_id, m->simdId, m->wfSlotId, (int)w->wfDynId,
++                 w->kernId, m->disassemble(), (int)w->getStatus(),
++                 w->reservedVectorRegs, w->reservedScalarRegs,
++                 w->outstandingReqs);
+         m->completeAcc(m);
+         w->decLGKMInstsIssued();
+         w->untrackLGKMInst(m);
+diff --git a/src/gpu-compute/scoreboard_check_stage.cc b/src/gpu-compute/scoreboard_check_stage.cc
+index 6771a0878..fa10acab4 100644
+--- a/src/gpu-compute/scoreboard_check_stage.cc
++++ b/src/gpu-compute/scoreboard_check_stage.cc
+@@ -193,7 +193,14 @@ ScoreboardCheckStage::ready(Wavefront *w, nonrdytype_e *rdyStatus,
+         // Older instructions have executed, adding implicit wait count
+         w->setStatus(Wavefront::S_WAITCNT);
+         w->setWaitCnts(0, 0, 0);
+-        if (!w->waitCntsSatisfied()) {
++        /**
++         * The wait counters track issued instructions, but retiring also
++         * releases the wave's register region. A memory response that is
++         * still in a return pipeline would then write back through a
++         * released region, so require the wave's outstanding requests to
++         * have drained as well.
++         */
++        if (!w->waitCntsSatisfied() || w->outstandingReqs > 0) {
+             *rdyStatus = NRDY_WAIT_CNT;
+             return false;
+         }
+diff --git a/src/gpu-compute/static_register_manager_policy.cc b/src/gpu-compute/static_register_manager_policy.cc
+index e9dca36d6..26d286cee 100644
+--- a/src/gpu-compute/static_register_manager_policy.cc
++++ b/src/gpu-compute/static_register_manager_policy.cc
+@@ -59,8 +59,14 @@ StaticRegisterManagerPolicy::mapVgpr(Wavefront* w, int vgprIndex)
+ {
+     panic_if((vgprIndex >= w->reservedVectorRegs)
+              || (w->reservedVectorRegs < 0),
+-             "VGPR index %d is out of range: VGPR range=[0,%d]",
+-             vgprIndex, w->reservedVectorRegs);
++             "VGPR index %d is out of range: VGPR range=[0,%d] "
++             "cu=%d simd=%d wfSlot=%d wfDynId=%d kernel=%d wg=%d "
++             "status=%d startVgpr=%d reservedSgprs=%d simdReservedVgprs=%d",
++             vgprIndex, w->reservedVectorRegs,
++             w->computeUnit->cu_id, w->simdId, w->wfSlotId,
++             (int)w->wfDynId, w->kernId, w->wgId, (int)w->getStatus(),
++             w->startVgprIndex, w->reservedScalarRegs,
++             w->computeUnit->vectorRegsReserved[w->simdId]);
+ 
+     // add the offset from where the VGPRs of the wavefront have been assigned
+     int physicalVgprIndex = w->startVgprIndex + vgprIndex;
+-- 
+2.53.0
+

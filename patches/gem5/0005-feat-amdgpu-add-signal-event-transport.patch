@@ -1,0 +1,2108 @@
+From ae21e44a9434efb24417dfb167adacb55cb6f66f Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sat, 8 Aug 2026 14:18:26 +0800
+Subject: [PATCH 05/42] feat(amdgpu): add signal event transport
+
+Checkpoint-ID: CP-0007
+Goal-ID: GSIM-001
+Plan-Revision: 1
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: e75832244dc6a9186b3fe36958c873284f5e44aad67cc4e2dd264f6ba05237be
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/dev/amdgpu/SConscript                    |   3 +
+ src/dev/amdgpu/host_gpu_bridge.cc            | 132 +++++-
+ src/dev/amdgpu/host_gpu_bridge.hh            |  20 +-
+ src/dev/amdgpu/host_gpu_protocol.cc          | 213 +++++++++
+ src/dev/amdgpu/host_gpu_protocol.hh          |  76 +++
+ src/dev/amdgpu/host_gpu_protocol.test.cc     | 367 +++++++++++++++
+ src/dev/amdgpu/host_gpu_signal_state.cc      | 323 +++++++++++++
+ src/dev/amdgpu/host_gpu_signal_state.hh      | 132 ++++++
+ src/dev/amdgpu/host_gpu_signal_state.test.cc | 464 +++++++++++++++++++
+ 9 files changed, 1724 insertions(+), 6 deletions(-)
+ create mode 100644 src/dev/amdgpu/host_gpu_signal_state.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_signal_state.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_signal_state.test.cc
+
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index 33eef62ad..3997eff46 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -51,6 +51,7 @@ Source('host_gpu_protocol.cc', tags=['x86 isa'])
+ Source('host_gpu_bridge.cc', tags=['x86 isa'])
+ Source('host_gpu_memory_state.cc', tags=['x86 isa'])
+ Source('host_gpu_queue_state.cc', tags=['x86 isa'])
++Source('host_gpu_signal_state.cc', tags=['x86 isa'])
+ Source('host_gpu_socket_utils.cc', tags=['x86 isa'])
+ Source('interrupt_handler.cc', tags=['x86 isa'])
+ Source('memory_manager.cc', tags=['x86 isa'])
+@@ -65,6 +66,8 @@ GTest('host_gpu_memory_state.test', 'host_gpu_memory_state.test.cc',
+       'host_gpu_memory_state.cc', 'host_gpu_protocol.cc')
+ GTest('host_gpu_queue_state.test', 'host_gpu_queue_state.test.cc',
+       'host_gpu_queue_state.cc')
++GTest('host_gpu_signal_state.test', 'host_gpu_signal_state.test.cc',
++      'host_gpu_signal_state.cc', 'host_gpu_queue_state.cc')
+ GTest('host_gpu_socket_utils.test', 'host_gpu_socket_utils.test.cc',
+       'host_gpu_socket_utils.cc')
+ 
+diff --git a/src/dev/amdgpu/host_gpu_bridge.cc b/src/dev/amdgpu/host_gpu_bridge.cc
+index 247d544a8..41513045d 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.cc
++++ b/src/dev/amdgpu/host_gpu_bridge.cc
+@@ -332,7 +332,9 @@ HostGPUBridge::HostGPUBridge(const HostGPUBridgeParams &params)
+       recordServiceEvent([this]() { processRecords(); },
+                          name() + ".host_gpu_records"),
+       queueServiceEvent([this]() { processQueueCommands(); },
+-                        name() + ".host_gpu_queue_commands")
++                        name() + ".host_gpu_queue_commands"),
++      signalServiceEvent([this]() { processSignalCompletions(); },
++                         name() + ".host_gpu_signal_completions")
+ {
+     validateConfiguration();
+ 
+@@ -365,6 +367,8 @@ HostGPUBridge::HostGPUBridge(const HostGPUBridgeParams &params)
+         protocol::QueueControlCapabilityMask;
+     identity.supported[protocol::MemoryControlCapabilityByte] |=
+         protocol::MemoryControlCapabilityMask;
++    identity.supported[protocol::SignalEventCapabilityByte] |=
++        protocol::SignalEventCapabilityMask;
+ }
+ 
+ HostGPUBridge::~HostGPUBridge()
+@@ -804,12 +808,15 @@ HostGPUBridge::shutdown()
+             deschedule(recordServiceEvent);
+         if (queueServiceEvent.scheduled())
+             deschedule(queueServiceEvent);
++        if (signalServiceEvent.scheduled())
++            deschedule(signalServiceEvent);
+         listenEvent.reset();
+         clients.clear();
+         admissionBudget.reset();
+         pendingRecords.clear();
+         queueState.clear();
+         memoryState.clear();
++        signalState.clear();
+     }
+     endpointCleanupDone = cleanupEndpoint();
+ }
+@@ -1094,6 +1101,7 @@ HostGPUBridge::closeClient(int fd)
+     admissionBudget.release(found->second->admission);
+     queueState.disconnect(owner);
+     memoryState.disconnect({owner.fd, owner.clientGeneration});
++    signalState.disconnect({owner.fd, owner.clientGeneration});
+     clients.erase(found);
+     pendingRecords.erase(std::remove_if(
+         pendingRecords.begin(), pendingRecords.end(),
+@@ -1101,6 +1109,8 @@ HostGPUBridge::closeClient(int fd)
+         pendingRecords.end());
+     if (queueState.inflightCount() == 0 && queueServiceEvent.scheduled())
+         deschedule(queueServiceEvent);
++    if (!signalState.nextReadyTick() && signalServiceEvent.scheduled())
++        deschedule(signalServiceEvent);
+ }
+ 
+ void
+@@ -1132,6 +1142,11 @@ HostGPUBridge::processRecords()
+                    hasWireMessageType(record.bytes,
+                                       protocol::MessageType::MemoryRequest)) {
+             processMemoryRecord(record);
++        } else if (found->second->state.phase() ==
++                       ConnectionPhase::Established &&
++                   hasWireMessageType(record.bytes,
++                                      protocol::MessageType::SignalRequest)) {
++            processSignalRecord(record);
+         } else {
+             processHelloRecord(record);
+         }
+@@ -1437,6 +1452,67 @@ HostGPUBridge::processMemoryRecord(const PendingRecord &record)
+                       OutboundKind::MemoryAck);
+ }
+ 
++void
++HostGPUBridge::processSignalRecord(const PendingRecord &record)
++{
++    auto found = clients.find(record.clientFd);
++    if (found == clients.end() ||
++        found->second->generation != record.generation) {
++        return;
++    }
++    Client &client = *found->second;
++    const auto decoded = protocol::decodeSignalRequestRecord(
++        record.bytes.data(), record.bytes.size(), maximumRecord);
++    if (decoded.action == protocol::DecodeAction::Drop) {
++        if (decoded.closeConnection)
++            closeClient(record.clientFd);
++        return;
++    }
++
++    protocol::Status sessionStatus = protocol::Status::Ok;
++    const bool signalSelected =
++        (client.selectedCapabilities[protocol::SignalEventCapabilityByte] &
++         protocol::SignalEventCapabilityMask) != 0;
++    if (decoded.header.daemonUuid != identity.daemonUuid) {
++        sessionStatus = protocol::Status::InstanceMismatch;
++    } else if (decoded.header.connectionId != client.connectionId) {
++        sessionStatus = protocol::Status::ProtocolState;
++    } else if (decoded.header.jobEpoch != identity.jobEpoch) {
++        sessionStatus = protocol::Status::TopologyMismatch;
++    } else if (!signalSelected) {
++        sessionStatus = protocol::Status::UnsupportedCapability;
++    }
++    protocol::Status status = queueRequestStatus(
++        decoded.status, sessionStatus);
++    if (status == protocol::Status::Ok &&
++        client.requestIds.observe(decoded.header.requestId) !=
++            RequestIdResult::Fresh) {
++        status = protocol::Status::ProtocolState;
++    }
++
++    protocol::SignalResponse response =
++        HostGPUSignalState::failureResponse(decoded.request, status);
++    if (status == protocol::Status::Ok) {
++        const HostGPUSignalState::Owner owner{
++            record.clientFd, record.generation};
++        response = signalState.submit(
++            owner, decoded.header, decoded.request, curTick());
++    }
++
++    client.state.finishEstablishedRecord();
++    const auto responseHeader = protocol::queueResponseHeader(
++        decoded.header, identity, client.connectionId);
++    const uint16_t requestOpcode =
++        static_cast<uint16_t>(decoded.request.opcode);
++    const auto encoded = response.status == protocol::Status::Ok ?
++        protocol::encodeSignalAck(responseHeader, response) :
++        protocol::encodeSignalFailureAck(
++            responseHeader, response, requestOpcode);
++    sendQueueResponse(record.clientFd, record.generation, encoded,
++                      OutboundKind::SignalAck);
++    scheduleSignalService();
++}
++
+ void
+ HostGPUBridge::scheduleQueueService()
+ {
+@@ -1465,6 +1541,46 @@ HostGPUBridge::processQueueCommands()
+     scheduleQueueService();
+ }
+ 
++void
++HostGPUBridge::scheduleSignalService()
++{
++    const auto next = signalState.nextReadyTick();
++    if (next && !signalServiceEvent.scheduled())
++        schedule(signalServiceEvent, static_cast<Tick>(*next));
++}
++
++void
++HostGPUBridge::processSignalCompletions()
++{
++    while (const auto completion = signalState.popReady(curTick())) {
++        auto found = clients.find(completion->owner.fd);
++        if (found == clients.end() || found->second->generation !=
++                completion->owner.clientGeneration) {
++            signalState.complete(*completion);
++            continue;
++        }
++
++        protocol::SignalResponse response;
++        response.status = protocol::Status::Ok;
++        response.opcode = protocol::SignalOpcode::Wait;
++        response.signalId = completion->signalId;
++        response.generation = completion->signalGeneration;
++        response.sequence = completion->sequence;
++        response.value = completion->value;
++        response.simTick = completion->readyTick;
++        const auto responseHeader = protocol::queueResponseHeader(
++            completion->header, identity, found->second->connectionId);
++        auto encoded = protocol::encodeSignalCompletion(
++            responseHeader, response);
++        enqueueOutbound(
++            completion->owner.fd, completion->owner.clientGeneration,
++            OutboundRecord{std::move(encoded),
++                           OutboundKind::SignalCompletion,
++                           protocol::Status::Ok, true, *completion});
++    }
++    scheduleSignalService();
++}
++
+ void
+ HostGPUBridge::sendAck(int fd, uint64_t generation,
+                        std::vector<uint8_t> record,
+@@ -1474,7 +1590,8 @@ HostGPUBridge::sendAck(int fd, uint64_t generation,
+     if (found == clients.end() || found->second->generation != generation)
+         return;
+     enqueueOutbound(fd, generation, OutboundRecord{
+-        std::move(record), OutboundKind::HandshakeAck, status, success});
++        std::move(record), OutboundKind::HandshakeAck, status, success,
++        std::nullopt});
+ }
+ 
+ void
+@@ -1483,7 +1600,7 @@ HostGPUBridge::sendQueueResponse(int fd, uint64_t generation,
+                                  OutboundKind kind)
+ {
+     enqueueOutbound(fd, generation, OutboundRecord{
+-        std::move(record), kind, protocol::Status::Ok, true});
++        std::move(record), kind, protocol::Status::Ok, true, std::nullopt});
+ }
+ 
+ void
+@@ -1494,7 +1611,7 @@ HostGPUBridge::enqueueOutbound(int fd, uint64_t generation,
+     if (found == clients.end() || found->second->generation != generation)
+         return;
+     Client &client = *found->second;
+-    if (client.outbound.size() >= MaximumOutboundRecords) {
++    if (!canEnqueueOutbound(client.outbound.size())) {
+         closeClient(fd);
+         return;
+     }
+@@ -1559,6 +1676,7 @@ HostGPUBridge::completeOutbound(int fd, uint64_t generation,
+         break;
+       case OutboundKind::QueueAck:
+       case OutboundKind::MemoryAck:
++      case OutboundKind::SignalAck:
+         if (found->second->state.phase() == ConnectionPhase::Established &&
+             found->second->state.canReceive()) {
+             found->second->socketEvent->setReadable(true);
+@@ -1566,6 +1684,12 @@ HostGPUBridge::completeOutbound(int fd, uint64_t generation,
+         break;
+       case OutboundKind::QueueCompletion:
+         break;
++      case OutboundKind::SignalCompletion:
++        if (!record.signalCompletion ||
++            !signalState.complete(*record.signalCompletion)) {
++            closeClient(fd);
++        }
++        break;
+     }
+ }
+ 
+diff --git a/src/dev/amdgpu/host_gpu_bridge.hh b/src/dev/amdgpu/host_gpu_bridge.hh
+index db4f00bae..4af9f6977 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.hh
++++ b/src/dev/amdgpu/host_gpu_bridge.hh
+@@ -34,6 +34,7 @@
+ #include <cstdint>
+ #include <deque>
+ #include <memory>
++#include <optional>
+ #include <string>
+ #include <unordered_map>
+ #include <unordered_set>
+@@ -44,6 +45,7 @@
+ #include "dev/amdgpu/host_gpu_memory_state.hh"
+ #include "dev/amdgpu/host_gpu_protocol.hh"
+ #include "dev/amdgpu/host_gpu_queue_state.hh"
++#include "dev/amdgpu/host_gpu_signal_state.hh"
+ #include "dev/amdgpu/host_gpu_socket_utils.hh"
+ #include "params/HostGPUBridge.hh"
+ #include "sim/eventq.hh"
+@@ -63,11 +65,17 @@ class HostGPUBridge : public SimObject
+     void init() override;
+     void startup() override;
+ 
++    static constexpr size_t MaximumOutboundRecords =
++        HostGPUQueueState::MaximumInflight * 2 +
++        HostGPUSignalState::MaximumWaits + 1;
++    static constexpr bool canEnqueueOutbound(size_t currentRecords)
++    {
++        return currentRecords < MaximumOutboundRecords;
++    }
++
+   private:
+     static constexpr size_t MaximumRegularClients = 8;
+     static constexpr size_t MaximumExcessClients = 8;
+-    static constexpr size_t MaximumOutboundRecords =
+-        HostGPUQueueState::MaximumInflight * 2 + 1;
+ 
+     struct Client;
+ 
+@@ -122,6 +130,8 @@ class HostGPUBridge : public SimObject
+         QueueAck,
+         QueueCompletion,
+         MemoryAck,
++        SignalAck,
++        SignalCompletion,
+     };
+ 
+     struct OutboundRecord
+@@ -130,6 +140,7 @@ class HostGPUBridge : public SimObject
+         OutboundKind kind = OutboundKind::QueueAck;
+         protocol::Status status = protocol::Status::Internal;
+         bool success = false;
++        std::optional<HostGPUSignalState::Completion> signalCompletion;
+     };
+ 
+     struct Client
+@@ -173,9 +184,12 @@ class HostGPUBridge : public SimObject
+     void processHelloRecord(const PendingRecord &record);
+     void processQueueRecord(const PendingRecord &record);
+     void processMemoryRecord(const PendingRecord &record);
++    void processSignalRecord(const PendingRecord &record);
+     void scheduleRecordService();
+     void scheduleQueueService();
+     void processQueueCommands();
++    void scheduleSignalService();
++    void processSignalCompletions();
+     void sendAck(int fd, uint64_t generation,
+                  std::vector<uint8_t> record,
+                  protocol::Status status, bool success);
+@@ -230,6 +244,8 @@ class HostGPUBridge : public SimObject
+     HostGPUQueueState queueState;
+     EventFunctionWrapper queueServiceEvent;
+     HostGPUMemoryState memoryState;
++    HostGPUSignalState signalState;
++    EventFunctionWrapper signalServiceEvent;
+     uint64_t nextClientGeneration = 1;
+     std::unordered_set<uint64_t> usedConnectionIds;
+     int activeClientFd = -1;
+diff --git a/src/dev/amdgpu/host_gpu_protocol.cc b/src/dev/amdgpu/host_gpu_protocol.cc
+index 6479482fa..68f2b0f5f 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.cc
++++ b/src/dev/amdgpu/host_gpu_protocol.cc
+@@ -29,6 +29,7 @@
+ 
+ #include <algorithm>
+ #include <array>
++#include <cassert>
+ #include <cstring>
+ #include <iomanip>
+ #include <limits>
+@@ -65,6 +66,20 @@ validMemoryOpcode(uint16_t raw)
+            raw <= static_cast<uint16_t>(MemoryOpcode::CopyD2H);
+ }
+ 
++bool
++validSignalOpcode(uint16_t raw)
++{
++    return raw >= static_cast<uint16_t>(SignalOpcode::Create) &&
++           raw <= static_cast<uint16_t>(SignalOpcode::Wait);
++}
++
++bool
++validSignalCondition(uint64_t raw)
++{
++    return raw <= static_cast<uint64_t>(
++        SignalCondition::GreaterThanOrEqual);
++}
++
+ uint16_t
+ load16(const uint8_t *data)
+ {
+@@ -90,6 +105,16 @@ load64(const uint8_t *data)
+     return value;
+ }
+ 
++int64_t
++loadSigned64(const uint8_t *data)
++{
++    const uint64_t raw = load64(data);
++    if (raw <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
++        return static_cast<int64_t>(raw);
++    return -1 - static_cast<int64_t>(
++        std::numeric_limits<uint64_t>::max() - raw);
++}
++
+ void
+ store16(std::vector<uint8_t> &data, size_t offset, uint16_t value)
+ {
+@@ -116,6 +141,12 @@ store64(std::vector<uint8_t> &data, size_t offset, uint64_t value)
+     }
+ }
+ 
++void
++storeSigned64(std::vector<uint8_t> &data, size_t offset, int64_t value)
++{
++    store64(data, offset, static_cast<uint64_t>(value));
++}
++
+ uint32_t
+ calculateCrc32c(const uint8_t *data, size_t size, bool zeroRecordChecksum)
+ {
+@@ -393,6 +424,14 @@ memoryControlCapability()
+     return capabilities;
+ }
+ 
++Capabilities
++signalEventCapability()
++{
++    Capabilities capabilities = {};
++    capabilities[SignalEventCapabilityByte] = SignalEventCapabilityMask;
++    return capabilities;
++}
++
+ bool
+ capabilitySubset(const Capabilities &subset, const Capabilities &superset)
+ {
+@@ -530,6 +569,11 @@ negotiate(const Header &header, const Hello &hello,
+         result.selected[MemoryControlCapabilityByte] &=
+             ~MemoryControlCapabilityMask;
+     }
++    if ((hello.required[SignalEventCapabilityByte] &
++         SignalEventCapabilityMask) == 0) {
++        result.selected[SignalEventCapabilityByte] &=
++            ~SignalEventCapabilityMask;
++    }
+     if (hello.unknownCriticalTlv ||
+         !capabilitySubset(hello.required, result.selected) ||
+         (hello.offered[0] & 1) == 0 ||
+@@ -841,6 +885,101 @@ decodeMemoryRequestRecord(const uint8_t *record, size_t size,
+     return acknowledge(Status::Ok, "valid simulated-memory request");
+ }
+ 
++SignalDecodeResult
++decodeSignalRequestRecord(const uint8_t *record, size_t size,
++                          uint32_t configuredMaximum)
++{
++    Header header;
++    const uint8_t *payload = nullptr;
++    std::string reason;
++    if (!decodeEstablishedEnvelope(record, size, configuredMaximum, header,
++                                   payload, reason)) {
++        SignalDecodeResult result;
++        result.reason = reason;
++        return result;
++    }
++    if (header.messageType != MessageType::SignalRequest) {
++        SignalDecodeResult result;
++        result.reason = "expected SIGNAL_REQUEST";
++        return result;
++    }
++    if (size - HeaderBytes != SignalPayloadBytes) {
++        SignalDecodeResult result;
++        result.reason = "signal payload length";
++        return result;
++    }
++
++    SignalRequest request;
++    request.major = load16(payload);
++    request.minor = load16(payload + 2);
++    const uint16_t rawOpcode = load16(payload + 4);
++    request.opcode = static_cast<SignalOpcode>(rawOpcode);
++    request.flags = load16(payload + 6);
++    request.signalId = load64(payload + 8);
++    request.generation = load64(payload + 16);
++    request.sequence = load64(payload + 24);
++    request.value = loadSigned64(payload + 32);
++    const uint64_t rawCondition = load64(payload + 40);
++    request.condition = static_cast<SignalCondition>(rawCondition);
++    const uint64_t reserved0 = load64(payload + 48);
++    const uint64_t reserved1 = load64(payload + 56);
++
++    auto acknowledge = [&](Status status, const std::string &why) {
++        SignalDecodeResult result;
++        result.action = DecodeAction::Acknowledge;
++        result.closeConnection = false;
++        result.status = status;
++        result.reason = why;
++        result.header = header;
++        result.request = request;
++        return result;
++    };
++
++    if (!validSignalOpcode(rawOpcode) || request.flags != 0 ||
++        reserved0 != 0 || reserved1 != 0) {
++        return acknowledge(Status::Malformed, "invalid signal fields");
++    }
++
++    switch (request.opcode) {
++      case SignalOpcode::Create:
++        if (request.signalId != 0 || request.generation != 0 ||
++            request.sequence != 0 || rawCondition != 0) {
++            return acknowledge(Status::Malformed,
++                               "invalid signal create fields");
++        }
++        break;
++      case SignalOpcode::Destroy:
++      case SignalOpcode::Load:
++        if (request.signalId == 0 || request.generation == 0 ||
++            request.sequence != 0 || request.value != 0 ||
++            rawCondition != 0) {
++            return acknowledge(Status::Malformed,
++                               "invalid signal handle operation fields");
++        }
++        break;
++      case SignalOpcode::Store:
++        if (request.signalId == 0 || request.generation == 0 ||
++            request.sequence != 0 || rawCondition != 0) {
++            return acknowledge(Status::Malformed,
++                               "invalid signal store fields");
++        }
++        break;
++      case SignalOpcode::Wait:
++        if (request.signalId == 0 || request.generation == 0 ||
++            request.sequence == 0 || !validSignalCondition(rawCondition)) {
++            return acknowledge(Status::Malformed,
++                               "invalid signal wait fields");
++        }
++        break;
++    }
++    if (request.major != SignalEventMajor ||
++        request.minor != SignalEventMinor) {
++        return acknowledge(Status::UnsupportedVersion,
++                           "unsupported signal event version");
++    }
++    return acknowledge(Status::Ok, "valid signal request");
++}
++
+ std::vector<uint8_t>
+ encodeAck(const Header &request, const Ack &ack,
+           const ServerIdentity &server, uint64_t connectionId)
+@@ -905,6 +1044,24 @@ encodeMemoryRequest(const Header &header, const MemoryRequest &request)
+     return encodeFrame(encoded, payload);
+ }
+ 
++std::vector<uint8_t>
++encodeSignalRequest(const Header &header, const SignalRequest &request)
++{
++    std::vector<uint8_t> payload(SignalPayloadBytes, 0);
++    store16(payload, 0, request.major);
++    store16(payload, 2, request.minor);
++    store16(payload, 4, static_cast<uint16_t>(request.opcode));
++    store16(payload, 6, request.flags);
++    store64(payload, 8, request.signalId);
++    store64(payload, 16, request.generation);
++    store64(payload, 24, request.sequence);
++    storeSigned64(payload, 32, request.value);
++    store64(payload, 40, static_cast<uint64_t>(request.condition));
++    Header encoded = header;
++    encoded.messageType = MessageType::SignalRequest;
++    return encodeFrame(encoded, payload);
++}
++
+ Header
+ queueResponseHeader(const Header &request, const ServerIdentity &server,
+                     uint64_t connectionId)
+@@ -977,6 +1134,62 @@ encodeMemoryAck(const Header &request, const MemoryResponse &response)
+     return encodeFrame(encoded, payload);
+ }
+ 
++namespace
++{
++
++std::vector<uint8_t>
++encodeSignalResponse(MessageType type, const Header &request,
++                     const SignalResponse &response, uint16_t opcode)
++{
++    std::vector<uint8_t> payload(SignalPayloadBytes, 0);
++    store16(payload, 0, SignalEventMajor);
++    store16(payload, 2, SignalEventMinor);
++    store32(payload, 4, static_cast<uint32_t>(response.status));
++    store16(payload, 8, opcode);
++    store64(payload, 16, response.signalId);
++    store64(payload, 24, response.generation);
++    store64(payload, 32, response.sequence);
++    if (response.status == Status::Ok) {
++        storeSigned64(payload, 40, response.value);
++        store64(payload, 48, response.ready);
++        store64(payload, 56, response.simTick);
++    }
++    Header encoded = request;
++    encoded.messageType = type;
++    return encodeFrame(encoded, payload);
++}
++
++} // anonymous namespace
++
++std::vector<uint8_t>
++encodeSignalAck(const Header &request, const SignalResponse &response)
++{
++    const uint16_t opcode = static_cast<uint16_t>(response.opcode);
++    assert(validSignalOpcode(opcode));
++    return encodeSignalResponse(
++        MessageType::SignalAck, request, response, opcode);
++}
++
++std::vector<uint8_t>
++encodeSignalFailureAck(const Header &request,
++                       const SignalResponse &response,
++                       uint16_t requestOpcode)
++{
++    assert(response.status != Status::Ok);
++    return encodeSignalResponse(
++        MessageType::SignalAck, request, response, requestOpcode);
++}
++
++std::vector<uint8_t>
++encodeSignalCompletion(const Header &request,
++                       const SignalResponse &response)
++{
++    const uint16_t opcode = static_cast<uint16_t>(response.opcode);
++    assert(response.status == Status::Ok && validSignalOpcode(opcode));
++    return encodeSignalResponse(
++        MessageType::SignalCompletion, request, response, opcode);
++}
++
+ const char *
+ statusName(Status status)
+ {
+diff --git a/src/dev/amdgpu/host_gpu_protocol.hh b/src/dev/amdgpu/host_gpu_protocol.hh
+index 821f0c80b..5482062c8 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.hh
++++ b/src/dev/amdgpu/host_gpu_protocol.hh
+@@ -46,6 +46,7 @@ constexpr size_t HelloFixedBytes = 96;
+ constexpr size_t AckFixedBytes = 80;
+ constexpr size_t QueuePayloadBytes = 64;
+ constexpr size_t MemoryPayloadBytes = 64;
++constexpr size_t SignalPayloadBytes = 64;
+ constexpr size_t CapabilityBytes = 32;
+ constexpr size_t UuidBytes = 16;
+ constexpr uint32_t MinimumRecordBytes = 4096;
+@@ -63,6 +64,10 @@ constexpr uint16_t MemoryControlMajor = 1;
+ constexpr uint16_t MemoryControlMinor = 0;
+ constexpr uint8_t MemoryControlCapabilityByte = 0;
+ constexpr uint8_t MemoryControlCapabilityMask = 0x04;
++constexpr uint16_t SignalEventMajor = 1;
++constexpr uint16_t SignalEventMinor = 0;
++constexpr uint8_t SignalEventCapabilityByte = 0;
++constexpr uint8_t SignalEventCapabilityMask = 0x08;
+ 
+ using Uuid = std::array<uint8_t, UuidBytes>;
+ using Capabilities = std::array<uint8_t, CapabilityBytes>;
+@@ -77,6 +82,26 @@ enum class MessageType : uint16_t
+     QueueCompletion = 5,
+     MemoryRequest = 6,
+     MemoryAck = 7,
++    SignalRequest = 8,
++    SignalAck = 9,
++    SignalCompletion = 10,
++};
++
++enum class SignalOpcode : uint16_t
++{
++    Create = 1,
++    Destroy = 2,
++    Load = 3,
++    Store = 4,
++    Wait = 5,
++};
++
++enum class SignalCondition : uint64_t
++{
++    Equal = 0,
++    NotEqual = 1,
++    LessThan = 2,
++    GreaterThanOrEqual = 3,
+ };
+ 
+ enum class MemoryOpcode : uint16_t
+@@ -288,6 +313,45 @@ struct MemoryDecodeResult
+     MemoryRequest request;
+ };
+ 
++/** Versioned signed signal request; events carry no host pointer or FD. */
++struct SignalRequest
++{
++    uint16_t major = SignalEventMajor;
++    uint16_t minor = SignalEventMinor;
++    SignalOpcode opcode = SignalOpcode::Create;
++    uint16_t flags = 0;
++    uint64_t signalId = 0;
++    uint64_t generation = 0;
++    uint64_t sequence = 0;
++    int64_t value = 0;
++    SignalCondition condition = SignalCondition::Equal;
++};
++
++/** Common fixed-width payload for SIGNAL_ACK and SIGNAL_COMPLETION. */
++struct SignalResponse
++{
++    uint16_t major = SignalEventMajor;
++    uint16_t minor = SignalEventMinor;
++    Status status = Status::Internal;
++    SignalOpcode opcode = SignalOpcode::Create;
++    uint64_t signalId = 0;
++    uint64_t generation = 0;
++    uint64_t sequence = 0;
++    int64_t value = 0;
++    uint64_t ready = 0;
++    uint64_t simTick = 0;
++};
++
++struct SignalDecodeResult
++{
++    DecodeAction action = DecodeAction::Drop;
++    bool closeConnection = true;
++    Status status = Status::Malformed;
++    std::string reason;
++    Header header;
++    SignalRequest request;
++};
++
+ bool isZero(const Uuid &value);
+ bool parseUuid(const std::string &text, Uuid &value);
+ std::string formatUuid(const Uuid &value);
+@@ -295,6 +359,7 @@ std::string formatUuid(const Uuid &value);
+ Capabilities topologyCapability();
+ Capabilities queueControlCapability();
+ Capabilities memoryControlCapability();
++Capabilities signalEventCapability();
+ bool capabilitySubset(const Capabilities &subset,
+                       const Capabilities &superset);
+ 
+@@ -306,6 +371,8 @@ QueueDecodeResult decodeQueueRequestRecord(const uint8_t *record, size_t size,
+                                            uint32_t configuredMaximum);
+ MemoryDecodeResult decodeMemoryRequestRecord(
+     const uint8_t *record, size_t size, uint32_t configuredMaximum);
++SignalDecodeResult decodeSignalRequestRecord(
++    const uint8_t *record, size_t size, uint32_t configuredMaximum);
+ NegotiationResult negotiate(const Header &header, const Hello &hello,
+                             const ServerIdentity &server,
+                             const NegotiationContext &context = {});
+@@ -327,6 +394,15 @@ std::vector<uint8_t> encodeMemoryRequest(const Header &header,
+                                          const MemoryRequest &request);
+ std::vector<uint8_t> encodeMemoryAck(const Header &request,
+                                      const MemoryResponse &response);
++std::vector<uint8_t> encodeSignalRequest(const Header &header,
++                                         const SignalRequest &request);
++std::vector<uint8_t> encodeSignalAck(const Header &request,
++                                     const SignalResponse &response);
++std::vector<uint8_t> encodeSignalFailureAck(
++    const Header &request, const SignalResponse &response,
++    uint16_t requestOpcode);
++std::vector<uint8_t> encodeSignalCompletion(
++    const Header &request, const SignalResponse &response);
+ 
+ const char *statusName(Status status);
+ 
+diff --git a/src/dev/amdgpu/host_gpu_protocol.test.cc b/src/dev/amdgpu/host_gpu_protocol.test.cc
+index 625f8fcc5..bbb9c72f1 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.test.cc
++++ b/src/dev/amdgpu/host_gpu_protocol.test.cc
+@@ -162,6 +162,94 @@ constexpr char GoldenMemoryFreeAckHex[] =
+     "000000000000000788776655443322110000000000000000"
+     "00000000000000000000000000000000123456789abcdef5";
+ 
++constexpr char GoldenSignalCreateRequestHex[] =
++    "4753494d5250430000010000005000080000000000000040"
++    "0123456789abcdf500112233445566778899aabbccddeeff"
++    "11223344556677880102030405060708b095ba9900000000"
++    "000000000000000000010000000100000000000000000000"
++    "00000000000000000000000000000000fffffffffffffff9"
++    "000000000000000000000000000000000000000000000000";
++
++constexpr char GoldenSignalCreateAckHex[] =
++    "4753494d5250430000010000005000090000000000000040"
++    "0123456789abcdf500112233445566778899aabbccddeeff"
++    "11223344556677880102030405060708dda8e6fc00000000"
++    "000000000000000000010000000000000001000000000000"
++    "000000000000000788776655443322110000000000000000"
++    "fffffffffffffff90000000000000000123456789abcdef5";
++
++constexpr char GoldenSignalLoadRequestHex[] =
++    "4753494d5250430000010000005000080000000000000040"
++    "0123456789abcdf600112233445566778899aabbccddeeff"
++    "11223344556677880102030405060708601dbdee00000000"
++    "000000000000000000010000000300000000000000000007"
++    "887766554433221100000000000000000000000000000000"
++    "000000000000000000000000000000000000000000000000";
++
++constexpr char GoldenSignalLoadAckHex[] =
++    "4753494d5250430000010000005000090000000000000040"
++    "0123456789abcdf600112233445566778899aabbccddeeff"
++    "112233445566778801020304050607082fa9d5b600000000"
++    "000000000000000000010000000000000003000000000000"
++    "000000000000000788776655443322110000000000000000"
++    "fffffffffffffff90000000000000000123456789abcdef6";
++
++constexpr char GoldenSignalWaitRequestHex[] =
++    "4753494d5250430000010000005000080000000000000040"
++    "0123456789abcdf700112233445566778899aabbccddeeff"
++    "1122334455667788010203040506070860ce276f00000000"
++    "000000000000000000010000000500000000000000000007"
++    "887766554433221101000000000000020000000000000000"
++    "000000000000000300000000000000000000000000000000";
++
++constexpr char GoldenSignalWaitAckHex[] =
++    "4753494d5250430000010000005000090000000000000040"
++    "0123456789abcdf700112233445566778899aabbccddeeff"
++    "11223344556677880102030405060708593564c300000000"
++    "000000000000000000010000000000000005000000000000"
++    "000000000000000788776655443322110100000000000002"
++    "fffffffffffffff90000000000000000123456789abcdef7";
++
++constexpr char GoldenSignalStoreRequestHex[] =
++    "4753494d5250430000010000005000080000000000000040"
++    "0123456789abcdf800112233445566778899aabbccddeeff"
++    "11223344556677880102030405060708302bee2300000000"
++    "000000000000000000010000000400000000000000000007"
++    "88776655443322110000000000000000000000000000002a"
++    "000000000000000000000000000000000000000000000000";
++
++constexpr char GoldenSignalStoreAckHex[] =
++    "4753494d5250430000010000005000090000000000000040"
++    "0123456789abcdf800112233445566778899aabbccddeeff"
++    "11223344556677880102030405060708c6b5892c00000000"
++    "000000000000000000010000000000000004000000000000"
++    "000000000000000788776655443322110000000000000000"
++    "000000000000002a0000000000000000123456789abcdef8";
++
++constexpr char GoldenSignalWaitCompletionHex[] =
++    "4753494d52504300000100000050000a0000000000000040"
++    "0123456789abcdf700112233445566778899aabbccddeeff"
++    "112233445566778801020304050607085b15367900000000"
++    "000000000000000000010000000000000005000000000000"
++    "000000000000000788776655443322110100000000000002"
++    "000000000000002a0000000000000000123456789abcdef9";
++
++constexpr char GoldenSignalDestroyRequestHex[] =
++    "4753494d5250430000010000005000080000000000000040"
++    "0123456789abcdf900112233445566778899aabbccddeeff"
++    "112233445566778801020304050607084580308000000000"
++    "000000000000000000010000000200000000000000000007"
++    "887766554433221100000000000000000000000000000000"
++    "000000000000000000000000000000000000000000000000";
++
++constexpr char GoldenSignalDestroyAckHex[] =
++    "4753494d5250430000010000005000090000000000000040"
++    "0123456789abcdf900112233445566778899aabbccddeeff"
++    "11223344556677880102030405060708544d9c8300000000"
++    "000000000000000000010000000000000002000000000000"
++    "000000000000000788776655443322110000000000000000"
++    "00000000000000000000000000000000123456789abcdefa";
++
+ std::vector<uint8_t>
+ fromHex(const std::string &text)
+ {
+@@ -225,6 +313,15 @@ load16(const uint8_t *data)
+         static_cast<uint16_t>(data[1]);
+ }
+ 
++uint32_t
++load32(const uint8_t *data)
++{
++    return (static_cast<uint32_t>(data[0]) << 24) |
++        (static_cast<uint32_t>(data[1]) << 16) |
++        (static_cast<uint32_t>(data[2]) << 8) |
++        static_cast<uint32_t>(data[3]);
++}
++
+ void
+ recomputeCrc(std::vector<uint8_t> &frame)
+ {
+@@ -452,6 +549,39 @@ TEST(HostGpuProtocol, MemoryControlMustBeOfferedAndRequiredIndependently)
+     EXPECT_EQ(negotiated.selected[0] & QueueControlCapabilityMask, 0);
+ }
+ 
++TEST(HostGpuProtocol, SignalEventMustBeOfferedAndRequiredIndependently)
++{
++    const auto capability = signalEventCapability();
++    EXPECT_EQ(capability[SignalEventCapabilityByte],
++              SignalEventCapabilityMask);
++    EXPECT_EQ(std::count(capability.begin(), capability.end(), uint8_t(0)),
++              CapabilityBytes - 1);
++
++    auto server = goldenServer();
++    server.supported[0] |= QueueControlCapabilityMask |
++                           MemoryControlCapabilityMask |
++                           SignalEventCapabilityMask;
++    auto hello = goldenHello();
++    hello.offered[0] |= QueueControlCapabilityMask |
++                        MemoryControlCapabilityMask |
++                        SignalEventCapabilityMask;
++    auto negotiated = negotiate(goldenHeader(), hello, server);
++    ASSERT_EQ(negotiated.status, Status::Ok);
++    EXPECT_EQ(negotiated.selected[0] &
++                  (QueueControlCapabilityMask | MemoryControlCapabilityMask |
++                   SignalEventCapabilityMask),
++              0);
++
++    hello.required[0] |= SignalEventCapabilityMask;
++    negotiated = negotiate(goldenHeader(), hello, server);
++    ASSERT_EQ(negotiated.status, Status::Ok);
++    EXPECT_EQ(negotiated.selected[0] & SignalEventCapabilityMask,
++              SignalEventCapabilityMask);
++    EXPECT_EQ(negotiated.selected[0] &
++                  (QueueControlCapabilityMask | MemoryControlCapabilityMask),
++              0);
++}
++
+ TEST(HostGpuProtocol, GoldenMemoryFramesAreByteExact)
+ {
+     MemoryRequest allocate;
+@@ -600,6 +730,243 @@ TEST(HostGpuProtocol, FailedMemoryAckIsCanonicalized)
+     EXPECT_EQ(load64(payload + 56), 0U);
+ }
+ 
++TEST(HostGpuProtocol, GoldenSignalFramesAreByteExact)
++{
++    SignalRequest request;
++    request.opcode = SignalOpcode::Create;
++    request.value = -7;
++    auto frame = encodeSignalRequest(
++        goldenMemoryHeader(0x0123456789abcdf5ULL), request);
++    EXPECT_EQ(frame, fromHex(GoldenSignalCreateRequestHex));
++    auto decoded = decodeSignalRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    ASSERT_EQ(decoded.action, DecodeAction::Acknowledge);
++    EXPECT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(decoded.request.value, -7);
++
++    SignalResponse response;
++    response.status = Status::Ok;
++    response.opcode = SignalOpcode::Create;
++    response.signalId = 7;
++    response.generation = 0x8877665544332211ULL;
++    response.value = -7;
++    response.simTick = 0x123456789abcdef5ULL;
++    frame = encodeSignalAck(
++        goldenMemoryHeader(0x0123456789abcdf5ULL), response);
++    EXPECT_EQ(frame, fromHex(GoldenSignalCreateAckHex));
++
++    request = {};
++    request.opcode = SignalOpcode::Load;
++    request.signalId = response.signalId;
++    request.generation = response.generation;
++    frame = encodeSignalRequest(
++        goldenMemoryHeader(0x0123456789abcdf6ULL), request);
++    EXPECT_EQ(frame, fromHex(GoldenSignalLoadRequestHex));
++    response.opcode = SignalOpcode::Load;
++    response.simTick = 0x123456789abcdef6ULL;
++    frame = encodeSignalAck(
++        goldenMemoryHeader(0x0123456789abcdf6ULL), response);
++    EXPECT_EQ(frame, fromHex(GoldenSignalLoadAckHex));
++
++    request.opcode = SignalOpcode::Wait;
++    request.sequence = 0x0100000000000002ULL;
++    request.condition = SignalCondition::GreaterThanOrEqual;
++    frame = encodeSignalRequest(
++        goldenMemoryHeader(0x0123456789abcdf7ULL), request);
++    EXPECT_EQ(frame, fromHex(GoldenSignalWaitRequestHex));
++    decoded = decodeSignalRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    ASSERT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(decoded.request.condition,
++              SignalCondition::GreaterThanOrEqual);
++    response.opcode = SignalOpcode::Wait;
++    response.sequence = request.sequence;
++    response.simTick = 0x123456789abcdef7ULL;
++    frame = encodeSignalAck(
++        goldenMemoryHeader(0x0123456789abcdf7ULL), response);
++    EXPECT_EQ(frame, fromHex(GoldenSignalWaitAckHex));
++
++    request.opcode = SignalOpcode::Store;
++    request.sequence = 0;
++    request.value = 42;
++    request.condition = SignalCondition::Equal;
++    frame = encodeSignalRequest(
++        goldenMemoryHeader(0x0123456789abcdf8ULL), request);
++    EXPECT_EQ(frame, fromHex(GoldenSignalStoreRequestHex));
++    response.opcode = SignalOpcode::Store;
++    response.sequence = 0;
++    response.value = 42;
++    response.simTick = 0x123456789abcdef8ULL;
++    frame = encodeSignalAck(
++        goldenMemoryHeader(0x0123456789abcdf8ULL), response);
++    EXPECT_EQ(frame, fromHex(GoldenSignalStoreAckHex));
++
++    response.opcode = SignalOpcode::Wait;
++    response.sequence = 0x0100000000000002ULL;
++    response.simTick = 0x123456789abcdef9ULL;
++    frame = encodeSignalCompletion(
++        goldenMemoryHeader(0x0123456789abcdf7ULL), response);
++    EXPECT_EQ(frame, fromHex(GoldenSignalWaitCompletionHex));
++
++    request.opcode = SignalOpcode::Destroy;
++    request.value = 0;
++    frame = encodeSignalRequest(
++        goldenMemoryHeader(0x0123456789abcdf9ULL), request);
++    EXPECT_EQ(frame, fromHex(GoldenSignalDestroyRequestHex));
++    response.opcode = SignalOpcode::Destroy;
++    response.sequence = 0;
++    response.value = 0;
++    response.simTick = 0x123456789abcdefaULL;
++    frame = encodeSignalAck(
++        goldenMemoryHeader(0x0123456789abcdf9ULL), response);
++    EXPECT_EQ(frame, fromHex(GoldenSignalDestroyAckHex));
++}
++
++TEST(HostGpuProtocol, SignalRequestValidationIsStrict)
++{
++    auto expect = [](std::vector<uint8_t> frame, Status status) {
++        recomputeCrc(frame);
++        const auto decoded = decodeSignalRequestRecord(
++            frame.data(), frame.size(), MaximumRecordBytes);
++        EXPECT_EQ(decoded.action, DecodeAction::Acknowledge);
++        EXPECT_EQ(decoded.status, status);
++        EXPECT_FALSE(decoded.closeConnection);
++    };
++
++    auto frame = fromHex(GoldenSignalWaitRequestHex);
++    store16(frame, HeaderBytes, 2);
++    expect(frame, Status::UnsupportedVersion);
++    store16(frame, HeaderBytes + 6, 1);
++    expect(frame, Status::Malformed);
++
++    frame = fromHex(GoldenSignalWaitRequestHex);
++    store16(frame, HeaderBytes + 4, 99);
++    expect(frame, Status::Malformed);
++    frame = fromHex(GoldenSignalWaitRequestHex);
++    store64(frame, HeaderBytes + 40, 4);
++    expect(frame, Status::Malformed);
++    frame = fromHex(GoldenSignalWaitRequestHex);
++    store64(frame, HeaderBytes + 48, 1);
++    expect(frame, Status::Malformed);
++    frame = fromHex(GoldenSignalWaitRequestHex);
++    store64(frame, HeaderBytes + 56, 1);
++    expect(frame, Status::Malformed);
++
++    SignalRequest request;
++    request.opcode = SignalOpcode::Destroy;
++    request.signalId = 1;
++    request.generation = 2;
++    for (const size_t offset : {size_t(24), size_t(32), size_t(40)}) {
++        frame = encodeSignalRequest(goldenMemoryHeader(30), request);
++        store64(frame, HeaderBytes + offset, 1);
++        expect(frame, Status::Malformed);
++    }
++    request.opcode = SignalOpcode::Load;
++    request.value = 1;
++    frame = encodeSignalRequest(goldenMemoryHeader(31), request);
++    expect(frame, Status::Malformed);
++    request = {};
++    request.opcode = SignalOpcode::Store;
++    request.signalId = 1;
++    request.generation = 2;
++    request.sequence = 1;
++    frame = encodeSignalRequest(goldenMemoryHeader(32), request);
++    expect(frame, Status::Malformed);
++    request = {};
++    request.opcode = SignalOpcode::Wait;
++    request.signalId = 1;
++    request.generation = 2;
++    frame = encodeSignalRequest(goldenMemoryHeader(33), request);
++    expect(frame, Status::Malformed);
++
++    frame = fromHex(GoldenSignalWaitRequestHex);
++    store16(frame, 14, static_cast<uint16_t>(MessageType::SignalAck));
++    recomputeCrc(frame);
++    EXPECT_EQ(decodeSignalRequestRecord(
++                  frame.data(), frame.size(), MaximumRecordBytes).action,
++              DecodeAction::Drop);
++    frame = fromHex(GoldenSignalWaitRequestHex);
++    frame.pop_back();
++    store32(frame, 20, SignalPayloadBytes - 1);
++    recomputeCrc(frame);
++    EXPECT_EQ(decodeSignalRequestRecord(
++                  frame.data(), frame.size(), MaximumRecordBytes).action,
++              DecodeAction::Drop);
++}
++
++TEST(HostGpuProtocol, FailedSignalAckIsCanonicalized)
++{
++    SignalResponse response;
++    response.major = 9;
++    response.minor = 9;
++    response.status = Status::Busy;
++    response.opcode = SignalOpcode::Wait;
++    response.signalId = 7;
++    response.generation = 8;
++    response.sequence = 9;
++    response.value = -1;
++    response.ready = 1;
++    response.simTick = 10;
++    const auto frame = encodeSignalAck(goldenMemoryHeader(34), response);
++    ASSERT_EQ(frame.size(), HeaderBytes + SignalPayloadBytes);
++    const uint8_t *payload = frame.data() + HeaderBytes;
++    EXPECT_EQ(load16(payload), SignalEventMajor);
++    EXPECT_EQ(load16(payload + 2), SignalEventMinor);
++    EXPECT_EQ(load64(payload + 16), 7U);
++    EXPECT_EQ(load64(payload + 24), 8U);
++    EXPECT_EQ(load64(payload + 32), 9U);
++    EXPECT_EQ(load64(payload + 40), 0U);
++    EXPECT_EQ(load64(payload + 48), 0U);
++    EXPECT_EQ(load64(payload + 56), 0U);
++}
++
++TEST(HostGpuProtocol, UnknownSignalOpcodeRoundTripsThroughFailureAck)
++{
++    constexpr uint16_t UnknownOpcode = 0xbeef;
++    auto requestFrame = fromHex(GoldenSignalWaitRequestHex);
++    store16(requestFrame, HeaderBytes + 4, UnknownOpcode);
++    recomputeCrc(requestFrame);
++    const auto decoded = decodeSignalRequestRecord(
++        requestFrame.data(), requestFrame.size(), MaximumRecordBytes);
++    ASSERT_EQ(decoded.action, DecodeAction::Acknowledge);
++    ASSERT_EQ(decoded.status, Status::Malformed);
++    EXPECT_EQ(static_cast<uint16_t>(decoded.request.opcode), UnknownOpcode);
++
++    SignalResponse response;
++    response.status = decoded.status;
++    response.opcode = decoded.request.opcode;
++    response.signalId = decoded.request.signalId;
++    response.generation = decoded.request.generation;
++    response.sequence = decoded.request.sequence;
++    response.value = -1;
++    response.ready = 1;
++    response.simTick = 1;
++    const auto responseHeader = queueResponseHeader(
++        decoded.header, goldenServer(), decoded.header.connectionId);
++    const auto ack = encodeSignalFailureAck(
++        responseHeader, response,
++        static_cast<uint16_t>(decoded.request.opcode));
++
++    ASSERT_EQ(ack.size(), HeaderBytes + SignalPayloadBytes);
++    EXPECT_EQ(load16(ack.data() + 14),
++              static_cast<uint16_t>(MessageType::SignalAck));
++    const uint8_t *payload = ack.data() + HeaderBytes;
++    EXPECT_EQ(load32(payload + 4), static_cast<uint32_t>(Status::Malformed));
++    EXPECT_EQ(load16(payload + 8), UnknownOpcode);
++    EXPECT_EQ(load64(payload + 16), decoded.request.signalId);
++    EXPECT_EQ(load64(payload + 24), decoded.request.generation);
++    EXPECT_EQ(load64(payload + 32), decoded.request.sequence);
++    EXPECT_EQ(load64(payload + 40), 0U);
++    EXPECT_EQ(load64(payload + 48), 0U);
++    EXPECT_EQ(load64(payload + 56), 0U);
++
++    EXPECT_DEBUG_DEATH(
++        {
++            response.status = Status::Ok;
++            (void)encodeSignalAck(responseHeader, response);
++        }, "");
++}
++
+ TEST(HostGpuProtocol, GoldenQueueRequestIsByteExact)
+ {
+     const auto actual = encodeQueueRequest(
+diff --git a/src/dev/amdgpu/host_gpu_signal_state.cc b/src/dev/amdgpu/host_gpu_signal_state.cc
+new file mode 100644
+index 000000000..e8133eea7
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_signal_state.cc
+@@ -0,0 +1,323 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_signal_state.hh"
++
++#include <limits>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++protocol::SignalResponse
++HostGPUSignalState::failureResponse(
++    const protocol::SignalRequest &request, protocol::Status status)
++{
++    protocol::SignalResponse response;
++    response.status = status;
++    response.opcode = request.opcode;
++    response.signalId = request.signalId;
++    response.generation = request.generation;
++    response.sequence = request.sequence;
++    return response;
++}
++
++bool
++HostGPUSignalState::takeGeneration(uint64_t &generation)
++{
++    if (generationExhausted || nextGeneration == 0)
++        return false;
++    generation = nextGeneration;
++    if (nextGeneration == std::numeric_limits<uint64_t>::max()) {
++        generationExhausted = true;
++    } else {
++        ++nextGeneration;
++    }
++    return true;
++}
++
++HostGPUSignalState::Signal *
++HostGPUSignalState::resolve(
++    const Owner &owner, const protocol::SignalRequest &request)
++{
++    if (request.signalId == 0 || request.signalId > signals.size())
++        return nullptr;
++    auto &slot = signals[request.signalId - 1];
++    if (!slot || !(slot->owner == owner) ||
++        slot->generation != request.generation) {
++        return nullptr;
++    }
++    return &*slot;
++}
++
++const HostGPUSignalState::Signal *
++HostGPUSignalState::resolve(
++    const Owner &owner, uint64_t signalId, uint64_t generation) const
++{
++    if (signalId == 0 || signalId > signals.size())
++        return nullptr;
++    const auto &slot = signals[signalId - 1];
++    if (!slot || !(slot->owner == owner) || slot->generation != generation)
++        return nullptr;
++    return &*slot;
++}
++
++bool
++HostGPUSignalState::isNextSequence(uint64_t previous, uint64_t candidate)
++{
++    return previous != std::numeric_limits<uint64_t>::max() &&
++           candidate == previous + 1;
++}
++
++bool
++HostGPUSignalState::conditionSatisfied(
++    int64_t value, protocol::SignalCondition condition, int64_t compareValue)
++{
++    switch (condition) {
++      case protocol::SignalCondition::Equal:
++        return value == compareValue;
++      case protocol::SignalCondition::NotEqual:
++        return value != compareValue;
++      case protocol::SignalCondition::LessThan:
++        return value < compareValue;
++      case protocol::SignalCondition::GreaterThanOrEqual:
++        return value >= compareValue;
++    }
++    return false;
++}
++
++protocol::SignalResponse
++HostGPUSignalState::submit(
++    const Owner &owner, const protocol::Header &header,
++    const protocol::SignalRequest &request, uint64_t now)
++{
++    auto response = failureResponse(
++        request, protocol::Status::ProtocolState);
++
++    if (request.opcode == protocol::SignalOpcode::Create) {
++        response.status = protocol::Status::ResourceExhausted;
++        if (liveSignals >= MaximumSignals)
++            return response;
++        size_t slot = 0;
++        while (slot < signals.size() && signals[slot])
++            ++slot;
++        if (slot == signals.size())
++            return response;
++        uint64_t generation = 0;
++        if (!takeGeneration(generation))
++            return response;
++        signals[slot].emplace(Signal{
++            owner, generation, request.value, 0, std::nullopt});
++        ++liveSignals;
++        response.status = protocol::Status::Ok;
++        response.signalId = slot + 1;
++        response.generation = generation;
++        response.value = request.value;
++        response.simTick = now;
++        return response;
++    }
++
++    Signal *signal = resolve(owner, request);
++    if (signal == nullptr)
++        return response;
++
++    switch (request.opcode) {
++      case protocol::SignalOpcode::Create:
++        break;
++      case protocol::SignalOpcode::Destroy:
++        if (signal->wait) {
++            response.status = protocol::Status::Busy;
++            return response;
++        }
++        signals[request.signalId - 1].reset();
++        --liveSignals;
++        response.status = protocol::Status::Ok;
++        response.simTick = now;
++        return response;
++      case protocol::SignalOpcode::Load:
++        response.status = protocol::Status::Ok;
++        response.value = signal->value;
++        response.simTick = now;
++        return response;
++      case protocol::SignalOpcode::Store: {
++        const bool wakesArmed = signal->wait && !signal->wait->ready &&
++            conditionSatisfied(request.value, signal->wait->condition,
++                               signal->wait->compareValue);
++        if (wakesArmed && now == std::numeric_limits<uint64_t>::max()) {
++            response.status = protocol::Status::Internal;
++            return response;
++        }
++        signal->value = request.value;
++        if (wakesArmed) {
++            signal->wait->ready = true;
++            signal->wait->capturedValue = request.value;
++            signal->wait->readyTick = now + CompletionDelay;
++        }
++        response.status = protocol::Status::Ok;
++        response.value = request.value;
++        response.simTick = now;
++        return response;
++      }
++      case protocol::SignalOpcode::Wait: {
++        if (!isNextSequence(signal->lastSequence, request.sequence))
++            return response;
++        if (signal->wait) {
++            response.status = protocol::Status::Busy;
++            return response;
++        }
++        if (liveWaits >= MaximumWaits) {
++            response.status = protocol::Status::ResourceExhausted;
++            return response;
++        }
++        if (now == std::numeric_limits<uint64_t>::max()) {
++            response.status = protocol::Status::Internal;
++            return response;
++        }
++        const bool ready = conditionSatisfied(
++            signal->value, request.condition, request.value);
++        signal->wait.emplace(Wait{
++            header, request.sequence, request.condition, request.value,
++            ready, false, ready ? signal->value : 0,
++            ready ? now + CompletionDelay : 0});
++        signal->lastSequence = request.sequence;
++        ++liveWaits;
++        response.status = protocol::Status::Ok;
++        response.value = signal->value;
++        response.ready = ready ? 1 : 0;
++        response.simTick = now;
++        return response;
++      }
++    }
++
++    response.status = protocol::Status::Malformed;
++    return response;
++}
++
++bool
++HostGPUSignalState::callbackPending(const Completion &completion) const
++{
++    const Signal *signal = resolve(
++        completion.owner, completion.signalId, completion.signalGeneration);
++    if (signal == nullptr || !signal->wait || !signal->wait->ready)
++        return false;
++    const Wait &wait = *signal->wait;
++    return completion.header.requestId != 0 &&
++        wait.header.requestId == completion.header.requestId &&
++        wait.sequence == completion.sequence &&
++        wait.capturedValue == completion.value &&
++        wait.readyTick == completion.readyTick;
++}
++
++std::optional<HostGPUSignalState::Completion>
++HostGPUSignalState::popReady(uint64_t now)
++{
++    size_t selected = signals.size();
++    uint64_t selectedTick = std::numeric_limits<uint64_t>::max();
++    for (size_t slot = 0; slot < signals.size(); ++slot) {
++        if (!signals[slot] || !signals[slot]->wait ||
++            !signals[slot]->wait->ready ||
++            signals[slot]->wait->queued ||
++            signals[slot]->wait->readyTick > now) {
++            continue;
++        }
++        if (selected == signals.size() ||
++            signals[slot]->wait->readyTick < selectedTick) {
++            selected = slot;
++            selectedTick = signals[slot]->wait->readyTick;
++        }
++    }
++    if (selected == signals.size())
++        return std::nullopt;
++
++    Signal &signal = *signals[selected];
++    const Wait &wait = *signal.wait;
++    Completion completion{
++        signal.owner, wait.header, selected + 1, signal.generation,
++        wait.sequence, wait.capturedValue, wait.readyTick};
++    signal.wait->queued = true;
++    return completion;
++}
++
++bool
++HostGPUSignalState::complete(const Completion &completion)
++{
++    Signal *signal = nullptr;
++    if (completion.signalId != 0 && completion.signalId <= signals.size()) {
++        auto &slot = signals[completion.signalId - 1];
++        if (slot && slot->owner == completion.owner &&
++            slot->generation == completion.signalGeneration) {
++            signal = &*slot;
++        }
++    }
++    if (signal == nullptr || !signal->wait || !signal->wait->queued ||
++        !callbackPending(completion)) {
++        return false;
++    }
++    signal->wait.reset();
++    --liveWaits;
++    return true;
++}
++
++std::optional<uint64_t>
++HostGPUSignalState::nextReadyTick() const
++{
++    std::optional<uint64_t> next;
++    for (const auto &signal : signals) {
++        if (!signal || !signal->wait || !signal->wait->ready ||
++            signal->wait->queued)
++            continue;
++        if (!next || signal->wait->readyTick < *next)
++            next = signal->wait->readyTick;
++    }
++    return next;
++}
++
++void
++HostGPUSignalState::disconnect(const Owner &owner)
++{
++    for (auto &signal : signals) {
++        if (signal && signal->owner == owner) {
++            if (signal->wait)
++                --liveWaits;
++            signal.reset();
++            --liveSignals;
++        }
++    }
++}
++
++void
++HostGPUSignalState::clear()
++{
++    for (auto &signal : signals)
++        signal.reset();
++    liveSignals = 0;
++    liveWaits = 0;
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_signal_state.hh b/src/dev/amdgpu/host_gpu_signal_state.hh
+new file mode 100644
+index 000000000..83bd13154
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_signal_state.hh
+@@ -0,0 +1,132 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_SIGNAL_STATE_HH__
++#define __DEV_AMDGPU_HOST_GPU_SIGNAL_STATE_HH__
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <optional>
++
++#include "dev/amdgpu/host_gpu_protocol.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++/** Bounded bridge-private signed signals and one-shot wait completions. */
++class HostGPUSignalState
++{
++  public:
++    static constexpr size_t MaximumSignals = 1024;
++    static constexpr size_t MaximumWaits = 8;
++    static constexpr uint64_t CompletionDelay = 1;
++
++    struct Owner
++    {
++        int fd = -1;
++        uint64_t clientGeneration = 0;
++
++        bool operator==(const Owner &other) const
++        {
++            return fd == other.fd &&
++                   clientGeneration == other.clientGeneration;
++        }
++    };
++
++    struct Completion
++    {
++        Owner owner;
++        protocol::Header header;
++        uint64_t signalId = 0;
++        uint64_t signalGeneration = 0;
++        uint64_t sequence = 0;
++        int64_t value = 0;
++        uint64_t readyTick = 0;
++    };
++
++    protocol::SignalResponse submit(
++        const Owner &owner, const protocol::Header &header,
++        const protocol::SignalRequest &request, uint64_t now);
++    static protocol::SignalResponse failureResponse(
++        const protocol::SignalRequest &request, protocol::Status status);
++    static bool isNextSequence(uint64_t previous, uint64_t candidate);
++    static bool conditionSatisfied(
++        int64_t value, protocol::SignalCondition condition,
++        int64_t compareValue);
++    bool callbackPending(const Completion &completion) const;
++    std::optional<Completion> popReady(uint64_t now);
++    bool complete(const Completion &completion);
++    std::optional<uint64_t> nextReadyTick() const;
++    void disconnect(const Owner &owner);
++    void clear();
++
++    size_t signalCount() const { return liveSignals; }
++    size_t waitCount() const { return liveWaits; }
++
++  private:
++    struct Wait
++    {
++        protocol::Header header;
++        uint64_t sequence = 0;
++        protocol::SignalCondition condition =
++            protocol::SignalCondition::Equal;
++        int64_t compareValue = 0;
++        bool ready = false;
++        bool queued = false;
++        int64_t capturedValue = 0;
++        uint64_t readyTick = 0;
++    };
++
++    struct Signal
++    {
++        Owner owner;
++        uint64_t generation = 0;
++        int64_t value = 0;
++        uint64_t lastSequence = 0;
++        std::optional<Wait> wait;
++    };
++
++    Signal *resolve(
++        const Owner &owner, const protocol::SignalRequest &request);
++    const Signal *resolve(
++        const Owner &owner, uint64_t signalId, uint64_t generation) const;
++    bool takeGeneration(uint64_t &generation);
++
++    std::array<std::optional<Signal>, MaximumSignals> signals;
++    uint64_t nextGeneration = 1;
++    bool generationExhausted = false;
++    size_t liveSignals = 0;
++    size_t liveWaits = 0;
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_SIGNAL_STATE_HH__
+diff --git a/src/dev/amdgpu/host_gpu_signal_state.test.cc b/src/dev/amdgpu/host_gpu_signal_state.test.cc
+new file mode 100644
+index 000000000..c099f6940
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_signal_state.test.cc
+@@ -0,0 +1,464 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <gtest/gtest.h>
++
++#include <cstdint>
++#include <limits>
++#include <vector>
++
++#include "dev/amdgpu/host_gpu_queue_state.hh"
++#include "dev/amdgpu/host_gpu_signal_state.hh"
++
++namespace gem5::hostgpu
++{
++namespace
++{
++
++HostGPUSignalState::Owner
++owner(int fd = 7, uint64_t generation = 11)
++{
++    return {fd, generation};
++}
++
++protocol::Header
++header(uint64_t requestId = 1)
++{
++    protocol::Header value;
++    value.requestId = requestId;
++    value.connectionId = 17;
++    value.jobEpoch = 19;
++    value.daemonUuid[0] = 1;
++    return value;
++}
++
++protocol::SignalRequest
++create(int64_t initialValue)
++{
++    protocol::SignalRequest request;
++    request.opcode = protocol::SignalOpcode::Create;
++    request.value = initialValue;
++    return request;
++}
++
++protocol::SignalRequest
++operation(const protocol::SignalResponse &created,
++          protocol::SignalOpcode opcode)
++{
++    protocol::SignalRequest request;
++    request.opcode = opcode;
++    request.signalId = created.signalId;
++    request.generation = created.generation;
++    return request;
++}
++
++protocol::SignalRequest
++waitFor(const protocol::SignalResponse &created, uint64_t sequence,
++        protocol::SignalCondition condition, int64_t compareValue)
++{
++    auto request = operation(created, protocol::SignalOpcode::Wait);
++    request.sequence = sequence;
++    request.condition = condition;
++    request.value = compareValue;
++    return request;
++}
++
++TEST(HostGPUSignalState, CreatesLoadsStoresAndDestroysSignedSignal)
++{
++    HostGPUSignalState state;
++    const auto created = state.submit(owner(), header(), create(-7), 10);
++    EXPECT_EQ(created.status, protocol::Status::Ok);
++    EXPECT_EQ(created.signalId, 1U);
++    EXPECT_NE(created.generation, 0U);
++    EXPECT_EQ(created.value, -7);
++    EXPECT_EQ(created.simTick, 10U);
++    EXPECT_EQ(state.signalCount(), 1U);
++
++    const auto loaded = state.submit(
++        owner(), header(2), operation(created, protocol::SignalOpcode::Load),
++        11);
++    EXPECT_EQ(loaded.status, protocol::Status::Ok);
++    EXPECT_EQ(loaded.value, -7);
++
++    auto store = operation(created, protocol::SignalOpcode::Store);
++    store.value = std::numeric_limits<int64_t>::min();
++    const auto stored = state.submit(owner(), header(3), store, 12);
++    EXPECT_EQ(stored.status, protocol::Status::Ok);
++    EXPECT_EQ(stored.value, std::numeric_limits<int64_t>::min());
++
++    const auto destroyed = state.submit(
++        owner(), header(4),
++        operation(created, protocol::SignalOpcode::Destroy), 13);
++    EXPECT_EQ(destroyed.status, protocol::Status::Ok);
++    EXPECT_EQ(destroyed.value, 0);
++    EXPECT_EQ(state.signalCount(), 0U);
++}
++
++TEST(HostGPUSignalState, ConditionsUseSignedHsaComparisons)
++{
++    using Condition = protocol::SignalCondition;
++    EXPECT_TRUE(HostGPUSignalState::conditionSatisfied(-3, Condition::Equal,
++                                                       -3));
++    EXPECT_TRUE(HostGPUSignalState::conditionSatisfied(-3,
++                    Condition::NotEqual, 2));
++    EXPECT_TRUE(HostGPUSignalState::conditionSatisfied(
++        std::numeric_limits<int64_t>::min(), Condition::LessThan, 0));
++    EXPECT_TRUE(HostGPUSignalState::conditionSatisfied(
++        std::numeric_limits<int64_t>::max(),
++        Condition::GreaterThanOrEqual, -1));
++    EXPECT_FALSE(HostGPUSignalState::conditionSatisfied(
++        -1, Condition::GreaterThanOrEqual, 0));
++}
++
++TEST(HostGPUSignalState, BridgeFailurePreservesUnknownOpcodeBits)
++{
++    constexpr uint16_t UnknownOpcode = 0xbeef;
++    protocol::SignalRequest request;
++    request.opcode = static_cast<protocol::SignalOpcode>(UnknownOpcode);
++    request.signalId = 7;
++    request.generation = 8;
++    request.sequence = 9;
++    request.value = -1;
++    const auto response = HostGPUSignalState::failureResponse(
++        request, protocol::Status::Malformed);
++
++    EXPECT_EQ(response.status, protocol::Status::Malformed);
++    EXPECT_EQ(static_cast<uint16_t>(response.opcode), UnknownOpcode);
++    EXPECT_EQ(response.signalId, request.signalId);
++    EXPECT_EQ(response.generation, request.generation);
++    EXPECT_EQ(response.sequence, request.sequence);
++    EXPECT_EQ(response.value, 0);
++    EXPECT_EQ(response.ready, 0U);
++    EXPECT_EQ(response.simTick, 0U);
++}
++
++TEST(HostGPUSignalState, ImmediateWaitCompletesOneTickLaterAndOnSend)
++{
++    HostGPUSignalState state;
++    const auto created = state.submit(owner(), header(), create(-7), 0);
++    const auto request = waitFor(
++        created, 1, protocol::SignalCondition::LessThan, 0);
++    const auto accepted = state.submit(owner(), header(2), request, 20);
++    EXPECT_EQ(accepted.status, protocol::Status::Ok);
++    EXPECT_EQ(accepted.value, -7);
++    EXPECT_EQ(accepted.ready, 1U);
++    EXPECT_EQ(accepted.simTick, 20U);
++    EXPECT_EQ(state.waitCount(), 1U);
++    ASSERT_TRUE(state.nextReadyTick());
++    EXPECT_EQ(*state.nextReadyTick(), 21U);
++    EXPECT_FALSE(state.popReady(20));
++
++    const auto completion = state.popReady(21);
++    ASSERT_TRUE(completion);
++    EXPECT_EQ(completion->header.requestId, 2U);
++    EXPECT_EQ(completion->signalId, created.signalId);
++    EXPECT_EQ(completion->signalGeneration, created.generation);
++    EXPECT_EQ(completion->sequence, 1U);
++    EXPECT_EQ(completion->value, -7);
++    EXPECT_EQ(completion->readyTick, 21U);
++    EXPECT_TRUE(state.callbackPending(*completion));
++    EXPECT_EQ(state.waitCount(), 1U);
++    EXPECT_FALSE(state.nextReadyTick());
++    EXPECT_FALSE(state.popReady(21));
++
++    EXPECT_EQ(state.submit(owner(), header(3),
++                           operation(created,
++                                     protocol::SignalOpcode::Destroy), 21)
++                  .status,
++              protocol::Status::Busy);
++    EXPECT_TRUE(state.complete(*completion));
++    EXPECT_FALSE(state.callbackPending(*completion));
++    EXPECT_EQ(state.waitCount(), 0U);
++}
++
++TEST(HostGPUSignalState, ArmedWaitCapturesFirstSatisfyingStoreExactlyOnce)
++{
++    HostGPUSignalState state;
++    const auto created = state.submit(owner(), header(), create(-7), 0);
++    const auto waiting = waitFor(
++        created, 1, protocol::SignalCondition::GreaterThanOrEqual, 0);
++    const auto accepted = state.submit(owner(), header(2), waiting, 10);
++    EXPECT_EQ(accepted.status, protocol::Status::Ok);
++    EXPECT_EQ(accepted.value, -7);
++    EXPECT_EQ(accepted.ready, 0U);
++    EXPECT_FALSE(state.nextReadyTick());
++
++    auto store = operation(created, protocol::SignalOpcode::Store);
++    store.value = -1;
++    EXPECT_EQ(state.submit(owner(), header(3), store, 20).status,
++              protocol::Status::Ok);
++    EXPECT_FALSE(state.nextReadyTick());
++
++    store.value = 42;
++    EXPECT_EQ(state.submit(owner(), header(4), store, 30).status,
++              protocol::Status::Ok);
++    ASSERT_TRUE(state.nextReadyTick());
++    EXPECT_EQ(*state.nextReadyTick(), 31U);
++
++    store.value = 99;
++    EXPECT_EQ(state.submit(owner(), header(5), store, 30).status,
++              protocol::Status::Ok);
++    const auto completion = state.popReady(31);
++    ASSERT_TRUE(completion);
++    EXPECT_EQ(completion->value, 42);
++    EXPECT_EQ(completion->readyTick, 31U);
++
++    auto repeated = waitFor(
++        created, 1, protocol::SignalCondition::Equal, 99);
++    EXPECT_EQ(state.submit(owner(), header(6), repeated, 31).status,
++              protocol::Status::ProtocolState);
++    repeated.sequence = 2;
++    EXPECT_EQ(state.submit(owner(), header(7), repeated, 31).status,
++              protocol::Status::Busy);
++    EXPECT_TRUE(state.complete(*completion));
++    EXPECT_EQ(state.submit(owner(), header(8), repeated, 31).status,
++              protocol::Status::Ok);
++}
++
++TEST(HostGPUSignalState, PendingAndQueuedWaitsShareGlobalEightLimit)
++{
++    HostGPUSignalState state;
++    std::vector<protocol::SignalResponse> created;
++    for (size_t index = 0;
++         index <= HostGPUSignalState::MaximumWaits; ++index) {
++        created.push_back(state.submit(
++            owner(), header(index + 1), create(0), index));
++        ASSERT_EQ(created.back().status, protocol::Status::Ok);
++    }
++    for (size_t index = 0; index < HostGPUSignalState::MaximumWaits; ++index) {
++        EXPECT_EQ(state.submit(
++                      owner(), header(20 + index),
++                      waitFor(created[index], 1,
++                              protocol::SignalCondition::Equal, -1), 10)
++                      .status,
++                  protocol::Status::Ok);
++    }
++    EXPECT_EQ(state.waitCount(), HostGPUSignalState::MaximumWaits);
++    auto ninthWait = waitFor(
++        created.back(), 1, protocol::SignalCondition::Equal, -1);
++    EXPECT_EQ(state.submit(owner(), header(40), ninthWait, 10).status,
++              protocol::Status::ResourceExhausted);
++
++    for (size_t index = 0; index < HostGPUSignalState::MaximumWaits; ++index) {
++        auto store = operation(created[index], protocol::SignalOpcode::Store);
++        store.value = -1;
++        ASSERT_EQ(state.submit(owner(), header(50 + index), store, 20).status,
++                  protocol::Status::Ok);
++    }
++    std::vector<HostGPUSignalState::Completion> queued;
++    for (size_t index = 0; index < HostGPUSignalState::MaximumWaits; ++index) {
++        auto completion = state.popReady(21);
++        ASSERT_TRUE(completion);
++        queued.push_back(*completion);
++    }
++    EXPECT_EQ(state.waitCount(), HostGPUSignalState::MaximumWaits);
++    EXPECT_EQ(state.submit(owner(), header(70), ninthWait, 21).status,
++              protocol::Status::ResourceExhausted);
++
++    ASSERT_TRUE(state.complete(queued.front()));
++    EXPECT_EQ(state.waitCount(), HostGPUSignalState::MaximumWaits - 1);
++    EXPECT_EQ(state.submit(owner(), header(71), ninthWait, 21).status,
++              protocol::Status::Ok);
++}
++
++TEST(HostGPUSignalState, CombinedCompletionBacklogFitsBridgeHardCap)
++{
++    HostGPUQueueState queues;
++    const HostGPUQueueState::Owner queueOwner{7, 11};
++    protocol::QueueRequest createQueue;
++    createQueue.opcode = protocol::QueueOpcode::Create;
++    createQueue.arg0 = 64;
++    const auto queue = queues.submit(queueOwner, header(), createQueue, 0);
++    ASSERT_EQ(queue.response.status, protocol::Status::Ok);
++
++    auto doorbell = [&](uint64_t sequence, uint64_t requestId, uint64_t now) {
++        protocol::QueueRequest request;
++        request.opcode = protocol::QueueOpcode::Doorbell;
++        request.queueId = queue.response.queueId;
++        request.generation = queue.response.generation;
++        request.sequence = sequence;
++        return queues.submit(queueOwner, header(requestId), request, now);
++    };
++    for (size_t index = 0; index < HostGPUQueueState::MaximumInflight;
++         ++index) {
++        ASSERT_EQ(doorbell(index + 1, index + 2, 0).response.status,
++                  protocol::Status::Ok);
++    }
++    size_t queuedQueueCompletions = 0;
++    while (queues.popReady(1))
++        ++queuedQueueCompletions;
++    ASSERT_EQ(queuedQueueCompletions,
++              HostGPUQueueState::MaximumInflight);
++    for (size_t index = 0; index < HostGPUQueueState::MaximumInflight;
++         ++index) {
++        ASSERT_EQ(doorbell(index + 9, index + 20, 1).response.status,
++                  protocol::Status::Ok);
++    }
++    while (queues.popReady(2))
++        ++queuedQueueCompletions;
++    ASSERT_EQ(queuedQueueCompletions,
++              HostGPUQueueState::MaximumInflight * 2);
++
++    const size_t allAsyncBacklog = queuedQueueCompletions +
++        HostGPUSignalState::MaximumWaits;
++    EXPECT_EQ(allAsyncBacklog, 24U);
++    constexpr size_t maximumOutboundRecords =
++        HostGPUQueueState::MaximumInflight * 2 +
++        HostGPUSignalState::MaximumWaits + 1;
++    const auto canEnqueue = [=](size_t current) {
++        return current < maximumOutboundRecords;
++    };
++    EXPECT_TRUE(canEnqueue(allAsyncBacklog));
++    EXPECT_EQ(maximumOutboundRecords, 25U);
++    EXPECT_FALSE(canEnqueue(maximumOutboundRecords));
++}
++
++TEST(HostGPUSignalState, ReusesLowestSlotWithNewDaemonLifetimeGeneration)
++{
++    HostGPUSignalState state;
++    const auto first = state.submit(owner(), header(), create(1), 0);
++    const auto second = state.submit(owner(), header(2), create(2), 0);
++    ASSERT_EQ(first.signalId, 1U);
++    ASSERT_EQ(second.signalId, 2U);
++    ASSERT_EQ(state.submit(owner(), header(3),
++                           operation(first,
++                                     protocol::SignalOpcode::Destroy), 1)
++                  .status,
++              protocol::Status::Ok);
++    const auto reused = state.submit(owner(), header(4), create(-9), 2);
++    EXPECT_EQ(reused.signalId, first.signalId);
++    EXPECT_NE(reused.generation, first.generation);
++    EXPECT_EQ(reused.value, -9);
++
++    state.clear();
++    const auto afterClear = state.submit(owner(), header(5), create(0), 3);
++    EXPECT_EQ(afterClear.signalId, 1U);
++    EXPECT_NE(afterClear.generation, reused.generation);
++}
++
++TEST(HostGPUSignalState, EnforcesSignalLimitAndOwnerGeneration)
++{
++    HostGPUSignalState state;
++    protocol::SignalResponse first;
++    for (size_t index = 0; index < HostGPUSignalState::MaximumSignals;
++         ++index) {
++        const auto result = state.submit(
++            owner(), header(index + 1), create(0), index);
++        ASSERT_EQ(result.status, protocol::Status::Ok);
++        if (index == 0)
++            first = result;
++    }
++    EXPECT_EQ(state.submit(owner(), header(2000), create(0), 0).status,
++              protocol::Status::ResourceExhausted);
++
++    const auto reusedFd = owner(owner().fd, owner().clientGeneration + 1);
++    EXPECT_EQ(state.submit(reusedFd, header(2001),
++                           operation(first, protocol::SignalOpcode::Load), 0)
++                  .status,
++              protocol::Status::ProtocolState);
++    auto stale = operation(first, protocol::SignalOpcode::Load);
++    ++stale.generation;
++    EXPECT_EQ(state.submit(owner(), header(2002), stale, 0).status,
++              protocol::Status::ProtocolState);
++}
++
++TEST(HostGPUSignalState, DisconnectCancelsOnlyMatchingOwnerAndQueuedWait)
++{
++    HostGPUSignalState state;
++    const auto firstOwner = owner(7, 1);
++    const auto secondOwner = owner(8, 2);
++    const auto first = state.submit(firstOwner, header(), create(0), 0);
++    const auto second = state.submit(secondOwner, header(2), create(0), 0);
++    ASSERT_EQ(state.submit(
++                  firstOwner, header(3),
++                  waitFor(first, 1, protocol::SignalCondition::Equal, 0), 10)
++                  .status,
++              protocol::Status::Ok);
++    ASSERT_EQ(state.submit(
++                  secondOwner, header(4),
++                  waitFor(second, 1, protocol::SignalCondition::Equal, 0), 10)
++                  .status,
++              protocol::Status::Ok);
++    const auto firstCompletion = state.popReady(11);
++    ASSERT_TRUE(firstCompletion);
++    state.disconnect(firstOwner);
++    EXPECT_EQ(state.signalCount(), 1U);
++    EXPECT_EQ(state.waitCount(), 1U);
++    EXPECT_FALSE(state.callbackPending(*firstCompletion));
++    const auto remaining = state.popReady(11);
++    ASSERT_TRUE(remaining);
++    EXPECT_EQ(remaining->owner, secondOwner);
++}
++
++TEST(HostGPUSignalState, TickOverflowNeverMutatesWaitOrSatisfyingStore)
++{
++    HostGPUSignalState state;
++    const auto created = state.submit(owner(), header(), create(0), 0);
++    auto waiting = waitFor(
++        created, 1, protocol::SignalCondition::Equal, 1);
++    const uint64_t maximum = std::numeric_limits<uint64_t>::max();
++    EXPECT_EQ(state.submit(owner(), header(2), waiting, maximum).status,
++              protocol::Status::Internal);
++    EXPECT_EQ(state.waitCount(), 0U);
++    EXPECT_EQ(state.submit(owner(), header(3), waiting, maximum - 1).status,
++              protocol::Status::Ok);
++
++    auto store = operation(created, protocol::SignalOpcode::Store);
++    store.value = 1;
++    EXPECT_EQ(state.submit(owner(), header(4), store, maximum).status,
++              protocol::Status::Internal);
++    auto load = operation(created, protocol::SignalOpcode::Load);
++    EXPECT_EQ(state.submit(owner(), header(5), load, maximum).value, 0);
++
++    store.value = 2;
++    EXPECT_EQ(state.submit(owner(), header(6), store, maximum).status,
++              protocol::Status::Ok);
++    EXPECT_EQ(state.submit(owner(), header(7), load, maximum).value, 2);
++    EXPECT_FALSE(state.nextReadyTick());
++}
++
++TEST(HostGPUSignalState, SequenceAdvancesOnlyOnAcceptedWaitWithoutWrap)
++{
++    EXPECT_TRUE(HostGPUSignalState::isNextSequence(0, 1));
++    EXPECT_FALSE(HostGPUSignalState::isNextSequence(1, 1));
++    EXPECT_FALSE(HostGPUSignalState::isNextSequence(1, 3));
++    EXPECT_FALSE(HostGPUSignalState::isNextSequence(
++        std::numeric_limits<uint64_t>::max(), 0));
++
++    HostGPUSignalState state;
++    const auto created = state.submit(owner(), header(), create(0), 0);
++    auto skipped = waitFor(
++        created, 2, protocol::SignalCondition::Equal, 1);
++    EXPECT_EQ(state.submit(owner(), header(2), skipped, 1).status,
++              protocol::Status::ProtocolState);
++    skipped.sequence = 1;
++    EXPECT_EQ(state.submit(owner(), header(3), skipped, 1).status,
++              protocol::Status::Ok);
++}
++
++} // anonymous namespace
++} // namespace gem5::hostgpu
+-- 
+2.53.0
+

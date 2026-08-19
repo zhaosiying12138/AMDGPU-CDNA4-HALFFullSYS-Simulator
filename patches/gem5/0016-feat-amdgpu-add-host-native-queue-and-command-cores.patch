@@ -1,0 +1,1793 @@
+From bf40bf3bf560018fb62fecb144f3077b05b93b0f Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 10 Aug 2026 00:59:49 +0800
+Subject: [PATCH 16/42] feat(amdgpu): add host-native queue and command cores
+
+Checkpoint-ID: CP-0019
+Goal-ID: GSIM-001
+Plan-Revision: 2
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 13e4dddb3b541696d8b289145d562abfa86316c7b24db736870d131d5f01f892
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/dev/amdgpu/SConscript                     |  20 +
+ src/dev/amdgpu/host_gpu_native_b1_main.cc     | 527 ++++++++++++++++++
+ .../host_gpu_native_command_processor_core.cc | 299 ++++++++++
+ .../host_gpu_native_command_processor_core.hh | 142 +++++
+ .../host_gpu_native_dispatch_admission.cc     |  22 +-
+ .../host_gpu_native_dispatch_admission.hh     |  11 +-
+ src/dev/amdgpu/host_gpu_native_queue_core.cc  | 311 +++++++++++
+ src/dev/amdgpu/host_gpu_native_queue_core.hh  | 157 ++++++
+ src/gpu-compute/hsa_queue_entry.hh            |   7 +
+ util/host_native/check_control_core.py        | 103 +++-
+ 10 files changed, 1592 insertions(+), 7 deletions(-)
+ create mode 100644 src/dev/amdgpu/host_gpu_native_b1_main.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_native_command_processor_core.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_native_command_processor_core.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_native_queue_core.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_native_queue_core.hh
+
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index 762faa715..1a83ea141 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -82,6 +82,26 @@ Executable('host_gpu_native_dispatch_admission_core',
+            'host_gpu_memory_state.cc',
+            'host_gpu_queue_state.cc')
+ 
++# CP19/B1 extracted queue and command-processor core.  This target publishes
++# one 64-byte AQL packet, fetches it through the host-owned address space, and
++# performs descriptor/MQD/kernarg admission only.  Every source is explicit so
++# no legacy HSAPP, DMA, dispatcher, CU, System, or ISA object can enter the
++# link closure.
++Executable('host_gpu_native_b1_core',
++           Source('host_gpu_native_b1_main.cc',
++                  append={'CPPDEFINES': ['GEM5_HOST_NATIVE_NO_ISA']}),
++           'host_gpu_native_queue_core.cc',
++           Source('host_gpu_native_command_processor_core.cc',
++                  append={'CPPDEFINES': ['GEM5_HOST_NATIVE_NO_ISA']}),
++           Source('host_gpu_native_dispatch_admission.cc',
++                  append={'CPPDEFINES': ['GEM5_HOST_NATIVE_NO_ISA']}),
++           'host_native_code_object_mapper.cc',
++           'host_native_memory_context.cc',
++           'host_gpu_code_object_image.cc',
++           'host_gpu_code_object_state.cc',
++           'host_gpu_protocol.cc',
++           'host_gpu_memory_state.cc')
++
+ if not env['CONF']['USE_X86_ISA']:
+     Return()
+ 
+diff --git a/src/dev/amdgpu/host_gpu_native_b1_main.cc b/src/dev/amdgpu/host_gpu_native_b1_main.cc
+new file mode 100644
+index 000000000..14edb9eb8
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_b1_main.cc
+@@ -0,0 +1,527 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of their contributors may be used to endorse or promote
++ * products derived from this software without specific prior written
++ * permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <algorithm>
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <fstream>
++#include <iostream>
++#include <iterator>
++#include <stdexcept>
++#include <string>
++#include <vector>
++
++#include "dev/amdgpu/host_gpu_code_object_fixture.hh"
++#include "dev/amdgpu/host_gpu_code_object_state.hh"
++#include "dev/amdgpu/host_gpu_native_command_processor_core.hh"
++#include "dev/amdgpu/host_gpu_native_dispatch_admission.hh"
++#include "dev/amdgpu/host_gpu_native_queue_core.hh"
++#include "dev/amdgpu/host_native_code_object_mapper.hh"
++#include "dev/amdgpu/host_native_memory_context.hh"
++#include "dev/hsa/hsa_queue.hh"
++
++namespace gem5::hostgpu
++{
++namespace
++{
++
++constexpr const char *FixtureRelativePath =
++    "projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/"
++    "hsaco/gfx950/gpuReadWrite_kernels.hsaco";
++constexpr uint32_t QueueId = 511;
++constexpr uint64_t QueueGeneration = 1;
++constexpr uint32_t QueueBytes = 4096;
++constexpr uint32_t DoorbellBytes = 8;
++
++void
++require(bool condition, const char *message)
++{
++    if (!condition)
++        throw std::runtime_error(message);
++}
++
++std::vector<uint8_t>
++readFixture(int argc, char **argv)
++{
++    std::vector<std::string> candidates;
++    if (argc > 1)
++        candidates.emplace_back(argv[1]);
++    candidates.emplace_back(FixtureRelativePath);
++    candidates.emplace_back(
++        std::string("../") + std::string(FixtureRelativePath).substr(9));
++    candidates.emplace_back(std::string("../../") + FixtureRelativePath);
++    candidates.emplace_back(std::string("../../../") + FixtureRelativePath);
++    for (const auto &candidate : candidates) {
++        std::ifstream input(candidate, std::ios::binary);
++        if (!input)
++            continue;
++        return {std::istreambuf_iterator<char>(input),
++                std::istreambuf_iterator<char>()};
++    }
++    throw std::runtime_error("locked gpuReadWrite HSACO fixture is unavailable");
++}
++
++protocol::CodeObjectManifest
++fixtureManifest(const std::vector<uint8_t> &image)
++{
++    protocol::CodeObjectManifest manifest;
++    manifest.imageSize = image.size();
++    manifest.chunkCount = 2;
++    manifest.segmentCount = 3;
++    manifest.kernelIndex = 0;
++    manifest.imageSha256 = {
++        0x7b, 0x6a, 0x4d, 0x2b, 0xb7, 0xf9, 0xc4, 0xe7,
++        0x46, 0x6b, 0xcf, 0x69, 0xf3, 0x11, 0x0e, 0xcb,
++        0xfa, 0xb5, 0x4d, 0x07, 0xab, 0xd4, 0xc7, 0x0b,
++        0x6b, 0xd9, 0x6b, 0x6a, 0x6f, 0xb9, 0xde, 0x56,
++    };
++    manifest.elfMachine = code_object_fixture::ElfMachine;
++    manifest.elfType = code_object_fixture::ElfTypeDyn;
++    manifest.elfOsabi = code_object_fixture::ElfOsabiAmdgpuHsa;
++    manifest.elfAbiVersion = code_object_fixture::ElfAbiVersion;
++    manifest.elfFlags = code_object_fixture::ElfFlags;
++    manifest.gfxTarget = code_object_fixture::GfxTarget;
++    manifest.codeObjectVersion = code_object_fixture::CodeObjectVersion;
++    manifest.metadataMajor = code_object_fixture::MetadataMajor;
++    manifest.metadataMinor = code_object_fixture::MetadataMinor;
++    manifest.relocationCount = code_object_fixture::RelocationCount;
++    manifest.kernargSegmentSize = 280;
++    manifest.kernargSegmentAlign = 8;
++    manifest.maxFlatWorkgroupSize = 256;
++    manifest.wavefrontSize = 64;
++    manifest.sgprCount = 22;
++    manifest.vgprCount = 6;
++    manifest.descriptorSize = code_object_fixture::DescriptorBytes;
++    manifest.kernelCodeEntryByteOffset = 0x1100;
++    manifest.codeVirtualAddress = 0x1900;
++    manifest.codeFileOffset = 0x900;
++    manifest.codeSize = 0x78;
++    manifest.descriptorVirtualAddress = 0x800;
++    manifest.descriptorFileOffset = 0x800;
++    std::copy_n("gpuReadWrite", 12, manifest.kernelName.begin());
++    std::copy_n("gpuReadWrite.kd", 15, manifest.descriptorSymbol.begin());
++    require(image.size() == 5528, "gpuReadWrite fixture size");
++    std::copy_n(image.begin() + manifest.descriptorFileOffset,
++                protocol::CodeObjectDescriptorBytes, manifest.descriptor.begin());
++    manifest.segments[0] = {1, 4, 0, 0, 0x840, 0x840, 0x1000};
++    manifest.segments[1] = {1, 5, 0x900, 0x1900, 0x480, 0x480, 0x1000};
++    manifest.segments[2] = {1, 6, 0xd80, 0x2d80, 0x70, 0x280, 0x1000};
++    return manifest;
++}
++
++struct StagedImage
++{
++    std::vector<uint8_t> image;
++    protocol::CodeObjectManifest manifest;
++};
++
++StagedImage
++stageImage(const std::vector<uint8_t> &image,
++           const protocol::CodeObjectManifest &manifest)
++{
++    HostGPUCodeObjectState state;
++    const HostGPUCodeObjectState::Owner owner{37, 1};
++    protocol::CodeObjectRequest begin;
++    begin.opcode = protocol::CodeObjectOpcode::Begin;
++    begin.manifest = manifest;
++    const auto beginResult = state.submit(owner, begin, 1);
++    require(beginResult.accepted, "B1 code-object begin");
++
++    uint64_t offset = 0;
++    for (uint32_t index = 0; index < manifest.chunkCount; ++index) {
++        protocol::CodeObjectRequest chunk;
++        chunk.opcode = protocol::CodeObjectOpcode::Chunk;
++        chunk.objectId = beginResult.response.objectId;
++        chunk.generation = beginResult.response.generation;
++        chunk.imageOffset = offset;
++        chunk.chunkIndex = index;
++        const auto count = static_cast<uint32_t>(std::min<uint64_t>(
++            manifest.imageSize - offset, protocol::CodeObjectChunkDataBytes));
++        chunk.byteCount = count;
++        std::copy_n(image.begin() + offset, count, chunk.chunkData.begin());
++        chunk.chunkCrc32c = protocol::crc32c(chunk.chunkData.data(), count);
++        require(state.submit(owner, chunk, 2 + index).accepted,
++                "B1 code-object chunk");
++        offset += count;
++    }
++
++    protocol::CodeObjectRequest commit;
++    commit.opcode = protocol::CodeObjectOpcode::Commit;
++    commit.objectId = beginResult.response.objectId;
++    commit.generation = beginResult.response.generation;
++    commit.byteCount = manifest.imageSize;
++    commit.chunkIndex = manifest.chunkCount;
++    commit.commitSha256 = manifest.imageSha256;
++    const auto commitResult = state.submit(owner, commit, 4);
++    require(commitResult.committed, "B1 code-object commit");
++
++    StagedImage staged;
++    require(state.readCommittedImage(owner, beginResult.response.objectId,
++                                     beginResult.response.generation,
++                                     staged.image),
++            "B1 committed image");
++    const auto committedManifest = state.committedManifest(
++        owner, beginResult.response.objectId, beginResult.response.generation);
++    require(committedManifest.has_value(), "B1 committed manifest");
++    staged.manifest = *committedManifest;
++    return staged;
++}
++
++struct AllocationLease
++{
++    uint64_t id = 0;
++    uint64_t generation = 0;
++    Addr gpuVa = 0;
++    HostNativeMemoryContext::PageLease lease;
++};
++
++AllocationLease
++allocate(HostGPUMemoryState &memory, HostNativeMemoryContext &context,
++         const HostGPUMemoryState::Owner &owner, uint64_t bytes, uint64_t now)
++{
++    protocol::MemoryRequest request;
++    request.opcode = protocol::MemoryOpcode::Allocate;
++    request.byteCount = bytes;
++    request.argument = 4096;
++    const auto response = memory.allocate(owner, request, now);
++    require(response.status == protocol::Status::Ok, "B1 allocation");
++    const auto lease = context.map(response.value0, bytes);
++    require(lease.has_value(), "B1 page map");
++    return {response.allocationId, response.generation, response.value0,
++            *lease};
++}
++
++void
++release(HostGPUMemoryState &memory, HostNativeMemoryContext &context,
++        const HostGPUMemoryState::Owner &owner, const AllocationLease &value,
++        uint64_t now)
++{
++    require(context.unmap(value.lease), "B1 page unmap");
++    protocol::MemoryRequest request;
++    request.opcode = protocol::MemoryOpcode::Free;
++    request.allocationId = value.id;
++    request.generation = value.generation;
++    require(memory.free(owner, request, now).status == protocol::Status::Ok,
++            "B1 allocation free");
++}
++
++class LifecycleRecorder : public GPUDispatchLifecycleListener
++{
++  public:
++    std::vector<std::string> events;
++
++    void hsaPacketFetched(Addr, uint32_t) override
++    {
++        events.emplace_back("hsa_packet_fetched");
++    }
++    void commandProcessorSubmitted(const HSAQueueEntry &) override
++    {
++        events.emplace_back("command_processor_submitted");
++    }
++    void gpuDispatcherStarted(const HSAQueueEntry &) override
++    {
++        events.emplace_back("gpu_dispatcher_started");
++    }
++    void hsaPacketRetired(const HSAQueueEntry &, int, int) override
++    {
++        events.emplace_back("hsa_packet_retired");
++    }
++};
++
++void
++runSelfTest(const std::vector<uint8_t> &image)
++{
++    const auto manifest = fixtureManifest(image);
++    require(HostGPUCodeObjectState::imageSha256(image) == manifest.imageSha256,
++            "B1 fixture SHA");
++    const auto staged = stageImage(image, manifest);
++
++    HostGPUMemoryState memory;
++    const HostGPUMemoryState::Owner owner{37, 1};
++    HostNativeMemoryContext context(memory, owner);
++    HostNativeCodeObjectMapper mapper(memory, context, owner);
++    const auto mapping = mapper.map(staged.image, staged.manifest);
++    require(mapping && mapping->valid(), "B1 PT_LOAD map");
++
++    const auto data = allocate(memory, context, owner, 4096, 10);
++    const auto kernarg = allocate(memory, context, owner, 4096, 11);
++    const auto packet = allocate(memory, context, owner, QueueBytes, 12);
++    const auto signal = allocate(memory, context, owner, 4096, 13);
++    const auto mqd = allocate(memory, context, owner, 4096, 14);
++    const uint64_t signalObjectWord = 1;
++    require(context.functionalWrite(signal.gpuVa, &signalObjectWord,
++                                    sizeof(signalObjectWord)),
++            "B1 signal initialize");
++
++    {
++    HostNativeDispatchAdmission admission;
++    HostNativeDispatchAdmission::Result admissionResult;
++    require(admission.materialize(
++                *mapping, staged.manifest, context, packet.gpuVa,
++                kernarg.gpuVa, signal.gpuVa, data.gpuVa, data.gpuVa + 0x400,
++                data.gpuVa + 0x800, QueueId, QueueGeneration, 1,
++                admissionResult),
++            admission.failure());
++    require(admissionResult.descriptorLoaded &&
++                admissionResult.descriptorEntryRelation &&
++                admissionResult.hiddenKernargPacked &&
++                admissionResult.aqlFieldsValid &&
++                !admissionResult.hsaQueueEntryValid &&
++                !admissionResult.lifecycleListenerContractSmoke &&
++                admissionResult.listenerEvents.empty() &&
++                !admissionResult.kernelExecuted,
++            "B1 admission result flags");
++
++    _amd_queue_t queueDescriptor = {};
++    queueDescriptor.hsa_queue.base_address =
++        reinterpret_cast<void *>(packet.gpuVa);
++    queueDescriptor.hsa_queue.size =
++        QueueBytes / HostNativeQueueCore::PacketBytes;
++    queueDescriptor.hsa_queue.id = QueueId;
++    queueDescriptor.read_dispatch_id = 0;
++    queueDescriptor.write_dispatch_id = 0;
++    queueDescriptor.read_dispatch_id_field_base_byte_offset =
++        offsetof(_amd_queue_t, read_dispatch_id);
++    static_assert(sizeof(queueDescriptor) == 256);
++    require(context.functionalWrite(mqd.gpuVa, &queueDescriptor,
++                                    sizeof(queueDescriptor)),
++            "B1 MQD initialize");
++
++    HostNativeQueueCore queue(context);
++    HostNativeQueueCore::Config queueConfig;
++    queueConfig.baseVa = packet.gpuVa;
++    queueConfig.hostReadIndexVa =
++        mqd.gpuVa + offsetof(_amd_queue_t, read_dispatch_id);
++    queueConfig.activeQueueId = QueueId;
++    queueConfig.generation = QueueGeneration;
++    queueConfig.registeredIndex = 0;
++    queueConfig.queueBytes = QueueBytes;
++    queueConfig.doorbellBytes = DoorbellBytes;
++    queueConfig.readIndex = 0;
++    {
++        HostNativeQueueCore wrapQueue(context);
++        auto wrapConfig = queueConfig;
++        wrapConfig.readIndex = 63;
++        require(wrapQueue.registerQueue(wrapConfig), wrapQueue.failure());
++        Addr wrapPacketVa = 0;
++        require(HostNativeQueueCore::packetAddress(
++                    packet.gpuVa, 63, QueueBytes /
++                        HostNativeQueueCore::PacketBytes,
++                    wrapPacketVa),
++                "B1 wrap packet address");
++        require(wrapQueue.publish(
++                    wrapPacketVa, admissionResult.aqlBytes.data(),
++                    admissionResult.aqlBytes.size(), 100),
++                wrapQueue.failure());
++        uint32_t wrapRegisteredIndex = 1;
++        require(wrapQueue.ring(64, wrapRegisteredIndex) &&
++                    wrapRegisteredIndex == 0,
++                wrapQueue.failure());
++        HostNativeQueueCore::FetchedPacket wrapFetched;
++        require(wrapQueue.fetch(wrapFetched, nullptr, 100),
++                wrapQueue.failure());
++        require(wrapQueue.acceptDispatch(wrapFetched.ticket) &&
++                    wrapQueue.writeIndex() == 64 &&
++                    wrapQueue.fetchIndex() == 64 &&
++                    wrapQueue.dispatchIndex() == 64 &&
++                    wrapQueue.readIndex() == 63,
++                "B1 queue index 63-to-64 wrap");
++        require(!wrapQueue.unregisterQueue(),
++                "B1 wrapped in-flight unregister rejection");
++    }
++    HostNativeQueueCore invalidQueue(context);
++    auto invalidConfig = queueConfig;
++    invalidConfig.activeQueueId = HostNativeQueueCore::MaxQueueId;
++    require(!invalidQueue.registerQueue(invalidConfig),
++            "B1 invalid active queue ID rejection");
++    require(queue.registerQueue(queueConfig), queue.failure());
++
++    uint32_t registeredIndex = 0;
++    require(!queue.ring(1, registeredIndex),
++            "B1 ring-before-publish rejection");
++    require(queue.publish(packet.gpuVa, admissionResult.aqlBytes.data(),
++                           admissionResult.aqlBytes.size(), 101),
++            queue.failure());
++    require(!queue.ring(2, registeredIndex), "B1 skipped-ring rejection");
++    require(queue.ring(1, registeredIndex) && registeredIndex == 0,
++            queue.failure());
++    queueDescriptor.write_dispatch_id = 1;
++    require(context.functionalWrite(mqd.gpuVa, &queueDescriptor,
++                                    sizeof(queueDescriptor)),
++            "B1 MQD write-index publication");
++
++    LifecycleRecorder recorder;
++    HostNativeQueueCore::FetchedPacket fetched;
++    require(queue.fetch(fetched, &recorder, 102), queue.failure());
++    require(fetched.valid() && fetched.queueIndex == 0 &&
++                fetched.hostPacketVa == packet.gpuVa,
++            "B1 fetched packet identity");
++
++    HostNativeCommandProcessorCore commandProcessor;
++    queueDescriptor.read_dispatch_id_field_base_byte_offset = 64;
++    require(context.functionalWrite(mqd.gpuVa, &queueDescriptor,
++                                    sizeof(queueDescriptor)),
++            "B1 malformed MQD publish");
++    HostNativeCommandProcessorCore::Result rejectedMqd;
++    require(!commandProcessor.submit(fetched, queue, *mapping,
++                                     staged.manifest, context, 1, rejectedMqd,
++                                     &recorder, 103),
++            "B1 malformed MQD offset rejection");
++    require(recorder.events == std::vector<std::string>{"hsa_packet_fetched"},
++            "B1 malformed MQD emitted no CP event");
++    queueDescriptor.read_dispatch_id_field_base_byte_offset =
++        offsetof(_amd_queue_t, read_dispatch_id);
++    require(context.functionalWrite(mqd.gpuVa, &queueDescriptor,
++                                    sizeof(queueDescriptor)),
++            "B1 MQD restore");
++
++    HostNativeCommandProcessorCore::Result rejected;
++    auto malformed = fetched;
++    malformed.bytes[0] = 1;
++    require(!commandProcessor.submit(malformed, queue, *mapping,
++                                     staged.manifest, context, 1, rejected,
++                                     &recorder, 104),
++            "B1 forged packet rejection");
++    require(recorder.events == std::vector<std::string>{"hsa_packet_fetched"},
++            "B1 rejected packet emitted no CP event");
++
++    HostNativeCommandProcessorCore::Result submitted;
++    require(commandProcessor.submit(fetched, queue, *mapping,
++                                     staged.manifest, context, 1, submitted,
++                                     &recorder, 105),
++            commandProcessor.failure());
++    require(submitted.descriptorRead && submitted.kernargRead &&
++                submitted.completionSignalObjectRead && submitted.mqdRead &&
++                submitted.descriptorEntryRelation && submitted.taskValid &&
++                submitted.commandProcessorSubmitted &&
++                submitted.registeredIndex == 0 &&
++                submitted.task->queueId() == 0 &&
++                !submitted.kernelExecuted,
++            "B1 CP result flags");
++    require(submitted.task->kernelName() == "gpuReadWrite" &&
++                submitted.task->gfxVersion() == GfxVersion::gfx950 &&
++                submitted.task->numVectorRegs() == 8 &&
++                submitted.task->numScalarRegs() == 24 &&
++                submitted.task->accumOffset() == 8 &&
++                submitted.task->wgSize(0) == 256 &&
++                submitted.task->gridSize(0) == 1024 &&
++                submitted.task->numWgTotal() == 4 &&
++                submitted.task->hostDispPktAddr() == packet.gpuVa &&
++                submitted.task->codeAddr() == mapping->codeGpuVa &&
++                submitted.task->kernargAddr() == kernarg.gpuVa &&
++                submitted.task->completionSignal() == signal.gpuVa,
++            "B1 HSAQueueEntry descriptor getters");
++    require(submitted.task->hostAMDQueueAddr == mqd.gpuVa &&
++                submitted.task->amdQueue.hsa_queue.id == QueueId &&
++                submitted.task->amdQueue.hsa_queue.size == 64 &&
++                submitted.task->amdQueue.write_dispatch_id == 1 &&
++                submitted.task->amdQueue.read_dispatch_id == 0,
++            "B1 HSAQueueEntry MQD copy");
++    require(recorder.events == std::vector<std::string>{
++                "hsa_packet_fetched", "command_processor_submitted"},
++            "B1 lifecycle ordering");
++
++    _amd_queue_t mqdReadback = {};
++    require(context.functionalRead(mqd.gpuVa, &mqdReadback,
++                                    sizeof(mqdReadback)) &&
++                mqdReadback.read_dispatch_id == 0,
++            "B1 no host read-index write");
++    require(queue.fetchIndex() == 1 && queue.dispatchIndex() == 1 &&
++                queue.readIndex() == 0 && queue.writeIndex() == 1 &&
++                !queue.hostReadIndexUpdated(),
++            "B1 queue acknowledgement boundary");
++    require(!queue.unregisterQueue(), "B1 in-flight unregister rejection");
++    } // B1 queue/CP state teardown; no packet retirement is synthesized.
++
++    require(mapper.unmap(*mapping), "B1 PT_LOAD unmap");
++    release(memory, context, owner, mqd, 106);
++    release(memory, context, owner, signal, 107);
++    release(memory, context, owner, packet, 108);
++    release(memory, context, owner, kernarg, 109);
++    release(memory, context, owner, data, 110);
++}
++
++} // anonymous namespace
++} // namespace gem5::hostgpu
++
++int
++main(int argc, char **argv)
++{
++    try {
++        const auto image = gem5::hostgpu::readFixture(argc, argv);
++        gem5::hostgpu::runSelfTest(image);
++        std::cout
++            << "{\"schema\":\"gem5.host-native.dispatch-b1.v1\","
++               "\"staged_image_roundtrip\":true,"
++               "\"native_address_space_resolved\":true,"
++               "\"descriptor_read\":true,\"mqd_read\":true,"
++               "\"kernarg_read\":true,\"completion_signal_object_read\":true,"
++               "\"aql_packet_64b\":true,\"queue_registered\":true,"
++               "\"aql_published\":true,\"queue_ring_accepted\":true,"
++               "\"native_queue_cp_core\":true,\"aql_submitted\":true,"
++               "\"hsa_packet_fetched\":true,"
++               "\"hsa_packet_fetched_count\":1,"
++               "\"command_processor_submitted\":true,"
++               "\"command_processor_submitted_count\":1,"
++               "\"hsa_queue_entry_reused\":true,"
++               "\"descriptor_entry_relation\":true,"
++               "\"publication_fetch_submit_ordered\":true,"
++               "\"host_read_index_updated\":false,"
++               "\"gpu_dispatcher_instantiated\":false,"
++               "\"gpu_dispatcher_started_count\":0,"
++               "\"hsapp_simobject_instantiated\":false,"
++               "\"command_processor_simobject_instantiated\":false,"
++               "\"legacy_gpu_pipeline_submitted\":false,"
++               "\"gpu_pipeline_connected\":false,"
++               "\"cu_wave_started\":false,\"instruction_fetched\":false,"
++               "\"hsa_packet_retired\":false,"
++               "\"hsa_packet_retired_count\":0,"
++               "\"signal_decremented\":false,"
++               "\"kernel_executed\":false,\"cpu_fallback\":false,"
++               "\"vega_x86\":false,\"active_queue_id\":511,"
++               "\"registered_index\":0,\"queue_bytes\":4096,"
++               "\"queue_slots\":64,\"workgroup_size_x\":256,"
++               "\"queue_wrap_63_to_64\":true,"
++               "\"grid_size_x\":1024,\"dispatch_id\":1,"
++               "\"host_fetch_index\":1,\"aql_dispatch_index\":1,"
++               "\"aql_retire_index\":0,"
++               "\"mqd_read_dispatch_id_after_fetch\":0,"
++               "\"blocker\":\"B1 stops after native 64-byte AQL fetch and "
++               "descriptor/MQD/kernarg CP-core admission; completion signal "
++               "is object-range-only and B2 owns signal decrement, retire, "
++               "and CU execution\"}"
++            << '\n';
++    } catch (const std::exception &error) {
++        std::cerr << "host-native B1 self-test failed: " << error.what()
++                  << '\n';
++        return 1;
++    }
++    return 0;
++}
+diff --git a/src/dev/amdgpu/host_gpu_native_command_processor_core.cc b/src/dev/amdgpu/host_gpu_native_command_processor_core.cc
+new file mode 100644
+index 000000000..5c37b0ee6
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_command_processor_core.cc
+@@ -0,0 +1,299 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of their contributors may be used to endorse or promote
++ * products derived from this software without specific prior written
++ * permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE; EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_native_command_processor_core.hh"
++
++#include <algorithm>
++#include <climits>
++#include <cstring>
++#include <limits>
++#include <new>
++#include <vector>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++bool
++HostNativeCommandProcessorCore::fail(const char *reason)
++{
++    failureReason = reason;
++    return false;
++}
++
++bool
++HostNativeCommandProcessorCore::checkedEntryAddress(
++    Addr descriptor, int64_t offset, Addr &entry)
++{
++    if (offset >= 0) {
++        const auto positive = static_cast<uint64_t>(offset);
++        if (descriptor > std::numeric_limits<Addr>::max() - positive)
++            return false;
++        entry = descriptor + positive;
++        return true;
++    }
++
++    /* Avoid overflowing when offset is INT64_MIN. */
++    const uint64_t magnitude = static_cast<uint64_t>(-(offset + 1)) + 1;
++    if (descriptor < magnitude)
++        return false;
++    entry = descriptor - magnitude;
++    return true;
++}
++
++std::string
++HostNativeCommandProcessorCore::kernelName(
++    const protocol::CodeObjectManifest &manifest)
++{
++    const auto end = std::find(
++        manifest.kernelName.begin(), manifest.kernelName.end(), uint8_t(0));
++    return std::string(manifest.kernelName.begin(), end);
++}
++
++bool
++HostNativeCommandProcessorCore::packetFieldsValid(
++    const _hsa_dispatch_packet_t &packet)
++{
++    constexpr uint16_t PinnedDispatchHeader = 0x1402;
++    if (packet.header != PinnedDispatchHeader || packet.setup != 1 ||
++        packet.reserved0 != 0 || packet.reserved1 != 0 ||
++        packet.workgroup_size_x == 0 || packet.workgroup_size_y == 0 ||
++        packet.workgroup_size_z == 0 || packet.grid_size_x == 0 ||
++        packet.grid_size_y == 0 || packet.grid_size_z == 0 ||
++        packet.grid_size_x < packet.workgroup_size_x ||
++        packet.grid_size_y < packet.workgroup_size_y ||
++        packet.grid_size_z < packet.workgroup_size_z ||
++        packet.workgroup_size_y != 1 || packet.workgroup_size_z != 1 ||
++        packet.grid_size_y != 1 || packet.grid_size_z != 1 ||
++        packet.kernel_object == 0 || packet.kernarg_address == 0) {
++        return false;
++    }
++    return (packet.kernel_object & 63) == 0 &&
++        (packet.kernarg_address & 7) == 0;
++}
++
++bool
++HostNativeCommandProcessorCore::readMqd(
++    const HostNativeQueueCore &queueCore,
++    HostNativeMemoryContext &context, Result &result, uint64_t requestId)
++{
++    static_assert(sizeof(_amd_queue_t) == 256,
++                  "native MQD layout must remain the locked 256-byte ABI");
++    static_assert(offsetof(_amd_queue_t, read_dispatch_id) == 128,
++                  "native MQD read-dispatch offset changed");
++    static_assert(
++        offsetof(_amd_queue_t,
++                 read_dispatch_id_field_base_byte_offset) == 136,
++        "native MQD read-dispatch-offset field changed");
++    const auto &queue = queueCore.config();
++    if (queue.hostReadIndexVa < sizeof(uint64_t))
++        return fail("MQD read-index address underflow");
++    const Addr offsetAddress = queue.hostReadIndexVa + sizeof(uint64_t);
++    if (offsetAddress < queue.hostReadIndexVa)
++        return fail("MQD offset address overflow");
++
++    uint32_t readDispatchOffset = 0;
++    if (!context.functionalRead(
++            offsetAddress, &readDispatchOffset,
++            sizeof(readDispatchOffset), requestId)) {
++        return fail("MQD read-dispatch offset read");
++    }
++    if (readDispatchOffset != offsetof(_amd_queue_t, read_dispatch_id) ||
++        readDispatchOffset > queue.hostReadIndexVa) {
++        return fail("MQD read-dispatch offset mismatch");
++    }
++
++    result.mqdBaseVa = queue.hostReadIndexVa - readDispatchOffset;
++    if (!context.functionalRead(
++            result.mqdBaseVa, &result.mqd, sizeof(result.mqd), requestId)) {
++        return fail("MQD functional read");
++    }
++    result.mqdRead = true;
++    const Addr queueBase = reinterpret_cast<Addr>(
++        result.mqd.hsa_queue.base_address);
++    if (result.mqd.hsa_queue.type != _HSA_QUEUE_TYPE_MULTI ||
++        result.mqd.hsa_queue.id != queue.activeQueueId ||
++        queueBase != queue.baseVa ||
++        result.mqd.hsa_queue.size !=
++            queue.queueBytes / HostNativeQueueCore::PacketBytes ||
++        result.mqd.read_dispatch_id != queueCore.readIndex() ||
++        result.mqd.write_dispatch_id != queueCore.writeIndex()) {
++        return fail("MQD queue identity mismatch");
++    }
++    return true;
++}
++
++bool
++HostNativeCommandProcessorCore::validateDescriptor(
++    const HostNativeCodeObjectMapper::Mapping &mapping,
++    const protocol::CodeObjectManifest &manifest,
++    HostNativeMemoryContext &context, Result &result, uint64_t requestId)
++{
++    if (!mapping.valid() || (mapping.descriptorGpuVa & 63) != 0 ||
++        manifest.gfxTarget != 950 ||
++        manifest.relocationCount != 0 || manifest.descriptorSize != 64 ||
++        manifest.kernargSegmentSize == 0) {
++        return fail("invalid code-object admission metadata");
++    }
++    if (!context.functionalRead(
++            mapping.descriptorGpuVa, &result.descriptor,
++            sizeof(result.descriptor), requestId)) {
++        return fail("descriptor functional read");
++    }
++    result.descriptorRead = true;
++
++    std::array<uint8_t, protocol::CodeObjectDescriptorBytes> bytes = {};
++    std::memcpy(bytes.data(), &result.descriptor, bytes.size());
++    if (!std::equal(bytes.begin(), bytes.end(), manifest.descriptor.begin()) ||
++        result.descriptor.kernarg_size != manifest.kernargSegmentSize ||
++        result.descriptor.group_segment_fixed_size !=
++            manifest.groupSegmentFixedSize ||
++        result.descriptor.private_segment_fixed_size !=
++            manifest.privateSegmentFixedSize ||
++        result.descriptor.kernel_code_entry_byte_offset !=
++            manifest.kernelCodeEntryByteOffset ||
++        result.descriptor.kernarg_preload_spec_length != 0 ||
++        result.descriptor.kernarg_preload_spec_offset != 0 ||
++        result.descriptor.wgp_mode || result.descriptor.mem_ordered ||
++        result.descriptor.fwd_progress) {
++        return fail("descriptor manifest mismatch");
++    }
++
++    Addr entry = 0;
++    if (!checkedEntryAddress(
++            mapping.descriptorGpuVa,
++            result.descriptor.kernel_code_entry_byte_offset, entry) ||
++        entry != mapping.entryGpuVa || entry != mapping.codeGpuVa) {
++        return fail("descriptor entry relation");
++    }
++    result.descriptorEntryRelation = true;
++    return true;
++}
++
++bool
++HostNativeCommandProcessorCore::submit(
++    const HostNativeQueueCore::FetchedPacket &fetched,
++    HostNativeQueueCore &queueCore,
++    const HostNativeCodeObjectMapper::Mapping &mapping,
++    const protocol::CodeObjectManifest &manifest,
++    HostNativeMemoryContext &context, uint64_t dispatchId, Result &result,
++    GPUDispatchLifecycleListener *listener, uint64_t requestId)
++{
++    failureReason = "none";
++    result.reset();
++    const auto &queue = queueCore.config();
++    if (!fetched.valid() || fetched.bytes.size() != 64 ||
++        !queueCore.isRegistered() || queue.generation == 0 ||
++        dispatchId == 0 || dispatchId > INT_MAX) {
++        return fail("invalid native CP submission input");
++    }
++    Addr expectedPacketVa = 0;
++    const uint32_t depth =
++        queue.queueBytes / HostNativeQueueCore::PacketBytes;
++    if (!queueCore.ownsPending(fetched) ||
++        fetched.activeQueueId != queue.activeQueueId ||
++        fetched.queueGeneration != queue.generation ||
++        fetched.registeredIndex != queue.registeredIndex ||
++        fetched.queueIndex != queueCore.dispatchIndex() ||
++        !HostNativeQueueCore::packetAddress(
++            queue.baseVa, fetched.queueIndex, depth, expectedPacketVa) ||
++        fetched.hostPacketVa != expectedPacketVa) {
++        return fail("fetched packet queue identity mismatch");
++    }
++    result.registeredIndex = queue.registeredIndex;
++    _hsa_dispatch_packet_t fetchedPacket = {};
++    std::memcpy(&fetchedPacket, fetched.bytes.data(), sizeof(fetchedPacket));
++    if (!packetFieldsValid(fetchedPacket)) {
++        return fail("invalid kernel dispatch packet");
++    }
++    result.packet = fetchedPacket;
++    if (result.packet.kernel_object != mapping.descriptorGpuVa)
++        return fail("packet descriptor address mismatch");
++
++    if (!validateDescriptor(mapping, manifest, context, result, requestId))
++        return false;
++
++    std::vector<uint8_t> kernarg;
++    if (!context.functionalRead(
++            result.packet.kernarg_address, manifest.kernargSegmentSize,
++            kernarg, requestId) ||
++        kernarg.size() != manifest.kernargSegmentSize) {
++        return fail("kernarg functional read");
++    }
++    result.kernargRead = true;
++
++    if (result.packet.completion_signal != 0) {
++        uint64_t signalObjectWord = 0;
++        if (!context.functionalRead(
++                result.packet.completion_signal, &signalObjectWord,
++                sizeof(signalObjectWord), requestId) ||
++                signalObjectWord == 0) {
++            return fail("completion signal object range read");
++        }
++        result.completionSignalObjectRead = true;
++    }
++
++    if (!readMqd(queueCore, context, result, requestId))
++        return false;
++
++    if (!checkedEntryAddress(
++            result.packet.kernel_object,
++            result.descriptor.kernel_code_entry_byte_offset,
++            result.machineCodeVa)) {
++        return fail("machine code address overflow");
++    }
++
++    const std::string manifestName = kernelName(manifest);
++    const std::string name = manifestName.empty() ?
++        std::string("gpuReadWrite") : manifestName;
++    try {
++        result.task.emplace(
++            name, queue.registeredIndex,
++            static_cast<int>(dispatchId), &result.packet, &result.descriptor,
++            fetched.hostPacketVa, result.machineCodeVa,
++            GfxVersion::gfx950);
++    } catch (const std::bad_alloc &) {
++        return fail("HSAQueueEntry allocation");
++    }
++    result.task->hostAMDQueueAddr = result.mqdBaseVa;
++    result.task->amdQueue = result.mqd;
++    if (!queueCore.acceptDispatch(fetched.ticket)) {
++        result.task.reset();
++        return fail("queue dispatch acceptance");
++    }
++    result.taskValid = true;
++    if (listener)
++        listener->commandProcessorSubmitted(*result.task);
++    result.commandProcessorSubmitted = true;
++    result.kernelExecuted = false;
++    return true;
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_native_command_processor_core.hh b/src/dev/amdgpu/host_gpu_native_command_processor_core.hh
+new file mode 100644
+index 000000000..04c3268ca
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_command_processor_core.hh
+@@ -0,0 +1,142 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of their contributors may be used to endorse or promote
++ * products derived from this software without specific prior written
++ * permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_NATIVE_COMMAND_PROCESSOR_CORE_HH__
++#define __DEV_AMDGPU_HOST_GPU_NATIVE_COMMAND_PROCESSOR_CORE_HH__
++
++#include <array>
++#include <cstdint>
++#include <optional>
++#include <string>
++
++#include "base/types.hh"
++#include "dev/amdgpu/host_gpu_native_queue_core.hh"
++#include "dev/amdgpu/host_gpu_protocol.hh"
++#include "dev/amdgpu/host_native_code_object_mapper.hh"
++#include "dev/amdgpu/host_native_memory_context.hh"
++#include "dev/hsa/hsa_packet.hh"
++#include "dev/hsa/hsa_queue.hh"
++#include "gpu-compute/dispatch_lifecycle.hh"
++#include "gpu-compute/kernel_code.hh"
++#include "gpu-compute/hsa_queue_entry.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++/**
++ * Functional command-processor admission for the host-native front-end.
++ *
++ * This is the descriptor/MQD half of GPUCommandProcessor::submitDispatchPkt.
++ * It deliberately stops after HSAQueueEntry construction and the shared
++ * lifecycle callback.  Shader, GPUDispatcher, CU, DMA ports, and gem5 System
++ * objects are intentionally absent from this class and its link boundary.
++ */
++class HostNativeCommandProcessorCore
++{
++  public:
++    struct Result
++    {
++        Result() = default;
++        Result(const Result &) = delete;
++        Result &operator=(const Result &) = delete;
++        Result(Result &&) = delete;
++        Result &operator=(Result &&) = delete;
++
++        void reset()
++        {
++            task.reset();
++            packet = {};
++            descriptor = {};
++            mqd = {};
++            machineCodeVa = 0;
++            mqdBaseVa = 0;
++            registeredIndex = 0;
++            descriptorRead = false;
++            kernargRead = false;
++            completionSignalObjectRead = false;
++            mqdRead = false;
++            descriptorEntryRelation = false;
++            taskValid = false;
++            commandProcessorSubmitted = false;
++            kernelExecuted = false;
++        }
++
++        _hsa_dispatch_packet_t packet = {};
++        AMDKernelCode descriptor = {};
++        _amd_queue_t mqd = {};
++        std::optional<HSAQueueEntry> task;
++        Addr machineCodeVa = 0;
++        Addr mqdBaseVa = 0;
++        uint32_t registeredIndex = 0;
++        bool descriptorRead = false;
++        bool kernargRead = false;
++        /* B1 only proves that the signal object range is readable. */
++        bool completionSignalObjectRead = false;
++        bool mqdRead = false;
++        bool descriptorEntryRelation = false;
++        bool taskValid = false;
++        bool commandProcessorSubmitted = false;
++        bool kernelExecuted = false;
++    };
++
++    bool submit(
++        const HostNativeQueueCore::FetchedPacket &fetched,
++        HostNativeQueueCore &queue,
++        const HostNativeCodeObjectMapper::Mapping &mapping,
++        const protocol::CodeObjectManifest &manifest,
++        HostNativeMemoryContext &context, uint64_t dispatchId,
++        Result &result, GPUDispatchLifecycleListener *listener = nullptr,
++        uint64_t requestId = 0);
++
++    const char *failure() const { return failureReason.c_str(); }
++
++  private:
++    bool fail(const char *reason);
++    static bool checkedEntryAddress(
++        Addr descriptor, int64_t offset, Addr &entry);
++    static std::string kernelName(
++        const protocol::CodeObjectManifest &manifest);
++    static bool packetFieldsValid(const _hsa_dispatch_packet_t &packet);
++    bool readMqd(const HostNativeQueueCore &queue,
++                 HostNativeMemoryContext &context, Result &result,
++                 uint64_t requestId);
++    bool validateDescriptor(
++        const HostNativeCodeObjectMapper::Mapping &mapping,
++        const protocol::CodeObjectManifest &manifest,
++        HostNativeMemoryContext &context, Result &result,
++        uint64_t requestId);
++
++    std::string failureReason = "none";
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_NATIVE_COMMAND_PROCESSOR_CORE_HH__
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_admission.cc b/src/dev/amdgpu/host_gpu_native_dispatch_admission.cc
+index 790d74c0d..2d75ff043 100644
+--- a/src/dev/amdgpu/host_gpu_native_dispatch_admission.cc
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_admission.cc
+@@ -146,7 +146,7 @@ HostNativeDispatchAdmission::packKernarg(
+ }
+ 
+ bool
+-HostNativeDispatchAdmission::admit(
++HostNativeDispatchAdmission::materialize(
+     const HostNativeCodeObjectMapper::Mapping &mapping,
+     const protocol::CodeObjectManifest &manifest,
+     HostNativeMemoryContext &context, Addr packetVa, Addr kernargVa,
+@@ -265,6 +265,25 @@ HostNativeDispatchAdmission::admit(
+         fail("AQL field materialization");
+         return false;
+     }
++    result.kernelExecuted = false;
++    return true;
++}
++
++bool
++HostNativeDispatchAdmission::admit(
++    const HostNativeCodeObjectMapper::Mapping &mapping,
++    const protocol::CodeObjectManifest &manifest,
++    HostNativeMemoryContext &context, Addr packetVa, Addr kernargVa,
++    Addr completionSignalVa, Addr inputVa, Addr outputVa, Addr resultVa,
++    uint32_t queueId, uint64_t queueGeneration, uint64_t queueSequence,
++    Result &result)
++{
++    if (!materialize(
++            mapping, manifest, context, packetVa, kernargVa,
++            completionSignalVa, inputVa, outputVa, resultVa, queueId,
++            queueGeneration, queueSequence, result)) {
++        return false;
++    }
+ 
+     HSAQueueEntry task(
+         "gpuReadWrite", queueId, 1, &result.packet, &result.descriptor,
+@@ -298,7 +317,6 @@ HostNativeDispatchAdmission::admit(
+         result.listenerEvents == std::vector<std::string>{
+             "hsa_packet_fetched", "command_processor_submitted",
+             "gpu_dispatcher_started", "hsa_packet_retired"};
+-    result.kernelExecuted = false;
+     if (!result.lifecycleListenerContractSmoke) {
+         fail("lifecycle listener contract smoke");
+         return false;
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_admission.hh b/src/dev/amdgpu/host_gpu_native_dispatch_admission.hh
+index 70c5f208b..93fd08072 100644
+--- a/src/dev/amdgpu/host_gpu_native_dispatch_admission.hh
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_admission.hh
+@@ -81,7 +81,16 @@ class HostNativeDispatchAdmission
+         std::vector<std::string> listenerEvents;
+     };
+ 
+-    /** Materialize and trace one dispatch using a previously mapped image. */
++    /** Materialize descriptor, kernarg, and AQL bytes without lifecycle events. */
++    bool materialize(const HostNativeCodeObjectMapper::Mapping &mapping,
++                     const protocol::CodeObjectManifest &manifest,
++                     HostNativeMemoryContext &context, Addr packetVa,
++                     Addr kernargVa, Addr completionSignalVa, Addr inputVa,
++                     Addr outputVa, Addr resultVa, uint32_t queueId,
++                     uint64_t queueGeneration, uint64_t queueSequence,
++                     Result &result);
++
++    /** B0 wrapper that also exercises the synthetic listener contract. */
+     bool admit(const HostNativeCodeObjectMapper::Mapping &mapping,
+                const protocol::CodeObjectManifest &manifest,
+                HostNativeMemoryContext &context, Addr packetVa,
+diff --git a/src/dev/amdgpu/host_gpu_native_queue_core.cc b/src/dev/amdgpu/host_gpu_native_queue_core.cc
+new file mode 100644
+index 000000000..a2d83339e
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_queue_core.cc
+@@ -0,0 +1,311 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of their contributors may be used to endorse or promote
++ * products derived from this software without specific prior written
++ * permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_native_queue_core.hh"
++
++#include <cstring>
++#include <exception>
++#include <limits>
++#include <new>
++
++#include "gpu-compute/dispatch_lifecycle.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++bool
++HostNativeQueueCore::fail(const char *reason)
++{
++    failureReason = reason;
++    return false;
++}
++
++bool
++HostNativeQueueCore::packetAddress(
++    Addr baseVa, uint64_t index, uint32_t depth, Addr &address)
++{
++    if (baseVa == 0 || depth == 0)
++        return false;
++    const uint64_t slot = index % depth;
++    if (slot > std::numeric_limits<uint64_t>::max() / PacketBytes)
++        return false;
++    const uint64_t offset = slot * PacketBytes;
++    if (baseVa > std::numeric_limits<Addr>::max() - offset)
++        return false;
++    address = baseVa + offset;
++    return true;
++}
++
++bool
++HostNativeQueueCore::validRegistration(const Config &candidate) const
++{
++    if (candidate.baseVa == 0 || candidate.hostReadIndexVa == 0 ||
++        candidate.generation == 0 || candidate.activeQueueId >= MaxQueueId ||
++        candidate.registeredIndex >= MaxQueueId ||
++        candidate.queueBytes < PacketBytes ||
++        candidate.queueBytes % PacketBytes != 0 ||
++        (candidate.doorbellBytes != 4 && candidate.doorbellBytes != 8) ||
++        candidate.activeQueueId > std::numeric_limits<Addr>::max() /
++            candidate.doorbellBytes ||
++        candidate.readIndex == std::numeric_limits<uint64_t>::max()) {
++        return false;
++    }
++    const uint64_t depth = candidate.queueBytes / PacketBytes;
++    return depth != 0;
++}
++
++bool
++HostNativeQueueCore::nextIndex(uint64_t value, uint64_t &next) const
++{
++    if (value == std::numeric_limits<uint64_t>::max())
++        return false;
++    next = value + 1;
++    return true;
++}
++
++bool
++HostNativeQueueCore::queueHasSpace(uint64_t candidateWrite) const
++{
++    if (candidateWrite < readIdx || slots.empty())
++        return false;
++    return candidateWrite - readIdx <= slots.size();
++}
++
++void
++HostNativeQueueCore::reset()
++{
++    queueConfig = {};
++    slots.clear();
++    pending.reset();
++    writeIdx = 0;
++    fetchIdx = 0;
++    readIdx = 0;
++    dispatchIdx = 0;
++    nextTicket = 1;
++    regdIndex = 0;
++    registered = false;
++}
++
++bool
++HostNativeQueueCore::registerQueue(const Config &newConfig)
++{
++    failureReason = "none";
++    if (registered)
++        return fail("queue already registered");
++    if (!validRegistration(newConfig))
++        return fail("invalid queue registration");
++
++    const uint32_t depth = newConfig.queueBytes / PacketBytes;
++    std::vector<uint8_t> probe;
++    if (!context.functionalRead(
++            newConfig.baseVa, PacketBytes, probe)) {
++        return fail("queue base address translation");
++    }
++    if (!context.functionalRead(
++            newConfig.hostReadIndexVa, sizeof(uint64_t), probe)) {
++        return fail("queue read-index address translation");
++    }
++
++    try {
++        slots.resize(depth);
++    } catch (const std::exception &) {
++        return fail("queue ring allocation");
++    }
++    queueConfig = newConfig;
++    writeIdx = newConfig.readIndex;
++    fetchIdx = newConfig.readIndex;
++    readIdx = newConfig.readIndex;
++    dispatchIdx = newConfig.readIndex;
++    regdIndex = newConfig.registeredIndex;
++    registered = true;
++    return true;
++}
++
++bool
++HostNativeQueueCore::publish(
++    Addr packetVa, const uint8_t *bytes, size_t byteCount,
++    uint64_t requestId)
++{
++    failureReason = "none";
++    if (!registered)
++        return fail("queue is not registered");
++    if (!bytes || byteCount != PacketBytes)
++        return fail("invalid AQL packet size");
++
++    Addr expected = 0;
++    if (!packetAddress(queueConfig.baseVa, writeIdx, slots.size(), expected) ||
++        packetVa != expected) {
++        return fail("packet address is outside queue slot");
++    }
++    Slot &slot = slots[writeIdx % slots.size()];
++    if (slot.published || slot.fetched)
++        return fail("queue slot is busy");
++    if (!context.functionalWrite(packetVa, bytes, byteCount, requestId))
++        return fail("AQL packet functional write");
++    std::memcpy(slot.bytes.data(), bytes, PacketBytes);
++    slot.hostPacketVa = packetVa;
++    slot.published = true;
++    return true;
++}
++
++bool
++HostNativeQueueCore::ring(uint64_t newWriteIndex, uint32_t &registeredIndex)
++{
++    failureReason = "none";
++    registeredIndex = 0;
++    if (!registered)
++        return fail("queue is not registered");
++    uint64_t expected = 0;
++    if (!nextIndex(writeIdx, expected) || newWriteIndex != expected)
++        return fail("queue ring index is not monotonic");
++    if (!queueHasSpace(newWriteIndex))
++        return fail("queue ring is full");
++    Slot &slot = slots[writeIdx % slots.size()];
++    if (!slot.published || slot.hostPacketVa == 0)
++        return fail("queue ring has no published packet");
++    writeIdx = newWriteIndex;
++    registeredIndex = regdIndex;
++    return true;
++}
++
++bool
++HostNativeQueueCore::fetch(
++    FetchedPacket &packet, GPUDispatchLifecycleListener *listener,
++    uint64_t requestId)
++{
++    failureReason = "none";
++    packet = {};
++    if (!registered)
++        return fail("queue is not registered");
++    if (pending)
++        return fail("queue fetch already pending");
++    if (fetchIdx >= writeIdx)
++        return fail("queue has no pending packet");
++
++    Addr packetVa = 0;
++    if (!packetAddress(
++            queueConfig.baseVa, fetchIdx, slots.size(), packetVa)) {
++        return fail("queue packet address overflow");
++    }
++    Slot &slot = slots[fetchIdx % slots.size()];
++    if (!slot.published || slot.fetched || slot.hostPacketVa != packetVa)
++        return fail("queue slot publication state");
++
++    std::vector<uint8_t> bytes;
++    if (!context.functionalRead(packetVa, PacketBytes, bytes, requestId) ||
++        bytes.size() != PacketBytes) {
++        return fail("AQL packet functional read");
++    }
++    /* The queue core only accepts kernel dispatch packets. */
++    if ((bytes[0] & 0xffU) != 2U)
++        return fail("AQL packet is not a kernel dispatch");
++    if (nextTicket == 0)
++        return fail("queue fetch ticket exhausted");
++
++    std::memcpy(packet.bytes.data(), bytes.data(), PacketBytes);
++    packet.ticket = nextTicket++;
++    packet.queueIndex = fetchIdx;
++    packet.hostPacketVa = packetVa;
++    packet.activeQueueId = queueConfig.activeQueueId;
++    packet.queueGeneration = queueConfig.generation;
++    packet.registeredIndex = queueConfig.registeredIndex;
++    pending = packet;
++    slot.fetched = true;
++    uint64_t next = 0;
++    if (!nextIndex(fetchIdx, next)) {
++        slot.fetched = false;
++        pending.reset();
++        packet = {};
++        return fail("queue fetch index exhausted");
++    }
++    fetchIdx = next;
++    if (listener)
++        listener->hsaPacketFetched(packetVa, regdIndex);
++    return true;
++}
++
++bool
++HostNativeQueueCore::ownsPending(const FetchedPacket &packet) const
++{
++    return registered && pending && packet.valid() &&
++        pending->ticket == packet.ticket &&
++        pending->queueIndex == packet.queueIndex &&
++        pending->hostPacketVa == packet.hostPacketVa &&
++        pending->activeQueueId == packet.activeQueueId &&
++        pending->queueGeneration == packet.queueGeneration &&
++        pending->registeredIndex == packet.registeredIndex &&
++        pending->bytes == packet.bytes;
++}
++
++bool
++HostNativeQueueCore::acceptDispatch(uint64_t ticket)
++{
++    failureReason = "none";
++    if (!registered || !pending || pending->ticket != ticket)
++        return fail("unknown queue fetch ticket");
++    if (pending->queueIndex != dispatchIdx)
++        return fail("queue dispatch index changed");
++    uint64_t next = 0;
++    if (!nextIndex(dispatchIdx, next))
++        return fail("queue dispatch index exhausted");
++    dispatchIdx = next;
++    pending.reset();
++    return true;
++}
++
++bool
++HostNativeQueueCore::cancelFetch(uint64_t ticket)
++{
++    failureReason = "none";
++    if (!registered || !pending || pending->ticket != ticket)
++        return fail("unknown queue fetch ticket");
++    if (fetchIdx == 0 || pending->queueIndex + 1 != fetchIdx)
++        return fail("queue fetch index changed");
++    Slot &slot = slots[pending->queueIndex % slots.size()];
++    slot.fetched = false;
++    fetchIdx = pending->queueIndex;
++    pending.reset();
++    return true;
++}
++
++bool
++HostNativeQueueCore::unregisterQueue()
++{
++    failureReason = "none";
++    if (!registered)
++        return fail("queue is not registered");
++    if (pending || readIdx != writeIdx)
++        return fail("queue has in-flight packets");
++    reset();
++    return true;
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_native_queue_core.hh b/src/dev/amdgpu/host_gpu_native_queue_core.hh
+new file mode 100644
+index 000000000..7e7d47e1a
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_queue_core.hh
+@@ -0,0 +1,157 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of their contributors may be used to endorse or promote
++ * products derived from this software without specific prior written
++ * permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_NATIVE_QUEUE_CORE_HH__
++#define __DEV_AMDGPU_HOST_GPU_NATIVE_QUEUE_CORE_HH__
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <optional>
++#include <string>
++#include <vector>
++
++#include "base/types.hh"
++#include "dev/amdgpu/host_native_memory_context.hh"
++
++namespace gem5
++{
++
++class GPUDispatchLifecycleListener;
++
++namespace hostgpu
++{
++
++/**
++ * A small host-native implementation of the AQL publication/fetch boundary.
++ *
++ * The legacy HSAPacketProcessor uses a DmaVirtDevice and gem5 events to copy
++ * packets into an internal ring.  This class keeps the same queue invariants,
++ * but uses the host-owned functional address space synchronously.  It does
++ * not model a doorbell device, a DMA port, a GPU VM walker, or execution.
++ */
++class HostNativeQueueCore
++{
++  public:
++    static constexpr size_t PacketBytes = 64;
++    static constexpr uint32_t MaxQueueId = 4096 / 8;
++
++    struct Config
++    {
++        Addr baseVa = 0;
++        Addr hostReadIndexVa = 0;
++        uint64_t activeQueueId = 0;
++        uint64_t generation = 0;
++        uint32_t registeredIndex = 0;
++        uint32_t queueBytes = 0;
++        uint32_t doorbellBytes = 0;
++        uint64_t readIndex = 0;
++    };
++
++    /** A fetched packet copy whose bytes remain valid for the caller. */
++    struct FetchedPacket
++    {
++        uint64_t ticket = 0;
++        uint64_t queueIndex = 0;
++        Addr hostPacketVa = 0;
++        uint64_t activeQueueId = 0;
++        uint64_t queueGeneration = 0;
++        uint32_t registeredIndex = 0;
++        std::array<uint8_t, PacketBytes> bytes = {};
++
++        bool valid() const
++        {
++            return ticket != 0 && hostPacketVa != 0 && queueGeneration != 0;
++        }
++    };
++
++    explicit HostNativeQueueCore(HostNativeMemoryContext &addressSpace)
++        : context(addressSpace)
++    {}
++
++    HostNativeQueueCore(const HostNativeQueueCore &) = delete;
++    HostNativeQueueCore &operator=(const HostNativeQueueCore &) = delete;
++
++    bool registerQueue(const Config &newConfig);
++    bool publish(Addr packetVa, const uint8_t *bytes, size_t byteCount,
++                 uint64_t requestId = 0);
++    bool ring(uint64_t newWriteIndex, uint32_t &registeredIndex);
++    bool fetch(FetchedPacket &packet,
++               GPUDispatchLifecycleListener *listener = nullptr,
++               uint64_t requestId = 0);
++    bool acceptDispatch(uint64_t ticket);
++    bool cancelFetch(uint64_t ticket);
++    bool unregisterQueue();
++
++    bool isRegistered() const { return registered; }
++    const Config &config() const { return queueConfig; }
++    uint64_t writeIndex() const { return writeIdx; }
++    uint64_t fetchIndex() const { return fetchIdx; }
++    uint64_t readIndex() const { return readIdx; }
++    uint64_t dispatchIndex() const { return dispatchIdx; }
++    bool hostReadIndexUpdated() const { return false; }
++    bool ownsPending(const FetchedPacket &packet) const;
++    uint32_t registeredIndex() const { return regdIndex; }
++    const char *failure() const { return failureReason.c_str(); }
++
++    static bool packetAddress(Addr baseVa, uint64_t index, uint32_t depth,
++                              Addr &address);
++
++  private:
++    struct Slot
++    {
++        std::array<uint8_t, PacketBytes> bytes = {};
++        Addr hostPacketVa = 0;
++        bool published = false;
++        bool fetched = false;
++    };
++
++    bool fail(const char *reason);
++    bool validRegistration(const Config &candidate) const;
++    bool queueHasSpace(uint64_t candidateWrite) const;
++    bool nextIndex(uint64_t value, uint64_t &next) const;
++    void reset();
++
++    HostNativeMemoryContext &context;
++    Config queueConfig;
++    std::vector<Slot> slots;
++    std::optional<FetchedPacket> pending;
++    std::string failureReason = "none";
++    uint64_t writeIdx = 0;
++    uint64_t fetchIdx = 0;
++    uint64_t readIdx = 0;
++    uint64_t dispatchIdx = 0;
++    uint64_t nextTicket = 1;
++    uint32_t regdIndex = 0;
++    bool registered = false;
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_NATIVE_QUEUE_CORE_HH__
+diff --git a/src/gpu-compute/hsa_queue_entry.hh b/src/gpu-compute/hsa_queue_entry.hh
+index 7e9991f3b..1e62256c4 100644
+--- a/src/gpu-compute/hsa_queue_entry.hh
++++ b/src/gpu-compute/hsa_queue_entry.hh
+@@ -48,7 +48,9 @@
+ #include <vector>
+ 
+ #include "base/intmath.hh"
++#if !defined(GEM5_HOST_NATIVE_NO_ISA)
+ #include "base/logging.hh"
++#endif
+ #include "base/types.hh"
+ #include "dev/hsa/hsa_packet.hh"
+ #include "dev/hsa/hsa_queue.hh"
+@@ -134,7 +136,12 @@ class HSAQueueEntry
+             gfx_version == GfxVersion::gfx950) {
+             numSgprs = ((akc->granulated_wavefront_sgpr_count + 1) * 16)/2;
+         } else {
++#if defined(GEM5_HOST_NATIVE_NO_ISA)
++            /* Native admission validates gfx950 before constructing a task. */
++            numSgprs = 0;
++#else
+             panic("Saw unknown gfx version setting up GPR counts\n");
++#endif
+         }
+ 
+         initialVgprState.reset();
+diff --git a/util/host_native/check_control_core.py b/util/host_native/check_control_core.py
+index d9c5c853a..8946c7636 100644
+--- a/util/host_native/check_control_core.py
++++ b/util/host_native/check_control_core.py
+@@ -27,6 +27,8 @@ DISPATCH_ADMISSION_SCHEMA = "gem5.host-native.dispatch-admission.v1"
+ DISPATCH_ADMISSION_AUDIT_SCHEMA = (
+     "gem5.host-native.dispatch-admission.audit.v1"
+ )
++DISPATCH_B1_SCHEMA = "gem5.host-native.dispatch-b1.v1"
++DISPATCH_B1_AUDIT_SCHEMA = "gem5.host-native.dispatch-b1.audit.v1"
+ DEFAULT_BUILD_OPTS = (
+     Path(__file__).resolve().parents[2] / "build_opts/HOSTGPU_NATIVE_CONTROL"
+ )
+@@ -34,6 +36,7 @@ EXPECTED_BUILD_OPTS = {
+     "BUILD_ISA": "n",
+     "USE_X86_ISA": "n",
+     "BUILD_GPU": "y",
++    "VEGA_GPU_ISA": "y",
+ }
+ 
+ # Match complete type/namespace components.  In particular, do not match
+@@ -46,6 +49,37 @@ FORBIDDEN_SYMBOL = re.compile(
+     r"BaseCPU|ThreadContext)(?:::|$))"
+ )
+ 
++# B1 is a source-extracted queue/CP core.  Keep its link boundary stricter
++# than the older control profiles so accidental simulator-runtime closure is
++# detected even when a symbol is only pulled in as an undefined reference.
++B1_FORBIDDEN_SYMBOL = re.compile(
++    r"(?:\bX86ISA(?:::|$)|\bX86GPUTLB(?:::|$)|\bBaseCPU(?:::|$)|"
++    r"\bThreadContext(?:::|$)|\bProcess(?:::|$)|\bSystem(?:::|$)|"
++    r"\bSETranslatingPortProxy(?:::|$)|\bTranslatingPortProxy(?:::|$)|"
++    r"\bAMDGPUDevice(?:::|$)|\bGPUDispatcher(?:::|$)|"
++    r"\bHSAPacketProcessor(?:::|$)|\bGPUCommandProcessor(?:::|$)|"
++    r"\bHWScheduler(?:::|$)|\bComputeUnit(?:::|$)|\bShader(?:::|$)|"
++    r"\bGPUComputeDriver(?:::|$)|\bWavefront(?:::|$)|"
++    r"\bGPUStaticInst(?:::|$)|\bGPUDynInst(?:::|$)|"
++    r"\bAMDGPUVM(?:::|$)|\bDmaVirtDevice(?:::|$)|"
++    r"\bDmaDevice(?:::|$)|\bDmaPort(?:::|$)|\bSimObject(?:::|$)|"
++    r"\bClockedObject(?:::|$)|\bClocked(?:::|$)|\bBaseMMU(?:::|$)|"
++    r"\bDrainable(?:::|$)|\bSerializable(?:::|$)|\bPioDevice(?:::|$)|"
++    r"\bFullSystem(?:::|$)|"
++    r"\bVegaISA::Walker(?:::|$)|\bGem5Internal::_curTickPtr|"
++    r"\b_curEventQueue|\bEvent(?:::|$)|\bEventBase(?:::|$)|"
++    r"\bEventQueue(?:::|$)|\bEventManager(?:::|$)|"
++    r"\bEventFunctionWrapper(?:::|$)|\bPort(?:::|$)|"
++    r"\bPortProxy(?:::|$)|\bRequestPort(?:::|$)|\bPacket(?:::|$)|"
++    r"\bRequest(?:::|$)|\bMemCmd(?:::|$)|\bLogger(?:::|$)|"
++    r"\bdebug::|\btrace::|\bcp::Print(?:::|$)|\bstatistics::|"
++    r"\bsim_clock::|"
++    r"\bAMDGPUVM::UserTranslationGen|\bPageTableTranslationGen|"
++    r"\b(?:AMDGPUDevice|GPUDispatcher|HSAPacketProcessor|"
++    r"GPUCommandProcessor|ComputeUnit|Shader|DmaDevice)Params(?:::|$)|"
++    r"\bexitSimLoop(?:::|$)|\binParallelMode(?:::|$))"
++)
++
+ ALLOWED_DYNAMIC_LIBS = (
+     "linux-vdso.so.1",
+     "libstdc++.so",
+@@ -116,9 +150,9 @@ def parse_dependencies(ldd_output: str) -> list[str]:
+     return dependencies
+ 
+ 
+-def forbidden_lines(output: str) -> list[str]:
++def forbidden_lines(output: str, pattern=FORBIDDEN_SYMBOL) -> list[str]:
+     return [line for line in output.splitlines()
+-            if FORBIDDEN_SYMBOL.search(line)]
++            if pattern.search(line)]
+ 
+ 
+ PROFILES = {
+@@ -189,6 +223,54 @@ PROFILES = {
+         },
+         "require_blocker": True,
+     },
++    "dispatch-b1": {
++        "schema": DISPATCH_B1_SCHEMA,
++        "audit_schema": DISPATCH_B1_AUDIT_SCHEMA,
++        "forbidden_symbol": B1_FORBIDDEN_SYMBOL,
++        "required_defined_symbols": (
++            "gem5::hostgpu::HostNativeQueueCore::fetch(",
++            "gem5::hostgpu::HostNativeQueueCore::acceptDispatch(",
++            "gem5::hostgpu::HostNativeCommandProcessorCore::submit(",
++        ),
++        "true_flags": (
++            "staged_image_roundtrip", "native_address_space_resolved",
++            "descriptor_read", "mqd_read", "kernarg_read",
++            "completion_signal_object_read", "aql_packet_64b",
++            "queue_registered", "aql_published", "queue_ring_accepted",
++            "native_queue_cp_core", "aql_submitted",
++            "queue_wrap_63_to_64",
++            "hsa_packet_fetched", "command_processor_submitted",
++            "hsa_queue_entry_reused", "descriptor_entry_relation",
++            "publication_fetch_submit_ordered",
++        ),
++        "false_flags": (
++            "host_read_index_updated", "gpu_dispatcher_instantiated",
++            "hsapp_simobject_instantiated", "gpu_pipeline_connected",
++            "command_processor_simobject_instantiated",
++            "legacy_gpu_pipeline_submitted",
++            "cu_wave_started", "instruction_fetched", "hsa_packet_retired",
++            "kernel_executed", "cpu_fallback", "vega_x86",
++            "signal_decremented",
++        ),
++        "expected_values": {
++            "active_queue_id": 511,
++            "registered_index": 0,
++            "queue_bytes": 4096,
++            "queue_slots": 64,
++            "workgroup_size_x": 256,
++            "grid_size_x": 1024,
++            "dispatch_id": 1,
++            "host_fetch_index": 1,
++            "aql_dispatch_index": 1,
++            "aql_retire_index": 0,
++            "mqd_read_dispatch_id_after_fetch": 0,
++            "hsa_packet_fetched_count": 1,
++            "command_processor_submitted_count": 1,
++            "gpu_dispatcher_started_count": 0,
++            "hsa_packet_retired_count": 0,
++        },
++        "require_blocker": True,
++    },
+ }
+ 
+ 
+@@ -233,18 +315,28 @@ def main() -> int:
+         )
+ 
+     undefined = run("nm", "-C", "--undefined-only", str(executable))
+-    forbidden_undefined = forbidden_lines(undefined)
++    symbol_pattern = profile.get("forbidden_symbol", FORBIDDEN_SYMBOL)
++    forbidden_undefined = forbidden_lines(undefined, symbol_pattern)
+     if forbidden_undefined:
+         raise SystemExit(
+             "forbidden undefined symbols:\n" + "\n".join(forbidden_undefined)
+         )
+ 
+     defined = run("nm", "-C", "--defined-only", str(executable))
+-    forbidden_defined = forbidden_lines(defined)
++    forbidden_defined = forbidden_lines(defined, symbol_pattern)
+     if forbidden_defined:
+         raise SystemExit(
+             "forbidden defined symbols:\n" + "\n".join(forbidden_defined)
+         )
++    missing_defined = [
++        name for name in profile.get("required_defined_symbols", ())
++        if name not in defined
++    ]
++    if missing_defined:
++        raise SystemExit(
++            "required defined symbols are absent:\n" +
++            "\n".join(missing_defined)
++        )
+ 
+     self_test = subprocess.run(
+         [str(executable)], check=True, text=True,
+@@ -283,6 +375,9 @@ def main() -> int:
+         "dynamic_dependencies": dependencies,
+         "forbidden_undefined_symbols": [],
+         "forbidden_defined_symbols": [],
++        "required_defined_symbols": list(
++            profile.get("required_defined_symbols", ())
++        ),
+         "self_test": result,
+         "strace": "unavailable",
+     }, sort_keys=True))
+-- 
+2.53.0
+

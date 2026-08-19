@@ -1,0 +1,74 @@
+From 4c7de84a26941fd851d9c8a13b9c97349de371f6 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sun, 16 Aug 2026 19:59:19 +0800
+Subject: [PATCH 1/5] runtime: require explicit model fast-copy authorization
+
+Remove model-mode default-on behavior and require both the ROCr operation switch and the model-provider authorization while preserving non-model explicit flag behavior.
+
+Checkpoint-ID: CP-0038
+Goal-ID: GSIM-001
+Plan-Revision: 16
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 3b716584dce9a40166b506a1df1be3c05fbef8cd86cdda49954d32546851788f
+Change-Kind: code
+Baseline-Commit: 92115a2941982a384de161be3f78cf9bff547027
+---
+ projects/clr/rocclr/utils/flags.cpp              | 13 +++++++++----
+ .../runtime/hsa-runtime/core/util/flag.h         | 16 ++++++++--------
+ 2 files changed, 17 insertions(+), 12 deletions(-)
+
+diff --git a/projects/clr/rocclr/utils/flags.cpp b/projects/clr/rocclr/utils/flags.cpp
+index 7c06e49c6c..84c6e3a288 100644
+--- a/projects/clr/rocclr/utils/flags.cpp
++++ b/projects/clr/rocclr/utils/flags.cpp
+@@ -153,10 +153,15 @@ bool Flag::init() {
+     }
+   }
+ 
+-  // If the user did not explicitly set HSA_ENABLE_DTIF_FAST_COPY, default it ON
+-  // whenever HSA_MODEL_TOPOLOGY is set (FFM model mode), mirroring the ROCr-side default.
+-  if (flagIsDefault(HSA_ENABLE_DTIF_FAST_COPY) && vars.find("HSA_MODEL_TOPOLOGY") != vars.cend()) {
+-    HSA_ENABLE_DTIF_FAST_COPY = true;
++  // Model mode requires HSA_ENABLE_DTIF_FAST_COPY=1 and
++  // SAGR_HSAKMT_MODEL_FAST_COPY=1.
++  // Outside model mode, retain the normally parsed HSA fast-copy flag.
++  if (vars.find("HSA_MODEL_TOPOLOGY") != vars.cend()) {
++    const auto hsa_fast_copy = vars.find("HSA_ENABLE_DTIF_FAST_COPY");
++    const auto model_fast_copy = vars.find("SAGR_HSAKMT_MODEL_FAST_COPY");
++    HSA_ENABLE_DTIF_FAST_COPY =
++        hsa_fast_copy != vars.cend() && std::string_view(hsa_fast_copy->second) == "1" &&
++        model_fast_copy != vars.cend() && std::string_view(model_fast_copy->second) == "1";
+   }
+ 
+   return true;
+diff --git a/projects/rocr-runtime/runtime/hsa-runtime/core/util/flag.h b/projects/rocr-runtime/runtime/hsa-runtime/core/util/flag.h
+index 527f64e50a..54d433422e 100644
+--- a/projects/rocr-runtime/runtime/hsa-runtime/core/util/flag.h
++++ b/projects/rocr-runtime/runtime/hsa-runtime/core/util/flag.h
+@@ -318,15 +318,15 @@ class Flag {
+     var = os::GetEnvVar("HSA_ENABLE_DTIF");
+     enable_dtif_ = (var == "1") ? true : false;
+ 
+-    // Shared DTIF/FFM fast-copy enable: skips the staging blit and uses host
+-    // memcpy in the ROCr blit kernel/SDMA paths.
+-    //   HSA_ENABLE_DTIF_FAST_COPY=1 -> on
+-    //   HSA_ENABLE_DTIF_FAST_COPY=0 -> off
+-    //   unset -> on if HSA_MODEL_TOPOLOGY is set (FFM model mode default).
++    // Model mode requires HSA_ENABLE_DTIF_FAST_COPY=1 and
++    // SAGR_HSAKMT_MODEL_FAST_COPY=1.
++    // Outside model mode, preserve the standalone HSA fast-copy switch.
+     var = os::GetEnvVar("HSA_ENABLE_DTIF_FAST_COPY");
+-    enable_dtif_fast_copy_ = var.empty()
+-        ? os::IsEnvVarSet("HSA_MODEL_TOPOLOGY")
+-        : (var == "1");
++    enable_dtif_fast_copy_ = (var == "1");
++    if (os::IsEnvVarSet("HSA_MODEL_TOPOLOGY")) {
++      var = os::GetEnvVar("SAGR_HSAKMT_MODEL_FAST_COPY");
++      enable_dtif_fast_copy_ = enable_dtif_fast_copy_ && (var == "1");
++    }
+ 
+     var = os::GetEnvVar("HSA_DTIF_SKIP_INV_CODE_CACHE");
+     enable_dtif_skip_inv_code_cache_ = (var == "1") ? true : false;
+-- 
+2.53.0
+

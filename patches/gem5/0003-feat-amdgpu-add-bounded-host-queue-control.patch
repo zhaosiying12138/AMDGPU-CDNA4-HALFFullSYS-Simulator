@@ -1,0 +1,2330 @@
+From dc1dea0f1e306a571cd5950eef0cb979eab69e5e Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sat, 8 Aug 2026 10:24:56 +0800
+Subject: [PATCH 03/42] feat(amdgpu): add bounded host queue control
+
+Checkpoint-ID: CP-0005
+Goal-ID: GSIM-001
+Plan-Revision: 1
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 88245b20395d5cc4f9b55cb42d30c6890c8e3e57ae4bebf0a4f8a1302b08d25d
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/dev/amdgpu/SConscript                    |   3 +
+ src/dev/amdgpu/host_gpu_bridge.cc            | 377 +++++++++++++-----
+ src/dev/amdgpu/host_gpu_bridge.hh            |  41 +-
+ src/dev/amdgpu/host_gpu_connection_state.hh  |  53 +++
+ src/dev/amdgpu/host_gpu_protocol.cc          | 233 +++++++++++
+ src/dev/amdgpu/host_gpu_protocol.hh          |  73 ++++
+ src/dev/amdgpu/host_gpu_protocol.test.cc     | 329 ++++++++++++++++
+ src/dev/amdgpu/host_gpu_queue_state.cc       | 242 ++++++++++++
+ src/dev/amdgpu/host_gpu_queue_state.hh       | 124 ++++++
+ src/dev/amdgpu/host_gpu_queue_state.test.cc  | 384 +++++++++++++++++++
+ src/dev/amdgpu/host_gpu_socket_utils.test.cc |  67 ++++
+ 11 files changed, 1829 insertions(+), 97 deletions(-)
+ create mode 100644 src/dev/amdgpu/host_gpu_queue_state.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_queue_state.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_queue_state.test.cc
+
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index 3cf1395e6..47938786d 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -49,6 +49,7 @@ Source('amdgpu_smu.cc', tags=['x86 isa'])
+ Source('amdgpu_vm.cc', tags=['x86 isa'])
+ Source('host_gpu_protocol.cc', tags=['x86 isa'])
+ Source('host_gpu_bridge.cc', tags=['x86 isa'])
++Source('host_gpu_queue_state.cc', tags=['x86 isa'])
+ Source('host_gpu_socket_utils.cc', tags=['x86 isa'])
+ Source('interrupt_handler.cc', tags=['x86 isa'])
+ Source('memory_manager.cc', tags=['x86 isa'])
+@@ -59,6 +60,8 @@ Source('system_hub.cc', tags=['x86 isa'])
+ 
+ GTest('host_gpu_protocol.test', 'host_gpu_protocol.test.cc',
+       'host_gpu_protocol.cc')
++GTest('host_gpu_queue_state.test', 'host_gpu_queue_state.test.cc',
++      'host_gpu_queue_state.cc')
+ GTest('host_gpu_socket_utils.test', 'host_gpu_socket_utils.test.cc',
+       'host_gpu_socket_utils.cc')
+ 
+diff --git a/src/dev/amdgpu/host_gpu_bridge.cc b/src/dev/amdgpu/host_gpu_bridge.cc
+index ea9b3bcc7..e8b99075f 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.cc
++++ b/src/dev/amdgpu/host_gpu_bridge.cc
+@@ -65,6 +65,15 @@ constexpr size_t MaximumRecordsPerWakeup = 8;
+ constexpr size_t MaximumAliasCleanupAttempts = 4;
+ constexpr int StaleProbeTimeoutMs = 100;
+ 
++bool
++hasWireMessageType(const std::vector<uint8_t> &record,
++                   protocol::MessageType type)
++{
++    return record.size() >= 16 &&
++        record[14] == static_cast<uint8_t>(static_cast<uint16_t>(type) >> 8) &&
++        record[15] == static_cast<uint8_t>(static_cast<uint16_t>(type));
++}
++
+ bool
+ sameFile(const struct stat &left, const struct stat &right)
+ {
+@@ -291,7 +300,9 @@ HostGPUBridge::HostGPUBridge(const HostGPUBridgeParams &params)
+       handshakeTimeoutMs(params.handshake_timeout_ms),
+       maximumRecord(params.max_record), exitOnHandshake(params.exit_on_handshake),
+       recordServiceEvent([this]() { processRecords(); },
+-                         name() + ".host_gpu_records")
++                         name() + ".host_gpu_records"),
++      queueServiceEvent([this]() { processQueueCommands(); },
++                        name() + ".host_gpu_queue_commands")
+ {
+     validateConfiguration();
+ 
+@@ -320,6 +331,8 @@ HostGPUBridge::HostGPUBridge(const HostGPUBridgeParams &params)
+     identity.worldSize = worldSize;
+     identity.maximumRecord = maximumRecord;
+     identity.supported = protocol::topologyCapability();
++    identity.supported[protocol::QueueControlCapabilityByte] |=
++        protocol::QueueControlCapabilityMask;
+ }
+ 
+ HostGPUBridge::~HostGPUBridge()
+@@ -757,10 +770,13 @@ HostGPUBridge::shutdown()
+         shutdownDone = true;
+         if (recordServiceEvent.scheduled())
+             deschedule(recordServiceEvent);
++        if (queueServiceEvent.scheduled())
++            deschedule(queueServiceEvent);
+         listenEvent.reset();
+         clients.clear();
+         admissionBudget.reset();
+         pendingRecords.clear();
++        queueState.clear();
+     }
+     endpointCleanupDone = cleanupEndpoint();
+ }
+@@ -833,6 +849,10 @@ HostGPUBridge::serviceClient(int fd, uint64_t generation, int revents)
+     auto found = clients.find(fd);
+     if (found == clients.end() || found->second->generation != generation)
+         return;
++    if (revents & POLLNVAL) {
++        closeClient(fd);
++        return;
++    }
+ 
+     if (revents & POLLIN) {
+         receiveRecords(fd);
+@@ -846,11 +866,8 @@ HostGPUBridge::serviceClient(int fd, uint64_t generation, int revents)
+     found = clients.find(fd);
+     if (found == clients.end() || found->second->generation != generation)
+         return;
+-    if ((revents & (POLLERR | POLLHUP | POLLNVAL)) &&
+-        !found->second->state.recordPending() &&
+-        found->second->outbound.empty()) {
++    if (terminalClientPollEvent(revents))
+         closeClient(fd);
+-    }
+ }
+ 
+ void
+@@ -987,6 +1004,7 @@ HostGPUBridge::receiveRecords(int fd)
+             return;
+         }
+         found->second->state.noteRecordReceived();
++        found->second->socketEvent->setReadable(false);
+         pendingRecords.push_back({fd, generation, std::move(bytes)});
+         scheduleRecordService();
+         return;
+@@ -1028,15 +1046,20 @@ HostGPUBridge::closeClient(int fd)
+     auto found = clients.find(fd);
+     if (found == clients.end())
+         return;
++    const HostGPUQueueState::Owner owner{
++        fd, found->second->generation};
+     found->second->state.close();
+     if (activeClientFd == fd)
+         activeClientFd = -1;
+     admissionBudget.release(found->second->admission);
++    queueState.disconnect(owner);
+     clients.erase(found);
+     pendingRecords.erase(std::remove_if(
+         pendingRecords.begin(), pendingRecords.end(),
+         [fd](const PendingRecord &record) { return record.clientFd == fd; }),
+         pendingRecords.end());
++    if (queueState.inflightCount() == 0 && queueServiceEvent.scheduled())
++        deschedule(queueServiceEvent);
+ }
+ 
+ void
+@@ -1059,94 +1082,228 @@ HostGPUBridge::processRecords()
+             found->second->generation != record.generation) {
+             continue;
+         }
+-        Client &client = *found->second;
+-        const auto decoded = protocol::decodeHelloRecord(
+-            record.bytes.data(), record.bytes.size(), maximumRecord);
+-        if (decoded.action == protocol::DecodeAction::Drop) {
+-            if (decoded.closeConnection)
+-                closeClient(record.clientFd);
+-            continue;
++        if (found->second->state.phase() == ConnectionPhase::Established &&
++            hasWireMessageType(record.bytes,
++                               protocol::MessageType::QueueRequest)) {
++            processQueueRecord(record);
+         } else {
+-            protocol::Status status = preNegotiationStatus(
+-                client.state, sessionEstablished && activeClientFd < 0,
+-                decoded.status);
+-            protocol::NegotiationResult negotiation;
+-            if (status == protocol::Status::Ok) {
+-                protocol::NegotiationContext context;
+-                context.busy = activeClientFd >= 0 &&
+-                    activeClientFd != record.clientFd;
+-                context.resourceExhausted =
+-                    client.admission == ClientAdmission::ResourceLimited;
+-                negotiation = protocol::negotiate(
+-                    decoded.header, decoded.hello, identity, context);
+-                status = negotiation.status;
+-            }
+-
+-            protocol::Ack ack;
+-            ack.status = status;
+-            ack.clientNonce = decoded.hello.clientNonce;
+-            uint64_t connectionId = 0;
+-            if (status == protocol::Status::Ok) {
+-                protocol::Nonce serverNonce = {};
+-                bool randomReady = randomNonzeroUuid(serverNonce);
+-                for (unsigned attempt = 0;
+-                     randomReady && attempt < 16; ++attempt) {
+-                    randomReady = randomNonzero64(connectionId);
+-                    if (!randomReady ||
+-                        usedConnectionIds.insert(connectionId).second) {
+-                        break;
+-                    }
+-                    connectionId = 0;
+-                }
+-                if (connectionId == 0)
+-                    randomReady = false;
+-                if (!randomReady) {
+-                    status = protocol::Status::Internal;
+-                    ack.status = status;
+-                } else {
+-                    ack.selectedMajor = negotiation.selectedMajor;
+-                    ack.selectedMinor = negotiation.selectedMinor;
+-                    ack.serverNonce = serverNonce;
+-                    ack.selected = negotiation.selected;
+-                    ack.maximumRecord = negotiation.maximumRecord;
+-                    ack.topology.jobUuid = identity.jobUuid;
+-                    ack.topology.rank = identity.rank;
+-                    ack.topology.worldSize = identity.worldSize;
+-                }
+-            }
+-            const auto response = protocol::encodeAck(
+-                decoded.header, ack, identity, connectionId);
+-            const bool success = status == protocol::Status::Ok;
+-            client.state.beginAck(success);
+-            cancelDeadline(client);
+-            client.socketEvent->setReadable(false);
+-            if (success)
+-                activeClientFd = record.clientFd;
+-            sendAck(record.clientFd, record.generation, response, status,
+-                    success);
++            processHelloRecord(record);
+         }
+     }
+     if (!pendingRecords.empty())
+         scheduleRecordService();
+ }
+ 
++void
++HostGPUBridge::processHelloRecord(const PendingRecord &record)
++{
++    auto found = clients.find(record.clientFd);
++    if (found == clients.end() ||
++        found->second->generation != record.generation) {
++        return;
++    }
++    Client &client = *found->second;
++    const auto decoded = protocol::decodeHelloRecord(
++        record.bytes.data(), record.bytes.size(), maximumRecord);
++    if (decoded.action == protocol::DecodeAction::Drop) {
++        if (decoded.closeConnection)
++            closeClient(record.clientFd);
++        return;
++    }
++
++    protocol::Status status = preNegotiationStatus(
++        client.state, sessionEstablished && activeClientFd < 0,
++        decoded.status);
++    protocol::NegotiationResult negotiation;
++    if (status == protocol::Status::Ok) {
++        protocol::NegotiationContext context;
++        context.busy = activeClientFd >= 0 &&
++            activeClientFd != record.clientFd;
++        context.resourceExhausted =
++            client.admission == ClientAdmission::ResourceLimited;
++        negotiation = protocol::negotiate(
++            decoded.header, decoded.hello, identity, context);
++        status = negotiation.status;
++    }
++
++    protocol::Ack ack;
++    ack.status = status;
++    ack.clientNonce = decoded.hello.clientNonce;
++    uint64_t connectionId = 0;
++    if (status == protocol::Status::Ok) {
++        protocol::Nonce serverNonce = {};
++        bool randomReady = randomNonzeroUuid(serverNonce);
++        for (unsigned attempt = 0; randomReady && attempt < 16; ++attempt) {
++            randomReady = randomNonzero64(connectionId);
++            if (!randomReady || usedConnectionIds.insert(connectionId).second)
++                break;
++            connectionId = 0;
++        }
++        if (connectionId == 0)
++            randomReady = false;
++        if (!randomReady) {
++            status = protocol::Status::Internal;
++            ack.status = status;
++        } else {
++            ack.selectedMajor = negotiation.selectedMajor;
++            ack.selectedMinor = negotiation.selectedMinor;
++            ack.serverNonce = serverNonce;
++            ack.selected = negotiation.selected;
++            ack.maximumRecord = negotiation.maximumRecord;
++            ack.topology.jobUuid = identity.jobUuid;
++            ack.topology.rank = identity.rank;
++            ack.topology.worldSize = identity.worldSize;
++            client.connectionId = connectionId;
++            client.selectedCapabilities = negotiation.selected;
++            const auto inserted = client.requestIds.observe(
++                decoded.header.requestId);
++            assert(inserted == RequestIdResult::Fresh);
++        }
++    }
++    const auto response = protocol::encodeAck(
++        decoded.header, ack, identity, connectionId);
++    const bool success = status == protocol::Status::Ok;
++    client.state.beginAck(success);
++    cancelDeadline(client);
++    if (success)
++        activeClientFd = record.clientFd;
++    sendAck(record.clientFd, record.generation, response, status, success);
++}
++
++void
++HostGPUBridge::processQueueRecord(const PendingRecord &record)
++{
++    auto found = clients.find(record.clientFd);
++    if (found == clients.end() ||
++        found->second->generation != record.generation) {
++        return;
++    }
++    Client &client = *found->second;
++    const auto decoded = protocol::decodeQueueRequestRecord(
++        record.bytes.data(), record.bytes.size(), maximumRecord);
++    if (decoded.action == protocol::DecodeAction::Drop) {
++        if (decoded.closeConnection)
++            closeClient(record.clientFd);
++        return;
++    }
++
++    protocol::Status sessionStatus = protocol::Status::Ok;
++    const bool queueSelected =
++        (client.selectedCapabilities[protocol::QueueControlCapabilityByte] &
++         protocol::QueueControlCapabilityMask) != 0;
++    if (decoded.header.daemonUuid != identity.daemonUuid) {
++        sessionStatus = protocol::Status::InstanceMismatch;
++    } else if (decoded.header.connectionId != client.connectionId) {
++        sessionStatus = protocol::Status::ProtocolState;
++    } else if (decoded.header.jobEpoch != identity.jobEpoch) {
++        sessionStatus = protocol::Status::TopologyMismatch;
++    } else if (!queueSelected) {
++        sessionStatus = protocol::Status::UnsupportedCapability;
++    }
++    protocol::Status status = queueRequestStatus(
++        decoded.status, sessionStatus);
++    if (status == protocol::Status::Ok) {
++        switch (client.requestIds.observe(decoded.header.requestId)) {
++          case RequestIdResult::Fresh:
++            break;
++          case RequestIdResult::NotIncreasing:
++            status = protocol::Status::ProtocolState;
++            break;
++        }
++    }
++
++    protocol::QueueResponse response;
++    response.status = status;
++    response.opcode = decoded.request.opcode;
++    response.queueId = decoded.request.queueId;
++    response.generation = decoded.request.generation;
++    response.sequence = decoded.request.sequence;
++    response.simTick = curTick();
++    bool commandAccepted = false;
++    if (status == protocol::Status::Ok) {
++        const HostGPUQueueState::Owner owner{
++            record.clientFd, record.generation};
++        auto decision = queueState.submit(
++            owner, decoded.header, decoded.request, curTick());
++        response = decision.response;
++        commandAccepted = decision.commandAccepted;
++    }
++
++    client.state.finishEstablishedRecord();
++    const auto responseHeader = protocol::queueResponseHeader(
++        decoded.header, identity, client.connectionId);
++    const auto encoded = protocol::encodeQueueAck(responseHeader, response);
++    sendQueueResponse(record.clientFd, record.generation, encoded,
++                      OutboundKind::QueueAck);
++    if (commandAccepted)
++        scheduleQueueService();
++}
++
++void
++HostGPUBridge::scheduleQueueService()
++{
++    const auto next = queueState.nextReadyTick();
++    if (next && !queueServiceEvent.scheduled())
++        schedule(queueServiceEvent, static_cast<Tick>(*next));
++}
++
++void
++HostGPUBridge::processQueueCommands()
++{
++    while (const auto command = queueState.popReady(curTick())) {
++        auto found = clients.find(command->owner.fd);
++        if (found == clients.end() ||
++            found->second->generation != command->owner.clientGeneration) {
++            continue;
++        }
++        const auto response = HostGPUQueueState::completionResponse(
++            *command, curTick());
++        const auto encoded = protocol::encodeQueueCompletion(
++            command->header, response);
++        sendQueueResponse(command->owner.fd,
++                          command->owner.clientGeneration, encoded,
++                          OutboundKind::QueueCompletion);
++    }
++    scheduleQueueService();
++}
++
+ void
+ HostGPUBridge::sendAck(int fd, uint64_t generation,
+                        std::vector<uint8_t> record,
+                        protocol::Status status, bool success)
++{
++    auto found = clients.find(fd);
++    if (found == clients.end() || found->second->generation != generation)
++        return;
++    enqueueOutbound(fd, generation, OutboundRecord{
++        std::move(record), OutboundKind::HandshakeAck, status, success});
++}
++
++void
++HostGPUBridge::sendQueueResponse(int fd, uint64_t generation,
++                                 std::vector<uint8_t> record,
++                                 OutboundKind kind)
++{
++    enqueueOutbound(fd, generation, OutboundRecord{
++        std::move(record), kind, protocol::Status::Ok, true});
++}
++
++void
++HostGPUBridge::enqueueOutbound(int fd, uint64_t generation,
++                               OutboundRecord record)
+ {
+     auto found = clients.find(fd);
+     if (found == clients.end() || found->second->generation != generation)
+         return;
+     Client &client = *found->second;
+-    if (!client.outbound.empty()) {
++    if (client.outbound.size() >= MaximumOutboundRecords) {
+         closeClient(fd);
+         return;
+     }
+-    client.outbound = std::move(record);
+-    client.outboundStatus = status;
+-    client.outboundSuccess = success;
+-    flushClient(fd);
++    const bool wasEmpty = client.outbound.empty();
++    client.outbound.push_back(std::move(record));
++    if (wasEmpty)
++        flushClient(fd);
+ }
+ 
+ void
+@@ -1155,38 +1312,72 @@ HostGPUBridge::flushClient(int fd)
+     auto found = clients.find(fd);
+     if (found == clients.end())
+         return;
+-    Client &client = *found->second;
+-    if (client.outbound.empty())
+-        return;
+-    const ssize_t sent = ::send(fd, client.outbound.data(),
+-                                client.outbound.size(), MSG_NOSIGNAL);
+-    if (sent < 0) {
+-        if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+-            client.socketEvent->setWritable(true);
++    while (true) {
++        found = clients.find(fd);
++        if (found == clients.end())
++            return;
++        Client &client = *found->second;
++        if (client.outbound.empty()) {
++            client.socketEvent->setWritable(false);
+             return;
+         }
+-        closeClient(fd);
+-        return;
++        OutboundRecord &front = client.outbound.front();
++        const ssize_t sent = ::send(
++            fd, front.bytes.data(), front.bytes.size(), MSG_NOSIGNAL);
++        if (sent < 0) {
++            if (errno == EINTR)
++                continue;
++            if (errno == EAGAIN || errno == EWOULDBLOCK) {
++                client.socketEvent->setWritable(true);
++                return;
++            }
++            closeClient(fd);
++            return;
++        }
++        if (static_cast<size_t>(sent) != front.bytes.size()) {
++            closeClient(fd);
++            return;
++        }
++
++        const uint64_t generation = client.generation;
++        OutboundRecord completed = std::move(front);
++        client.outbound.pop_front();
++        if (client.outbound.empty())
++            client.socketEvent->setWritable(false);
++        completeOutbound(fd, generation, completed);
+     }
+-    if (static_cast<size_t>(sent) != client.outbound.size()) {
+-        closeClient(fd);
++}
++
++void
++HostGPUBridge::completeOutbound(int fd, uint64_t generation,
++                                const OutboundRecord &record)
++{
++    auto found = clients.find(fd);
++    if (found == clients.end() || found->second->generation != generation)
+         return;
++    switch (record.kind) {
++      case OutboundKind::HandshakeAck:
++        completeAck(fd, generation, record.status, record.success);
++        break;
++      case OutboundKind::QueueAck:
++        if (found->second->state.phase() == ConnectionPhase::Established &&
++            found->second->state.canReceive()) {
++            found->second->socketEvent->setReadable(true);
++        }
++        break;
++      case OutboundKind::QueueCompletion:
++        break;
+     }
+-
+-    client.outbound.clear();
+-    client.socketEvent->setWritable(false);
+-    completeAck(fd, client.generation);
+ }
+ 
+ void
+-HostGPUBridge::completeAck(int fd, uint64_t generation)
++HostGPUBridge::completeAck(int fd, uint64_t generation,
++                           protocol::Status status, bool success)
+ {
+     auto found = clients.find(fd);
+     if (found == clients.end() || found->second->generation != generation)
+         return;
+     Client &client = *found->second;
+-    const protocol::Status status = client.outboundStatus;
+-    const bool success = client.outboundSuccess;
+     client.state.noteAckSent();
+     inform("host-gpu-handshake status=%s fd=%d generation=%llu",
+            protocol::statusName(status), fd,
+diff --git a/src/dev/amdgpu/host_gpu_bridge.hh b/src/dev/amdgpu/host_gpu_bridge.hh
+index c50e95c8d..cbbf5594d 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.hh
++++ b/src/dev/amdgpu/host_gpu_bridge.hh
+@@ -42,6 +42,7 @@
+ #include "base/pollevent.hh"
+ #include "dev/amdgpu/host_gpu_connection_state.hh"
+ #include "dev/amdgpu/host_gpu_protocol.hh"
++#include "dev/amdgpu/host_gpu_queue_state.hh"
+ #include "params/HostGPUBridge.hh"
+ #include "sim/eventq.hh"
+ #include "sim/sim_object.hh"
+@@ -63,6 +64,8 @@ class HostGPUBridge : public SimObject
+   private:
+     static constexpr size_t MaximumRegularClients = 8;
+     static constexpr size_t MaximumExcessClients = 8;
++    static constexpr size_t MaximumOutboundRecords =
++        HostGPUQueueState::MaximumInflight * 2 + 1;
+ 
+     struct Client;
+ 
+@@ -110,6 +113,21 @@ class HostGPUBridge : public SimObject
+         std::vector<uint8_t> bytes;
+     };
+ 
++    enum class OutboundKind
++    {
++        HandshakeAck,
++        QueueAck,
++        QueueCompletion,
++    };
++
++    struct OutboundRecord
++    {
++        std::vector<uint8_t> bytes;
++        OutboundKind kind = OutboundKind::QueueAck;
++        protocol::Status status = protocol::Status::Internal;
++        bool success = false;
++    };
++
+     struct Client
+     {
+         int fd = -1;
+@@ -121,9 +139,10 @@ class HostGPUBridge : public SimObject
+         HostGPUConnectionState state;
+         std::unique_ptr<ClientEvent> socketEvent;
+         std::unique_ptr<DeadlineEvent> deadlineEvent;
+-        std::vector<uint8_t> outbound;
+-        protocol::Status outboundStatus = protocol::Status::Internal;
+-        bool outboundSuccess = false;
++        uint64_t connectionId = 0;
++        protocol::Capabilities selectedCapabilities = {};
++        QueueRequestIdTracker requestIds;
++        std::deque<OutboundRecord> outbound;
+         ClientAdmission admission = ClientAdmission::Rejected;
+ 
+         ~Client();
+@@ -147,12 +166,24 @@ class HostGPUBridge : public SimObject
+     void closeClient(int fd);
+     void scheduleClientClose(int fd, uint64_t generation);
+     void processRecords();
++    void processHelloRecord(const PendingRecord &record);
++    void processQueueRecord(const PendingRecord &record);
+     void scheduleRecordService();
++    void scheduleQueueService();
++    void processQueueCommands();
+     void sendAck(int fd, uint64_t generation,
+                  std::vector<uint8_t> record,
+                  protocol::Status status, bool success);
++    void sendQueueResponse(int fd, uint64_t generation,
++                           std::vector<uint8_t> record,
++                           OutboundKind kind);
++    void enqueueOutbound(int fd, uint64_t generation,
++                         OutboundRecord record);
+     void flushClient(int fd);
+-    void completeAck(int fd, uint64_t generation);
++    void completeOutbound(int fd, uint64_t generation,
++                          const OutboundRecord &record);
++    void completeAck(int fd, uint64_t generation,
++                     protocol::Status status, bool success);
+     void cancelDeadline(Client &client);
+     void boundedStartupWait();
+ 
+@@ -191,6 +222,8 @@ class HostGPUBridge : public SimObject
+         MaximumRegularClients, MaximumExcessClients};
+     std::deque<PendingRecord> pendingRecords;
+     EventFunctionWrapper recordServiceEvent;
++    HostGPUQueueState queueState;
++    EventFunctionWrapper queueServiceEvent;
+     uint64_t nextClientGeneration = 1;
+     std::unordered_set<uint64_t> usedConnectionIds;
+     int activeClientFd = -1;
+diff --git a/src/dev/amdgpu/host_gpu_connection_state.hh b/src/dev/amdgpu/host_gpu_connection_state.hh
+index 597f85c10..465597075 100644
+--- a/src/dev/amdgpu/host_gpu_connection_state.hh
++++ b/src/dev/amdgpu/host_gpu_connection_state.hh
+@@ -28,8 +28,11 @@
+ #ifndef __DEV_AMDGPU_HOST_GPU_CONNECTION_STATE_HH__
+ #define __DEV_AMDGPU_HOST_GPU_CONNECTION_STATE_HH__
+ 
++#include <poll.h>
++
+ #include <cassert>
+ #include <cstddef>
++#include <cstdint>
+ 
+ #include "dev/amdgpu/host_gpu_protocol.hh"
+ 
+@@ -53,6 +56,30 @@ enum class ClientAdmission
+     Rejected,
+ };
+ 
++enum class RequestIdResult
++{
++    Fresh,
++    NotIncreasing,
++};
++
++class QueueRequestIdTracker
++{
++  public:
++    RequestIdResult observe(uint64_t requestId)
++    {
++        assert(requestId != 0);
++        if (requestId <= lastRequestId)
++            return RequestIdResult::NotIncreasing;
++        lastRequestId = requestId;
++        return RequestIdResult::Fresh;
++    }
++
++    uint64_t last() const { return lastRequestId; }
++
++  private:
++    uint64_t lastRequestId = 0;
++};
++
+ class ClientAdmissionBudget
+ {
+   public:
+@@ -147,6 +174,13 @@ class HostGPUConnectionState
+         }
+     }
+ 
++    void finishEstablishedRecord()
++    {
++        assert(currentPhase == ConnectionPhase::Established);
++        assert(pendingRecord);
++        pendingRecord = false;
++    }
++
+     void close()
+     {
+         pendingRecord = false;
+@@ -172,6 +206,25 @@ preNegotiationStatus(const HostGPUConnectionState &state,
+     return decodedStatus;
+ }
+ 
++inline protocol::Status
++queueRequestStatus(protocol::Status decodedStatus,
++                   protocol::Status sessionStatus)
++{
++    if (decodedStatus == protocol::Status::Malformed ||
++        decodedStatus == protocol::Status::UnsupportedVersion) {
++        return decodedStatus;
++    }
++    if (sessionStatus != protocol::Status::Ok)
++        return sessionStatus;
++    return decodedStatus;
++}
++
++inline bool
++terminalClientPollEvent(int revents)
++{
++    return (revents & (POLLERR | POLLHUP | POLLNVAL)) != 0;
++}
++
+ } // namespace hostgpu
+ } // namespace gem5
+ 
+diff --git a/src/dev/amdgpu/host_gpu_protocol.cc b/src/dev/amdgpu/host_gpu_protocol.cc
+index 65c7f273d..9ccb6c9bf 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.cc
++++ b/src/dev/amdgpu/host_gpu_protocol.cc
+@@ -51,6 +51,13 @@ constexpr std::array<uint8_t, 8> Magic = {
+ constexpr size_t CrcOffset = 64;
+ constexpr size_t TopologyValueBytes = 24;
+ 
++bool
++validQueueOpcode(uint16_t raw)
++{
++    return raw >= static_cast<uint16_t>(QueueOpcode::Create) &&
++           raw <= static_cast<uint16_t>(QueueOpcode::Doorbell);
++}
++
+ uint16_t
+ load16(const uint8_t *data)
+ {
+@@ -343,6 +350,14 @@ topologyCapability()
+     return capabilities;
+ }
+ 
++Capabilities
++queueControlCapability()
++{
++    Capabilities capabilities = {};
++    capabilities[QueueControlCapabilityByte] = QueueControlCapabilityMask;
++    return capabilities;
++}
++
+ bool
+ capabilitySubset(const Capabilities &subset, const Capabilities &superset)
+ {
+@@ -481,6 +496,11 @@ negotiate(const Header &header, const Hello &hello,
+ 
+     for (size_t index = 0; index < result.selected.size(); ++index)
+         result.selected[index] = hello.offered[index] & server.supported[index];
++    if ((hello.required[QueueControlCapabilityByte] &
++         QueueControlCapabilityMask) == 0) {
++        result.selected[QueueControlCapabilityByte] &=
++            ~QueueControlCapabilityMask;
++    }
+     if (hello.unknownCriticalTlv ||
+         !capabilitySubset(hello.required, result.selected) ||
+         (hello.offered[0] & 1) == 0 ||
+@@ -549,6 +569,150 @@ encodeHello(const Header &header, const Hello &hello)
+     return encodeFrame(encodedHeader, payload);
+ }
+ 
++namespace
++{
++
++QueueDecodeResult
++queueDrop(const std::string &reason, bool closeConnection = true)
++{
++    QueueDecodeResult result;
++    result.action = DecodeAction::Drop;
++    result.closeConnection = closeConnection;
++    result.reason = reason;
++    return result;
++}
++
++QueueDecodeResult
++queueAcknowledge(Status status, const std::string &reason,
++                 const Header &header, const QueueRequest &request)
++{
++    QueueDecodeResult result;
++    result.action = DecodeAction::Acknowledge;
++    result.closeConnection = false;
++    result.status = status;
++    result.reason = reason;
++    result.header = header;
++    result.request = request;
++    return result;
++}
++
++bool
++decodeQueueEnvelope(const uint8_t *record, size_t size,
++                    uint32_t configuredMaximum, Header &header,
++                    const uint8_t *&payload, std::string &reason)
++{
++    if (record == nullptr || size < HeaderBytes ||
++        size > MaximumRecordBytes || size > configuredMaximum) {
++        reason = "record size";
++        return false;
++    }
++    if (!std::equal(Magic.begin(), Magic.end(), record) ||
++        load16(record + 8) != 1 || load16(record + 10) != 0) {
++        reason = "framing";
++        return false;
++    }
++    if (load16(record + 12) != HeaderBytes ||
++        load32(record + 20) != size - HeaderBytes ||
++        load32(record + 16) != 0) {
++        reason = "record envelope";
++        return false;
++    }
++    header.messageType = static_cast<MessageType>(load16(record + 14));
++    header.requestId = load64(record + 24);
++    header.daemonUuid = loadBytes<UuidBytes>(record + 32);
++    header.connectionId = load64(record + 48);
++    header.jobEpoch = load64(record + 56);
++    if (header.requestId == 0 || header.connectionId == 0 ||
++        isZero(header.daemonUuid) || header.jobEpoch == 0 ||
++        load32(record + 68) != 0 || load64(record + 72) != 0) {
++        reason = "request identity or reserved field";
++        return false;
++    }
++    if (crc32c(record, size) != load32(record + CrcOffset)) {
++        reason = "CRC32C";
++        return false;
++    }
++    payload = record + HeaderBytes;
++    return true;
++}
++
++} // anonymous namespace
++
++QueueDecodeResult
++decodeQueueRequestRecord(const uint8_t *record, size_t size,
++                         uint32_t configuredMaximum)
++{
++    Header header;
++    const uint8_t *payload = nullptr;
++    std::string reason;
++    if (!decodeQueueEnvelope(record, size, configuredMaximum, header, payload,
++                             reason))
++        return queueDrop(reason);
++    if (header.messageType != MessageType::QueueRequest)
++        return queueDrop("expected QUEUE_REQUEST");
++    if (size - HeaderBytes != QueuePayloadBytes)
++        return queueDrop("queue payload length");
++
++    QueueRequest request;
++    request.major = load16(payload);
++    request.minor = load16(payload + 2);
++    const uint16_t rawOpcode = load16(payload + 4);
++    request.opcode = static_cast<QueueOpcode>(rawOpcode);
++    request.flags = load16(payload + 6);
++    request.queueId = load64(payload + 8);
++    request.generation = load64(payload + 16);
++    request.sequence = load64(payload + 24);
++    request.arg0 = load64(payload + 32);
++    request.arg1 = load64(payload + 40);
++    const uint64_t reserved0 = load64(payload + 48);
++    const uint64_t reserved1 = load64(payload + 56);
++
++    if (!validQueueOpcode(rawOpcode) || request.flags != 0 ||
++        reserved0 != 0 || reserved1 != 0)
++        return queueAcknowledge(Status::Malformed,
++                                "invalid queue control fields", header,
++                                request);
++
++    switch (request.opcode) {
++      case QueueOpcode::Create:
++        if (request.queueId != 0 || request.generation != 0 ||
++            request.sequence != 0 || request.arg1 != 0 ||
++            request.arg0 == 0 || request.arg0 > 64) {
++            return queueAcknowledge(Status::Malformed,
++                                    "invalid queue create fields", header,
++                                    request);
++        }
++        break;
++      case QueueOpcode::Destroy:
++        if (request.queueId == 0 || request.generation == 0 ||
++            request.sequence != 0 || request.arg0 != 0 ||
++            request.arg1 != 0) {
++            return queueAcknowledge(Status::Malformed,
++                                    "invalid queue destroy fields", header,
++                                    request);
++        }
++        break;
++      case QueueOpcode::Doorbell:
++        if (request.queueId == 0 || request.generation == 0 ||
++            request.sequence == 0 ||
++            request.arg0 >
++                static_cast<uint64_t>(QueueCommandKind::ControlErrorTest) ||
++            request.arg1 != 0) {
++            return queueAcknowledge(Status::Malformed,
++                                    "invalid queue doorbell fields", header,
++                                    request);
++        }
++        break;
++    }
++    if (request.major != QueueControlMajor ||
++        request.minor != QueueControlMinor)
++        return queueAcknowledge(Status::UnsupportedVersion,
++                                "unsupported queue control version", header,
++                                request);
++    return queueAcknowledge(Status::Ok, "valid queue request", header,
++                            request);
++}
++
+ std::vector<uint8_t>
+ encodeAck(const Header &request, const Ack &ack,
+           const ServerIdentity &server, uint64_t connectionId)
+@@ -577,6 +741,75 @@ encodeAck(const Header &request, const Ack &ack,
+     return encodeFrame(header, payload);
+ }
+ 
++std::vector<uint8_t>
++encodeQueueRequest(const Header &header, const QueueRequest &request)
++{
++    std::vector<uint8_t> payload(QueuePayloadBytes, 0);
++    store16(payload, 0, request.major);
++    store16(payload, 2, request.minor);
++    store16(payload, 4, static_cast<uint16_t>(request.opcode));
++    store16(payload, 6, request.flags);
++    store64(payload, 8, request.queueId);
++    store64(payload, 16, request.generation);
++    store64(payload, 24, request.sequence);
++    store64(payload, 32, request.arg0);
++    store64(payload, 40, request.arg1);
++    Header encoded = header;
++    encoded.messageType = MessageType::QueueRequest;
++    return encodeFrame(encoded, payload);
++}
++
++Header
++queueResponseHeader(const Header &request, const ServerIdentity &server,
++                    uint64_t connectionId)
++{
++    Header header;
++    header.requestId = request.requestId;
++    header.daemonUuid = server.daemonUuid;
++    header.connectionId = connectionId;
++    header.jobEpoch = server.jobEpoch;
++    return header;
++}
++
++namespace
++{
++
++std::vector<uint8_t>
++encodeQueueResponse(MessageType type, const Header &request,
++                    const QueueResponse &response)
++{
++    std::vector<uint8_t> payload(QueuePayloadBytes, 0);
++    store16(payload, 0, response.major);
++    store16(payload, 2, response.minor);
++    store32(payload, 4, static_cast<uint32_t>(response.status));
++    store16(payload, 8, static_cast<uint16_t>(response.opcode));
++    store16(payload, 10, 0);
++    store64(payload, 16, response.queueId);
++    store64(payload, 24, response.generation);
++    store64(payload, 32, response.sequence);
++    store64(payload, 40, response.value);
++    store64(payload, 48, response.errorCode);
++    store64(payload, 56, response.simTick);
++    Header encoded = request;
++    encoded.messageType = type;
++    return encodeFrame(encoded, payload);
++}
++
++} // anonymous namespace
++
++std::vector<uint8_t>
++encodeQueueAck(const Header &request, const QueueResponse &response)
++{
++    return encodeQueueResponse(MessageType::QueueAck, request, response);
++}
++
++std::vector<uint8_t>
++encodeQueueCompletion(const Header &request, const QueueResponse &response)
++{
++    return encodeQueueResponse(MessageType::QueueCompletion, request,
++                               response);
++}
++
+ const char *
+ statusName(Status status)
+ {
+diff --git a/src/dev/amdgpu/host_gpu_protocol.hh b/src/dev/amdgpu/host_gpu_protocol.hh
+index 12e8ea999..d49a50f79 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.hh
++++ b/src/dev/amdgpu/host_gpu_protocol.hh
+@@ -44,6 +44,7 @@ namespace protocol
+ constexpr size_t HeaderBytes = 80;
+ constexpr size_t HelloFixedBytes = 96;
+ constexpr size_t AckFixedBytes = 80;
++constexpr size_t QueuePayloadBytes = 64;
+ constexpr size_t CapabilityBytes = 32;
+ constexpr size_t UuidBytes = 16;
+ constexpr uint32_t MinimumRecordBytes = 4096;
+@@ -53,6 +54,10 @@ constexpr uint16_t TopologyTlvType = 1;
+ constexpr uint16_t CriticalTlvFlag = 1;
+ constexpr uint16_t RuntimeRole = 1;
+ constexpr uint16_t DaemonRole = 2;
++constexpr uint16_t QueueControlMajor = 1;
++constexpr uint16_t QueueControlMinor = 0;
++constexpr uint8_t QueueControlCapabilityByte = 0;
++constexpr uint8_t QueueControlCapabilityMask = 0x02;
+ 
+ using Uuid = std::array<uint8_t, UuidBytes>;
+ using Capabilities = std::array<uint8_t, CapabilityBytes>;
+@@ -62,6 +67,23 @@ enum class MessageType : uint16_t
+ {
+     Hello = 1,
+     HelloAck = 2,
++    QueueRequest = 3,
++    QueueAck = 4,
++    QueueCompletion = 5,
++};
++
++enum class QueueOpcode : uint16_t
++{
++    Create = 1,
++    Destroy = 2,
++    Doorbell = 3,
++};
++
++enum class QueueCommandKind : uint64_t
++{
++    Noop = 0,
++    ControlTest = 1,
++    ControlErrorTest = 2,
+ };
+ 
+ enum class Status : uint32_t
+@@ -173,11 +195,51 @@ struct Ack
+     Topology topology;
+ };
+ 
++/** Versioned control-plane request; no host pointer or packet bytes appear. */
++struct QueueRequest
++{
++    uint16_t major = QueueControlMajor;
++    uint16_t minor = QueueControlMinor;
++    QueueOpcode opcode = QueueOpcode::Create;
++    uint16_t flags = 0;
++    uint64_t queueId = 0;
++    uint64_t generation = 0;
++    uint64_t sequence = 0;
++    uint64_t arg0 = 0;
++    uint64_t arg1 = 0;
++};
++
++/** Common fixed-width payload for QUEUE_ACK and QUEUE_COMPLETION. */
++struct QueueResponse
++{
++    uint16_t major = QueueControlMajor;
++    uint16_t minor = QueueControlMinor;
++    Status status = Status::Internal;
++    QueueOpcode opcode = QueueOpcode::Create;
++    uint64_t queueId = 0;
++    uint64_t generation = 0;
++    uint64_t sequence = 0;
++    uint64_t value = 0;
++    uint64_t errorCode = 0;
++    uint64_t simTick = 0;
++};
++
++struct QueueDecodeResult
++{
++    DecodeAction action = DecodeAction::Drop;
++    bool closeConnection = true;
++    Status status = Status::Malformed;
++    std::string reason;
++    Header header;
++    QueueRequest request;
++};
++
+ bool isZero(const Uuid &value);
+ bool parseUuid(const std::string &text, Uuid &value);
+ std::string formatUuid(const Uuid &value);
+ 
+ Capabilities topologyCapability();
++Capabilities queueControlCapability();
+ bool capabilitySubset(const Capabilities &subset,
+                       const Capabilities &superset);
+ 
+@@ -185,6 +247,8 @@ uint32_t crc32c(const uint8_t *data, size_t size);
+ 
+ DecodeResult decodeHelloRecord(const uint8_t *record, size_t size,
+                                uint32_t configuredMaximum);
++QueueDecodeResult decodeQueueRequestRecord(const uint8_t *record, size_t size,
++                                           uint32_t configuredMaximum);
+ NegotiationResult negotiate(const Header &header, const Hello &hello,
+                             const ServerIdentity &server,
+                             const NegotiationContext &context = {});
+@@ -193,6 +257,15 @@ std::vector<uint8_t> encodeHello(const Header &header, const Hello &hello);
+ std::vector<uint8_t> encodeAck(const Header &request, const Ack &ack,
+                                const ServerIdentity &server,
+                                uint64_t connectionId);
++std::vector<uint8_t> encodeQueueRequest(const Header &header,
++                                        const QueueRequest &request);
++Header queueResponseHeader(const Header &request,
++                           const ServerIdentity &server,
++                           uint64_t connectionId);
++std::vector<uint8_t> encodeQueueAck(const Header &request,
++                                    const QueueResponse &response);
++std::vector<uint8_t> encodeQueueCompletion(const Header &request,
++                                            const QueueResponse &response);
+ 
+ const char *statusName(Status status);
+ 
+diff --git a/src/dev/amdgpu/host_gpu_protocol.test.cc b/src/dev/amdgpu/host_gpu_protocol.test.cc
+index b65334761..bdd92dd67 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.test.cc
++++ b/src/dev/amdgpu/host_gpu_protocol.test.cc
+@@ -66,6 +66,38 @@ constexpr char GoldenAckHex[] =
+     "000000000000000000010000000200000001000100000018"
+     "102132435465768798a9bacbdcedfe0f0000000300000008";
+ 
++constexpr char GoldenQueueRequestHex[] =
++    "4753494d5250430000010000005000030000000000000040"
++    "0123456789abcdf000112233445566778899aabbccddeeff"
++    "11223344556677880102030405060708dfd3614c00000000"
++    "000000000000000000010000000300001020304050607080"
++    "887766554433221101000000000000020000000000000001"
++    "000000000000000000000000000000000000000000000000";
++
++constexpr char GoldenQueueAckHex[] =
++    "4753494d5250430000010000005000040000000000000040"
++    "0123456789abcdf000112233445566778899aabbccddeeff"
++    "1122334455667788010203040506070821b4ea0e00000000"
++    "000000000000000000010000000000000003000000000000"
++    "102030405060708088776655443322110100000000000002"
++    "00000000000000000000000000000000123456789abcdef0";
++
++constexpr char GoldenQueueCompletionHex[] =
++    "4753494d5250430000010000005000050000000000000040"
++    "0123456789abcdf000112233445566778899aabbccddeeff"
++    "11223344556677880102030405060708cf22e2cd00000000"
++    "000000000000000000010000000000000003000000000000"
++    "102030405060708088776655443322110100000000000002"
++    "00000000000000010000000000000000123456789abcdef1";
++
++constexpr char GoldenQueueErrorCompletionHex[] =
++    "4753494d5250430000010000005000050000000000000040"
++    "0123456789abcdf000112233445566778899aabbccddeeff"
++    "11223344556677880102030405060708ee1cda8100000000"
++    "0000000000000000000100000000000a0003000000000000"
++    "102030405060708088776655443322110100000000000002"
++    "00000000000000020000000000000001123456789abcdef1";
++
+ std::vector<uint8_t>
+ fromHex(const std::string &text)
+ {
+@@ -113,6 +145,15 @@ store64(std::vector<uint8_t> &data, size_t offset, uint64_t value)
+     }
+ }
+ 
++uint64_t
++load64(const uint8_t *data)
++{
++    uint64_t value = 0;
++    for (size_t index = 0; index < sizeof(value); ++index)
++        value = (value << 8) | data[index];
++    return value;
++}
++
+ void
+ recomputeCrc(std::vector<uint8_t> &frame)
+ {
+@@ -156,6 +197,41 @@ goldenHeader()
+     return header;
+ }
+ 
++Header
++goldenQueueHeader()
++{
++    Header header = goldenHeader();
++    ++header.requestId;
++    header.connectionId = 0x1122334455667788ULL;
++    return header;
++}
++
++QueueRequest
++goldenQueueRequest()
++{
++    QueueRequest request;
++    request.opcode = QueueOpcode::Doorbell;
++    request.queueId = 0x1020304050607080ULL;
++    request.generation = 0x8877665544332211ULL;
++    request.sequence = 0x0100000000000002ULL;
++    request.arg0 = 1;
++    return request;
++}
++
++QueueResponse
++goldenQueueResponse(uint64_t simTick, uint64_t value)
++{
++    QueueResponse response;
++    response.status = Status::Ok;
++    response.opcode = QueueOpcode::Doorbell;
++    response.queueId = 0x1020304050607080ULL;
++    response.generation = 0x8877665544332211ULL;
++    response.sequence = 0x0100000000000002ULL;
++    response.value = value;
++    response.simTick = simTick;
++    return response;
++}
++
+ ServerIdentity
+ goldenServer()
+ {
+@@ -223,6 +299,259 @@ TEST(HostGpuProtocol, GoldenAckIsByteExact)
+     EXPECT_EQ(actual[67], 0x12);
+ }
+ 
++TEST(HostGpuProtocol, QueueControlCapabilityIsBitOneOnly)
++{
++    const auto capability = queueControlCapability();
++    EXPECT_EQ(capability[QueueControlCapabilityByte],
++              QueueControlCapabilityMask);
++    EXPECT_EQ(std::count(capability.begin(), capability.end(), uint8_t(0)),
++              CapabilityBytes - 1);
++}
++
++TEST(HostGpuProtocol, QueueControlMustBeOfferedAndRequired)
++{
++    auto server = goldenServer();
++    server.supported[QueueControlCapabilityByte] |=
++        QueueControlCapabilityMask;
++    auto hello = goldenHello();
++    hello.offered[QueueControlCapabilityByte] |=
++        QueueControlCapabilityMask;
++
++    auto negotiated = negotiate(goldenHeader(), hello, server);
++    ASSERT_EQ(negotiated.status, Status::Ok);
++    EXPECT_EQ(negotiated.selected[QueueControlCapabilityByte] &
++                  QueueControlCapabilityMask,
++              0);
++
++    hello.required[QueueControlCapabilityByte] |=
++        QueueControlCapabilityMask;
++    negotiated = negotiate(goldenHeader(), hello, server);
++    ASSERT_EQ(negotiated.status, Status::Ok);
++    EXPECT_EQ(negotiated.selected[QueueControlCapabilityByte] &
++                  QueueControlCapabilityMask,
++              QueueControlCapabilityMask);
++}
++
++TEST(HostGpuProtocol, GoldenQueueRequestIsByteExact)
++{
++    const auto actual = encodeQueueRequest(
++        goldenQueueHeader(), goldenQueueRequest());
++    EXPECT_EQ(actual, fromHex(GoldenQueueRequestHex));
++    ASSERT_EQ(actual.size(), HeaderBytes + QueuePayloadBytes);
++
++    const auto decoded = decodeQueueRequestRecord(
++        actual.data(), actual.size(), MaximumRecordBytes);
++    EXPECT_EQ(decoded.action, DecodeAction::Acknowledge);
++    EXPECT_EQ(decoded.status, Status::Ok);
++    EXPECT_FALSE(decoded.closeConnection);
++    EXPECT_EQ(decoded.header.messageType, MessageType::QueueRequest);
++    EXPECT_GT(decoded.header.requestId, goldenHeader().requestId);
++    EXPECT_EQ(decoded.header.requestId, 0x0123456789abcdf0ULL);
++    EXPECT_EQ(decoded.header.connectionId, 0x1122334455667788ULL);
++    EXPECT_EQ(decoded.request.opcode, QueueOpcode::Doorbell);
++    EXPECT_EQ(decoded.request.queueId, 0x1020304050607080ULL);
++    EXPECT_EQ(decoded.request.generation, 0x8877665544332211ULL);
++    EXPECT_EQ(decoded.request.sequence, 0x0100000000000002ULL);
++    EXPECT_EQ(decoded.request.arg0, 1U);
++    EXPECT_EQ(decoded.request.arg1, 0U);
++}
++
++TEST(HostGpuProtocol, GoldenQueueResponsesAreByteExact)
++{
++    const auto header = goldenQueueHeader();
++    const auto ack = encodeQueueAck(
++        header, goldenQueueResponse(0x123456789abcdef0ULL, 0));
++    const auto completion = encodeQueueCompletion(
++        header, goldenQueueResponse(0x123456789abcdef1ULL, 1));
++    EXPECT_EQ(ack, fromHex(GoldenQueueAckHex));
++    EXPECT_EQ(completion, fromHex(GoldenQueueCompletionHex));
++    EXPECT_EQ(ack.size(), HeaderBytes + QueuePayloadBytes);
++    EXPECT_EQ(completion.size(), HeaderBytes + QueuePayloadBytes);
++    EXPECT_EQ(0x123456789abcdef1ULL,
++              0x123456789abcdef0ULL + 1);
++}
++
++TEST(HostGpuProtocol, GoldenQueueErrorCompletionIsByteExact)
++{
++    auto response = goldenQueueResponse(0x123456789abcdef1ULL, 2);
++    response.status = Status::Internal;
++    response.errorCode = 1;
++    const auto completion = encodeQueueCompletion(
++        goldenQueueHeader(), response);
++    EXPECT_EQ(completion, fromHex(GoldenQueueErrorCompletionHex));
++    ASSERT_EQ(completion.size(), HeaderBytes + QueuePayloadBytes);
++    EXPECT_EQ(completion[HeaderBytes + 7], 10);
++    EXPECT_EQ(load64(completion.data() + HeaderBytes + 40), 2U);
++    EXPECT_EQ(load64(completion.data() + HeaderBytes + 48), 1U);
++}
++
++TEST(HostGpuProtocol, QueueResponseHeaderUsesSessionIdentity)
++{
++    const auto server = goldenServer();
++    const auto actualConnection = 0x1122334455667788ULL;
++    std::array<Header, 3> requests = {
++        goldenQueueHeader(), goldenQueueHeader(), goldenQueueHeader()};
++    requests[0].daemonUuid = uuid("11112233445566778899aabbccddeeff");
++    requests[1].connectionId = 0x8877665544332211ULL;
++    requests[2].jobEpoch = 0x8877665544332211ULL;
++
++    for (const auto &request : requests) {
++        const auto canonical = queueResponseHeader(
++            request, server, actualConnection);
++        EXPECT_EQ(canonical.requestId, request.requestId);
++        EXPECT_EQ(canonical.daemonUuid, server.daemonUuid);
++        EXPECT_EQ(canonical.connectionId, actualConnection);
++        EXPECT_EQ(canonical.jobEpoch, server.jobEpoch);
++
++        auto response = goldenQueueResponse(7, 0);
++        response.status = Status::ProtocolState;
++        const auto frame = encodeQueueAck(canonical, response);
++        ASSERT_EQ(frame.size(), HeaderBytes + QueuePayloadBytes);
++        EXPECT_EQ(load64(frame.data() + 24), request.requestId);
++        EXPECT_TRUE(std::equal(server.daemonUuid.begin(),
++                               server.daemonUuid.end(), frame.begin() + 32));
++        EXPECT_EQ(load64(frame.data() + 48), actualConnection);
++        EXPECT_EQ(load64(frame.data() + 56), server.jobEpoch);
++    }
++}
++
++TEST(HostGpuProtocol, QueueRequestValidationIsStrict)
++{
++    auto expect = [](std::vector<uint8_t> frame, Status status) {
++        recomputeCrc(frame);
++        const auto decoded = decodeQueueRequestRecord(
++            frame.data(), frame.size(), MaximumRecordBytes);
++        EXPECT_EQ(decoded.action, DecodeAction::Acknowledge);
++        EXPECT_EQ(decoded.status, status);
++        EXPECT_FALSE(decoded.closeConnection);
++    };
++
++    auto frame = fromHex(GoldenQueueRequestHex);
++    store16(frame, HeaderBytes, 2);
++    expect(frame, Status::UnsupportedVersion);
++
++    frame = fromHex(GoldenQueueRequestHex);
++    store16(frame, HeaderBytes + 2, 1);
++    expect(frame, Status::UnsupportedVersion);
++
++    frame = fromHex(GoldenQueueRequestHex);
++    store16(frame, HeaderBytes, 2);
++    store16(frame, HeaderBytes + 6, 1);
++    expect(frame, Status::Malformed);
++
++    QueueRequest malformedCreate;
++    malformedCreate.major = 2;
++    malformedCreate.opcode = QueueOpcode::Create;
++    malformedCreate.arg0 = 0;
++    frame = encodeQueueRequest(goldenQueueHeader(), malformedCreate);
++    expect(frame, Status::Malformed);
++
++    frame = fromHex(GoldenQueueRequestHex);
++    store16(frame, HeaderBytes + 4, 99);
++    expect(frame, Status::Malformed);
++
++    frame = fromHex(GoldenQueueRequestHex);
++    store16(frame, HeaderBytes + 6, 1);
++    expect(frame, Status::Malformed);
++
++    frame = fromHex(GoldenQueueRequestHex);
++    store64(frame, HeaderBytes + 48, 1);
++    expect(frame, Status::Malformed);
++
++    frame = fromHex(GoldenQueueRequestHex);
++    store64(frame, HeaderBytes + 56, 1);
++    expect(frame, Status::Malformed);
++
++    QueueRequest request;
++    request.opcode = QueueOpcode::Create;
++    request.arg0 = 1;
++    for (const size_t offset : {size_t(8), size_t(16), size_t(24),
++                                size_t(40)}) {
++        frame = encodeQueueRequest(goldenQueueHeader(), request);
++        store64(frame, HeaderBytes + offset, 1);
++        expect(frame, Status::Malformed);
++    }
++    request.arg0 = 0;
++    frame = encodeQueueRequest(goldenQueueHeader(), request);
++    expect(frame, Status::Malformed);
++
++    request.arg0 = 65;
++    frame = encodeQueueRequest(goldenQueueHeader(), request);
++    expect(frame, Status::Malformed);
++
++    request = {};
++    request.opcode = QueueOpcode::Destroy;
++    request.queueId = 1;
++    request.generation = 1;
++    for (const size_t offset : {size_t(24), size_t(32), size_t(40)}) {
++        frame = encodeQueueRequest(goldenQueueHeader(), request);
++        store64(frame, HeaderBytes + offset, 1);
++        expect(frame, Status::Malformed);
++    }
++
++    request = goldenQueueRequest();
++    request.sequence = 0;
++    frame = encodeQueueRequest(goldenQueueHeader(), request);
++    expect(frame, Status::Malformed);
++
++    request = goldenQueueRequest();
++    request.arg0 = 3;
++    frame = encodeQueueRequest(goldenQueueHeader(), request);
++    expect(frame, Status::Malformed);
++
++    request = goldenQueueRequest();
++    request.arg1 = 1;
++    frame = encodeQueueRequest(goldenQueueHeader(), request);
++    expect(frame, Status::Malformed);
++}
++
++TEST(HostGpuProtocol, QueueEnvelopeFailuresDropSilently)
++{
++    const auto golden = fromHex(GoldenQueueRequestHex);
++    std::vector<std::vector<uint8_t>> cases;
++    cases.emplace_back(golden.begin(), golden.begin() + HeaderBytes - 1);
++    cases.push_back(golden);
++    cases.back()[0] ^= 1;
++    cases.push_back(golden);
++    store32(cases.back(), 16, 1);
++    recomputeCrc(cases.back());
++    cases.push_back(golden);
++    store64(cases.back(), 24, 0);
++    recomputeCrc(cases.back());
++    cases.push_back(golden);
++    store64(cases.back(), 48, 0);
++    recomputeCrc(cases.back());
++    cases.push_back(golden);
++    std::fill(cases.back().begin() + 32, cases.back().begin() + 48, 0);
++    recomputeCrc(cases.back());
++    cases.push_back(golden);
++    store64(cases.back(), 56, 0);
++    recomputeCrc(cases.back());
++    cases.push_back(golden);
++    store32(cases.back(), 68, 1);
++    recomputeCrc(cases.back());
++    cases.push_back(golden);
++    store64(cases.back(), 72, 1);
++    recomputeCrc(cases.back());
++    cases.push_back(golden);
++    cases.back().back() ^= 1;
++    cases.push_back(golden);
++    store16(cases.back(), 14,
++            static_cast<uint16_t>(MessageType::QueueAck));
++    recomputeCrc(cases.back());
++    cases.push_back(golden);
++    cases.back().pop_back();
++    store32(cases.back(), 20, QueuePayloadBytes - 1);
++    recomputeCrc(cases.back());
++
++    for (const auto &frame : cases) {
++        const auto decoded = decodeQueueRequestRecord(
++            frame.data(), frame.size(), MaximumRecordBytes);
++        EXPECT_EQ(decoded.action, DecodeAction::Drop);
++        EXPECT_TRUE(decoded.closeConnection);
++    }
++}
++
+ TEST(HostGpuProtocol, InvalidEnvelopeDropsWithoutAck)
+ {
+     const auto golden = fromHex(GoldenHelloHex);
+diff --git a/src/dev/amdgpu/host_gpu_queue_state.cc b/src/dev/amdgpu/host_gpu_queue_state.cc
+new file mode 100644
+index 000000000..67e4e3071
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_queue_state.cc
+@@ -0,0 +1,242 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_queue_state.hh"
++
++#include <algorithm>
++#include <limits>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++protocol::QueueResponse
++HostGPUQueueState::echo(const protocol::QueueRequest &request, uint64_t now)
++{
++    protocol::QueueResponse response;
++    response.opcode = request.opcode;
++    response.queueId = request.queueId;
++    response.generation = request.generation;
++    response.sequence = request.sequence;
++    response.simTick = now;
++    return response;
++}
++
++uint64_t
++HostGPUQueueState::allocateQueueId()
++{
++    for (size_t attempt = 0; attempt <= queues.size(); ++attempt) {
++        const uint64_t candidate = nextQueueId++;
++        if (nextQueueId == 0)
++            ++nextQueueId;
++        if (candidate != 0 && queues.find(candidate) == queues.end())
++            return candidate;
++    }
++    return 0;
++}
++
++uint64_t
++HostGPUQueueState::allocateQueueGeneration()
++{
++    const uint64_t generation = nextQueueGeneration++;
++    if (nextQueueGeneration == 0)
++        ++nextQueueGeneration;
++    return generation;
++}
++
++HostGPUQueueState::Decision
++HostGPUQueueState::submit(const Owner &owner, const protocol::Header &header,
++                          const protocol::QueueRequest &request, uint64_t now)
++{
++    Decision decision;
++    decision.response = echo(request, now);
++
++    switch (request.opcode) {
++      case protocol::QueueOpcode::Create: {
++        if (queues.size() >= MaximumQueues) {
++            decision.response.status = protocol::Status::ResourceExhausted;
++            return decision;
++        }
++        const uint64_t queueId = allocateQueueId();
++        const uint64_t generation = allocateQueueGeneration();
++        if (queueId == 0 || generation == 0) {
++            decision.response.status = protocol::Status::Internal;
++            return decision;
++        }
++        queues.emplace(queueId, Queue{
++            owner, generation, request.arg0, 0, {}});
++        decision.response.status = protocol::Status::Ok;
++        decision.response.queueId = queueId;
++        decision.response.generation = generation;
++        decision.response.value = request.arg0;
++        return decision;
++      }
++      case protocol::QueueOpcode::Destroy: {
++        const auto found = queues.find(request.queueId);
++        if (found == queues.end() || !(found->second.owner == owner) ||
++            found->second.generation != request.generation) {
++            decision.response.status = protocol::Status::ProtocolState;
++            return decision;
++        }
++        if (!found->second.requestIdBySequence.empty()) {
++            decision.response.status = protocol::Status::Busy;
++            return decision;
++        }
++        queues.erase(found);
++        decision.response.status = protocol::Status::Ok;
++        return decision;
++      }
++      case protocol::QueueOpcode::Doorbell: {
++        const auto found = queues.find(request.queueId);
++        if (found == queues.end() || !(found->second.owner == owner) ||
++            found->second.generation != request.generation ||
++            !isNextSequence(found->second.lastSequence, request.sequence)) {
++            decision.response.status = protocol::Status::ProtocolState;
++            return decision;
++        }
++        if (request.arg0 > static_cast<uint64_t>(
++                protocol::QueueCommandKind::ControlErrorTest)) {
++            decision.response.status = protocol::Status::Malformed;
++            return decision;
++        }
++        if (commands.size() >= MaximumInflight ||
++            found->second.requestIdBySequence.size() >= found->second.depth) {
++            decision.response.status = protocol::Status::ResourceExhausted;
++            return decision;
++        }
++        if (now == std::numeric_limits<uint64_t>::max()) {
++            decision.response.status = protocol::Status::Internal;
++            return decision;
++        }
++        const auto inserted = found->second.requestIdBySequence.emplace(
++            request.sequence, header.requestId);
++        if (!inserted.second) {
++            decision.response.status = protocol::Status::Internal;
++            return decision;
++        }
++        found->second.lastSequence = request.sequence;
++        commands.push_back(Command{
++            owner, header, request.queueId, request.generation,
++            request.sequence, request.arg0, now + CompletionDelay});
++        decision.response.status = protocol::Status::Ok;
++        decision.commandAccepted = true;
++        return decision;
++      }
++    }
++
++    decision.response.status = protocol::Status::Malformed;
++    return decision;
++}
++
++bool
++HostGPUQueueState::isNextSequence(uint64_t previous, uint64_t candidate)
++{
++    return previous != std::numeric_limits<uint64_t>::max() &&
++           candidate == previous + 1;
++}
++
++protocol::QueueResponse
++HostGPUQueueState::completionResponse(const Command &command, uint64_t now)
++{
++    protocol::QueueResponse response;
++    const bool injectedError = command.kind == static_cast<uint64_t>(
++        protocol::QueueCommandKind::ControlErrorTest);
++    response.status = injectedError ? protocol::Status::Internal :
++        protocol::Status::Ok;
++    response.opcode = protocol::QueueOpcode::Doorbell;
++    response.queueId = command.queueId;
++    response.generation = command.queueGeneration;
++    response.sequence = command.sequence;
++    response.value = command.kind;
++    response.errorCode = injectedError ? 1 : 0;
++    response.simTick = now;
++    return response;
++}
++
++bool
++HostGPUQueueState::callbackPending(const Command &command) const
++{
++    const auto queue = queues.find(command.queueId);
++    if (queue == queues.end() || !(queue->second.owner == command.owner) ||
++        queue->second.generation != command.queueGeneration) {
++        return false;
++    }
++    const auto request = queue->second.requestIdBySequence.find(
++        command.sequence);
++    return request != queue->second.requestIdBySequence.end() &&
++        command.header.requestId != 0 &&
++        request->second == command.header.requestId;
++}
++
++std::optional<HostGPUQueueState::Command>
++HostGPUQueueState::popReady(uint64_t now)
++{
++    while (!commands.empty() && commands.front().readyTick <= now) {
++        Command command = std::move(commands.front());
++        commands.pop_front();
++        if (!callbackPending(command))
++            continue;
++        auto &queue = queues.at(command.queueId);
++        queue.requestIdBySequence.erase(command.sequence);
++        return command;
++    }
++    return std::nullopt;
++}
++
++std::optional<uint64_t>
++HostGPUQueueState::nextReadyTick() const
++{
++    if (commands.empty())
++        return std::nullopt;
++    return commands.front().readyTick;
++}
++
++void
++HostGPUQueueState::disconnect(const Owner &owner)
++{
++    commands.erase(std::remove_if(
++        commands.begin(), commands.end(),
++        [&owner](const Command &command) { return command.owner == owner; }),
++        commands.end());
++    for (auto iterator = queues.begin(); iterator != queues.end();) {
++        if (iterator->second.owner == owner)
++            iterator = queues.erase(iterator);
++        else
++            ++iterator;
++    }
++}
++
++void
++HostGPUQueueState::clear()
++{
++    commands.clear();
++    queues.clear();
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_queue_state.hh b/src/dev/amdgpu/host_gpu_queue_state.hh
+new file mode 100644
+index 000000000..750b01426
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_queue_state.hh
+@@ -0,0 +1,124 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_QUEUE_STATE_HH__
++#define __DEV_AMDGPU_HOST_GPU_QUEUE_STATE_HH__
++
++#include <cstddef>
++#include <cstdint>
++#include <deque>
++#include <optional>
++#include <unordered_map>
++
++#include "dev/amdgpu/host_gpu_protocol.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++/**
++ * Bounded, control-only queue bookkeeping for HostGPUBridge.
++ *
++ * This object never accepts pointers, packets, or GPU work. A doorbell only
++ * creates a deterministic control completion due one simulation tick later.
++ */
++class HostGPUQueueState
++{
++  public:
++    static constexpr size_t MaximumQueues = 8;
++    static constexpr size_t MaximumInflight = 8;
++    static constexpr uint64_t CompletionDelay = 1;
++
++    struct Owner
++    {
++        int fd = -1;
++        uint64_t clientGeneration = 0;
++
++        bool operator==(const Owner &other) const
++        {
++            return fd == other.fd &&
++                   clientGeneration == other.clientGeneration;
++        }
++    };
++
++    struct Command
++    {
++        Owner owner;
++        protocol::Header header;
++        uint64_t queueId = 0;
++        uint64_t queueGeneration = 0;
++        uint64_t sequence = 0;
++        uint64_t kind = 0;
++        uint64_t readyTick = 0;
++    };
++
++    struct Decision
++    {
++        protocol::QueueResponse response;
++        bool commandAccepted = false;
++    };
++
++    Decision submit(const Owner &owner, const protocol::Header &header,
++                    const protocol::QueueRequest &request, uint64_t now);
++    static bool isNextSequence(uint64_t previous, uint64_t candidate);
++    static protocol::QueueResponse completionResponse(
++        const Command &command, uint64_t now);
++    bool callbackPending(const Command &command) const;
++    std::optional<Command> popReady(uint64_t now);
++    std::optional<uint64_t> nextReadyTick() const;
++    void disconnect(const Owner &owner);
++    void clear();
++
++    size_t queueCount() const { return queues.size(); }
++    size_t inflightCount() const { return commands.size(); }
++
++  private:
++    struct Queue
++    {
++        Owner owner;
++        uint64_t generation = 0;
++        uint64_t depth = 0;
++        uint64_t lastSequence = 0;
++        std::unordered_map<uint64_t, uint64_t> requestIdBySequence;
++    };
++
++    uint64_t allocateQueueId();
++    uint64_t allocateQueueGeneration();
++    static protocol::QueueResponse echo(
++        const protocol::QueueRequest &request, uint64_t now);
++
++    std::unordered_map<uint64_t, Queue> queues;
++    std::deque<Command> commands;
++    uint64_t nextQueueId = 1;
++    uint64_t nextQueueGeneration = 1;
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_QUEUE_STATE_HH__
+diff --git a/src/dev/amdgpu/host_gpu_queue_state.test.cc b/src/dev/amdgpu/host_gpu_queue_state.test.cc
+new file mode 100644
+index 000000000..ae459a0cf
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_queue_state.test.cc
+@@ -0,0 +1,384 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <gtest/gtest.h>
++#include <poll.h>
++#include <sys/socket.h>
++#include <unistd.h>
++
++#include <array>
++#include <cerrno>
++#include <cstdint>
++#include <limits>
++
++#include "dev/amdgpu/host_gpu_connection_state.hh"
++#include "dev/amdgpu/host_gpu_queue_state.hh"
++
++namespace gem5::hostgpu
++{
++namespace
++{
++
++HostGPUQueueState::Owner
++owner(int fd = 7, uint64_t generation = 11)
++{
++    return {fd, generation};
++}
++
++protocol::Header
++header(uint64_t requestId = 1)
++{
++    protocol::Header value;
++    value.requestId = requestId;
++    value.connectionId = 17;
++    value.jobEpoch = 19;
++    value.daemonUuid[0] = 1;
++    return value;
++}
++
++protocol::QueueRequest
++create(uint64_t depth)
++{
++    protocol::QueueRequest request;
++    request.opcode = protocol::QueueOpcode::Create;
++    request.arg0 = depth;
++    return request;
++}
++
++protocol::QueueRequest
++doorbell(const protocol::QueueResponse &created, uint64_t sequence,
++         uint64_t kind = 0)
++{
++    protocol::QueueRequest request;
++    request.opcode = protocol::QueueOpcode::Doorbell;
++    request.queueId = created.queueId;
++    request.generation = created.generation;
++    request.sequence = sequence;
++    request.arg0 = kind;
++    return request;
++}
++
++protocol::QueueRequest
++destroy(const protocol::QueueResponse &created)
++{
++    protocol::QueueRequest request;
++    request.opcode = protocol::QueueOpcode::Destroy;
++    request.queueId = created.queueId;
++    request.generation = created.generation;
++    return request;
++}
++
++TEST(HostGPUQueueState, CreatesAndDestroysOwnedQueue)
++{
++    HostGPUQueueState state;
++    const auto created = state.submit(owner(), header(), create(4), 20);
++    EXPECT_EQ(created.response.status, protocol::Status::Ok);
++    EXPECT_NE(created.response.queueId, 0U);
++    EXPECT_NE(created.response.generation, 0U);
++    EXPECT_EQ(created.response.sequence, 0U);
++    EXPECT_EQ(created.response.value, 4U);
++    EXPECT_EQ(created.response.simTick, 20U);
++    EXPECT_EQ(state.queueCount(), 1U);
++
++    const auto removed = state.submit(
++        owner(), header(2), destroy(created.response), 21);
++    EXPECT_EQ(removed.response.status, protocol::Status::Ok);
++    EXPECT_EQ(removed.response.queueId, created.response.queueId);
++    EXPECT_EQ(removed.response.generation, created.response.generation);
++    EXPECT_EQ(removed.response.value, 0U);
++    EXPECT_EQ(state.queueCount(), 0U);
++}
++
++TEST(HostGPUQueueState, EnforcesEightQueueLimit)
++{
++    HostGPUQueueState state;
++    for (size_t index = 0; index < HostGPUQueueState::MaximumQueues; ++index) {
++        EXPECT_EQ(state.submit(owner(), header(index + 1), create(1), index)
++                      .response.status,
++                  protocol::Status::Ok);
++    }
++    const auto rejected = state.submit(owner(), header(9), create(1), 8);
++    EXPECT_EQ(rejected.response.status,
++              protocol::Status::ResourceExhausted);
++    EXPECT_EQ(rejected.response.queueId, 0U);
++    EXPECT_EQ(rejected.response.generation, 0U);
++    EXPECT_EQ(rejected.response.value, 0U);
++    EXPECT_EQ(state.queueCount(), HostGPUQueueState::MaximumQueues);
++}
++
++TEST(HostGPUQueueState, DoorbellCompletesExactlyOneTickLater)
++{
++    HostGPUQueueState state;
++    const auto created = state.submit(owner(), header(), create(2), 40);
++    const auto accepted = state.submit(
++        owner(), header(2), doorbell(created.response, 1, 1), 50);
++    EXPECT_EQ(accepted.response.status, protocol::Status::Ok);
++    EXPECT_TRUE(accepted.commandAccepted);
++    EXPECT_EQ(accepted.response.value, 0U);
++    ASSERT_TRUE(state.nextReadyTick());
++    EXPECT_EQ(*state.nextReadyTick(), 51U);
++    EXPECT_FALSE(state.popReady(50));
++
++    const auto command = state.popReady(51);
++    ASSERT_TRUE(command);
++    EXPECT_EQ(command->owner.fd, owner().fd);
++    EXPECT_EQ(command->owner.clientGeneration, owner().clientGeneration);
++    EXPECT_EQ(command->header.requestId, 2U);
++    EXPECT_EQ(command->queueId, created.response.queueId);
++    EXPECT_EQ(command->queueGeneration, created.response.generation);
++    EXPECT_EQ(command->sequence, 1U);
++    EXPECT_EQ(command->kind, 1U);
++    EXPECT_EQ(command->readyTick, 51U);
++    EXPECT_FALSE(state.nextReadyTick());
++}
++
++TEST(HostGPUQueueState, ControlErrorCompletesAsInternalOneTickLater)
++{
++    HostGPUQueueState state;
++    const auto created = state.submit(owner(), header(), create(1), 0);
++    const auto accepted = state.submit(
++        owner(), header(2), doorbell(created.response, 1, 2), 60);
++    ASSERT_EQ(accepted.response.status, protocol::Status::Ok);
++    EXPECT_EQ(accepted.response.value, 0U);
++    EXPECT_EQ(accepted.response.errorCode, 0U);
++    const auto command = state.popReady(61);
++    ASSERT_TRUE(command);
++    const auto completion =
++        HostGPUQueueState::completionResponse(*command, 61);
++    EXPECT_EQ(completion.status, protocol::Status::Internal);
++    EXPECT_EQ(completion.opcode, protocol::QueueOpcode::Doorbell);
++    EXPECT_EQ(completion.queueId, created.response.queueId);
++    EXPECT_EQ(completion.generation, created.response.generation);
++    EXPECT_EQ(completion.sequence, 1U);
++    EXPECT_EQ(completion.value, 2U);
++    EXPECT_EQ(completion.errorCode, 1U);
++    EXPECT_EQ(completion.simTick, 61U);
++}
++
++TEST(HostGPUQueueState, CallbackCorrelationRejectsTamperedRequestIdentity)
++{
++    HostGPUQueueState state;
++    const auto created = state.submit(owner(), header(), create(1), 0);
++    ASSERT_EQ(state.submit(owner(), header(2),
++                           doorbell(created.response, 1, 1), 70)
++                  .response.status,
++              protocol::Status::Ok);
++
++    HostGPUQueueState::Command callback{
++        owner(), header(2), created.response.queueId,
++        created.response.generation, 1, 1, 71};
++    EXPECT_TRUE(state.callbackPending(callback));
++
++    auto tampered = callback;
++    tampered.header.requestId = 3;
++    EXPECT_FALSE(state.callbackPending(tampered));
++    tampered = callback;
++    ++tampered.owner.clientGeneration;
++    EXPECT_FALSE(state.callbackPending(tampered));
++    tampered = callback;
++    ++tampered.queueGeneration;
++    EXPECT_FALSE(state.callbackPending(tampered));
++    tampered = callback;
++    ++tampered.sequence;
++    EXPECT_FALSE(state.callbackPending(tampered));
++
++    const auto completed = state.popReady(71);
++    ASSERT_TRUE(completed);
++    EXPECT_EQ(completed->header.requestId, 2U);
++    EXPECT_FALSE(state.callbackPending(callback));
++}
++
++TEST(HostGPUQueueState, EnforcesDepthAndDoesNotConsumeRejectedSequence)
++{
++    HostGPUQueueState state;
++    const auto created = state.submit(owner(), header(), create(1), 0);
++    EXPECT_EQ(state.submit(owner(), header(2),
++                           doorbell(created.response, 1), 10)
++                  .response.status,
++              protocol::Status::Ok);
++    EXPECT_EQ(state.submit(owner(), header(3),
++                           doorbell(created.response, 2), 10)
++                  .response.status,
++              protocol::Status::ResourceExhausted);
++    EXPECT_EQ(state.submit(owner(), header(4), destroy(created.response), 10)
++                  .response.status,
++              protocol::Status::Busy);
++    ASSERT_TRUE(state.popReady(11));
++    EXPECT_EQ(state.submit(owner(), header(5),
++                           doorbell(created.response, 2), 11)
++                  .response.status,
++              protocol::Status::Ok);
++    EXPECT_EQ(state.submit(owner(), header(6),
++                           doorbell(created.response, 2), 11)
++                  .response.status,
++              protocol::Status::ProtocolState);
++}
++
++TEST(HostGPUQueueState, SequenceMustBePreviousPlusOneWithoutWrap)
++{
++    EXPECT_TRUE(HostGPUQueueState::isNextSequence(0, 1));
++    EXPECT_TRUE(HostGPUQueueState::isNextSequence(1, 2));
++    EXPECT_FALSE(HostGPUQueueState::isNextSequence(1, 1));
++    EXPECT_FALSE(HostGPUQueueState::isNextSequence(1, 3));
++    EXPECT_FALSE(HostGPUQueueState::isNextSequence(
++        std::numeric_limits<uint64_t>::max(), 0));
++    EXPECT_FALSE(HostGPUQueueState::isNextSequence(
++        std::numeric_limits<uint64_t>::max(),
++        std::numeric_limits<uint64_t>::max()));
++
++    HostGPUQueueState state;
++    const auto created = state.submit(owner(), header(), create(2), 0);
++    EXPECT_EQ(state.submit(owner(), header(2),
++                           doorbell(created.response, 2), 1)
++                  .response.status,
++              protocol::Status::ProtocolState);
++    EXPECT_EQ(state.inflightCount(), 0U);
++    EXPECT_EQ(state.submit(owner(), header(3),
++                           doorbell(created.response, 1), 1)
++                  .response.status,
++              protocol::Status::Ok);
++}
++
++TEST(HostGPUQueueState, EnforcesGlobalInflightLimit)
++{
++    HostGPUQueueState state;
++    const auto created = state.submit(owner(), header(), create(64), 0);
++    for (size_t index = 0; index < HostGPUQueueState::MaximumInflight;
++         ++index) {
++        EXPECT_EQ(state.submit(owner(), header(index + 2),
++                               doorbell(created.response, index + 1), 70)
++                      .response.status,
++                  protocol::Status::Ok);
++    }
++    EXPECT_EQ(state.inflightCount(), HostGPUQueueState::MaximumInflight);
++    EXPECT_EQ(state.submit(owner(), header(10),
++                           doorbell(created.response, 9), 70)
++                  .response.status,
++              protocol::Status::ResourceExhausted);
++    for (size_t index = 0; index < HostGPUQueueState::MaximumInflight;
++         ++index) {
++        ASSERT_TRUE(state.popReady(71));
++    }
++    EXPECT_EQ(state.inflightCount(), 0U);
++    EXPECT_EQ(state.submit(owner(), header(11),
++                           doorbell(created.response, 9), 71)
++                  .response.status,
++              protocol::Status::Ok);
++}
++
++TEST(HostGPUQueueState, RejectsFdReuseAndWrongGeneration)
++{
++    HostGPUQueueState state;
++    const auto original = owner(9, 100);
++    const auto reused = owner(9, 101);
++    const auto created = state.submit(original, header(), create(2), 0);
++    EXPECT_EQ(state.submit(reused, header(2),
++                           doorbell(created.response, 1), 1)
++                  .response.status,
++              protocol::Status::ProtocolState);
++
++    auto wrongGeneration = doorbell(created.response, 1);
++    ++wrongGeneration.generation;
++    EXPECT_EQ(state.submit(original, header(3), wrongGeneration, 1)
++                  .response.status,
++              protocol::Status::ProtocolState);
++    EXPECT_EQ(state.inflightCount(), 0U);
++}
++
++TEST(HostGPUQueueState, DisconnectCancelsOwnedQueuesAndCommands)
++{
++    HostGPUQueueState state;
++    const auto firstOwner = owner(7, 1);
++    const auto secondOwner = owner(8, 2);
++    const auto first = state.submit(firstOwner, header(), create(2), 0);
++    const auto second = state.submit(secondOwner, header(2), create(2), 0);
++    ASSERT_EQ(state.submit(firstOwner, header(3),
++                           doorbell(first.response, 1), 3)
++                  .response.status,
++              protocol::Status::Ok);
++    ASSERT_EQ(state.submit(secondOwner, header(4),
++                           doorbell(second.response, 1), 3)
++                  .response.status,
++              protocol::Status::Ok);
++    state.disconnect(firstOwner);
++    EXPECT_EQ(state.queueCount(), 1U);
++    EXPECT_EQ(state.inflightCount(), 1U);
++    const auto remaining = state.popReady(4);
++    ASSERT_TRUE(remaining);
++    EXPECT_EQ(remaining->owner, secondOwner);
++}
++
++TEST(HostGPUQueueState, BackpressuredPeerCloseRequiresImmediateCleanup)
++{
++    int sockets[2] = {-1, -1};
++    ASSERT_EQ(::socketpair(AF_UNIX,
++                           SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC,
++                           0, sockets),
++              0);
++    std::array<uint8_t, 256> packet = {};
++    while (::send(sockets[0], packet.data(), packet.size(),
++                  MSG_NOSIGNAL) >= 0) {
++    }
++    ASSERT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK);
++
++    HostGPUQueueState state;
++    const auto socketOwner = owner(sockets[0], 100);
++    const auto created = state.submit(socketOwner, header(), create(1), 0);
++    ASSERT_EQ(created.response.status, protocol::Status::Ok);
++    ASSERT_EQ(state.submit(socketOwner, header(2),
++                           doorbell(created.response, 1), 1)
++                  .response.status,
++              protocol::Status::Ok);
++    ASSERT_EQ(state.queueCount(), 1U);
++    ASSERT_EQ(state.inflightCount(), 1U);
++
++    ::close(sockets[1]);
++    sockets[1] = -1;
++    pollfd descriptor = {sockets[0], POLLIN | POLLOUT, 0};
++    ASSERT_GT(::poll(&descriptor, 1, 1000), 0);
++    ASSERT_TRUE(terminalClientPollEvent(descriptor.revents));
++
++    state.disconnect(socketOwner);
++    EXPECT_EQ(state.queueCount(), 0U);
++    EXPECT_EQ(state.inflightCount(), 0U);
++    ::close(sockets[0]);
++}
++
++TEST(HostGPUQueueState, TickOverflowIsRejectedWithoutMutation)
++{
++    HostGPUQueueState state;
++    const auto created = state.submit(owner(), header(), create(1), 0);
++    const auto rejected = state.submit(
++        owner(), header(2), doorbell(created.response, 1),
++        std::numeric_limits<uint64_t>::max());
++    EXPECT_EQ(rejected.response.status, protocol::Status::Internal);
++    EXPECT_FALSE(rejected.commandAccepted);
++    EXPECT_EQ(state.inflightCount(), 0U);
++}
++
++} // anonymous namespace
++} // namespace gem5::hostgpu
+diff --git a/src/dev/amdgpu/host_gpu_socket_utils.test.cc b/src/dev/amdgpu/host_gpu_socket_utils.test.cc
+index 98eda44e5..a227c4aa4 100644
+--- a/src/dev/amdgpu/host_gpu_socket_utils.test.cc
++++ b/src/dev/amdgpu/host_gpu_socket_utils.test.cc
+@@ -535,4 +535,71 @@ TEST(HostGPUConnectionState, DeadlineWinsUntilHelloBeginsAck)
+     EXPECT_FALSE(state.handshakeDeadlineApplies());
+ }
+ 
++TEST(HostGPUConnectionState, EstablishedRecordCompletesWithoutPhaseChange)
++{
++    HostGPUConnectionState state;
++    state.noteRecordReceived();
++    state.beginAck(true);
++    state.noteAckSent();
++    ASSERT_EQ(state.phase(), ConnectionPhase::Established);
++    state.noteRecordReceived();
++    EXPECT_TRUE(state.recordPending());
++    EXPECT_FALSE(state.canReceive());
++    state.finishEstablishedRecord();
++    EXPECT_EQ(state.phase(), ConnectionPhase::Established);
++    EXPECT_TRUE(state.committed());
++    EXPECT_FALSE(state.recordPending());
++    EXPECT_TRUE(state.canReceive());
++}
++
++TEST(HostGPURequestIds, MustIncreaseAfterHelloWithoutWrap)
++{
++    QueueRequestIdTracker tracker;
++    EXPECT_EQ(tracker.observe(7), RequestIdResult::Fresh);
++    EXPECT_EQ(tracker.last(), 7U);
++    EXPECT_EQ(tracker.observe(7), RequestIdResult::NotIncreasing);
++    EXPECT_EQ(tracker.observe(6), RequestIdResult::NotIncreasing);
++    EXPECT_EQ(tracker.last(), 7U);
++    EXPECT_EQ(tracker.observe(8), RequestIdResult::Fresh);
++    EXPECT_EQ(tracker.last(), 8U);
++    EXPECT_EQ(tracker.observe(1), RequestIdResult::NotIncreasing);
++    EXPECT_EQ(tracker.last(), 8U);
++}
++
++TEST(HostGPUConnectionState, QueueMalformedPrecedesSessionErrors)
++{
++    EXPECT_EQ(queueRequestStatus(protocol::Status::Malformed,
++                                 protocol::Status::ProtocolState),
++              protocol::Status::Malformed);
++    EXPECT_EQ(queueRequestStatus(protocol::Status::Malformed,
++                                 protocol::Status::InstanceMismatch),
++              protocol::Status::Malformed);
++    EXPECT_EQ(queueRequestStatus(protocol::Status::UnsupportedVersion,
++                                 protocol::Status::ProtocolState),
++              protocol::Status::UnsupportedVersion);
++    EXPECT_EQ(queueRequestStatus(protocol::Status::UnsupportedVersion,
++                                 protocol::Status::InstanceMismatch),
++              protocol::Status::UnsupportedVersion);
++    EXPECT_EQ(queueRequestStatus(protocol::Status::UnsupportedVersion,
++                                 protocol::Status::Ok),
++              protocol::Status::UnsupportedVersion);
++
++    QueueRequestIdTracker tracker;
++    ASSERT_EQ(tracker.observe(7), RequestIdResult::Fresh);
++    const auto malformed = queueRequestStatus(
++        protocol::Status::Malformed, protocol::Status::ProtocolState);
++    ASSERT_NE(malformed, protocol::Status::Ok);
++    EXPECT_EQ(tracker.last(), 7U);
++}
++
++TEST(HostGPUConnectionState, TerminalPollEventsNeverWaitForOutboundDrain)
++{
++    EXPECT_FALSE(terminalClientPollEvent(0));
++    EXPECT_FALSE(terminalClientPollEvent(POLLIN | POLLOUT));
++    EXPECT_TRUE(terminalClientPollEvent(POLLERR));
++    EXPECT_TRUE(terminalClientPollEvent(POLLHUP));
++    EXPECT_TRUE(terminalClientPollEvent(POLLNVAL));
++    EXPECT_TRUE(terminalClientPollEvent(POLLIN | POLLHUP));
++}
++
+ } // namespace gem5::hostgpu
+-- 
+2.53.0
+

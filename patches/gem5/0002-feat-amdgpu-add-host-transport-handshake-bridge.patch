@@ -1,0 +1,4137 @@
+From 192c85de3a5c96507a886af31c82b2c4d82cce36 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sat, 8 Aug 2026 08:24:20 +0800
+Subject: [PATCH 02/42] feat(amdgpu): add host transport handshake bridge
+
+Checkpoint-ID: CP-0004
+Goal-ID: GSIM-001
+Plan-Revision: 1
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: cc61b236b2d25007bfed1edff59a32b300a59f6b136a489966cacfd5a836836e
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ configs/example/gemsim/host_bridge.py        |   84 ++
+ src/dev/amdgpu/AMDGPU.py                     |   28 +
+ src/dev/amdgpu/SConscript                    |   11 +-
+ src/dev/amdgpu/host_gpu_bridge.cc            | 1329 ++++++++++++++++++
+ src/dev/amdgpu/host_gpu_bridge.hh            |  206 +++
+ src/dev/amdgpu/host_gpu_connection_state.hh  |  178 +++
+ src/dev/amdgpu/host_gpu_protocol.cc          |  601 ++++++++
+ src/dev/amdgpu/host_gpu_protocol.hh          |  203 +++
+ src/dev/amdgpu/host_gpu_protocol.test.cc     |  492 +++++++
+ src/dev/amdgpu/host_gpu_socket_utils.cc      |  234 +++
+ src/dev/amdgpu/host_gpu_socket_utils.hh      |   97 ++
+ src/dev/amdgpu/host_gpu_socket_utils.test.cc |  538 +++++++
+ 12 files changed, 4000 insertions(+), 1 deletion(-)
+ create mode 100644 configs/example/gemsim/host_bridge.py
+ create mode 100644 src/dev/amdgpu/host_gpu_bridge.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_bridge.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_connection_state.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_protocol.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_protocol.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_protocol.test.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_socket_utils.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_socket_utils.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_socket_utils.test.cc
+
+diff --git a/configs/example/gemsim/host_bridge.py b/configs/example/gemsim/host_bridge.py
+new file mode 100644
+index 000000000..d98920b20
+--- /dev/null
++++ b/configs/example/gemsim/host_bridge.py
+@@ -0,0 +1,84 @@
++# Copyright (c) 2026 The gem5 Project
++# All rights reserved.
++#
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are met:
++# redistributions of source code must retain the above copyright notice, this
++# list of conditions and the following disclaimer; redistributions in binary
++# form must reproduce the above copyright notice, this list of conditions and
++# the following disclaimer in the documentation and/or other materials
++# provided with the distribution; neither the name of the copyright holders
++# nor the names of its contributors may be used to endorse or promote products
++# derived from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++# POSSIBILITY OF SUCH DAMAGE.
++
++import argparse
++import time
++
++import m5
++from m5.objects import HostGPUBridge, Root
++
++
++def parse_args():
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--endpoint", required=True)
++    parser.add_argument("--daemon-uuid", default="")
++    parser.add_argument("--job-uuid", default="")
++    parser.add_argument(
++        "--epoch", type=lambda value: int(value, 0), required=True
++    )
++    parser.add_argument("--rank", type=int, default=0)
++    parser.add_argument("--world-size", type=int, default=1)
++    parser.add_argument("--startup-timeout-ms", type=int, default=5000)
++    parser.add_argument("--handshake-timeout-ms", type=int, default=5000)
++    parser.add_argument("--max-record", type=int, default=65536)
++    parser.add_argument(
++        "--run-timeout-ms",
++        type=int,
++        default=10000,
++        help="Host wall-clock service window after startup",
++    )
++    parser.add_argument("--exit-on-handshake", action="store_true")
++    return parser.parse_args()
++
++
++args = parse_args()
++root = Root(full_system=False)
++root.host_gpu_bridge = HostGPUBridge(
++    endpoint=args.endpoint,
++    daemon_uuid=args.daemon_uuid,
++    job_uuid=args.job_uuid,
++    epoch=args.epoch,
++    rank=args.rank,
++    world_size=args.world_size,
++    startup_timeout_ms=args.startup_timeout_ms,
++    handshake_timeout_ms=args.handshake_timeout_ms,
++    max_record=args.max_record,
++    exit_on_handshake=args.exit_on_handshake,
++)
++
++m5.instantiate()
++deadline = time.monotonic() + args.run_timeout_ms / 1000.0
++while True:
++    exit_event = m5.simulate(1)
++    if exit_event.getCause() != "simulate() limit reached":
++        break
++    if time.monotonic() >= deadline:
++        break
++    time.sleep(0.001)
++print(
++    "host-gpu-sim-exit cause={} code={}".format(
++        exit_event.getCause(), exit_event.getCode()
++    )
++)
+diff --git a/src/dev/amdgpu/AMDGPU.py b/src/dev/amdgpu/AMDGPU.py
+index 6ee3baaf9..bd646ab57 100644
+--- a/src/dev/amdgpu/AMDGPU.py
++++ b/src/dev/amdgpu/AMDGPU.py
+@@ -40,6 +40,34 @@ from m5.objects.PciDevice import (
+ )
+ from m5.params import *
+ from m5.proxy import *
++from m5.SimObject import SimObject
++
++
++class HostGPUBridge(SimObject):
++    type = "HostGPUBridge"
++    cxx_header = "dev/amdgpu/host_gpu_bridge.hh"
++    cxx_class = "gem5::hostgpu::HostGPUBridge"
++
++    endpoint = Param.String("", "Absolute AF_UNIX SOCK_SEQPACKET endpoint")
++    daemon_uuid = Param.String(
++        "", "Daemon lifetime UUID; empty generates a secure random UUID"
++    )
++    job_uuid = Param.String(
++        "", "Job UUID; empty generates a secure random UUID"
++    )
++    epoch = Param.UInt64(0, "Job epoch")
++    rank = Param.UInt32(0, "Daemon rank")
++    world_size = Param.UInt32(1, "Number of daemon ranks")
++    startup_timeout_ms = Param.UInt32(
++        5000, "Wall-clock wait for the first complete HELLO before simulation"
++    )
++    handshake_timeout_ms = Param.UInt32(
++        5000, "Wall-clock deadline for each accepted client HELLO"
++    )
++    max_record = Param.UInt32(65536, "Maximum accepted protocol record")
++    exit_on_handshake = Param.Bool(
++        False, "Exit the simulation only after a successful ACK is sent"
++    )
+ 
+ 
+ # PCI device model for an AMD Vega 10 based GPU. The PCI codes and BARs
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index 51f25097f..3cf1395e6 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -38,7 +38,8 @@ if not env['CONF']['USE_X86_ISA']:
+ # Controllers
+ SimObject('AMDGPU.py', sim_objects=['AMDGPUDevice', 'AMDGPUInterruptHandler',
+                                     'AMDGPUMemoryManager', 'AMDGPUSystemHub',
+-                                    'SDMAEngine', 'PM4PacketProcessor'],
++                                    'SDMAEngine', 'PM4PacketProcessor',
++                                    'HostGPUBridge'],
+                                     tags=['x86 isa'])
+ 
+ Source('amdgpu_device.cc', tags=['x86 isa'])
+@@ -46,6 +47,9 @@ Source('amdgpu_gfx.cc', tags=['x86 isa'])
+ Source('amdgpu_nbio.cc', tags=['x86 isa'])
+ Source('amdgpu_smu.cc', tags=['x86 isa'])
+ Source('amdgpu_vm.cc', tags=['x86 isa'])
++Source('host_gpu_protocol.cc', tags=['x86 isa'])
++Source('host_gpu_bridge.cc', tags=['x86 isa'])
++Source('host_gpu_socket_utils.cc', tags=['x86 isa'])
+ Source('interrupt_handler.cc', tags=['x86 isa'])
+ Source('memory_manager.cc', tags=['x86 isa'])
+ Source('mmio_reader.cc', tags=['x86 isa'])
+@@ -53,6 +57,11 @@ Source('pm4_packet_processor.cc', tags=['x86 isa'])
+ Source('sdma_engine.cc', tags=['x86 isa'])
+ Source('system_hub.cc', tags=['x86 isa'])
+ 
++GTest('host_gpu_protocol.test', 'host_gpu_protocol.test.cc',
++      'host_gpu_protocol.cc')
++GTest('host_gpu_socket_utils.test', 'host_gpu_socket_utils.test.cc',
++      'host_gpu_socket_utils.cc')
++
+ DebugFlag('AMDGPUDevice', tags=['x86 isa'])
+ DebugFlag('AMDGPUMem', tags=['x86 isa'])
+ DebugFlag('AMDGPUSystemHub', tags=['x86 isa'])
+diff --git a/src/dev/amdgpu/host_gpu_bridge.cc b/src/dev/amdgpu/host_gpu_bridge.cc
+new file mode 100644
+index 000000000..ea9b3bcc7
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_bridge.cc
+@@ -0,0 +1,1329 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_bridge.hh"
++
++#include <fcntl.h>
++#include <poll.h>
++#include <sys/file.h>
++#include <sys/random.h>
++#include <sys/socket.h>
++#include <sys/stat.h>
++#include <sys/timerfd.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++#include <algorithm>
++#include <array>
++#include <cassert>
++#include <cerrno>
++#include <cstddef>
++#include <cstring>
++#include <limits>
++#include <utility>
++
++#include "base/logging.hh"
++#include "base/socket.hh"
++#include "dev/amdgpu/host_gpu_socket_utils.hh"
++#include "sim/sim_exit.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++namespace
++{
++
++constexpr size_t MaximumAcceptsPerWakeup = 8;
++constexpr size_t MaximumPendingRecords = 64;
++constexpr size_t MaximumRecordsPerWakeup = 8;
++constexpr size_t MaximumAliasCleanupAttempts = 4;
++constexpr int StaleProbeTimeoutMs = 100;
++
++bool
++sameFile(const struct stat &left, const struct stat &right)
++{
++    return left.st_dev == right.st_dev && left.st_ino == right.st_ino &&
++           left.st_uid == right.st_uid &&
++           (left.st_mode & S_IFMT) == (right.st_mode & S_IFMT);
++}
++
++int
++openDirectoryNoSymlinks(const std::string &path)
++{
++    if (path.empty() || path[0] != '/' || path.find("//") != std::string::npos) {
++        errno = EINVAL;
++        return -1;
++    }
++
++    int current = ::open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
++    if (current < 0)
++        return -1;
++    size_t begin = 1;
++    while (begin < path.size()) {
++        const size_t end = path.find('/', begin);
++        const std::string component = path.substr(
++            begin, end == std::string::npos ? std::string::npos : end - begin);
++        if (component.empty() || component == "." || component == "..") {
++            ::close(current);
++            errno = EINVAL;
++            return -1;
++        }
++        const int next = ::openat(current, component.c_str(),
++            O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
++        const int savedErrno = errno;
++        ::close(current);
++        if (next < 0) {
++            errno = savedErrno;
++            return -1;
++        }
++        current = next;
++        if (end == std::string::npos)
++            break;
++        begin = end + 1;
++    }
++    return current;
++}
++
++bool
++makeUnixAddress(const std::string &path, sockaddr_un &address,
++                socklen_t &addressSize)
++{
++    if (path.empty() || path.size() >= sizeof(address.sun_path))
++        return false;
++    std::memset(&address, 0, sizeof(address));
++    address.sun_family = AF_UNIX;
++    std::memcpy(address.sun_path, path.data(), path.size());
++    addressSize = static_cast<socklen_t>(
++        offsetof(sockaddr_un, sun_path) + path.size() + 1);
++    return true;
++}
++
++timespec monotonicDeadline(uint32_t milliseconds);
++int millisecondsRemaining(const timespec &deadline);
++
++int
++probeEndpoint(const std::string &path)
++{
++    const timespec deadline = monotonicDeadline(StaleProbeTimeoutMs);
++    const int fd = ::socket(AF_UNIX,
++        SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
++    if (fd < 0)
++        return errno;
++
++    sockaddr_un address;
++    socklen_t addressSize = 0;
++    if (!makeUnixAddress(path, address, addressSize)) {
++        ::close(fd);
++        return ENAMETOOLONG;
++    }
++
++    int result = -1;
++    while (millisecondsRemaining(deadline) != 0) {
++        result = ::connect(fd, reinterpret_cast<sockaddr *>(&address),
++                           addressSize);
++        if (result == 0 || errno != EINTR)
++            break;
++    }
++    if (result == 0) {
++        ::close(fd);
++        return 0;
++    }
++
++    int error = errno;
++    if (result < 0 && error == EINTR)
++        error = ETIMEDOUT;
++    if (error == EINPROGRESS) {
++        pollfd descriptor = {fd, POLLOUT, 0};
++        while (true) {
++            const int remaining = millisecondsRemaining(deadline);
++            if (remaining == 0) {
++                error = ETIMEDOUT;
++                break;
++            }
++            result = ::poll(&descriptor, 1, remaining);
++            if (result < 0 && errno == EINTR)
++                continue;
++            if (result == 0) {
++                error = ETIMEDOUT;
++            } else if (result < 0) {
++                error = errno;
++            } else {
++                socklen_t size = sizeof(error);
++                if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) < 0 ||
++                    size != sizeof(error)) {
++                    error = errno != 0 ? errno : EIO;
++                }
++            }
++            break;
++        }
++    }
++    ::close(fd);
++    return error;
++}
++
++timespec
++monotonicDeadline(uint32_t milliseconds)
++{
++    timespec deadline = {};
++    fatal_if(::clock_gettime(CLOCK_MONOTONIC, &deadline) != 0,
++             "HostGPUBridge: clock_gettime failed: %s", std::strerror(errno));
++    deadline.tv_sec += milliseconds / 1000;
++    deadline.tv_nsec += static_cast<long>(milliseconds % 1000) * 1000000L;
++    if (deadline.tv_nsec >= 1000000000L) {
++        ++deadline.tv_sec;
++        deadline.tv_nsec -= 1000000000L;
++    }
++    return deadline;
++}
++
++int
++millisecondsRemaining(const timespec &deadline)
++{
++    timespec now = {};
++    if (::clock_gettime(CLOCK_MONOTONIC, &now) != 0)
++        return 0;
++    int64_t nanoseconds =
++        static_cast<int64_t>(deadline.tv_sec - now.tv_sec) * 1000000000LL +
++        deadline.tv_nsec - now.tv_nsec;
++    if (nanoseconds <= 0)
++        return 0;
++    const int64_t rounded = (nanoseconds + 999999) / 1000000;
++    return static_cast<int>(std::min<int64_t>(
++        rounded, std::numeric_limits<int>::max()));
++}
++
++} // anonymous namespace
++
++HostGPUBridge::ListenEvent::ListenEvent(HostGPUBridge &bridge, int fd)
++    : PollEvent(fd, POLLIN), bridge(bridge)
++{
++}
++
++void
++HostGPUBridge::ListenEvent::process(int revents)
++{
++    bridge.scheduleListenerService(revents);
++}
++
++HostGPUBridge::ClientEvent::ClientEvent(
++    HostGPUBridge &bridge, int fd, uint64_t generation)
++    : PollEvent(fd, POLLIN), bridge(bridge), clientFd(fd),
++      generation(generation)
++{
++}
++
++void
++HostGPUBridge::ClientEvent::setWritable(bool writable)
++{
++    disable();
++    pfd.events = (pfd.events & ~POLLOUT) | (writable ? POLLOUT : 0);
++    enable();
++}
++
++void
++HostGPUBridge::ClientEvent::setReadable(bool readable)
++{
++    disable();
++    pfd.events = (pfd.events & ~POLLIN) | (readable ? POLLIN : 0);
++    enable();
++}
++
++void
++HostGPUBridge::ClientEvent::process(int revents)
++{
++    bridge.scheduleClientService(clientFd, generation, revents);
++}
++
++HostGPUBridge::DeadlineEvent::DeadlineEvent(
++    HostGPUBridge &bridge, int timerFd, int clientFd, uint64_t generation)
++    : PollEvent(timerFd, POLLIN), bridge(bridge), clientFd(clientFd),
++      generation(generation)
++{
++}
++
++void
++HostGPUBridge::DeadlineEvent::process(int revents)
++{
++    bridge.scheduleDeadlineService(clientFd, generation, revents);
++}
++
++HostGPUBridge::Client::~Client()
++{
++    deadlineEvent.reset();
++    socketEvent.reset();
++    if (timerFd >= 0)
++        ::close(timerFd);
++    if (fd >= 0)
++        ::close(fd);
++}
++
++HostGPUBridge::HostGPUBridge(const HostGPUBridgeParams &params)
++    : SimObject(params), endpoint(params.endpoint),
++      configuredDaemonUuid(params.daemon_uuid),
++      configuredJobUuid(params.job_uuid), epoch(params.epoch), rank(params.rank),
++      worldSize(params.world_size), startupTimeoutMs(params.startup_timeout_ms),
++      handshakeTimeoutMs(params.handshake_timeout_ms),
++      maximumRecord(params.max_record), exitOnHandshake(params.exit_on_handshake),
++      recordServiceEvent([this]() { processRecords(); },
++                         name() + ".host_gpu_records")
++{
++    validateConfiguration();
++
++    if (configuredDaemonUuid.empty()) {
++        fatal_if(!randomNonzeroUuid(identity.daemonUuid),
++                 "%s: nonblocking getrandom unavailable for daemon_uuid",
++                 name());
++    } else {
++        fatal_if(!protocol::parseUuid(configuredDaemonUuid,
++                                      identity.daemonUuid) ||
++                     protocol::isZero(identity.daemonUuid),
++                 "%s: daemon_uuid must be a nonzero canonical UUID or 32 hex "
++                 "digits", name());
++    }
++    if (configuredJobUuid.empty()) {
++        fatal_if(!randomNonzeroUuid(identity.jobUuid),
++                 "%s: nonblocking getrandom unavailable for job_uuid", name());
++    } else {
++        fatal_if(!protocol::parseUuid(configuredJobUuid, identity.jobUuid) ||
++                     protocol::isZero(identity.jobUuid),
++                 "%s: job_uuid must be a nonzero canonical UUID or 32 hex "
++                 "digits", name());
++    }
++    identity.jobEpoch = epoch;
++    identity.rank = rank;
++    identity.worldSize = worldSize;
++    identity.maximumRecord = maximumRecord;
++    identity.supported = protocol::topologyCapability();
++}
++
++HostGPUBridge::~HostGPUBridge()
++{
++    shutdown();
++}
++
++void
++HostGPUBridge::validateConfiguration()
++{
++    fatal_if(endpoint.empty() || endpoint[0] != '/' || endpoint.back() == '/',
++             "%s: endpoint must be an absolute socket pathname", name());
++    fatal_if(endpoint.find("//") != std::string::npos,
++             "%s: endpoint must not contain empty path components", name());
++    sockaddr_un address = {};
++    socklen_t addressSize = 0;
++    fatal_if(!makeUnixAddress(endpoint, address, addressSize),
++             "%s: endpoint is too long for an AF_UNIX pathname", name());
++    fatal_if(epoch == 0, "%s: epoch must be nonzero", name());
++    fatal_if(worldSize == 0, "%s: world_size must be at least one", name());
++    fatal_if(rank >= worldSize, "%s: rank must be less than world_size", name());
++    fatal_if(handshakeTimeoutMs == 0,
++             "%s: handshake_timeout_ms must be nonzero", name());
++    fatal_if(maximumRecord < protocol::MinimumRecordBytes ||
++                 maximumRecord > protocol::MaximumRecordBytes,
++             "%s: max_record must be in [%u, %u]", name(),
++             protocol::MinimumRecordBytes, protocol::MaximumRecordBytes);
++}
++
++void
++HostGPUBridge::init()
++{
++    SimObject::init();
++    fatal_if(ListenSocket::allDisabled(),
++             "%s: host GPU bridge requires --listener-mode=on", name());
++    if (!exitCallbackRegistered) {
++        registerExitCallback([this]() { shutdown(); });
++        exitCallbackRegistered = true;
++    }
++    prepareEndpoint();
++    listenEvent = std::make_unique<ListenEvent>(*this, listenerFd);
++    pollQueue.schedule(listenEvent.get());
++    inform("host-gpu-ready endpoint=%s daemon_uuid=%s job_uuid=%s epoch=%llu "
++           "rank=%u world=%u max_record=%u",
++           endpoint, protocol::formatUuid(identity.daemonUuid),
++           protocol::formatUuid(identity.jobUuid),
++           static_cast<unsigned long long>(identity.jobEpoch), identity.rank,
++           identity.worldSize, identity.maximumRecord);
++}
++
++void
++HostGPUBridge::startup()
++{
++    SimObject::startup();
++    boundedStartupWait();
++}
++
++void
++HostGPUBridge::prepareEndpoint()
++{
++    const size_t separator = endpoint.rfind('/');
++    parentPath = separator == 0 ? "/" : endpoint.substr(0, separator);
++    endpointName = endpoint.substr(separator + 1);
++    fatal_if(endpointName.empty() || endpointName == "." ||
++                 endpointName == "..",
++             "%s: invalid endpoint basename", name());
++    lockName = endpointName + ".lock";
++    temporaryName.clear();
++    endpointAliasPending = false;
++    temporaryAliasPending = false;
++    endpointCleanupError = 0;
++    temporaryCleanupError = 0;
++
++    directoryFd = openDirectoryNoSymlinks(parentPath);
++    fatal_if(directoryFd < 0, "%s: cannot securely open endpoint parent %s: %s",
++             name(), parentPath, std::strerror(errno));
++    struct stat directory = {};
++    fatal_if(::fstat(directoryFd, &directory) != 0 ||
++                 !S_ISDIR(directory.st_mode),
++             "%s: endpoint parent is not a directory", name());
++    fatal_if(directory.st_uid != ::geteuid() ||
++                 (directory.st_mode & (S_IRWXG | S_IRWXO)) != 0,
++             "%s: endpoint parent must be owned by euid %u with no group or "
++             "other permissions", name(), static_cast<unsigned>(::geteuid()));
++
++    lockFd = ::openat(directoryFd, lockName.c_str(),
++        O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
++    fatal_if(lockFd < 0, "%s: cannot open endpoint lock %s: %s", name(),
++             lockName, std::strerror(errno));
++    struct stat lock = {};
++    fatal_if(::fstat(lockFd, &lock) != 0 || !S_ISREG(lock.st_mode) ||
++                 lock.st_uid != ::geteuid() || (lock.st_mode & 0777) != 0600,
++             "%s: endpoint lock must be a same-euid 0600 regular file", name());
++    fatal_if(::flock(lockFd, LOCK_EX | LOCK_NB) != 0,
++             "%s: endpoint lock is held by another process", name());
++    struct stat lockPath = {};
++    fatal_if(::fstatat(directoryFd, lockName.c_str(), &lockPath,
++                      AT_SYMLINK_NOFOLLOW) != 0 ||
++                 !sameFile(lock, lockPath),
++             "%s: endpoint lock identity changed after acquisition", name());
++
++    const std::string trustedPath = "/proc/self/fd/" +
++        std::to_string(directoryFd) + "/" + endpointName;
++    sockaddr_un address;
++    socklen_t addressSize = 0;
++    fatal_if(!makeUnixAddress(trustedPath, address, addressSize),
++             "%s: endpoint basename is too long for secure AF_UNIX bind", name());
++
++    struct stat existing = {};
++    if (::fstatat(directoryFd, endpointName.c_str(), &existing,
++                  AT_SYMLINK_NOFOLLOW) == 0) {
++        fatal_if(!S_ISSOCK(existing.st_mode),
++                 "%s: existing endpoint is not a socket", name());
++        fatal_if(existing.st_uid != ::geteuid(),
++                 "%s: existing endpoint has a different owner", name());
++        const int probe = probeEndpoint(trustedPath);
++        fatal_if(probe != ECONNREFUSED,
++                 "%s: existing endpoint is live or cannot be proven stale: %s",
++                 name(), probe == 0 ? "live listener" : std::strerror(probe));
++        struct stat fresh = {};
++        fatal_if(::fstatat(directoryFd, endpointName.c_str(), &fresh,
++                          AT_SYMLINK_NOFOLLOW) != 0 ||
++                     !sameFile(existing, fresh),
++                 "%s: stale endpoint identity changed before removal", name());
++        fatal_if(::unlinkat(directoryFd, endpointName.c_str(), 0) != 0,
++                 "%s: cannot remove verified stale endpoint: %s", name(),
++                 std::strerror(errno));
++    } else {
++        fatal_if(errno != ENOENT, "%s: cannot inspect endpoint: %s", name(),
++                 std::strerror(errno));
++    }
++
++    int bindError = EADDRINUSE;
++    for (unsigned attempt = 0; attempt < 16; ++attempt) {
++        uint64_t nonce = 0;
++        fatal_if(!randomNonzero64(nonce),
++                 "%s: nonblocking getrandom unavailable for endpoint "
++                 "publication", name());
++        temporaryName = ".sagr-hostgpu-" + std::to_string(::getpid()) + "-" +
++            std::to_string(nonce);
++        const std::string temporaryPath = "/proc/self/fd/" +
++            std::to_string(directoryFd) + "/" + temporaryName;
++        fatal_if(!makeUnixAddress(temporaryPath, address, addressSize),
++                 "%s: temporary endpoint path exceeds AF_UNIX limits", name());
++
++        listenerFd = ::socket(AF_UNIX,
++            SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
++        fatal_if(listenerFd < 0,
++                 "%s: cannot create SOCK_SEQPACKET listener: %s", name(),
++                 std::strerror(errno));
++        if (::bind(listenerFd, reinterpret_cast<sockaddr *>(&address),
++                   addressSize) == 0) {
++            bindError = 0;
++            break;
++        }
++        bindError = errno;
++        ::close(listenerFd);
++        listenerFd = -1;
++        if (bindError != EADDRINUSE)
++            break;
++    }
++    fatal_if(bindError != 0,
++             "%s: cannot bind a private temporary endpoint: %s", name(),
++             std::strerror(bindError));
++    temporaryAliasPending = true;
++
++    struct stat boundBeforeChmod = {};
++    int validationError = 0;
++    if (::fstatat(directoryFd, temporaryName.c_str(), &boundBeforeChmod,
++                  AT_SYMLINK_NOFOLLOW) != 0) {
++        validationError = errno;
++    } else if (!S_ISSOCK(boundBeforeChmod.st_mode) ||
++               boundBeforeChmod.st_uid != ::geteuid()) {
++        validationError = ESTALE;
++    }
++    if (validationError != 0) {
++        abandonEndpointPreparation();
++        fatal("%s: temporary endpoint identity validation failed: %s", name(),
++              std::strerror(validationError));
++    }
++    endpointDevice = boundBeforeChmod.st_dev;
++    endpointInode = boundBeforeChmod.st_ino;
++    endpointPinFd = pinSocketAtNoFollow(
++        directoryFd, temporaryName, boundBeforeChmod);
++    if (endpointPinFd < 0) {
++        const int error = errno;
++        abandonEndpointPreparation();
++        fatal("%s: cannot pin bound endpoint identity: %s", name(),
++              std::strerror(error));
++    }
++    if (!chmodPinnedSocket(endpointPinFd, boundBeforeChmod, 0600)) {
++        const int error = errno;
++        abandonEndpointPreparation();
++        fatal("%s: cannot safely restrict endpoint permissions: %s", name(),
++              std::strerror(error));
++    }
++
++    struct stat bound = {};
++    if (::fstatat(directoryFd, temporaryName.c_str(), &bound,
++                  AT_SYMLINK_NOFOLLOW) != 0 ||
++        !sameFile(boundBeforeChmod, bound) || !S_ISSOCK(bound.st_mode) ||
++        bound.st_uid != ::geteuid() || (bound.st_mode & 0777) != 0600) {
++        abandonEndpointPreparation();
++        fatal("%s: bound endpoint failed identity validation", name());
++    }
++    endpointDevice = bound.st_dev;
++    endpointInode = bound.st_ino;
++
++    if (::listen(listenerFd,
++                 static_cast<int>(MaximumRegularClients +
++                                  MaximumExcessClients)) != 0) {
++        const int error = errno;
++        abandonEndpointPreparation();
++        fatal("%s: cannot listen on endpoint: %s", name(),
++              std::strerror(error));
++    }
++
++    struct stat freshLockPath = {};
++    if (::fstatat(directoryFd, lockName.c_str(), &freshLockPath,
++                  AT_SYMLINK_NOFOLLOW) != 0 ||
++        !sameFile(lock, freshLockPath)) {
++        abandonEndpointPreparation();
++        fatal("%s: endpoint lock identity changed before publication", name());
++    }
++
++    const SocketPublicationResult publication = publishSocketAtNoReplace(
++        directoryFd, temporaryName, endpointName, bound);
++    endpointAliasPending = publication.endpointMayExist;
++    temporaryAliasPending = publication.temporaryMayExist;
++    if (!temporaryAliasPending)
++        temporaryName.clear();
++    if (!publication.complete()) {
++        const int error = publication.error != 0 ? publication.error : EIO;
++        abandonEndpointPreparation();
++        fatal("%s: cannot atomically publish endpoint without replacement: %s",
++              name(), std::strerror(error));
++    }
++
++    struct stat published = {};
++    int publishedError = 0;
++    if (::fstatat(directoryFd, endpointName.c_str(), &published,
++                  AT_SYMLINK_NOFOLLOW) != 0) {
++        publishedError = errno;
++    } else if (!sameFile(bound, published) || !S_ISSOCK(published.st_mode) ||
++               published.st_uid != ::geteuid() ||
++               (published.st_mode & 0777) != 0600) {
++        publishedError = ESTALE;
++    }
++    if (publishedError != 0) {
++        abandonEndpointPreparation();
++        fatal("%s: published endpoint failed identity validation: %s", name(),
++              std::strerror(publishedError));
++    }
++
++    const int verificationFd = openDirectoryNoSymlinks(parentPath);
++    const int verificationOpenError = verificationFd < 0 ? errno : 0;
++    struct stat originalDirectory = {};
++    struct stat verificationDirectory = {};
++    int directoryError = verificationOpenError;
++    if (directoryError == 0 &&
++        ::fstat(directoryFd, &originalDirectory) != 0) {
++        directoryError = errno;
++    }
++    if (directoryError == 0 &&
++        ::fstat(verificationFd, &verificationDirectory) != 0) {
++        directoryError = errno;
++    }
++    if (verificationFd >= 0)
++        ::close(verificationFd);
++    if (directoryError == 0 &&
++        (originalDirectory.st_dev != verificationDirectory.st_dev ||
++         originalDirectory.st_ino != verificationDirectory.st_ino)) {
++        directoryError = ESTALE;
++    }
++    if (directoryError != 0) {
++        abandonEndpointPreparation();
++        fatal("%s: absolute endpoint parent changed before readiness: %s",
++              name(), std::strerror(directoryError));
++    }
++}
++
++void
++HostGPUBridge::abandonEndpointPreparation()
++{
++    if (listenerFd >= 0) {
++        ::close(listenerFd);
++        listenerFd = -1;
++    }
++    cleanupEndpointAliases();
++    if (!endpointAliasPending && !temporaryAliasPending) {
++        if (endpointPinFd >= 0) {
++            ::close(endpointPinFd);
++            endpointPinFd = -1;
++        }
++        endpointDevice = 0;
++        endpointInode = 0;
++    }
++}
++
++bool
++HostGPUBridge::cleanupEndpointAliases()
++{
++    if (!endpointAliasPending && !temporaryAliasPending)
++        return true;
++
++    if (directoryFd < 0) {
++        const int error = EBADF;
++        if (endpointAliasPending)
++            endpointCleanupError = error;
++        if (temporaryAliasPending)
++            temporaryCleanupError = error;
++        warn("%s: endpoint alias cleanup has no trusted directory: %s", name(),
++             std::strerror(error));
++        return false;
++    }
++
++    struct stat expected = {};
++    bool haveExpected = false;
++    if (endpointPinFd >= 0) {
++        if (::fstat(endpointPinFd, &expected) != 0) {
++            const int error = errno;
++            if (endpointAliasPending)
++                endpointCleanupError = error;
++            if (temporaryAliasPending)
++                temporaryCleanupError = error;
++            warn("%s: cannot inspect pinned endpoint during alias cleanup: %s",
++                 name(), std::strerror(error));
++            return false;
++        }
++        if (!S_ISSOCK(expected.st_mode) ||
++            (endpointInode != 0 &&
++             (expected.st_dev != endpointDevice ||
++              expected.st_ino != endpointInode))) {
++            if (endpointAliasPending)
++                endpointCleanupError = ESTALE;
++            if (temporaryAliasPending)
++                temporaryCleanupError = ESTALE;
++            warn("%s: pinned endpoint identity changed before alias cleanup",
++                 name());
++            return false;
++        }
++        haveExpected = true;
++    } else if (endpointInode != 0) {
++        expected.st_dev = endpointDevice;
++        expected.st_ino = endpointInode;
++        expected.st_uid = ::geteuid();
++        expected.st_mode = S_IFSOCK;
++        haveExpected = true;
++    }
++
++    const auto cleanupKnownAlias =
++        [this, &expected](const std::string &alias, bool &pending,
++                          int &lastError, const char *description) {
++            if (!pending)
++                return;
++            const SocketAliasCleanupResult result = retrySocketAliasCleanup(
++                MaximumAliasCleanupAttempts,
++                [this, &alias, &expected]() {
++                    return unlinkSocketAtIfMatches(
++                        directoryFd, alias, expected);
++                });
++            switch (result.status) {
++              case SocketAliasCleanupStatus::Removed:
++              case SocketAliasCleanupStatus::Missing:
++                pending = false;
++                lastError = 0;
++                break;
++              case SocketAliasCleanupStatus::IdentityMismatch:
++                pending = false;
++                lastError = result.error;
++                warn("%s: %s identity changed before cleanup; leaving pathname "
++                     "untouched", name(), description);
++                break;
++              case SocketAliasCleanupStatus::Error:
++                lastError = result.error;
++                warn("%s: could not remove %s during cleanup: %s", name(),
++                     description, std::strerror(result.error));
++                break;
++            }
++        };
++
++    if (endpointAliasPending) {
++        if (haveExpected) {
++            cleanupKnownAlias(endpointName, endpointAliasPending,
++                              endpointCleanupError, "published endpoint");
++        } else {
++            endpointCleanupError = EBADF;
++            warn("%s: cannot identify published endpoint during cleanup", name());
++        }
++    }
++
++    if (temporaryAliasPending) {
++        if (haveExpected) {
++            cleanupKnownAlias(temporaryName, temporaryAliasPending,
++                              temporaryCleanupError, "temporary endpoint");
++        } else {
++            const SocketAliasCleanupResult result = retrySocketAliasCleanup(
++                MaximumAliasCleanupAttempts,
++                [this]() {
++                    if (::unlinkat(
++                            directoryFd, temporaryName.c_str(), 0) == 0) {
++                        return SocketAliasCleanupResult{
++                            SocketAliasCleanupStatus::Removed, 0};
++                    }
++                    if (errno == ENOENT) {
++                        return SocketAliasCleanupResult{
++                            SocketAliasCleanupStatus::Missing, 0};
++                    }
++                    return SocketAliasCleanupResult{
++                        SocketAliasCleanupStatus::Error, errno};
++                });
++            if (result.status == SocketAliasCleanupStatus::Removed ||
++                result.status == SocketAliasCleanupStatus::Missing) {
++                temporaryAliasPending = false;
++                temporaryCleanupError = 0;
++            } else {
++                temporaryCleanupError = result.error;
++                warn("%s: could not remove unpinned temporary endpoint during "
++                     "cleanup: %s", name(),
++                     std::strerror(temporaryCleanupError));
++            }
++        }
++    }
++    if (!temporaryAliasPending)
++        temporaryName.clear();
++    return !endpointAliasPending && !temporaryAliasPending;
++}
++
++void
++HostGPUBridge::shutdown()
++{
++    if (shutdownDone && endpointCleanupDone)
++        return;
++    if (!shutdownDone) {
++        shutdownDone = true;
++        if (recordServiceEvent.scheduled())
++            deschedule(recordServiceEvent);
++        listenEvent.reset();
++        clients.clear();
++        admissionBudget.reset();
++        pendingRecords.clear();
++    }
++    endpointCleanupDone = cleanupEndpoint();
++}
++
++bool
++HostGPUBridge::cleanupEndpoint()
++{
++    if (listenerFd >= 0) {
++        ::close(listenerFd);
++        listenerFd = -1;
++    }
++    if (!cleanupEndpointAliases()) {
++        warn("%s: endpoint alias cleanup remains pending; retaining the inode "
++             "pin, trusted directory, and endpoint lock for a later retry",
++             name());
++        return false;
++    }
++    if (endpointPinFd >= 0) {
++        ::close(endpointPinFd);
++        endpointPinFd = -1;
++    }
++    endpointDevice = 0;
++    endpointInode = 0;
++    if (lockFd >= 0) {
++        ::close(lockFd);
++        lockFd = -1;
++    }
++    if (directoryFd >= 0) {
++        ::close(directoryFd);
++        directoryFd = -1;
++    }
++    return true;
++}
++
++void
++HostGPUBridge::scheduleListenerService(int revents)
++{
++    auto *event = new EventFunctionWrapper(
++        [this, revents]() { serviceListener(revents); },
++        name() + ".host_gpu_listener_service", true);
++    schedule(event, curTick());
++}
++
++void
++HostGPUBridge::serviceListener(int revents)
++{
++    if (shutdownDone)
++        return;
++    if (revents & (POLLERR | POLLHUP | POLLNVAL))
++        fatal("%s: host GPU listener failed", name());
++    if (revents & POLLIN)
++        acceptClients();
++}
++
++void
++HostGPUBridge::scheduleClientService(
++    int fd, uint64_t generation, int revents)
++{
++    auto *event = new EventFunctionWrapper(
++        [this, fd, generation, revents]() {
++            serviceClient(fd, generation, revents);
++        },
++        name() + ".host_gpu_client_service", true);
++    schedule(event, curTick());
++}
++
++void
++HostGPUBridge::serviceClient(int fd, uint64_t generation, int revents)
++{
++    auto found = clients.find(fd);
++    if (found == clients.end() || found->second->generation != generation)
++        return;
++
++    if (revents & POLLIN) {
++        receiveRecords(fd);
++        processRecords();
++    }
++    found = clients.find(fd);
++    if (found == clients.end() || found->second->generation != generation)
++        return;
++    if (revents & POLLOUT)
++        flushClient(fd);
++    found = clients.find(fd);
++    if (found == clients.end() || found->second->generation != generation)
++        return;
++    if ((revents & (POLLERR | POLLHUP | POLLNVAL)) &&
++        !found->second->state.recordPending() &&
++        found->second->outbound.empty()) {
++        closeClient(fd);
++    }
++}
++
++void
++HostGPUBridge::scheduleDeadlineService(
++    int fd, uint64_t generation, int revents)
++{
++    auto *event = new EventFunctionWrapper(
++        [this, fd, generation, revents]() {
++            serviceDeadline(fd, generation, revents);
++        },
++        name() + ".host_gpu_deadline_service", true, Event::Minimum_Pri);
++    schedule(event, curTick());
++}
++
++void
++HostGPUBridge::serviceDeadline(
++    int fd, uint64_t generation, int revents)
++{
++    if (revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL))
++        expireClient(fd, generation);
++}
++
++void
++HostGPUBridge::acceptClients()
++{
++    for (size_t accepted = 0; accepted < MaximumAcceptsPerWakeup; ++accepted) {
++        const int fd = ::accept4(listenerFd, nullptr, nullptr,
++                                 SOCK_NONBLOCK | SOCK_CLOEXEC);
++        if (fd < 0) {
++            if (errno == EINTR)
++                continue;
++            if (errno == EAGAIN || errno == EWOULDBLOCK)
++                return;
++            fatal("%s: accept4 failed: %s", name(), std::strerror(errno));
++        }
++        struct ucred credentials = {};
++        socklen_t credentialSize = sizeof(credentials);
++        if (::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &credentials,
++                         &credentialSize) != 0 ||
++            credentialSize != sizeof(credentials) ||
++            credentials.uid != ::geteuid()) {
++            ::close(fd);
++            continue;
++        }
++
++        const ClientAdmission admission = admissionBudget.acquire();
++        if (admission == ClientAdmission::Rejected) {
++            ::close(fd);
++            continue;
++        }
++
++        const int timerFd = ::timerfd_create(
++            CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
++        if (timerFd < 0) {
++            warn("%s: timerfd_create failed for accepted host GPU client: %s",
++                 name(), std::strerror(errno));
++            admissionBudget.release(admission);
++            ::close(fd);
++            continue;
++        }
++        itimerspec timer = {};
++        timer.it_value = monotonicDeadline(handshakeTimeoutMs);
++        if (::timerfd_settime(timerFd, TFD_TIMER_ABSTIME, &timer, nullptr) != 0) {
++            warn("%s: timerfd_settime failed for accepted host GPU client: %s",
++                 name(), std::strerror(errno));
++            admissionBudget.release(admission);
++            ::close(timerFd);
++            ::close(fd);
++            continue;
++        }
++
++        auto client = std::make_unique<Client>();
++        client->fd = fd;
++        client->timerFd = timerFd;
++        client->generation = nextClientGeneration++;
++        if (nextClientGeneration == 0)
++            ++nextClientGeneration;
++        client->uid = credentials.uid;
++        client->gid = credentials.gid;
++        client->pid = credentials.pid;
++        client->admission = admission;
++        client->socketEvent = std::make_unique<ClientEvent>(
++            *this, fd, client->generation);
++        client->deadlineEvent = std::make_unique<DeadlineEvent>(
++            *this, timerFd, fd, client->generation);
++        Client *clientPointer = client.get();
++        clients.emplace(fd, std::move(client));
++        pollQueue.schedule(clientPointer->socketEvent.get());
++        pollQueue.schedule(clientPointer->deadlineEvent.get());
++    }
++}
++
++void
++HostGPUBridge::receiveRecords(int fd)
++{
++    auto found = clients.find(fd);
++    if (found == clients.end() || !found->second->state.canReceive())
++        return;
++    const uint64_t generation = found->second->generation;
++
++    for (size_t attempt = 0; attempt < MaximumRecordsPerWakeup; ++attempt) {
++        std::vector<uint8_t> bytes(maximumRecord);
++        std::array<uint8_t, CMSG_SPACE(sizeof(int) * 4)> control = {};
++        iovec vector = {bytes.data(), bytes.size()};
++        msghdr message = {};
++        message.msg_iov = &vector;
++        message.msg_iovlen = 1;
++        message.msg_control = control.data();
++        message.msg_controllen = control.size();
++        const ssize_t received = ::recvmsg(
++            fd, &message, MSG_DONTWAIT | MSG_CMSG_CLOEXEC);
++        if (received < 0) {
++            if (errno == EINTR)
++                continue;
++            if (errno == EAGAIN || errno == EWOULDBLOCK)
++                return;
++            scheduleClientClose(fd, generation);
++            return;
++        }
++        closeReceivedFileDescriptors(message);
++        if (received == 0 || (message.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) ||
++            message.msg_controllen != 0) {
++            scheduleClientClose(fd, generation);
++            return;
++        }
++        if (pendingRecords.size() >= MaximumPendingRecords) {
++            scheduleClientClose(fd, generation);
++            return;
++        }
++        bytes.resize(static_cast<size_t>(received));
++        found = clients.find(fd);
++        if (found == clients.end() || found->second->generation != generation ||
++            !found->second->state.canReceive()) {
++            return;
++        }
++        found->second->state.noteRecordReceived();
++        pendingRecords.push_back({fd, generation, std::move(bytes)});
++        scheduleRecordService();
++        return;
++    }
++    scheduleClientClose(fd, generation);
++}
++
++void
++HostGPUBridge::expireClient(int fd, uint64_t generation)
++{
++    auto found = clients.find(fd);
++    if (found == clients.end() || found->second->generation != generation ||
++        !found->second->state.handshakeDeadlineApplies()) {
++        return;
++    }
++    inform("host-gpu-timeout fd=%d generation=%llu", fd,
++           static_cast<unsigned long long>(generation));
++    closeClient(fd);
++}
++
++void
++HostGPUBridge::scheduleClientClose(int fd, uint64_t generation)
++{
++    auto *event = new EventFunctionWrapper(
++        [this, fd, generation]() {
++            auto found = clients.find(fd);
++            if (found != clients.end() &&
++                found->second->generation == generation) {
++                closeClient(fd);
++            }
++        },
++        name() + ".host_gpu_close", true);
++    schedule(event, curTick());
++}
++
++void
++HostGPUBridge::closeClient(int fd)
++{
++    auto found = clients.find(fd);
++    if (found == clients.end())
++        return;
++    found->second->state.close();
++    if (activeClientFd == fd)
++        activeClientFd = -1;
++    admissionBudget.release(found->second->admission);
++    clients.erase(found);
++    pendingRecords.erase(std::remove_if(
++        pendingRecords.begin(), pendingRecords.end(),
++        [fd](const PendingRecord &record) { return record.clientFd == fd; }),
++        pendingRecords.end());
++}
++
++void
++HostGPUBridge::scheduleRecordService()
++{
++    if (!recordServiceEvent.scheduled())
++        schedule(recordServiceEvent, curTick());
++}
++
++void
++HostGPUBridge::processRecords()
++{
++    size_t processed = 0;
++    while (!pendingRecords.empty() && processed++ < MaximumPendingRecords) {
++        PendingRecord record = std::move(pendingRecords.front());
++        pendingRecords.pop_front();
++
++        auto found = clients.find(record.clientFd);
++        if (found == clients.end() ||
++            found->second->generation != record.generation) {
++            continue;
++        }
++        Client &client = *found->second;
++        const auto decoded = protocol::decodeHelloRecord(
++            record.bytes.data(), record.bytes.size(), maximumRecord);
++        if (decoded.action == protocol::DecodeAction::Drop) {
++            if (decoded.closeConnection)
++                closeClient(record.clientFd);
++            continue;
++        } else {
++            protocol::Status status = preNegotiationStatus(
++                client.state, sessionEstablished && activeClientFd < 0,
++                decoded.status);
++            protocol::NegotiationResult negotiation;
++            if (status == protocol::Status::Ok) {
++                protocol::NegotiationContext context;
++                context.busy = activeClientFd >= 0 &&
++                    activeClientFd != record.clientFd;
++                context.resourceExhausted =
++                    client.admission == ClientAdmission::ResourceLimited;
++                negotiation = protocol::negotiate(
++                    decoded.header, decoded.hello, identity, context);
++                status = negotiation.status;
++            }
++
++            protocol::Ack ack;
++            ack.status = status;
++            ack.clientNonce = decoded.hello.clientNonce;
++            uint64_t connectionId = 0;
++            if (status == protocol::Status::Ok) {
++                protocol::Nonce serverNonce = {};
++                bool randomReady = randomNonzeroUuid(serverNonce);
++                for (unsigned attempt = 0;
++                     randomReady && attempt < 16; ++attempt) {
++                    randomReady = randomNonzero64(connectionId);
++                    if (!randomReady ||
++                        usedConnectionIds.insert(connectionId).second) {
++                        break;
++                    }
++                    connectionId = 0;
++                }
++                if (connectionId == 0)
++                    randomReady = false;
++                if (!randomReady) {
++                    status = protocol::Status::Internal;
++                    ack.status = status;
++                } else {
++                    ack.selectedMajor = negotiation.selectedMajor;
++                    ack.selectedMinor = negotiation.selectedMinor;
++                    ack.serverNonce = serverNonce;
++                    ack.selected = negotiation.selected;
++                    ack.maximumRecord = negotiation.maximumRecord;
++                    ack.topology.jobUuid = identity.jobUuid;
++                    ack.topology.rank = identity.rank;
++                    ack.topology.worldSize = identity.worldSize;
++                }
++            }
++            const auto response = protocol::encodeAck(
++                decoded.header, ack, identity, connectionId);
++            const bool success = status == protocol::Status::Ok;
++            client.state.beginAck(success);
++            cancelDeadline(client);
++            client.socketEvent->setReadable(false);
++            if (success)
++                activeClientFd = record.clientFd;
++            sendAck(record.clientFd, record.generation, response, status,
++                    success);
++        }
++    }
++    if (!pendingRecords.empty())
++        scheduleRecordService();
++}
++
++void
++HostGPUBridge::sendAck(int fd, uint64_t generation,
++                       std::vector<uint8_t> record,
++                       protocol::Status status, bool success)
++{
++    auto found = clients.find(fd);
++    if (found == clients.end() || found->second->generation != generation)
++        return;
++    Client &client = *found->second;
++    if (!client.outbound.empty()) {
++        closeClient(fd);
++        return;
++    }
++    client.outbound = std::move(record);
++    client.outboundStatus = status;
++    client.outboundSuccess = success;
++    flushClient(fd);
++}
++
++void
++HostGPUBridge::flushClient(int fd)
++{
++    auto found = clients.find(fd);
++    if (found == clients.end())
++        return;
++    Client &client = *found->second;
++    if (client.outbound.empty())
++        return;
++    const ssize_t sent = ::send(fd, client.outbound.data(),
++                                client.outbound.size(), MSG_NOSIGNAL);
++    if (sent < 0) {
++        if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
++            client.socketEvent->setWritable(true);
++            return;
++        }
++        closeClient(fd);
++        return;
++    }
++    if (static_cast<size_t>(sent) != client.outbound.size()) {
++        closeClient(fd);
++        return;
++    }
++
++    client.outbound.clear();
++    client.socketEvent->setWritable(false);
++    completeAck(fd, client.generation);
++}
++
++void
++HostGPUBridge::completeAck(int fd, uint64_t generation)
++{
++    auto found = clients.find(fd);
++    if (found == clients.end() || found->second->generation != generation)
++        return;
++    Client &client = *found->second;
++    const protocol::Status status = client.outboundStatus;
++    const bool success = client.outboundSuccess;
++    client.state.noteAckSent();
++    inform("host-gpu-handshake status=%s fd=%d generation=%llu",
++           protocol::statusName(status), fd,
++           static_cast<unsigned long long>(generation));
++    if (!success) {
++        closeClient(fd);
++        return;
++    }
++    sessionEstablished = true;
++    activeClientFd = fd;
++    client.socketEvent->setReadable(true);
++    if (exitOnHandshake)
++        exitSimLoop("host GPU transport handshake complete");
++}
++
++void
++HostGPUBridge::cancelDeadline(Client &client)
++{
++    client.deadlineEvent.reset();
++    if (client.timerFd >= 0) {
++        ::close(client.timerFd);
++        client.timerFd = -1;
++    }
++}
++
++void
++HostGPUBridge::boundedStartupWait()
++{
++    if (startupTimeoutMs == 0)
++        return;
++    const timespec deadline = monotonicDeadline(startupTimeoutMs);
++    while (pendingRecords.empty()) {
++        std::vector<pollfd> descriptors;
++        descriptors.push_back({listenerFd, POLLIN, 0});
++        struct StartupDescriptor
++        {
++            int fd;
++            uint64_t generation;
++            bool deadline;
++        };
++        std::vector<StartupDescriptor> clientDescriptors;
++        for (const auto &[fd, client] : clients) {
++            descriptors.push_back({fd, POLLIN, 0});
++            clientDescriptors.push_back({fd, client->generation, false});
++            descriptors.push_back({client->timerFd, POLLIN, 0});
++            clientDescriptors.push_back({fd, client->generation, true});
++        }
++        int ready = -1;
++        while (ready < 0) {
++            const int remaining = millisecondsRemaining(deadline);
++            fatal_if(remaining == 0,
++                     "%s: startup_timeout_ms expired before a complete host "
++                     "GPU record arrived", name());
++            ready = ::poll(descriptors.data(), descriptors.size(), remaining);
++            if (ready < 0 && errno == EINTR)
++                continue;
++            break;
++        }
++        fatal_if(ready == 0,
++                 "%s: startup_timeout_ms expired before a complete host GPU "
++                 "record arrived", name());
++        fatal_if(ready < 0, "%s: startup poll failed: %s", name(),
++                 std::strerror(errno));
++
++        if (descriptors[0].revents & POLLIN)
++            acceptClients();
++        for (size_t index = 1; index < descriptors.size(); ++index) {
++            const auto [fd, generation, deadlineReady] =
++                clientDescriptors[index - 1];
++            if (deadlineReady && descriptors[index].revents != 0)
++                expireClient(fd, generation);
++        }
++        for (size_t index = 1; index < descriptors.size(); ++index) {
++            const auto [fd, generation, deadlineReady] =
++                clientDescriptors[index - 1];
++            if (descriptors[index].revents == 0)
++                continue;
++            if (!deadlineReady) {
++                if (descriptors[index].revents & POLLIN)
++                    receiveRecords(fd);
++                if (descriptors[index].revents &
++                    (POLLERR | POLLHUP | POLLNVAL)) {
++                    auto found = clients.find(fd);
++                    if (found != clients.end() &&
++                        found->second->generation == generation) {
++                        closeClient(fd);
++                    }
++                }
++            }
++        }
++    }
++}
++
++bool
++HostGPUBridge::randomNonzero64(uint64_t &value)
++{
++    for (unsigned attempt = 0; attempt < 8; ++attempt) {
++        value = 0;
++        size_t offset = 0;
++        unsigned interruptions = 0;
++        while (offset < sizeof(value)) {
++            const ssize_t result = ::getrandom(
++                reinterpret_cast<uint8_t *>(&value) + offset,
++                sizeof(value) - offset, GRND_NONBLOCK);
++            if (result < 0 && errno == EINTR && interruptions++ < 16)
++                continue;
++            if (result <= 0)
++                return false;
++            offset += static_cast<size_t>(result);
++        }
++        if (value != 0)
++            return true;
++    }
++    return false;
++}
++
++bool
++HostGPUBridge::randomNonzeroUuid(protocol::Uuid &value)
++{
++    for (unsigned attempt = 0; attempt < 8; ++attempt) {
++        value.fill(0);
++        size_t offset = 0;
++        unsigned interruptions = 0;
++        while (offset < value.size()) {
++            const ssize_t result = ::getrandom(
++                value.data() + offset, value.size() - offset, GRND_NONBLOCK);
++            if (result < 0 && errno == EINTR && interruptions++ < 16)
++                continue;
++            if (result <= 0)
++                return false;
++            offset += static_cast<size_t>(result);
++        }
++        if (!protocol::isZero(value))
++            return true;
++    }
++    return false;
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_bridge.hh b/src/dev/amdgpu/host_gpu_bridge.hh
+new file mode 100644
+index 000000000..c50e95c8d
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_bridge.hh
+@@ -0,0 +1,206 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_BRIDGE_HH__
++#define __DEV_AMDGPU_HOST_GPU_BRIDGE_HH__
++
++#include <sys/types.h>
++
++#include <array>
++#include <cstdint>
++#include <deque>
++#include <memory>
++#include <string>
++#include <unordered_map>
++#include <unordered_set>
++#include <vector>
++
++#include "base/pollevent.hh"
++#include "dev/amdgpu/host_gpu_connection_state.hh"
++#include "dev/amdgpu/host_gpu_protocol.hh"
++#include "params/HostGPUBridge.hh"
++#include "sim/eventq.hh"
++#include "sim/sim_object.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++class HostGPUBridge : public SimObject
++{
++  public:
++    explicit HostGPUBridge(const HostGPUBridgeParams &params);
++    ~HostGPUBridge() override;
++
++    void init() override;
++    void startup() override;
++
++  private:
++    static constexpr size_t MaximumRegularClients = 8;
++    static constexpr size_t MaximumExcessClients = 8;
++
++    struct Client;
++
++    class ListenEvent : public PollEvent
++    {
++      public:
++        ListenEvent(HostGPUBridge &bridge, int fd);
++        void process(int revents) override;
++
++      private:
++        HostGPUBridge &bridge;
++    };
++
++    class ClientEvent : public PollEvent
++    {
++      public:
++        ClientEvent(HostGPUBridge &bridge, int fd, uint64_t generation);
++        void process(int revents) override;
++        void setWritable(bool writable);
++        void setReadable(bool readable);
++
++      private:
++        HostGPUBridge &bridge;
++        int clientFd;
++        uint64_t generation;
++    };
++
++    class DeadlineEvent : public PollEvent
++    {
++      public:
++        DeadlineEvent(HostGPUBridge &bridge, int timerFd, int clientFd,
++                      uint64_t generation);
++        void process(int revents) override;
++
++      private:
++        HostGPUBridge &bridge;
++        int clientFd;
++        uint64_t generation;
++    };
++
++    struct PendingRecord
++    {
++        int clientFd = -1;
++        uint64_t generation = 0;
++        std::vector<uint8_t> bytes;
++    };
++
++    struct Client
++    {
++        int fd = -1;
++        int timerFd = -1;
++        uint64_t generation = 0;
++        uid_t uid = 0;
++        gid_t gid = 0;
++        pid_t pid = 0;
++        HostGPUConnectionState state;
++        std::unique_ptr<ClientEvent> socketEvent;
++        std::unique_ptr<DeadlineEvent> deadlineEvent;
++        std::vector<uint8_t> outbound;
++        protocol::Status outboundStatus = protocol::Status::Internal;
++        bool outboundSuccess = false;
++        ClientAdmission admission = ClientAdmission::Rejected;
++
++        ~Client();
++    };
++
++    void validateConfiguration();
++    void prepareEndpoint();
++    void abandonEndpointPreparation();
++    bool cleanupEndpointAliases();
++    bool cleanupEndpoint();
++    void shutdown();
++    void scheduleListenerService(int revents);
++    void serviceListener(int revents);
++    void scheduleClientService(int fd, uint64_t generation, int revents);
++    void serviceClient(int fd, uint64_t generation, int revents);
++    void scheduleDeadlineService(int fd, uint64_t generation, int revents);
++    void serviceDeadline(int fd, uint64_t generation, int revents);
++    void acceptClients();
++    void receiveRecords(int fd);
++    void expireClient(int fd, uint64_t generation);
++    void closeClient(int fd);
++    void scheduleClientClose(int fd, uint64_t generation);
++    void processRecords();
++    void scheduleRecordService();
++    void sendAck(int fd, uint64_t generation,
++                 std::vector<uint8_t> record,
++                 protocol::Status status, bool success);
++    void flushClient(int fd);
++    void completeAck(int fd, uint64_t generation);
++    void cancelDeadline(Client &client);
++    void boundedStartupWait();
++
++    bool randomNonzero64(uint64_t &value);
++    bool randomNonzeroUuid(protocol::Uuid &value);
++
++    const std::string endpoint;
++    const std::string configuredDaemonUuid;
++    const std::string configuredJobUuid;
++    const uint64_t epoch;
++    const uint32_t rank;
++    const uint32_t worldSize;
++    const uint32_t startupTimeoutMs;
++    const uint32_t handshakeTimeoutMs;
++    const uint32_t maximumRecord;
++    const bool exitOnHandshake;
++
++    protocol::ServerIdentity identity;
++    int directoryFd = -1;
++    int lockFd = -1;
++    int listenerFd = -1;
++    int endpointPinFd = -1;
++    dev_t endpointDevice = 0;
++    ino_t endpointInode = 0;
++    std::string parentPath;
++    std::string endpointName;
++    std::string lockName;
++    std::string temporaryName;
++    bool endpointAliasPending = false;
++    bool temporaryAliasPending = false;
++    int endpointCleanupError = 0;
++    int temporaryCleanupError = 0;
++    std::unique_ptr<ListenEvent> listenEvent;
++    std::unordered_map<int, std::unique_ptr<Client>> clients;
++    ClientAdmissionBudget admissionBudget{
++        MaximumRegularClients, MaximumExcessClients};
++    std::deque<PendingRecord> pendingRecords;
++    EventFunctionWrapper recordServiceEvent;
++    uint64_t nextClientGeneration = 1;
++    std::unordered_set<uint64_t> usedConnectionIds;
++    int activeClientFd = -1;
++    bool sessionEstablished = false;
++    bool exitCallbackRegistered = false;
++    bool shutdownDone = false;
++    bool endpointCleanupDone = false;
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_BRIDGE_HH__
+diff --git a/src/dev/amdgpu/host_gpu_connection_state.hh b/src/dev/amdgpu/host_gpu_connection_state.hh
+new file mode 100644
+index 000000000..597f85c10
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_connection_state.hh
+@@ -0,0 +1,178 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_CONNECTION_STATE_HH__
++#define __DEV_AMDGPU_HOST_GPU_CONNECTION_STATE_HH__
++
++#include <cassert>
++#include <cstddef>
++
++#include "dev/amdgpu/host_gpu_protocol.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++enum class ConnectionPhase
++{
++    AwaitHello,
++    AckPending,
++    Established,
++    Closing,
++};
++
++enum class ClientAdmission
++{
++    Regular,
++    ResourceLimited,
++    Rejected,
++};
++
++class ClientAdmissionBudget
++{
++  public:
++    ClientAdmissionBudget(size_t maximumRegular, size_t maximumLimited)
++        : maximumRegular(maximumRegular), maximumLimited(maximumLimited)
++    {
++        assert(maximumRegular > 0);
++        assert(maximumLimited > 0);
++    }
++
++    ClientAdmission acquire()
++    {
++        if (regularCount < maximumRegular) {
++            ++regularCount;
++            return ClientAdmission::Regular;
++        }
++        if (limitedCount < maximumLimited) {
++            ++limitedCount;
++            return ClientAdmission::ResourceLimited;
++        }
++        return ClientAdmission::Rejected;
++    }
++
++    void release(ClientAdmission admission)
++    {
++        if (admission == ClientAdmission::Regular) {
++            assert(regularCount > 0);
++            --regularCount;
++        } else if (admission == ClientAdmission::ResourceLimited) {
++            assert(limitedCount > 0);
++            --limitedCount;
++        } else {
++            assert(false);
++        }
++    }
++
++    void reset()
++    {
++        regularCount = 0;
++        limitedCount = 0;
++    }
++
++    size_t regular() const { return regularCount; }
++    size_t limited() const { return limitedCount; }
++
++  private:
++    const size_t maximumRegular;
++    const size_t maximumLimited;
++    size_t regularCount = 0;
++    size_t limitedCount = 0;
++};
++
++class HostGPUConnectionState
++{
++  public:
++    ConnectionPhase phase() const { return currentPhase; }
++    bool committed() const { return sessionCommitted; }
++    bool recordPending() const { return pendingRecord; }
++    bool canReceive() const
++    {
++        return !pendingRecord &&
++            (currentPhase == ConnectionPhase::AwaitHello ||
++             currentPhase == ConnectionPhase::Established);
++    }
++    bool handshakeDeadlineApplies() const
++    {
++        return currentPhase == ConnectionPhase::AwaitHello;
++    }
++
++    void noteRecordReceived()
++    {
++        assert(canReceive());
++        pendingRecord = true;
++    }
++
++    void beginAck(bool success)
++    {
++        assert(pendingRecord);
++        pendingRecord = false;
++        successfulAck = success;
++        currentPhase = ConnectionPhase::AckPending;
++    }
++
++    void noteAckSent()
++    {
++        assert(currentPhase == ConnectionPhase::AckPending);
++        if (successfulAck) {
++            sessionCommitted = true;
++            currentPhase = ConnectionPhase::Established;
++        } else {
++            currentPhase = ConnectionPhase::Closing;
++        }
++    }
++
++    void close()
++    {
++        pendingRecord = false;
++        currentPhase = ConnectionPhase::Closing;
++    }
++
++  private:
++    ConnectionPhase currentPhase = ConnectionPhase::AwaitHello;
++    bool pendingRecord = false;
++    bool successfulAck = false;
++    bool sessionCommitted = false;
++};
++
++inline protocol::Status
++preNegotiationStatus(const HostGPUConnectionState &state,
++                     bool disconnectedSession,
++                     protocol::Status decodedStatus)
++{
++    if ((state.phase() != ConnectionPhase::AwaitHello || disconnectedSession) &&
++        decodedStatus != protocol::Status::Malformed) {
++        return protocol::Status::ProtocolState;
++    }
++    return decodedStatus;
++}
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_CONNECTION_STATE_HH__
+diff --git a/src/dev/amdgpu/host_gpu_protocol.cc b/src/dev/amdgpu/host_gpu_protocol.cc
+new file mode 100644
+index 000000000..65c7f273d
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_protocol.cc
+@@ -0,0 +1,601 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_protocol.hh"
++
++#include <algorithm>
++#include <array>
++#include <cstring>
++#include <iomanip>
++#include <limits>
++#include <set>
++#include <sstream>
++
++namespace gem5
++{
++namespace hostgpu
++{
++namespace protocol
++{
++
++namespace
++{
++
++constexpr std::array<uint8_t, 8> Magic = {
++    'G', 'S', 'I', 'M', 'R', 'P', 'C', 0
++};
++constexpr size_t CrcOffset = 64;
++constexpr size_t TopologyValueBytes = 24;
++
++uint16_t
++load16(const uint8_t *data)
++{
++    return (static_cast<uint16_t>(data[0]) << 8) |
++           static_cast<uint16_t>(data[1]);
++}
++
++uint32_t
++load32(const uint8_t *data)
++{
++    return (static_cast<uint32_t>(data[0]) << 24) |
++           (static_cast<uint32_t>(data[1]) << 16) |
++           (static_cast<uint32_t>(data[2]) << 8) |
++           static_cast<uint32_t>(data[3]);
++}
++
++uint64_t
++load64(const uint8_t *data)
++{
++    uint64_t value = 0;
++    for (size_t index = 0; index < sizeof(value); ++index)
++        value = (value << 8) | data[index];
++    return value;
++}
++
++void
++store16(std::vector<uint8_t> &data, size_t offset, uint16_t value)
++{
++    data[offset] = static_cast<uint8_t>(value >> 8);
++    data[offset + 1] = static_cast<uint8_t>(value);
++}
++
++void
++store32(std::vector<uint8_t> &data, size_t offset, uint32_t value)
++{
++    data[offset] = static_cast<uint8_t>(value >> 24);
++    data[offset + 1] = static_cast<uint8_t>(value >> 16);
++    data[offset + 2] = static_cast<uint8_t>(value >> 8);
++    data[offset + 3] = static_cast<uint8_t>(value);
++}
++
++void
++store64(std::vector<uint8_t> &data, size_t offset, uint64_t value)
++{
++    for (size_t index = 0; index < sizeof(value); ++index) {
++        data[offset + sizeof(value) - index - 1] =
++            static_cast<uint8_t>(value);
++        value >>= 8;
++    }
++}
++
++template <size_t N>
++void
++storeBytes(std::vector<uint8_t> &data, size_t offset,
++           const std::array<uint8_t, N> &value)
++{
++    std::copy(value.begin(), value.end(), data.begin() + offset);
++}
++
++template <size_t N>
++std::array<uint8_t, N>
++loadBytes(const uint8_t *data)
++{
++    std::array<uint8_t, N> value;
++    std::copy(data, data + N, value.begin());
++    return value;
++}
++
++bool
++versionOrdered(const Hello &hello)
++{
++    return std::make_pair(hello.minimumMajor, hello.minimumMinor) <=
++           std::make_pair(hello.maximumMajor, hello.maximumMinor);
++}
++
++void
++appendTlv(std::vector<uint8_t> &payload, uint16_t type, uint16_t flags,
++          const uint8_t *value, size_t valueSize)
++{
++    const size_t start = payload.size();
++    const size_t unpadded = 8 + valueSize;
++    const size_t padded = (unpadded + 7) & ~size_t(7);
++    payload.resize(start + padded, 0);
++    store16(payload, start, type);
++    store16(payload, start + 2, flags);
++    store32(payload, start + 4, static_cast<uint32_t>(valueSize));
++    if (valueSize != 0)
++        std::copy(value, value + valueSize, payload.begin() + start + 8);
++}
++
++void
++appendTopology(std::vector<uint8_t> &payload, const Topology &topology)
++{
++    std::array<uint8_t, TopologyValueBytes> value = {};
++    std::copy(topology.jobUuid.begin(), topology.jobUuid.end(), value.begin());
++    std::vector<uint8_t> encoded(value.begin(), value.end());
++    store32(encoded, 16, topology.rank);
++    store32(encoded, 20, topology.worldSize);
++    appendTlv(payload, TopologyTlvType, CriticalTlvFlag,
++              encoded.data(), encoded.size());
++}
++
++std::vector<uint8_t>
++encodeFrame(const Header &header, const std::vector<uint8_t> &payload)
++{
++    std::vector<uint8_t> frame(HeaderBytes + payload.size(), 0);
++    std::copy(Magic.begin(), Magic.end(), frame.begin());
++    store16(frame, 8, 1);
++    store16(frame, 10, 0);
++    store16(frame, 12, HeaderBytes);
++    store16(frame, 14, static_cast<uint16_t>(header.messageType));
++    store32(frame, 16, 0);
++    store32(frame, 20, static_cast<uint32_t>(payload.size()));
++    store64(frame, 24, header.requestId);
++    storeBytes(frame, 32, header.daemonUuid);
++    store64(frame, 48, header.connectionId);
++    store64(frame, 56, header.jobEpoch);
++    std::copy(payload.begin(), payload.end(), frame.begin() + HeaderBytes);
++    store32(frame, CrcOffset, crc32c(frame.data(), frame.size()));
++    return frame;
++}
++
++DecodeResult
++drop(const std::string &reason, bool closeConnection = true)
++{
++    DecodeResult result;
++    result.action = DecodeAction::Drop;
++    result.closeConnection = closeConnection;
++    result.reason = reason;
++    return result;
++}
++
++DecodeResult
++acknowledge(Status status, const std::string &reason,
++            const Header &header, const Hello &hello, bool hasHello = true)
++{
++    DecodeResult result;
++    result.action = DecodeAction::Acknowledge;
++    result.status = status;
++    result.reason = reason;
++    result.header = header;
++    result.hello = hello;
++    result.hasHello = hasHello;
++    return result;
++}
++
++bool
++parseTlvs(const uint8_t *data, size_t size, Hello &hello,
++          Status &failure, std::string &reason)
++{
++    std::set<uint16_t> seen;
++    size_t offset = 0;
++    hello.hasTopology = false;
++
++    while (offset < size) {
++        if (size - offset < 8) {
++            failure = Status::Malformed;
++            reason = "truncated TLV header";
++            return false;
++        }
++
++        const uint16_t type = load16(data + offset);
++        const uint16_t flags = load16(data + offset + 2);
++        const uint32_t valueSize = load32(data + offset + 4);
++        if ((flags & ~CriticalTlvFlag) != 0) {
++            failure = Status::Malformed;
++            reason = "invalid TLV flags";
++            return false;
++        }
++        if (!seen.insert(type).second) {
++            failure = Status::Malformed;
++            reason = "duplicate TLV type";
++            return false;
++        }
++
++        const size_t valueOffset = offset + 8;
++        if (valueSize > size - valueOffset) {
++            failure = Status::Malformed;
++            reason = "truncated TLV value";
++            return false;
++        }
++        const size_t valueEnd = valueOffset + valueSize;
++        if (valueEnd > std::numeric_limits<size_t>::max() - 7) {
++            failure = Status::Malformed;
++            reason = "TLV length overflow";
++            return false;
++        }
++        const size_t paddedEnd = (valueEnd + 7) & ~size_t(7);
++        if (paddedEnd > size) {
++            failure = Status::Malformed;
++            reason = "truncated TLV padding";
++            return false;
++        }
++        if (std::any_of(data + valueEnd, data + paddedEnd,
++                        [](uint8_t byte) { return byte != 0; })) {
++            failure = Status::Malformed;
++            reason = "nonzero TLV padding";
++            return false;
++        }
++
++        if (type == TopologyTlvType) {
++            if (flags != CriticalTlvFlag || valueSize != TopologyValueBytes) {
++                failure = Status::Malformed;
++                reason = "malformed topology TLV";
++                return false;
++            }
++            hello.topology.jobUuid = loadBytes<UuidBytes>(data + valueOffset);
++            hello.topology.rank = load32(data + valueOffset + 16);
++            hello.topology.worldSize = load32(data + valueOffset + 20);
++            hello.hasTopology = true;
++        } else if ((flags & CriticalTlvFlag) != 0) {
++            hello.unknownCriticalTlv = true;
++        } else {
++            Tlv tlv;
++            tlv.type = type;
++            tlv.flags = flags;
++            tlv.value.assign(data + valueOffset, data + valueEnd);
++            hello.optionalTlvs.push_back(std::move(tlv));
++        }
++        offset = paddedEnd;
++    }
++
++    return true;
++}
++
++} // anonymous namespace
++
++bool
++isZero(const Uuid &value)
++{
++    return std::all_of(value.begin(), value.end(),
++                       [](uint8_t byte) { return byte == 0; });
++}
++
++bool
++parseUuid(const std::string &text, Uuid &value)
++{
++    std::string hex;
++    if (text.size() == 32) {
++        hex = text;
++    } else if (text.size() == 36) {
++        constexpr std::array<size_t, 4> hyphens = {8, 13, 18, 23};
++        for (size_t index = 0; index < text.size(); ++index) {
++            if (std::find(hyphens.begin(), hyphens.end(), index) !=
++                    hyphens.end()) {
++                if (text[index] != '-')
++                    return false;
++            } else {
++                hex.push_back(text[index]);
++            }
++        }
++    } else {
++        return false;
++    }
++
++    auto digit = [](char character) -> int {
++        if (character >= '0' && character <= '9')
++            return character - '0';
++        if (character >= 'a' && character <= 'f')
++            return character - 'a' + 10;
++        if (character >= 'A' && character <= 'F')
++            return character - 'A' + 10;
++        return -1;
++    };
++    for (size_t index = 0; index < value.size(); ++index) {
++        const int high = digit(hex[index * 2]);
++        const int low = digit(hex[index * 2 + 1]);
++        if (high < 0 || low < 0)
++            return false;
++        value[index] = static_cast<uint8_t>((high << 4) | low);
++    }
++    return true;
++}
++
++std::string
++formatUuid(const Uuid &value)
++{
++    std::ostringstream stream;
++    stream << std::hex << std::setfill('0');
++    for (uint8_t byte : value)
++        stream << std::setw(2) << static_cast<unsigned>(byte);
++    return stream.str();
++}
++
++Capabilities
++topologyCapability()
++{
++    Capabilities capabilities = {};
++    capabilities[0] = 1;
++    return capabilities;
++}
++
++bool
++capabilitySubset(const Capabilities &subset, const Capabilities &superset)
++{
++    for (size_t index = 0; index < subset.size(); ++index) {
++        if ((subset[index] & ~superset[index]) != 0)
++            return false;
++    }
++    return true;
++}
++
++uint32_t
++crc32c(const uint8_t *data, size_t size)
++{
++    uint32_t crc = 0xffffffffU;
++    for (size_t index = 0; index < size; ++index) {
++        uint8_t byte = data[index];
++        if (index >= CrcOffset && index < CrcOffset + sizeof(uint32_t))
++            byte = 0;
++        crc ^= byte;
++        for (unsigned bit = 0; bit < 8; ++bit) {
++            const uint32_t mask = 0U - (crc & 1U);
++            crc = (crc >> 1) ^ (0x82f63b78U & mask);
++        }
++    }
++    return crc ^ 0xffffffffU;
++}
++
++DecodeResult
++decodeHelloRecord(const uint8_t *record, size_t size,
++                  uint32_t configuredMaximum)
++{
++    if (record == nullptr || size < HeaderBytes ||
++        size > MaximumRecordBytes || size > MaximumHandshakeBytes ||
++        size > configuredMaximum) {
++        return drop("record size");
++    }
++    if (!std::equal(Magic.begin(), Magic.end(), record) ||
++        load16(record + 8) != 1 || load16(record + 10) != 0) {
++        return drop("framing");
++    }
++    if (load16(record + 12) != HeaderBytes ||
++        load32(record + 20) != size - HeaderBytes) {
++        return drop("record length");
++    }
++
++    const uint16_t rawType = load16(record + 14);
++    if ((rawType != static_cast<uint16_t>(MessageType::Hello) &&
++         rawType != static_cast<uint16_t>(MessageType::HelloAck)) ||
++        load32(record + 16) != 0) {
++        return drop("message type or flags");
++    }
++
++    Header header;
++    header.messageType = static_cast<MessageType>(rawType);
++    header.requestId = load64(record + 24);
++    header.daemonUuid = loadBytes<UuidBytes>(record + 32);
++    header.connectionId = load64(record + 48);
++    header.jobEpoch = load64(record + 56);
++    if (header.requestId == 0 || load32(record + 68) != 0 ||
++        load64(record + 72) != 0) {
++        return drop("request or reserved field");
++    }
++    if (crc32c(record, size) != load32(record + CrcOffset))
++        return drop("CRC32C");
++
++    const uint8_t *payload = record + HeaderBytes;
++    const size_t payloadSize = size - HeaderBytes;
++    if (header.messageType != MessageType::Hello)
++        return drop("expected HELLO");
++    if (header.connectionId != 0)
++        return drop("HELLO connection ID");
++    if (payloadSize < HelloFixedBytes)
++        return drop("uncorrelatable short HELLO");
++
++    Hello hello;
++    hello.minimumMajor = load16(payload);
++    hello.minimumMinor = load16(payload + 2);
++    hello.maximumMajor = load16(payload + 4);
++    hello.maximumMinor = load16(payload + 6);
++    hello.clientNonce = loadBytes<UuidBytes>(payload + 8);
++    hello.offered = loadBytes<CapabilityBytes>(payload + 24);
++    hello.required = loadBytes<CapabilityBytes>(payload + 56);
++    hello.receiveMaximum = load32(payload + 88);
++    const uint16_t role = load16(payload + 92);
++    const uint16_t reserved = load16(payload + 94);
++
++    if (isZero(hello.clientNonce))
++        return drop("zero client nonce");
++
++    if (role != RuntimeRole || reserved != 0 ||
++        hello.receiveMaximum < MinimumRecordBytes ||
++        hello.receiveMaximum > MaximumRecordBytes || !versionOrdered(hello) ||
++        !capabilitySubset(hello.required, hello.offered)) {
++        return acknowledge(Status::Malformed, "invalid HELLO fixed fields",
++                           header, hello);
++    }
++
++    Status tlvStatus = Status::Malformed;
++    std::string tlvReason;
++    if (!parseTlvs(payload + HelloFixedBytes,
++                   payloadSize - HelloFixedBytes, hello,
++                   tlvStatus, tlvReason)) {
++        return acknowledge(tlvStatus, tlvReason, header, hello);
++    }
++    const bool topologyOffered = (hello.offered[0] & 1) != 0;
++    if (hello.hasTopology != topologyOffered) {
++        return acknowledge(Status::Malformed,
++                           "topology TLV/capability mismatch", header, hello);
++    }
++    return acknowledge(Status::Ok, "valid HELLO", header, hello);
++}
++
++NegotiationResult
++negotiate(const Header &header, const Hello &hello,
++          const ServerIdentity &server, const NegotiationContext &context)
++{
++    NegotiationResult result;
++    result.maximumRecord = std::min(server.maximumRecord,
++                                    hello.receiveMaximum);
++    if (result.maximumRecord < MinimumRecordBytes ||
++        result.maximumRecord > MaximumRecordBytes) {
++        result.maximumRecord = MinimumRecordBytes;
++    }
++
++    if (!capabilitySubset(hello.required, hello.offered)) {
++        result.status = Status::Malformed;
++        return result;
++    }
++    constexpr auto implemented = std::make_pair(uint16_t(1), uint16_t(0));
++    if (std::make_pair(hello.minimumMajor, hello.minimumMinor) > implemented ||
++        implemented >
++            std::make_pair(hello.maximumMajor, hello.maximumMinor)) {
++        result.status = Status::UnsupportedVersion;
++        return result;
++    }
++
++    for (size_t index = 0; index < result.selected.size(); ++index)
++        result.selected[index] = hello.offered[index] & server.supported[index];
++    if (hello.unknownCriticalTlv ||
++        !capabilitySubset(hello.required, result.selected) ||
++        (hello.offered[0] & 1) == 0 ||
++        (hello.required[0] & 1) == 0 ||
++        (result.selected[0] & 1) == 0) {
++        result.selected.fill(0);
++        result.status = Status::UnsupportedCapability;
++        return result;
++    }
++    if (!isZero(header.daemonUuid) && header.daemonUuid != server.daemonUuid) {
++        result.selected.fill(0);
++        result.status = Status::InstanceMismatch;
++        return result;
++    }
++
++    const bool topologyWildcard = isZero(hello.topology.jobUuid) &&
++        hello.topology.rank == std::numeric_limits<uint32_t>::max() &&
++        hello.topology.worldSize == 0;
++    const bool topologyExact = hello.topology.jobUuid == server.jobUuid &&
++        hello.topology.rank == server.rank &&
++        hello.topology.worldSize == server.worldSize;
++    if ((!topologyWildcard && !topologyExact) ||
++        (header.jobEpoch != 0 && header.jobEpoch != server.jobEpoch)) {
++        result.selected.fill(0);
++        result.status = Status::TopologyMismatch;
++        return result;
++    }
++    if (context.busy) {
++        result.selected.fill(0);
++        result.status = Status::Busy;
++        return result;
++    }
++    if (context.resourceExhausted) {
++        result.selected.fill(0);
++        result.status = Status::ResourceExhausted;
++        return result;
++    }
++    result.status = Status::Ok;
++    result.selectedMajor = 1;
++    result.selectedMinor = 0;
++    return result;
++}
++
++std::vector<uint8_t>
++encodeHello(const Header &header, const Hello &hello)
++{
++    std::vector<uint8_t> payload(HelloFixedBytes, 0);
++    store16(payload, 0, hello.minimumMajor);
++    store16(payload, 2, hello.minimumMinor);
++    store16(payload, 4, hello.maximumMajor);
++    store16(payload, 6, hello.maximumMinor);
++    storeBytes(payload, 8, hello.clientNonce);
++    storeBytes(payload, 24, hello.offered);
++    storeBytes(payload, 56, hello.required);
++    store32(payload, 88, hello.receiveMaximum);
++    store16(payload, 92, RuntimeRole);
++    if (hello.hasTopology)
++        appendTopology(payload, hello.topology);
++    for (const auto &tlv : hello.optionalTlvs) {
++        appendTlv(payload, tlv.type, tlv.flags,
++                  tlv.value.data(), tlv.value.size());
++    }
++    Header encodedHeader = header;
++    encodedHeader.messageType = MessageType::Hello;
++    encodedHeader.connectionId = 0;
++    return encodeFrame(encodedHeader, payload);
++}
++
++std::vector<uint8_t>
++encodeAck(const Header &request, const Ack &ack,
++          const ServerIdentity &server, uint64_t connectionId)
++{
++    std::vector<uint8_t> payload(AckFixedBytes, 0);
++    const bool success = ack.status == Status::Ok;
++    store16(payload, 0, success ? ack.selectedMajor : 0);
++    store16(payload, 2, success ? ack.selectedMinor : 0);
++    store32(payload, 4, static_cast<uint32_t>(ack.status));
++    storeBytes(payload, 8, ack.clientNonce);
++    if (success)
++        storeBytes(payload, 24, ack.serverNonce);
++    if (success)
++        storeBytes(payload, 40, ack.selected);
++    store32(payload, 72, success ? ack.maximumRecord : server.maximumRecord);
++    store16(payload, 76, DaemonRole);
++    if (success)
++        appendTopology(payload, ack.topology);
++
++    Header header;
++    header.messageType = MessageType::HelloAck;
++    header.requestId = request.requestId;
++    header.daemonUuid = server.daemonUuid;
++    header.connectionId = success ? connectionId : 0;
++    header.jobEpoch = server.jobEpoch;
++    return encodeFrame(header, payload);
++}
++
++const char *
++statusName(Status status)
++{
++    switch (status) {
++      case Status::Ok: return "OK";
++      case Status::Malformed: return "MALFORMED";
++      case Status::UnsupportedVersion: return "UNSUPPORTED_VERSION";
++      case Status::UnsupportedCapability: return "UNSUPPORTED_CAPABILITY";
++      case Status::InstanceMismatch: return "INSTANCE_MISMATCH";
++      case Status::TopologyMismatch: return "TOPOLOGY_MISMATCH";
++      case Status::Unauthorized: return "UNAUTHORIZED";
++      case Status::Busy: return "BUSY";
++      case Status::ResourceExhausted: return "RESOURCE_EXHAUSTED";
++      case Status::ProtocolState: return "PROTOCOL_STATE";
++      case Status::Internal: return "INTERNAL";
++    }
++    return "UNKNOWN";
++}
++
++} // namespace protocol
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_protocol.hh b/src/dev/amdgpu/host_gpu_protocol.hh
+new file mode 100644
+index 000000000..12e8ea999
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_protocol.hh
+@@ -0,0 +1,203 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_PROTOCOL_HH__
++#define __DEV_AMDGPU_HOST_GPU_PROTOCOL_HH__
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <string>
++#include <vector>
++
++namespace gem5
++{
++namespace hostgpu
++{
++namespace protocol
++{
++
++constexpr size_t HeaderBytes = 80;
++constexpr size_t HelloFixedBytes = 96;
++constexpr size_t AckFixedBytes = 80;
++constexpr size_t CapabilityBytes = 32;
++constexpr size_t UuidBytes = 16;
++constexpr uint32_t MinimumRecordBytes = 4096;
++constexpr uint32_t MaximumRecordBytes = 65536;
++constexpr uint32_t MaximumHandshakeBytes = 4096;
++constexpr uint16_t TopologyTlvType = 1;
++constexpr uint16_t CriticalTlvFlag = 1;
++constexpr uint16_t RuntimeRole = 1;
++constexpr uint16_t DaemonRole = 2;
++
++using Uuid = std::array<uint8_t, UuidBytes>;
++using Capabilities = std::array<uint8_t, CapabilityBytes>;
++using Nonce = std::array<uint8_t, UuidBytes>;
++
++enum class MessageType : uint16_t
++{
++    Hello = 1,
++    HelloAck = 2,
++};
++
++enum class Status : uint32_t
++{
++    Ok = 0,
++    Malformed = 1,
++    UnsupportedVersion = 2,
++    UnsupportedCapability = 3,
++    InstanceMismatch = 4,
++    TopologyMismatch = 5,
++    Unauthorized = 6,
++    Busy = 7,
++    ResourceExhausted = 8,
++    ProtocolState = 9,
++    Internal = 10,
++};
++
++enum class DecodeAction
++{
++    Drop,
++    Acknowledge,
++};
++
++struct Header
++{
++    MessageType messageType = MessageType::Hello;
++    uint64_t requestId = 0;
++    Uuid daemonUuid = {};
++    uint64_t connectionId = 0;
++    uint64_t jobEpoch = 0;
++};
++
++struct Topology
++{
++    Uuid jobUuid = {};
++    uint32_t rank = 0;
++    uint32_t worldSize = 0;
++};
++
++struct Tlv
++{
++    uint16_t type = 0;
++    uint16_t flags = 0;
++    std::vector<uint8_t> value;
++};
++
++struct Hello
++{
++    uint16_t minimumMajor = 1;
++    uint16_t minimumMinor = 0;
++    uint16_t maximumMajor = 1;
++    uint16_t maximumMinor = 0;
++    Nonce clientNonce = {};
++    Capabilities offered = {};
++    Capabilities required = {};
++    uint32_t receiveMaximum = MaximumRecordBytes;
++    Topology topology;
++    bool hasTopology = true;
++    std::vector<Tlv> optionalTlvs;
++    bool unknownCriticalTlv = false;
++};
++
++struct DecodeResult
++{
++    DecodeAction action = DecodeAction::Drop;
++    bool closeConnection = true;
++    Status status = Status::Malformed;
++    std::string reason;
++    Header header;
++    Hello hello;
++    bool hasHello = false;
++};
++
++struct ServerIdentity
++{
++    Uuid daemonUuid = {};
++    Uuid jobUuid = {};
++    uint64_t jobEpoch = 0;
++    uint32_t rank = 0;
++    uint32_t worldSize = 1;
++    uint32_t maximumRecord = MaximumRecordBytes;
++    Capabilities supported = {};
++};
++
++struct NegotiationContext
++{
++    bool busy = false;
++    bool resourceExhausted = false;
++};
++
++struct NegotiationResult
++{
++    Status status = Status::Internal;
++    uint16_t selectedMajor = 0;
++    uint16_t selectedMinor = 0;
++    Capabilities selected = {};
++    uint32_t maximumRecord = MinimumRecordBytes;
++};
++
++struct Ack
++{
++    Status status = Status::Internal;
++    uint16_t selectedMajor = 0;
++    uint16_t selectedMinor = 0;
++    Nonce clientNonce = {};
++    Nonce serverNonce = {};
++    Capabilities selected = {};
++    uint32_t maximumRecord = MinimumRecordBytes;
++    Topology topology;
++};
++
++bool isZero(const Uuid &value);
++bool parseUuid(const std::string &text, Uuid &value);
++std::string formatUuid(const Uuid &value);
++
++Capabilities topologyCapability();
++bool capabilitySubset(const Capabilities &subset,
++                      const Capabilities &superset);
++
++uint32_t crc32c(const uint8_t *data, size_t size);
++
++DecodeResult decodeHelloRecord(const uint8_t *record, size_t size,
++                               uint32_t configuredMaximum);
++NegotiationResult negotiate(const Header &header, const Hello &hello,
++                            const ServerIdentity &server,
++                            const NegotiationContext &context = {});
++
++std::vector<uint8_t> encodeHello(const Header &header, const Hello &hello);
++std::vector<uint8_t> encodeAck(const Header &request, const Ack &ack,
++                               const ServerIdentity &server,
++                               uint64_t connectionId);
++
++const char *statusName(Status status);
++
++} // namespace protocol
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_PROTOCOL_HH__
+diff --git a/src/dev/amdgpu/host_gpu_protocol.test.cc b/src/dev/amdgpu/host_gpu_protocol.test.cc
+new file mode 100644
+index 000000000..b65334761
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_protocol.test.cc
+@@ -0,0 +1,492 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_protocol.hh"
++#include "dev/amdgpu/host_gpu_connection_state.hh"
++
++#include <gtest/gtest.h>
++
++#include <algorithm>
++#include <array>
++#include <cstdint>
++#include <string>
++#include <vector>
++
++namespace gem5
++{
++namespace hostgpu
++{
++namespace protocol
++{
++namespace
++{
++
++constexpr char GoldenHelloHex[] =
++    "4753494d5250430000010000005000010000000000000080"
++    "0123456789abcdef00112233445566778899aabbccddeeff"
++    "00000000000000000102030405060708508ae01200000000"
++    "000000000000000000010000000100000001020304050607"
++    "08090a0b0c0d0e0f01000000000000000000000000000000"
++    "000000000000000000000000000000000100000000000000"
++    "000000000000000000000000000000000000000000000000"
++    "000100000001000000010001000000181021324354657687"
++    "98a9bacbdcedfe0f0000000300000008";
++
++constexpr char GoldenAckHex[] =
++    "4753494d5250430000010000005000020000000000000070"
++    "0123456789abcdef00112233445566778899aabbccddeeff"
++    "11223344556677880102030405060708c09c261200000000"
++    "000000000000000000010000000000000001020304050607"
++    "08090a0b0c0d0e0ff0e0d0c0b0a090807060504030201001"
++    "010000000000000000000000000000000000000000000000"
++    "000000000000000000010000000200000001000100000018"
++    "102132435465768798a9bacbdcedfe0f0000000300000008";
++
++std::vector<uint8_t>
++fromHex(const std::string &text)
++{
++    auto digit = [](char character) -> uint8_t {
++        if (character >= '0' && character <= '9')
++            return character - '0';
++        if (character >= 'a' && character <= 'f')
++            return character - 'a' + 10;
++        if (character >= 'A' && character <= 'F')
++            return character - 'A' + 10;
++        throw std::invalid_argument("invalid hex digit");
++    };
++    if ((text.size() & 1) != 0)
++        throw std::invalid_argument("odd hex string");
++    std::vector<uint8_t> result(text.size() / 2);
++    for (size_t index = 0; index < result.size(); ++index) {
++        result[index] = static_cast<uint8_t>(
++            digit(text[index * 2]) << 4 | digit(text[index * 2 + 1]));
++    }
++    return result;
++}
++
++void
++store16(std::vector<uint8_t> &data, size_t offset, uint16_t value)
++{
++    data[offset] = static_cast<uint8_t>(value >> 8);
++    data[offset + 1] = static_cast<uint8_t>(value);
++}
++
++void
++store32(std::vector<uint8_t> &data, size_t offset, uint32_t value)
++{
++    data[offset] = static_cast<uint8_t>(value >> 24);
++    data[offset + 1] = static_cast<uint8_t>(value >> 16);
++    data[offset + 2] = static_cast<uint8_t>(value >> 8);
++    data[offset + 3] = static_cast<uint8_t>(value);
++}
++
++void
++store64(std::vector<uint8_t> &data, size_t offset, uint64_t value)
++{
++    for (size_t index = 0; index < 8; ++index) {
++        data[offset + 7 - index] = static_cast<uint8_t>(value);
++        value >>= 8;
++    }
++}
++
++void
++recomputeCrc(std::vector<uint8_t> &frame)
++{
++    ASSERT_GE(frame.size(), 68U);
++    frame[64] = 0;
++    frame[65] = 0;
++    frame[66] = 0;
++    frame[67] = 0;
++    store32(frame, 64, crc32c(frame.data(), frame.size()));
++}
++
++Uuid
++uuid(const char *text)
++{
++    Uuid value;
++    EXPECT_TRUE(parseUuid(text, value));
++    return value;
++}
++
++Hello
++goldenHello()
++{
++    Hello hello;
++    hello.clientNonce = uuid("000102030405060708090a0b0c0d0e0f");
++    hello.offered = topologyCapability();
++    hello.required = topologyCapability();
++    hello.receiveMaximum = MaximumRecordBytes;
++    hello.topology.jobUuid = uuid("102132435465768798a9bacbdcedfe0f");
++    hello.topology.rank = 3;
++    hello.topology.worldSize = 8;
++    return hello;
++}
++
++Header
++goldenHeader()
++{
++    Header header;
++    header.requestId = 0x0123456789abcdefULL;
++    header.daemonUuid = uuid("00112233445566778899aabbccddeeff");
++    header.jobEpoch = 0x0102030405060708ULL;
++    return header;
++}
++
++ServerIdentity
++goldenServer()
++{
++    ServerIdentity server;
++    server.daemonUuid = uuid("00112233445566778899aabbccddeeff");
++    server.jobUuid = uuid("102132435465768798a9bacbdcedfe0f");
++    server.jobEpoch = 0x0102030405060708ULL;
++    server.rank = 3;
++    server.worldSize = 8;
++    server.supported = topologyCapability();
++    return server;
++}
++
++TEST(HostGpuProtocol, Crc32cCheckVector)
++{
++    constexpr std::array<uint8_t, 9> check = {
++        '1', '2', '3', '4', '5', '6', '7', '8', '9'
++    };
++    EXPECT_EQ(crc32c(check.data(), check.size()), 0xe3069283U);
++}
++
++TEST(HostGpuProtocol, GoldenHelloIsByteExact)
++{
++    const auto expected = fromHex(GoldenHelloHex);
++    const auto actual = encodeHello(goldenHeader(), goldenHello());
++    EXPECT_EQ(actual, expected);
++    ASSERT_EQ(actual.size(), size_t(208));
++    EXPECT_EQ(actual[64], 0x50);
++    EXPECT_EQ(actual[65], 0x8a);
++    EXPECT_EQ(actual[66], 0xe0);
++    EXPECT_EQ(actual[67], 0x12);
++
++    const auto decoded = decodeHelloRecord(
++        actual.data(), actual.size(), MaximumRecordBytes);
++    EXPECT_EQ(decoded.action, DecodeAction::Acknowledge);
++    EXPECT_EQ(decoded.status, Status::Ok);
++    ASSERT_TRUE(decoded.hasHello);
++    EXPECT_EQ(decoded.header.requestId, 0x0123456789abcdefULL);
++    EXPECT_EQ(decoded.hello.topology.rank, 3U);
++    EXPECT_EQ(decoded.hello.topology.worldSize, 8U);
++    EXPECT_EQ(negotiate(decoded.header, decoded.hello, goldenServer()).status,
++              Status::Ok);
++}
++
++TEST(HostGpuProtocol, GoldenAckIsByteExact)
++{
++    Ack ack;
++    ack.status = Status::Ok;
++    ack.selectedMajor = 1;
++    ack.selectedMinor = 0;
++    ack.clientNonce = uuid("000102030405060708090a0b0c0d0e0f");
++    ack.serverNonce = uuid("f0e0d0c0b0a090807060504030201001");
++    ack.selected = topologyCapability();
++    ack.maximumRecord = MaximumRecordBytes;
++    ack.topology.jobUuid = uuid("102132435465768798a9bacbdcedfe0f");
++    ack.topology.rank = 3;
++    ack.topology.worldSize = 8;
++    const auto actual = encodeAck(
++        goldenHeader(), ack, goldenServer(), 0x1122334455667788ULL);
++    EXPECT_EQ(actual, fromHex(GoldenAckHex));
++    ASSERT_EQ(actual.size(), size_t(192));
++    EXPECT_EQ(actual[64], 0xc0);
++    EXPECT_EQ(actual[65], 0x9c);
++    EXPECT_EQ(actual[66], 0x26);
++    EXPECT_EQ(actual[67], 0x12);
++}
++
++TEST(HostGpuProtocol, InvalidEnvelopeDropsWithoutAck)
++{
++    const auto golden = fromHex(GoldenHelloHex);
++    std::vector<std::vector<uint8_t>> cases;
++    cases.emplace_back(golden.begin(), golden.begin() + 7);
++    cases.push_back(golden);
++    cases.back()[0] ^= 1;
++    cases.push_back(golden);
++    store16(cases.back(), 8, 0x0100);
++    recomputeCrc(cases.back());
++    cases.push_back(golden);
++    store32(cases.back(), 20, 127);
++    recomputeCrc(cases.back());
++    cases.push_back(golden);
++    cases.back().back() ^= 1;
++    cases.push_back(golden);
++    store64(cases.back(), 24, 0);
++    recomputeCrc(cases.back());
++    cases.push_back(golden);
++    store64(cases.back(), 48, 1);
++    recomputeCrc(cases.back());
++    cases.push_back(golden);
++    store32(cases.back(), 68, 1);
++    recomputeCrc(cases.back());
++    cases.push_back(golden);
++    store16(cases.back(), 14, 99);
++    recomputeCrc(cases.back());
++
++    for (const auto &frame : cases) {
++        EXPECT_EQ(decodeHelloRecord(frame.data(), frame.size(),
++                                    MaximumRecordBytes).action,
++                  DecodeAction::Drop);
++    }
++}
++
++TEST(HostGpuProtocol, MalformedPayloadGetsDeterministicAck)
++{
++    auto expectMalformed = [](std::vector<uint8_t> frame) {
++        recomputeCrc(frame);
++        const auto decoded = decodeHelloRecord(
++            frame.data(), frame.size(), MaximumRecordBytes);
++        EXPECT_EQ(decoded.action, DecodeAction::Acknowledge);
++        EXPECT_EQ(decoded.status, Status::Malformed);
++    };
++    auto frame = fromHex(GoldenHelloHex);
++    store32(frame, HeaderBytes + 88, 4095);
++    expectMalformed(frame);
++
++    frame = fromHex(GoldenHelloHex);
++    store16(frame, HeaderBytes + 92, DaemonRole);
++    expectMalformed(frame);
++
++    frame = fromHex(GoldenHelloHex);
++    store16(frame, HeaderBytes + 96 + 2, 2);
++    expectMalformed(frame);
++
++    frame = fromHex(GoldenHelloHex);
++    store32(frame, HeaderBytes + 96 + 4, 25);
++    expectMalformed(frame);
++}
++
++TEST(HostGpuProtocol, ShortPayloadAndZeroNonceDropSilently)
++{
++    Header header = goldenHeader();
++    for (size_t payloadSize : {size_t(0), size_t(23), size_t(24), size_t(95)}) {
++        Hello hello = goldenHello();
++        auto frame = encodeHello(header, hello);
++        frame.resize(HeaderBytes + payloadSize);
++        store32(frame, 20, static_cast<uint32_t>(payloadSize));
++        recomputeCrc(frame);
++        EXPECT_EQ(decodeHelloRecord(frame.data(), frame.size(),
++                                    MaximumRecordBytes).action,
++                  DecodeAction::Drop);
++    }
++
++    auto frame = fromHex(GoldenHelloHex);
++    std::fill(frame.begin() + HeaderBytes + 8,
++              frame.begin() + HeaderBytes + 24, 0);
++    recomputeCrc(frame);
++    EXPECT_EQ(decodeHelloRecord(frame.data(), frame.size(),
++                                MaximumRecordBytes).action,
++              DecodeAction::Drop);
++
++    frame = fromHex(GoldenAckHex);
++    const auto ack = decodeHelloRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    EXPECT_EQ(ack.action, DecodeAction::Drop);
++    EXPECT_TRUE(ack.closeConnection);
++}
++
++TEST(HostGpuProtocol, TlvPaddingDuplicateAndCriticalHandling)
++{
++    auto frame = fromHex(GoldenHelloHex);
++    frame.insert(frame.end(), frame.begin() + HeaderBytes + HelloFixedBytes,
++                 frame.begin() + HeaderBytes + HelloFixedBytes + 32);
++    store32(frame, 20, static_cast<uint32_t>(frame.size() - HeaderBytes));
++    recomputeCrc(frame);
++    EXPECT_EQ(decodeHelloRecord(frame.data(), frame.size(),
++                                MaximumRecordBytes).status,
++              Status::Malformed);
++
++    frame = fromHex(GoldenHelloHex);
++    frame.insert(frame.end(), {0, 99, 0, 0, 0, 0, 0, 1, 'x', 0, 0, 0, 0, 0, 0, 1});
++    store32(frame, 20, static_cast<uint32_t>(frame.size() - HeaderBytes));
++    recomputeCrc(frame);
++    EXPECT_EQ(decodeHelloRecord(frame.data(), frame.size(),
++                                MaximumRecordBytes).status,
++              Status::Malformed);
++
++    frame = fromHex(GoldenHelloHex);
++    frame.insert(frame.end(), {0, 99, 0, 1, 0, 0, 0, 6,
++                               'f', 'u', 't', 'u', 'r', 'e', 0, 0});
++    store32(frame, 20, static_cast<uint32_t>(frame.size() - HeaderBytes));
++    recomputeCrc(frame);
++    const auto decoded = decodeHelloRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    EXPECT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(negotiate(decoded.header, decoded.hello, goldenServer()).status,
++              Status::UnsupportedCapability);
++}
++
++TEST(HostGpuProtocol, NegotiationPrecedenceAndIdentity)
++{
++    Header header = goldenHeader();
++    Hello hello = goldenHello();
++    auto server = goldenServer();
++
++    hello.required[1] = 1;
++    EXPECT_EQ(negotiate(header, hello, server).status, Status::Malformed);
++    hello = goldenHello();
++    hello.minimumMinor = 1;
++    hello.maximumMinor = 1;
++    EXPECT_EQ(negotiate(header, hello, server).status,
++              Status::UnsupportedVersion);
++    hello = goldenHello();
++    hello.maximumMinor = 1;
++    EXPECT_EQ(negotiate(header, hello, server).status, Status::Ok);
++    hello = goldenHello();
++    hello.offered = {};
++    hello.required = {};
++    EXPECT_EQ(negotiate(header, hello, server).status,
++              Status::UnsupportedCapability);
++    hello = goldenHello();
++    header.daemonUuid = uuid("11112233445566778899aabbccddeeff");
++    EXPECT_EQ(negotiate(header, hello, server).status,
++              Status::InstanceMismatch);
++    header = goldenHeader();
++    hello.topology.rank = 4;
++    EXPECT_EQ(negotiate(header, hello, server).status,
++              Status::TopologyMismatch);
++    hello = goldenHello();
++    NegotiationContext context;
++    context.busy = true;
++    context.resourceExhausted = true;
++    EXPECT_EQ(negotiate(header, hello, server, context).status, Status::Busy);
++    context.busy = false;
++    EXPECT_EQ(negotiate(header, hello, server, context).status,
++              Status::ResourceExhausted);
++}
++
++TEST(HostGpuProtocol, TopologyCapabilityAndTlvAreCoupled)
++{
++    auto header = goldenHeader();
++    auto hello = goldenHello();
++    hello.hasTopology = false;
++    auto frame = encodeHello(header, hello);
++    EXPECT_EQ(decodeHelloRecord(frame.data(), frame.size(), MaximumRecordBytes)
++                  .status,
++              Status::Malformed);
++
++    hello = goldenHello();
++    hello.offered = {};
++    hello.required = {};
++    frame = encodeHello(header, hello);
++    EXPECT_EQ(decodeHelloRecord(frame.data(), frame.size(), MaximumRecordBytes)
++                  .status,
++              Status::Malformed);
++
++    hello.hasTopology = false;
++    frame = encodeHello(header, hello);
++    const auto decoded = decodeHelloRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    EXPECT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(negotiate(decoded.header, decoded.hello, goldenServer()).status,
++              Status::UnsupportedCapability);
++
++    hello = goldenHello();
++    hello.required = {};
++    frame = encodeHello(header, hello);
++    const auto required = decodeHelloRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    EXPECT_EQ(required.status, Status::Ok);
++    EXPECT_EQ(negotiate(required.header, required.hello, goldenServer()).status,
++              Status::UnsupportedCapability);
++}
++
++TEST(HostGpuProtocol, IdentityWildcardsAreAllOrNothing)
++{
++    auto header = goldenHeader();
++    auto hello = goldenHello();
++    header.daemonUuid = {};
++    header.jobEpoch = 0;
++    hello.topology.jobUuid = {};
++    hello.topology.rank = std::numeric_limits<uint32_t>::max();
++    hello.topology.worldSize = 0;
++    EXPECT_EQ(negotiate(header, hello, goldenServer()).status, Status::Ok);
++    hello.topology.rank = 3;
++    EXPECT_EQ(negotiate(header, hello, goldenServer()).status,
++              Status::TopologyMismatch);
++}
++
++TEST(HostGpuProtocol, UuidParsingIsStrict)
++{
++    Uuid value;
++    EXPECT_TRUE(parseUuid("00112233445566778899aabbccddeeff", value));
++    EXPECT_EQ(formatUuid(value), "00112233445566778899aabbccddeeff");
++    EXPECT_TRUE(parseUuid("00112233-4455-6677-8899-aabbccddeeff", value));
++    EXPECT_FALSE(parseUuid("00112233-4455-6677-8899-aabbccddeezz", value));
++    EXPECT_FALSE(parseUuid("0011223344556677", value));
++}
++
++TEST(HostGpuProtocol, FailedAckHasNoSessionMaterial)
++{
++    Ack ack;
++    ack.status = Status::Busy;
++    ack.clientNonce = goldenHello().clientNonce;
++    ack.serverNonce.fill(0xff);
++    ack.selected.fill(0xff);
++    ack.maximumRecord = MinimumRecordBytes;
++    auto server = goldenServer();
++    server.maximumRecord = 32768;
++    const auto frame = encodeAck(
++        goldenHeader(), ack, server, 0x1122334455667788ULL);
++    ASSERT_EQ(frame.size(), HeaderBytes + AckFixedBytes);
++    EXPECT_TRUE(std::all_of(frame.begin() + 48, frame.begin() + 56,
++                            [](uint8_t byte) { return byte == 0; }));
++    EXPECT_TRUE(std::all_of(frame.begin() + HeaderBytes + 24,
++                            frame.begin() + HeaderBytes + 72,
++                            [](uint8_t byte) { return byte == 0; }));
++    EXPECT_EQ(frame[HeaderBytes + 72], 0);
++    EXPECT_EQ(frame[HeaderBytes + 73], 0);
++    EXPECT_EQ(frame[HeaderBytes + 74], 0x80);
++    EXPECT_EQ(frame[HeaderBytes + 75], 0);
++}
++
++TEST(HostGpuProtocol, EstablishedUnknownCriticalIsProtocolState)
++{
++    auto hello = goldenHello();
++    hello.optionalTlvs.push_back({99, CriticalTlvFlag, {'x'}});
++    const auto frame = encodeHello(goldenHeader(), hello);
++    const auto decoded = decodeHelloRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    ASSERT_EQ(decoded.status, Status::Ok);
++    ASSERT_TRUE(decoded.hello.unknownCriticalTlv);
++
++    HostGPUConnectionState state;
++    state.noteRecordReceived();
++    state.beginAck(true);
++    state.noteAckSent();
++    EXPECT_EQ(preNegotiationStatus(state, false, decoded.status),
++              Status::ProtocolState);
++}
++
++} // anonymous namespace
++} // namespace protocol
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_socket_utils.cc b/src/dev/amdgpu/host_gpu_socket_utils.cc
+new file mode 100644
+index 000000000..622619c7d
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_socket_utils.cc
+@@ -0,0 +1,234 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_socket_utils.hh"
++
++#include <fcntl.h>
++#include <unistd.h>
++
++#include <cerrno>
++#include <cstring>
++#include <string>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++namespace
++{
++
++bool
++sameFile(const struct stat &left, const struct stat &right)
++{
++    return left.st_dev == right.st_dev && left.st_ino == right.st_ino &&
++           left.st_uid == right.st_uid &&
++           (left.st_mode & S_IFMT) == (right.st_mode & S_IFMT);
++}
++
++void
++closeWithErrno(int fd, int error)
++{
++    ::close(fd);
++    errno = error;
++}
++
++} // anonymous namespace
++
++size_t
++closeReceivedFileDescriptors(const msghdr &message)
++{
++    msghdr view = message;
++    size_t closed = 0;
++    for (cmsghdr *control = CMSG_FIRSTHDR(&view); control != nullptr;
++         control = CMSG_NXTHDR(&view, control)) {
++        if (control->cmsg_len < CMSG_LEN(0))
++            break;
++        if (control->cmsg_level != SOL_SOCKET ||
++            control->cmsg_type != SCM_RIGHTS) {
++            continue;
++        }
++
++        const size_t payloadBytes = control->cmsg_len - CMSG_LEN(0);
++        const size_t descriptorCount = payloadBytes / sizeof(int);
++        for (size_t index = 0; index < descriptorCount; ++index) {
++            int fd = -1;
++            std::memcpy(&fd, CMSG_DATA(control) + index * sizeof(fd),
++                        sizeof(fd));
++            if (fd >= 0) {
++                ::close(fd);
++                ++closed;
++            }
++        }
++    }
++    return closed;
++}
++
++int
++pinSocketAtNoFollow(int directoryFd, const std::string &name,
++                    const struct stat &expected)
++{
++    const int pinned = ::openat(
++        directoryFd, name.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
++    if (pinned < 0)
++        return -1;
++
++    struct stat before = {};
++    if (::fstat(pinned, &before) != 0) {
++        closeWithErrno(pinned, errno);
++        return -1;
++    }
++    if (!S_ISSOCK(before.st_mode) || !sameFile(before, expected)) {
++        closeWithErrno(pinned, ESTALE);
++        return -1;
++    }
++    return pinned;
++}
++
++bool
++chmodPinnedSocket(int pinnedFd, const struct stat &expected, mode_t mode)
++{
++    struct stat before = {};
++    if (::fstat(pinnedFd, &before) != 0)
++        return false;
++    if (!S_ISSOCK(before.st_mode) || !sameFile(before, expected)) {
++        errno = ESTALE;
++        return false;
++    }
++
++    const std::string pinnedPath = "/proc/self/fd/" +
++        std::to_string(pinnedFd);
++    if (::chmod(pinnedPath.c_str(), mode) != 0)
++        return false;
++
++    struct stat after = {};
++    if (::fstat(pinnedFd, &after) != 0)
++        return false;
++    if (!sameFile(before, after) || (after.st_mode & 0777) != mode) {
++        errno = ESTALE;
++        return false;
++    }
++    return true;
++}
++
++SocketAliasCleanupResult
++unlinkSocketAtIfMatches(int directoryFd, const std::string &name,
++                       const struct stat &expected)
++{
++    struct stat current = {};
++    if (::fstatat(directoryFd, name.c_str(), &current,
++                  AT_SYMLINK_NOFOLLOW) != 0) {
++        if (errno == ENOENT)
++            return {SocketAliasCleanupStatus::Missing, 0};
++        return {SocketAliasCleanupStatus::Error, errno};
++    }
++    if (!S_ISSOCK(current.st_mode) || !sameFile(current, expected)) {
++        return {SocketAliasCleanupStatus::IdentityMismatch, ESTALE};
++    }
++    if (::unlinkat(directoryFd, name.c_str(), 0) == 0)
++        return {SocketAliasCleanupStatus::Removed, 0};
++    if (errno == ENOENT)
++        return {SocketAliasCleanupStatus::Missing, 0};
++    return {SocketAliasCleanupStatus::Error, errno};
++}
++
++SocketAliasCleanupResult
++retrySocketAliasCleanup(
++    size_t maximumAttempts,
++    const std::function<SocketAliasCleanupResult()> &cleanup)
++{
++    if (maximumAttempts == 0 || !cleanup)
++        return {SocketAliasCleanupStatus::Error, EINVAL};
++
++    SocketAliasCleanupResult result;
++    for (size_t attempt = 0; attempt < maximumAttempts; ++attempt) {
++        result = cleanup();
++        if (result.status != SocketAliasCleanupStatus::Error)
++            break;
++    }
++    return result;
++}
++
++SocketPublicationResult
++publishSocketAtNoReplace(int directoryFd,
++                         const std::string &temporaryName,
++                         const std::string &endpointName,
++                         const struct stat &expected)
++{
++    SocketPublicationResult result;
++    struct stat temporary = {};
++    if (::fstatat(directoryFd, temporaryName.c_str(), &temporary,
++                  AT_SYMLINK_NOFOLLOW) != 0) {
++        const int error = errno;
++        result.temporaryMayExist = error != ENOENT;
++        result.error = error;
++        return result;
++    }
++    if (!S_ISSOCK(temporary.st_mode) || !sameFile(temporary, expected)) {
++        result.error = ESTALE;
++        return result;
++    }
++
++    if (::linkat(directoryFd, temporaryName.c_str(), directoryFd,
++                 endpointName.c_str(), 0) != 0) {
++        const int linkError = errno;
++        struct stat published = {};
++        if (::fstatat(directoryFd, endpointName.c_str(), &published,
++                      AT_SYMLINK_NOFOLLOW) == 0) {
++            result.endpointMayExist =
++                S_ISSOCK(published.st_mode) && sameFile(published, expected);
++        } else if (errno != ENOENT) {
++            // A failed network-filesystem link can still have taken effect.
++            result.endpointMayExist = true;
++        }
++        result.error = linkError;
++        return result;
++    }
++    result.endpointMayExist = true;
++
++    struct stat published = {};
++    if (::fstatat(directoryFd, endpointName.c_str(), &published,
++                  AT_SYMLINK_NOFOLLOW) != 0) {
++        result.error = errno;
++        return result;
++    }
++    if (!S_ISSOCK(published.st_mode) || !sameFile(published, expected)) {
++        result.error = ESTALE;
++        return result;
++    }
++
++    if (::unlinkat(directoryFd, temporaryName.c_str(), 0) == 0 ||
++        errno == ENOENT) {
++        result.temporaryMayExist = false;
++        return result;
++    }
++    result.error = errno;
++    return result;
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_socket_utils.hh b/src/dev/amdgpu/host_gpu_socket_utils.hh
+new file mode 100644
+index 000000000..982ced834
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_socket_utils.hh
+@@ -0,0 +1,97 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_SOCKET_UTILS_HH__
++#define __DEV_AMDGPU_HOST_GPU_SOCKET_UTILS_HH__
++
++#include <sys/socket.h>
++#include <sys/stat.h>
++
++#include <cstddef>
++#include <functional>
++#include <string>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++/** Close every complete SCM_RIGHTS descriptor visible in a recvmsg result. */
++size_t closeReceivedFileDescriptors(const msghdr &message);
++
++/** Open and verify a socket inode without following the published path. */
++int pinSocketAtNoFollow(int directoryFd, const std::string &name,
++                        const struct stat &expected);
++
++/** Restrict a socket through an already verified O_PATH descriptor. */
++bool chmodPinnedSocket(int pinnedFd, const struct stat &expected, mode_t mode);
++
++enum class SocketAliasCleanupStatus
++{
++    Removed,
++    Missing,
++    IdentityMismatch,
++    Error,
++};
++
++struct SocketAliasCleanupResult
++{
++    SocketAliasCleanupStatus status = SocketAliasCleanupStatus::Error;
++    int error = 0;
++};
++
++/** Remove a socket name only when it still identifies the expected inode. */
++SocketAliasCleanupResult unlinkSocketAtIfMatches(
++    int directoryFd, const std::string &name, const struct stat &expected);
++
++/** Retry an alias operation while it reports a non-terminal system error. */
++SocketAliasCleanupResult retrySocketAliasCleanup(
++    size_t maximumAttempts,
++    const std::function<SocketAliasCleanupResult()> &cleanup);
++
++struct SocketPublicationResult
++{
++    // Conservative cleanup state after any successful or ambiguous operation.
++    bool endpointMayExist = false;
++    bool temporaryMayExist = true;
++    int error = 0;
++
++    bool complete() const
++    {
++        return endpointMayExist && !temporaryMayExist && error == 0;
++    }
++};
++
++/** Publish a bound temporary socket without replacing an existing endpoint. */
++SocketPublicationResult publishSocketAtNoReplace(
++    int directoryFd, const std::string &temporaryName,
++    const std::string &endpointName, const struct stat &expected);
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_SOCKET_UTILS_HH__
+diff --git a/src/dev/amdgpu/host_gpu_socket_utils.test.cc b/src/dev/amdgpu/host_gpu_socket_utils.test.cc
+new file mode 100644
+index 000000000..98eda44e5
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_socket_utils.test.cc
+@@ -0,0 +1,538 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_socket_utils.hh"
++#include "dev/amdgpu/host_gpu_connection_state.hh"
++
++#include <dirent.h>
++#include <fcntl.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++#include <array>
++#include <cerrno>
++#include <cstdlib>
++#include <cstring>
++#include <string>
++#include <vector>
++
++#include "gtest/gtest.h"
++
++namespace gem5::hostgpu
++{
++
++namespace
++{
++
++size_t
++openFileDescriptorCount()
++{
++    DIR *directory = ::opendir("/proc/self/fd");
++    EXPECT_NE(directory, nullptr);
++    if (directory == nullptr)
++        return 0;
++    size_t count = 0;
++    while (const dirent *entry = ::readdir(directory)) {
++        if (std::strcmp(entry->d_name, ".") != 0 &&
++            std::strcmp(entry->d_name, "..") != 0) {
++            ++count;
++        }
++    }
++    ::closedir(directory);
++    return count;
++}
++
++ssize_t
++sendRights(int fd, const int *descriptors, size_t count, bool withPayload)
++{
++    std::array<uint8_t, 1> payload = {0};
++    std::vector<uint8_t> control(CMSG_SPACE(sizeof(int) * count), 0);
++    msghdr message = {};
++    iovec vector = {payload.data(), withPayload ? payload.size() : 0};
++    message.msg_iov = &vector;
++    message.msg_iovlen = 1;
++    message.msg_control = control.data();
++    message.msg_controllen = control.size();
++    cmsghdr *header = CMSG_FIRSTHDR(&message);
++    header->cmsg_level = SOL_SOCKET;
++    header->cmsg_type = SCM_RIGHTS;
++    header->cmsg_len = CMSG_LEN(sizeof(int) * count);
++    std::memcpy(CMSG_DATA(header), descriptors, sizeof(int) * count);
++    return ::sendmsg(fd, &message, 0);
++}
++
++std::string
++temporaryDirectory()
++{
++    std::array<char, 64> pattern = {};
++    std::strcpy(pattern.data(), "/tmp/gem5-hostgpu-socket-XXXXXX");
++    char *created = ::mkdtemp(pattern.data());
++    EXPECT_NE(created, nullptr);
++    return created == nullptr ? std::string() : std::string(created);
++}
++
++int
++bindSeqpacket(const std::string &path)
++{
++    const int fd = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
++    if (fd < 0)
++        return -1;
++    sockaddr_un address = {};
++    address.sun_family = AF_UNIX;
++    if (path.size() >= sizeof(address.sun_path)) {
++        ::close(fd);
++        errno = ENAMETOOLONG;
++        return -1;
++    }
++    std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
++    if (::bind(fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0) {
++        const int error = errno;
++        ::close(fd);
++        errno = error;
++        return -1;
++    }
++    return fd;
++}
++
++}
++
++TEST(HostGPUSocketUtils, ClosesRightsWithZeroPayload)
++{
++    int sockets[2] = {-1, -1};
++    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sockets),
++              0);
++    int pipeFds[2] = {-1, -1};
++    ASSERT_EQ(::pipe2(pipeFds, O_CLOEXEC), 0);
++    ASSERT_GE(sendRights(sockets[0], pipeFds, 2, false), 0);
++
++    std::array<uint8_t, 1> payload = {0};
++    std::array<uint8_t, CMSG_SPACE(sizeof(int) * 2)> control = {};
++    msghdr message = {};
++    iovec vector = {payload.data(), payload.size()};
++    message.msg_iov = &vector;
++    message.msg_iovlen = 1;
++    message.msg_control = control.data();
++    message.msg_controllen = control.size();
++    const size_t beforeReceive = openFileDescriptorCount();
++    ASSERT_EQ(::recvmsg(sockets[1], &message, 0), 0);
++    int received[2] = {-1, -1};
++    cmsghdr *header = CMSG_FIRSTHDR(&message);
++    ASSERT_NE(header, nullptr);
++    std::memcpy(received, CMSG_DATA(header), sizeof(received));
++    EXPECT_EQ(openFileDescriptorCount(), beforeReceive + 2);
++    EXPECT_EQ(closeReceivedFileDescriptors(message), 2U);
++    EXPECT_EQ(openFileDescriptorCount(), beforeReceive);
++    for (const int fd : received) {
++        errno = 0;
++        EXPECT_EQ(::fcntl(fd, F_GETFD), -1);
++        EXPECT_EQ(errno, EBADF);
++    }
++    ::close(pipeFds[0]);
++    ::close(pipeFds[1]);
++    ::close(sockets[0]);
++    ::close(sockets[1]);
++}
++
++TEST(HostGPUSocketUtils, ClosesVisibleRightsWhenControlIsTruncated)
++{
++    int sockets[2] = {-1, -1};
++    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sockets),
++              0);
++    int pipeFds[4] = {-1, -1, -1, -1};
++    ASSERT_EQ(::pipe2(pipeFds, O_CLOEXEC), 0);
++    ASSERT_EQ(::pipe2(pipeFds + 2, O_CLOEXEC), 0);
++    ASSERT_GT(sendRights(sockets[0], pipeFds, 4, true), 0);
++
++    std::array<uint8_t, 1> payload = {0};
++    std::array<uint8_t, CMSG_SPACE(sizeof(int))> control = {};
++    msghdr message = {};
++    iovec vector = {payload.data(), payload.size()};
++    message.msg_iov = &vector;
++    message.msg_iovlen = 1;
++    message.msg_control = control.data();
++    message.msg_controllen = control.size();
++    const size_t beforeReceive = openFileDescriptorCount();
++    ASSERT_EQ(::recvmsg(sockets[1], &message, 0), 1);
++    ASSERT_NE(message.msg_flags & MSG_CTRUNC, 0);
++    cmsghdr *header = CMSG_FIRSTHDR(&message);
++    ASSERT_NE(header, nullptr);
++    const size_t visible =
++        (header->cmsg_len - CMSG_LEN(0)) / sizeof(int);
++    ASSERT_GT(visible, 0U);
++    ASSERT_LT(visible, 4U);
++    std::vector<int> received(visible, -1);
++    std::memcpy(received.data(), CMSG_DATA(header), visible * sizeof(int));
++    EXPECT_EQ(openFileDescriptorCount(), beforeReceive + visible);
++    EXPECT_EQ(closeReceivedFileDescriptors(message), visible);
++    EXPECT_EQ(openFileDescriptorCount(), beforeReceive);
++    for (const int fd : received) {
++        errno = 0;
++        EXPECT_EQ(::fcntl(fd, F_GETFD), -1);
++        EXPECT_EQ(errno, EBADF);
++    }
++    for (const int fd : pipeFds)
++        ::close(fd);
++    ::close(sockets[0]);
++    ::close(sockets[1]);
++}
++
++TEST(HostGPUSocketUtils, PinnedChmodNeverTouchesReplacement)
++{
++    const std::string directory = temporaryDirectory();
++    ASSERT_FALSE(directory.empty());
++    const int directoryFd = ::open(
++        directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
++    ASSERT_GE(directoryFd, 0);
++    const std::string name = "endpoint.sock";
++    const std::string path = directory + "/" + name;
++
++    const int original = bindSeqpacket(path);
++    ASSERT_GE(original, 0);
++    struct stat expected = {};
++    ASSERT_EQ(::lstat(path.c_str(), &expected), 0);
++    const int pinned = pinSocketAtNoFollow(directoryFd, name, expected);
++    ASSERT_GE(pinned, 0);
++
++    ASSERT_EQ(::unlink(path.c_str()), 0);
++    const int replacement = bindSeqpacket(path);
++    ASSERT_GE(replacement, 0);
++    ASSERT_EQ(::chmod(path.c_str(), 0660), 0);
++    ASSERT_TRUE(chmodPinnedSocket(pinned, expected, 0600));
++
++    struct stat pinnedStatus = {};
++    struct stat replacementStatus = {};
++    ASSERT_EQ(::fstat(pinned, &pinnedStatus), 0);
++    ASSERT_EQ(::lstat(path.c_str(), &replacementStatus), 0);
++    EXPECT_EQ(pinnedStatus.st_mode & 0777, 0600);
++    EXPECT_EQ(replacementStatus.st_mode & 0777, 0660);
++    errno = 0;
++    EXPECT_EQ(pinSocketAtNoFollow(directoryFd, name, expected), -1);
++    EXPECT_EQ(errno, ESTALE);
++
++    ::close(pinned);
++    ::close(original);
++    ::close(replacement);
++    ASSERT_EQ(::unlink(path.c_str()), 0);
++    ::close(directoryFd);
++    ASSERT_EQ(::rmdir(directory.c_str()), 0);
++}
++
++TEST(HostGPUSocketUtils, PublishesBoundSocketWithoutReplacement)
++{
++    const std::string directory = temporaryDirectory();
++    ASSERT_FALSE(directory.empty());
++    const int directoryFd = ::open(
++        directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
++    ASSERT_GE(directoryFd, 0);
++    const std::string temporaryName = "temporary.sock";
++    const std::string endpointName = "endpoint.sock";
++    const std::string temporaryPath = directory + "/" + temporaryName;
++    const std::string endpointPath = directory + "/" + endpointName;
++
++    const int listener = bindSeqpacket(temporaryPath);
++    ASSERT_GE(listener, 0);
++    struct stat expected = {};
++    ASSERT_EQ(::lstat(temporaryPath.c_str(), &expected), 0);
++    const int pinned = pinSocketAtNoFollow(
++        directoryFd, temporaryName, expected);
++    ASSERT_GE(pinned, 0);
++    ASSERT_TRUE(chmodPinnedSocket(pinned, expected, 0600));
++    ASSERT_EQ(::listen(listener, 1), 0);
++    const SocketPublicationResult publication = publishSocketAtNoReplace(
++        directoryFd, temporaryName, endpointName, expected);
++    ASSERT_TRUE(publication.complete());
++    EXPECT_TRUE(publication.endpointMayExist);
++    EXPECT_FALSE(publication.temporaryMayExist);
++    EXPECT_EQ(publication.error, 0);
++
++    struct stat published = {};
++    ASSERT_EQ(::lstat(endpointPath.c_str(), &published), 0);
++    EXPECT_EQ(published.st_dev, expected.st_dev);
++    EXPECT_EQ(published.st_ino, expected.st_ino);
++    EXPECT_EQ(published.st_mode & 0777, 0600);
++    errno = 0;
++    EXPECT_EQ(::lstat(temporaryPath.c_str(), &published), -1);
++    EXPECT_EQ(errno, ENOENT);
++
++    const int client = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
++    ASSERT_GE(client, 0);
++    sockaddr_un address = {};
++    address.sun_family = AF_UNIX;
++    std::memcpy(address.sun_path, endpointPath.c_str(), endpointPath.size() + 1);
++    ASSERT_EQ(::connect(client, reinterpret_cast<sockaddr *>(&address),
++                        sizeof(address)), 0);
++    const int accepted = ::accept4(listener, nullptr, nullptr, SOCK_CLOEXEC);
++    ASSERT_GE(accepted, 0);
++
++    ::close(accepted);
++    ::close(client);
++    ::close(pinned);
++    ::close(listener);
++    ASSERT_EQ(::unlink(endpointPath.c_str()), 0);
++    ::close(directoryFd);
++    ASSERT_EQ(::rmdir(directory.c_str()), 0);
++}
++
++TEST(HostGPUSocketUtils, PublicationPreservesExistingEndpoint)
++{
++    const std::string directory = temporaryDirectory();
++    ASSERT_FALSE(directory.empty());
++    const int directoryFd = ::open(
++        directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
++    ASSERT_GE(directoryFd, 0);
++    const std::string temporaryName = "temporary.sock";
++    const std::string endpointName = "endpoint.sock";
++    const std::string temporaryPath = directory + "/" + temporaryName;
++    const std::string endpointPath = directory + "/" + endpointName;
++
++    const int temporary = bindSeqpacket(temporaryPath);
++    const int existing = bindSeqpacket(endpointPath);
++    ASSERT_GE(temporary, 0);
++    ASSERT_GE(existing, 0);
++    struct stat expected = {};
++    struct stat existingStatus = {};
++    ASSERT_EQ(::lstat(temporaryPath.c_str(), &expected), 0);
++    ASSERT_EQ(::lstat(endpointPath.c_str(), &existingStatus), 0);
++    errno = 0;
++    const SocketPublicationResult publication = publishSocketAtNoReplace(
++        directoryFd, temporaryName, endpointName, expected);
++    EXPECT_FALSE(publication.complete());
++    EXPECT_FALSE(publication.endpointMayExist);
++    EXPECT_TRUE(publication.temporaryMayExist);
++    EXPECT_EQ(publication.error, EEXIST);
++    struct stat after = {};
++    ASSERT_EQ(::lstat(endpointPath.c_str(), &after), 0);
++    EXPECT_EQ(after.st_dev, existingStatus.st_dev);
++    EXPECT_EQ(after.st_ino, existingStatus.st_ino);
++    EXPECT_EQ(::lstat(temporaryPath.c_str(), &after), 0);
++
++    ::close(temporary);
++    ::close(existing);
++    ASSERT_EQ(::unlink(temporaryPath.c_str()), 0);
++    ASSERT_EQ(::unlink(endpointPath.c_str()), 0);
++    ::close(directoryFd);
++    ASSERT_EQ(::rmdir(directory.c_str()), 0);
++}
++
++TEST(HostGPUSocketUtils, PublicationPreservesStatError)
++{
++    struct stat expected = {};
++    const SocketPublicationResult publication = publishSocketAtNoReplace(
++        -1, "temporary.sock", "endpoint.sock", expected);
++    EXPECT_FALSE(publication.complete());
++    EXPECT_TRUE(publication.temporaryMayExist);
++    EXPECT_EQ(publication.error, EBADF);
++}
++
++TEST(HostGPUSocketUtils, AliasCleanupRetainsErrorAndCanRetry)
++{
++    const std::string directory = temporaryDirectory();
++    ASSERT_FALSE(directory.empty());
++    const int directoryFd = ::open(
++        directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
++    ASSERT_GE(directoryFd, 0);
++    const std::string name = "endpoint.sock";
++    const std::string path = directory + "/" + name;
++    const int listener = bindSeqpacket(path);
++    ASSERT_GE(listener, 0);
++    struct stat expected = {};
++    ASSERT_EQ(::lstat(path.c_str(), &expected), 0);
++
++    ASSERT_EQ(::chmod(directory.c_str(), 0500), 0);
++    size_t blockedAttempts = 0;
++    const SocketAliasCleanupResult blocked = retrySocketAliasCleanup(
++        4, [&]() {
++            ++blockedAttempts;
++            return unlinkSocketAtIfMatches(directoryFd, name, expected);
++        });
++    EXPECT_EQ(blocked.status, SocketAliasCleanupStatus::Error);
++    EXPECT_EQ(blocked.error, EACCES);
++    EXPECT_EQ(blockedAttempts, 4U);
++    EXPECT_EQ(::lstat(path.c_str(), &expected), 0);
++
++    ASSERT_EQ(::chmod(directory.c_str(), 0700), 0);
++    size_t successfulAttempts = 0;
++    const SocketAliasCleanupResult retried = retrySocketAliasCleanup(
++        4, [&]() {
++            ++successfulAttempts;
++            return unlinkSocketAtIfMatches(directoryFd, name, expected);
++        });
++    EXPECT_EQ(retried.status, SocketAliasCleanupStatus::Removed);
++    EXPECT_EQ(retried.error, 0);
++    EXPECT_EQ(successfulAttempts, 1U);
++    errno = 0;
++    EXPECT_EQ(::lstat(path.c_str(), &expected), -1);
++    EXPECT_EQ(errno, ENOENT);
++
++    ::close(listener);
++    ::close(directoryFd);
++    ASSERT_EQ(::rmdir(directory.c_str()), 0);
++}
++
++TEST(HostGPUSocketUtils, AliasCleanupRetryStopsAtTerminalResult)
++{
++    size_t attempts = 0;
++    const SocketAliasCleanupResult result = retrySocketAliasCleanup(
++        4, [&]() {
++            ++attempts;
++            if (attempts == 1) {
++                return SocketAliasCleanupResult{
++                    SocketAliasCleanupStatus::Error, EINTR};
++            }
++            return SocketAliasCleanupResult{
++                SocketAliasCleanupStatus::IdentityMismatch, ESTALE};
++        });
++    EXPECT_EQ(attempts, 2U);
++    EXPECT_EQ(result.status, SocketAliasCleanupStatus::IdentityMismatch);
++    EXPECT_EQ(result.error, ESTALE);
++}
++
++TEST(HostGPUSocketUtils, AliasCleanupPreservesReplacement)
++{
++    const std::string directory = temporaryDirectory();
++    ASSERT_FALSE(directory.empty());
++    const int directoryFd = ::open(
++        directory.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
++    ASSERT_GE(directoryFd, 0);
++    const std::string name = "endpoint.sock";
++    const std::string path = directory + "/" + name;
++    const int original = bindSeqpacket(path);
++    ASSERT_GE(original, 0);
++    struct stat expected = {};
++    ASSERT_EQ(::lstat(path.c_str(), &expected), 0);
++    ASSERT_EQ(::unlink(path.c_str()), 0);
++    const int replacement = bindSeqpacket(path);
++    ASSERT_GE(replacement, 0);
++
++    const SocketAliasCleanupResult result =
++        unlinkSocketAtIfMatches(directoryFd, name, expected);
++    EXPECT_EQ(result.status, SocketAliasCleanupStatus::IdentityMismatch);
++    EXPECT_EQ(result.error, ESTALE);
++    struct stat current = {};
++    ASSERT_EQ(::lstat(path.c_str(), &current), 0);
++    EXPECT_NE(current.st_ino, expected.st_ino);
++
++    ::close(original);
++    ::close(replacement);
++    ASSERT_EQ(::unlink(path.c_str()), 0);
++    ::close(directoryFd);
++    ASSERT_EQ(::rmdir(directory.c_str()), 0);
++}
++
++TEST(HostGPUAdmissionBudget, PreservesIndependentRegularAndLimitedCapacity)
++{
++    ClientAdmissionBudget budget(8, 8);
++    for (unsigned index = 0; index < 8; ++index)
++        EXPECT_EQ(budget.acquire(), ClientAdmission::Regular);
++    for (unsigned index = 0; index < 8; ++index)
++        EXPECT_EQ(budget.acquire(), ClientAdmission::ResourceLimited);
++    EXPECT_EQ(budget.acquire(), ClientAdmission::Rejected);
++    EXPECT_EQ(budget.regular(), 8U);
++    EXPECT_EQ(budget.limited(), 8U);
++
++    budget.release(ClientAdmission::Regular);
++    EXPECT_EQ(budget.acquire(), ClientAdmission::Regular);
++    budget.release(ClientAdmission::ResourceLimited);
++    EXPECT_EQ(budget.acquire(), ClientAdmission::ResourceLimited);
++    for (unsigned index = 0; index < 8; ++index) {
++        budget.release(ClientAdmission::Regular);
++        budget.release(ClientAdmission::ResourceLimited);
++    }
++    EXPECT_EQ(budget.regular(), 0U);
++    EXPECT_EQ(budget.limited(), 0U);
++}
++
++TEST(HostGPUConnectionState, SuccessfulAckCommitCannotBeRolledBack)
++{
++    HostGPUConnectionState state;
++    EXPECT_EQ(state.phase(), ConnectionPhase::AwaitHello);
++    state.noteRecordReceived();
++    state.beginAck(true);
++    EXPECT_EQ(state.phase(), ConnectionPhase::AckPending);
++    state.noteAckSent();
++    EXPECT_EQ(state.phase(), ConnectionPhase::Established);
++    EXPECT_TRUE(state.committed());
++    state.noteRecordReceived();
++    state.close();
++    EXPECT_EQ(state.phase(), ConnectionPhase::Closing);
++    EXPECT_TRUE(state.committed());
++}
++
++TEST(HostGPUConnectionState, FailureAckClosesAndStopsReading)
++{
++    HostGPUConnectionState state;
++    state.noteRecordReceived();
++    state.beginAck(false);
++    EXPECT_FALSE(state.canReceive());
++    state.noteAckSent();
++    EXPECT_EQ(state.phase(), ConnectionPhase::Closing);
++    EXPECT_FALSE(state.committed());
++}
++
++TEST(HostGPUConnectionState, EstablishedPreservesMalformedOnly)
++{
++    HostGPUConnectionState state;
++    state.noteRecordReceived();
++    state.beginAck(true);
++    state.noteAckSent();
++    EXPECT_EQ(preNegotiationStatus(
++                  state, false, protocol::Status::UnsupportedCapability),
++              protocol::Status::ProtocolState);
++    EXPECT_EQ(preNegotiationStatus(
++                  state, false, protocol::Status::Malformed),
++              protocol::Status::Malformed);
++}
++
++TEST(HostGPUConnectionState, PipelinedHelloWaitsForOkCommit)
++{
++    HostGPUConnectionState state;
++    state.noteRecordReceived();
++    state.beginAck(true);
++    EXPECT_FALSE(state.canReceive());
++    state.noteAckSent();
++    EXPECT_TRUE(state.committed());
++    ASSERT_TRUE(state.canReceive());
++    state.noteRecordReceived();
++    EXPECT_EQ(preNegotiationStatus(state, false, protocol::Status::Ok),
++              protocol::Status::ProtocolState);
++    state.beginAck(false);
++    state.noteAckSent();
++    EXPECT_EQ(state.phase(), ConnectionPhase::Closing);
++    EXPECT_TRUE(state.committed());
++}
++
++TEST(HostGPUConnectionState, DeadlineWinsUntilHelloBeginsAck)
++{
++    HostGPUConnectionState state;
++    state.noteRecordReceived();
++    EXPECT_TRUE(state.handshakeDeadlineApplies());
++    state.beginAck(true);
++    EXPECT_FALSE(state.handshakeDeadlineApplies());
++}
++
++} // namespace gem5::hostgpu
+-- 
+2.53.0
+

@@ -1,0 +1,114 @@
+From cc2d5989ca03307dceb2bf473e5f95ea05fa0236 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 17 Aug 2026 13:14:52 +0800
+Subject: [PATCH 3/5] runtime: centralize fast-copy eligibility in ROCr
+
+Stop CLR from treating the fast-copy switch as an allocation property. Plain device allocations retain their GPU owner and ordinary HostMemoryDirectAccess semantics remain unchanged, so HIP copies reach the ROCr eligibility helper. Eligible H2D and D2H copies can still use the host alias, while D2D, private, profiling, dependent, peer, VMM and IPC copies retain the legacy path.
+
+Checkpoint-ID: CP-0056
+Goal-ID: GSIM-001
+Plan-Revision: 16
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 79cc093a2e00eed1586210f44ddf3381909ae3f715d324417b4b27fc454e95e8
+Change-Kind: bugfix
+Baseline-Commit: 61aa4be538ed85e23a8a72b5437b327b1e50c201
+---
+ projects/clr/rocclr/device/rocm/rocblit.cpp   | 16 ++++------------
+ projects/clr/rocclr/device/rocm/rocmemory.cpp |  8 ++------
+ projects/clr/rocclr/utils/flags.cpp           | 11 -----------
+ projects/clr/rocclr/utils/flags.hpp           |  2 --
+ 4 files changed, 6 insertions(+), 31 deletions(-)
+
+diff --git a/projects/clr/rocclr/device/rocm/rocblit.cpp b/projects/clr/rocclr/device/rocm/rocblit.cpp
+index ae4d827043..dd11c3d6e9 100644
+--- a/projects/clr/rocclr/device/rocm/rocblit.cpp
++++ b/projects/clr/rocclr/device/rocm/rocblit.cpp
+@@ -207,14 +207,9 @@ bool DmaBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& dstMe
+                                 const amd::Coord3D& srcOrigin, const amd::Coord3D& dstOrigin,
+                                 const amd::Coord3D& size, bool entire,
+                                 amd::CopyMetadata copyMetadata) const {
+-  // When FFM/DTIF fast-copy is enabled, plain device allocations are marked
+-  // HostMemoryDirectAccess so HtoD/DtoH can short-circuit to a host memcpy. DtoD
+-  // must not take that path: the host memcpy CPU-stalls on prior queue work
+-  // (releaseGpuMemoryFence) and breaks CUDA-style host-async DtoD semantics.
+-  if (!HSA_ENABLE_DTIF_FAST_COPY &&
+-      (setup_.disableCopyBuffer_ ||
++  if (setup_.disableCopyBuffer_ ||
+       (srcMemory.isHostMemDirectAccess() && !srcMemory.isCpuUncached() &&
+-       (dev().agent_profile() != HSA_PROFILE_FULL) && dstMemory.isHostMemDirectAccess()))) {
++       (dev().agent_profile() != HSA_PROFILE_FULL) && dstMemory.isHostMemDirectAccess())) {
+     // Stall GPU before CPU access
+     gpu().releaseGpuMemoryFence();
+     return HostBlitManager::copyBuffer(srcMemory, dstMemory, srcOrigin, dstOrigin, size, false,
+@@ -231,12 +226,9 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
+                                     const amd::BufferRect& srcRect, const amd::BufferRect& dstRect,
+                                     const amd::Coord3D& size, bool entire,
+                                     amd::CopyMetadata copyMetadata) const {
+-  // See note in copyBuffer: skip the host short-circuit when FFM/DTIF fast-copy
+-  // is enabled so DtoD stays on the GPU blit path.
+-  if (!HSA_ENABLE_DTIF_FAST_COPY &&
+-      (setup_.disableCopyBufferRect_ ||
++  if (setup_.disableCopyBufferRect_ ||
+       (srcMemory.isHostMemDirectAccess() && !srcMemory.isCpuUncached() &&
+-       dstMemory.isHostMemDirectAccess()))) {
++       dstMemory.isHostMemDirectAccess())) {
+     // Stall GPU before CPU access
+     gpu().releaseGpuMemoryFence();
+     return HostBlitManager::copyBufferRect(srcMemory, dstMemory, srcRect, dstRect, size, entire,
+diff --git a/projects/clr/rocclr/device/rocm/rocmemory.cpp b/projects/clr/rocclr/device/rocm/rocmemory.cpp
+index 3bfb23bc30..944fad84f1 100644
+--- a/projects/clr/rocclr/device/rocm/rocmemory.cpp
++++ b/projects/clr/rocclr/device/rocm/rocmemory.cpp
+@@ -906,12 +906,8 @@ bool Buffer::create(bool alloc_local) {
+       flags_ |= HostMemoryDirectAccess;
+     }
+ 
+-    // FFM/DTIF fast-copy: when enabled, host can directly access plain device
+-    // allocations so hipMemcpy can short-circuit to a host memcpy in CLR
+-    // (skipping the rocclr-emitted blit/init kernel).
+-    if (HSA_ENABLE_DTIF_FAST_COPY) {
+-      flags_ |= HostMemoryDirectAccess;
+-    }
++    // HostMemoryDirectAccess describes allocation semantics, not copy policy.
++    // Fast-copy authorization belongs to ROCr so the cached owning agent stays accurate.
+ 
+     if (owner()->getSvmPtr() == reinterpret_cast<void*>(amd::Memory::MemoryType::kSvmMemoryPtr)) {
+       if (isFineGrain) {
+diff --git a/projects/clr/rocclr/utils/flags.cpp b/projects/clr/rocclr/utils/flags.cpp
+index 84c6e3a288..48a4316fed 100644
+--- a/projects/clr/rocclr/utils/flags.cpp
++++ b/projects/clr/rocclr/utils/flags.cpp
+@@ -153,17 +153,6 @@ bool Flag::init() {
+     }
+   }
+ 
+-  // Model mode requires HSA_ENABLE_DTIF_FAST_COPY=1 and
+-  // SAGR_HSAKMT_MODEL_FAST_COPY=1.
+-  // Outside model mode, retain the normally parsed HSA fast-copy flag.
+-  if (vars.find("HSA_MODEL_TOPOLOGY") != vars.cend()) {
+-    const auto hsa_fast_copy = vars.find("HSA_ENABLE_DTIF_FAST_COPY");
+-    const auto model_fast_copy = vars.find("SAGR_HSAKMT_MODEL_FAST_COPY");
+-    HSA_ENABLE_DTIF_FAST_COPY =
+-        hsa_fast_copy != vars.cend() && std::string_view(hsa_fast_copy->second) == "1" &&
+-        model_fast_copy != vars.cend() && std::string_view(model_fast_copy->second) == "1";
+-  }
+-
+   return true;
+ }
+ 
+diff --git a/projects/clr/rocclr/utils/flags.hpp b/projects/clr/rocclr/utils/flags.hpp
+index abc195c735..ac0284078e 100644
+--- a/projects/clr/rocclr/utils/flags.hpp
++++ b/projects/clr/rocclr/utils/flags.hpp
+@@ -100,8 +100,6 @@ release(bool, HSA_LOCAL_MEMORY_ENABLE, true,                                  \
+         "Enable HSA device local memory usage")                               \
+ release(uint, HSA_KERNARG_POOL_SIZE, 4 * 1024 * 1024,                         \
+         "Kernarg pool size")                                                  \
+-release(bool, HSA_ENABLE_DTIF_FAST_COPY, false,                               \
+-        "Flag plain device allocations as HostMemoryDirectAccess")            \
+ release(bool, GPU_MIPMAP, true,                                               \
+         "Enables GPU mipmap extension")                                       \
+ release(uint, GPU_ENABLE_PAL, 2,                                              \
+-- 
+2.53.0
+

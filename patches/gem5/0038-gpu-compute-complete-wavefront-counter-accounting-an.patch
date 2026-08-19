@@ -1,0 +1,499 @@
+From e0c9dd267e1016f61d3be2a8eefc1a755623d669 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Wed, 19 Aug 2026 07:18:19 +0800
+Subject: [PATCH 38/42] gpu-compute: complete wavefront counter accounting and
+ dispatch bookkeeping
+
+Extends the counter family already repaired at HEAD, where per-instruction
+bookkeeping was gated on static instruction flags that a valid instruction
+legitimately lacks, so the reservation made at issue was never released and the
+wave stalled forever on a later s_waitcnt.
+
+The same shape recurs for expcnt: an export or GDS instruction that never
+reached the path which decrements it left the wave's expcnt permanently
+non-zero, and the next s_waitcnt expcnt(0) blocked. Wavefront gains explicit
+accounting for the three outstanding counters, and the dispatcher and dynamic
+instruction carry the state that makes a leak visible rather than silent.
+
+UNVERIFIED AT HANDOFF: carried forward from an earlier session and compiled
+into the running binary, but not accepted by a completed model run.
+
+Checkpoint-ID: CP-0065
+Goal-ID: GSIM-001
+Plan-Revision: 16
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 3da978c32055239a056d892ab835013b541962d50ac5e6152ee57561e6a7f145
+Change-Kind: code
+Baseline-Commit: 0f27ef552a32cf78cc376a7edd0272f342cf1c7f
+---
+ src/gpu-compute/compute_unit.hh           |  7 +++
+ src/gpu-compute/dispatcher.cc             | 58 +++++++++++++++++++++++
+ src/gpu-compute/dispatcher.hh             |  2 +
+ src/gpu-compute/gpu_dyn_inst.cc           | 56 ++++++++++++++--------
+ src/gpu-compute/gpu_dyn_inst.hh           |  3 ++
+ src/gpu-compute/lds_state.hh              | 24 +++++++++-
+ src/gpu-compute/schedule_stage.cc         | 20 +++++++-
+ src/gpu-compute/scoreboard_check_stage.cc | 18 +++++--
+ src/gpu-compute/scoreboard_check_stage.hh | 15 +++++-
+ src/gpu-compute/wavefront.cc              | 20 ++++++++
+ src/gpu-compute/wavefront.hh              |  7 ++-
+ 11 files changed, 199 insertions(+), 31 deletions(-)
+
+diff --git a/src/gpu-compute/compute_unit.hh b/src/gpu-compute/compute_unit.hh
+index 53f34fc18..a656aebbb 100644
+--- a/src/gpu-compute/compute_unit.hh
++++ b/src/gpu-compute/compute_unit.hh
+@@ -500,6 +500,13 @@ class ComputeUnit : public ClockedObject
+ 
+     void printProgress();
+ 
++    /**
++     * Human-readable account of why hasDispResources() refused a workgroup
++     * of this task, plus this CU's total capacity for each of those
++     * resources. Used to report a dispatch that can never succeed.
++     */
++    std::string dispatchResourceReport(HSAQueueEntry *task);
++
+   protected:
+     RequestorID _requestorId;
+ 
+diff --git a/src/gpu-compute/dispatcher.cc b/src/gpu-compute/dispatcher.cc
+index efe1d3ce8..2e1d8727c 100644
+--- a/src/gpu-compute/dispatcher.cc
++++ b/src/gpu-compute/dispatcher.cc
+@@ -40,6 +40,7 @@
+ #if USE_X86_ISA
+ #include "gpu-compute/gpu_command_processor.hh"
+ #endif
++#include "gpu-compute/compute_unit.hh"
+ #include "gpu-compute/gpu_dispatch_completion.hh"
+ #include "gpu-compute/hsa_queue_entry.hh"
+ #include "gpu-compute/shader.hh"
+@@ -207,11 +208,65 @@ GPUDispatcher::dispatch(HSAQueueEntry *task)
+     }
+ }
+ 
++/**
++ * Nothing that a workgroup dispatch waits for can change while every compute
++ * unit is idle. Wavefront slots, the group segment chunk, the barrier slot
++ * and the register regions are all released by s_endpgm, which needs a
++ * resident wavefront to execute; and exec() is only re-armed by a workgroup
++ * completion, a completed cache invalidate, or a newly enqueued kernel.
++ *
++ * So a kernel that cannot place a single workgroup on an idle device is not
++ * waiting -- it is stuck, permanently and silently. The observed shape is a
++ * simulator that keeps advancing simulated time at full host CPU with zero
++ * retired instructions while the host waits for a completion signal that can
++ * never arrive.
++ *
++ * Fail closed instead, and print the exact demand next to the exact capacity.
++ * The cause is a workgroup that asks for more of some resource than one
++ * compute unit provides -- most often a compute unit configured smaller than
++ * the device the runtime advertised to the compiler -- or a resource that a
++ * completed workgroup failed to release.
++ */
++void
++GPUDispatcher::failStalledDispatch(const std::vector<int> &blocked_ids)
++{
++    if (blocked_ids.empty()) {
++        return;
++    }
++
++    for (int i_cu = 0; i_cu < shader->n_cu; ++i_cu) {
++        if (shader->cuList[i_cu]->activeWaves) {
++            return;
++        }
++    }
++
++    std::string report;
++    for (int kern_id : blocked_ids) {
++        auto task_iter = hsaQueueEntries.find(kern_id);
++        if (task_iter == hsaQueueEntries.end()) {
++            continue;
++        }
++        for (int i_cu = 0; i_cu < shader->n_cu; ++i_cu) {
++            report += "\n  " + shader->cuList[i_cu]
++                ->dispatchResourceReport(task_iter->second);
++        }
++    }
++
++    panic("GPU dispatch deadlock: %d kernel(s) have workgroups left to "
++          "dispatch, no compute unit has a resident wavefront, and no "
++          "workgroup fits. No later event can change this.%s",
++          blocked_ids.size(), report);
++}
++
+ void
+ GPUDispatcher::exec()
+ {
+     int fail_count(0);
+     int disp_count(0);
++    /* Kernels that have work left but could not place a workgroup this
++     * cycle, excluding those still waiting for their launch invalidate --
++     * that one does have a pending response event to re-arm this event. */
++    std::vector<int> blocked_ids;
+ 
+     /**
+      * There are potentially multiple outstanding kernel launches.
+@@ -278,6 +333,7 @@ GPUDispatcher::exec()
+                 DPRINTF(GPUDisp, "kernel %d failed to launch\n", exec_id);
+                 execIds.push(exec_id);
+                 ++fail_count;
++                blocked_ids.push_back(exec_id);
+                 break;
+             } else if (!launched) {
+                 launched = true;
+@@ -295,6 +351,8 @@ GPUDispatcher::exec()
+     DPRINTF(GPUWgLatency, "Kernel Wgs dispatched: %d | %d failures\n",
+             disp_count, fail_count);
+ 
++    failStalledDispatch(blocked_ids);
++
+     while (doneIds.size()) {
+         DPRINTF(GPUDisp, "Kernel %d completed\n", doneIds.front());
+         doneIds.pop();
+diff --git a/src/gpu-compute/dispatcher.hh b/src/gpu-compute/dispatcher.hh
+index 54d5498d1..0a49895c7 100644
+--- a/src/gpu-compute/dispatcher.hh
++++ b/src/gpu-compute/dispatcher.hh
+@@ -115,6 +115,8 @@ class GPUDispatcher : public SimObject
+     HSAQueueEntry* findHsaTask(int disp_id) const;
+ 
+   private:
++    void failStalledDispatch(const std::vector<int> &blocked_ids);
++
+     Shader *shader;
+     GPUCommandProcessor *gpuCmdProc;
+     GPUDispatchCompletionSink *completionSink = nullptr;
+diff --git a/src/gpu-compute/gpu_dyn_inst.cc b/src/gpu-compute/gpu_dyn_inst.cc
+index dc9deee5b..e99d77d70 100644
+--- a/src/gpu-compute/gpu_dyn_inst.cc
++++ b/src/gpu-compute/gpu_dyn_inst.cc
+@@ -52,23 +52,29 @@ GPUDynInst::GPUDynInst(ComputeUnit *_cu, Wavefront *_wf,
+     _staticInst->initOperandInfo();
+     statusVector.assign(TheGpuISA::NumVecElemPerVecReg, 0);
+     tlbHitLevel.assign(computeUnit()->wfSize(), -1);
++
++    /*
++     * One dynamic instruction is constructed for every instruction every
++     * wavefront retires, so this constructor runs millions of times per
++     * kernel and its allocation traffic is a first-order simulation cost.
++     * The four data staging areas have fixed, independent sizes, so carve
++     * them out of a single zero-initialized block instead of four separate
++     * new[] calls each followed by its own byte-at-a-time clear. The layout,
++     * the sizes and the zeroed contents are exactly as before; only the
++     * number of heap operations changes.
++     */
+     // vector instructions can have up to 4 source/destination operands
+-    d_data = new uint8_t[computeUnit()->wfSize() * 4 * sizeof(double)];
+-    a_data = new uint8_t[computeUnit()->wfSize() * 8];
+-    x_data = new uint8_t[computeUnit()->wfSize() * 8];
++    const size_t d_bytes = computeUnit()->wfSize() * 4 * sizeof(double);
++    const size_t a_bytes = computeUnit()->wfSize() * 8;
++    const size_t x_bytes = computeUnit()->wfSize() * 8;
+     // scalar loads can read up to 16 Dwords of data (see publicly
+     // available Vega ISA manual)
+-    scalar_data = new uint8_t[16 * sizeof(uint32_t)];
+-    for (int i = 0; i < (16 * sizeof(uint32_t)); ++i) {
+-        scalar_data[i] = 0;
+-    }
+-    for (int i = 0; i < (computeUnit()->wfSize() * 8); ++i) {
+-        a_data[i] = 0;
+-        x_data[i] = 0;
+-    }
+-    for (int i = 0; i < (computeUnit()->wfSize() * 4 * sizeof(double)); ++i) {
+-        d_data[i] = 0;
+-    }
++    const size_t scalar_bytes = 16 * sizeof(uint32_t);
++    dataArena = new uint8_t[d_bytes + a_bytes + x_bytes + scalar_bytes]();
++    d_data = dataArena;
++    a_data = d_data + d_bytes;
++    x_data = a_data + a_bytes;
++    scalar_data = x_data + x_bytes;
+     time = 0;
+ 
+     cu_id = _cu->cu_id;
+@@ -96,10 +102,8 @@ GPUDynInst::GPUDynInst(ComputeUnit *_cu, Wavefront *_wf,
+ 
+ GPUDynInst::~GPUDynInst()
+ {
+-    delete[] d_data;
+-    delete[] a_data;
+-    delete[] x_data;
+-    delete[] scalar_data;
++    // d_data, a_data, x_data and scalar_data are slices of dataArena.
++    delete[] dataArena;
+     delete _staticInst;
+ }
+ 
+@@ -970,9 +974,21 @@ GPUDynInst::resolveFlatSegment(const VectorMask &mask)
+         // For FLAT the local memory pipe counters are incremented, but they
+         // are not incremented for explicit scratch_* instructions. Only
+         // decrement these counters if we are explicitly a FLAT instruction.
++        //
++        // The LGKM count is deliberately NOT retired here, unlike the
++        // superficially similar SC_GROUP branch above. A flat instruction
++        // that resolves to private memory is issued to the *global* memory
++        // pipe (issueRequestHelper in vega/insts/op_encodings.hh), and
++        // GlobalMemPipeline::exec() already retires one LGKM count for any
++        // instruction whose isFlat() flag is set. Retiring it here as well
++        // decrements the wave's outstanding count twice for one instruction,
++        // which either trips the underflow check in decLGKMInstsIssued() or
++        // silently consumes a *different* instruction's count and lets the
++        // next s_waitcnt lgkmcnt fall through with data still in flight. The
++        // SC_GLOBAL branch above takes the same pipe and correctly leaves the
++        // LGKM count alone; SC_GROUP retires VMEM instead because it goes to
++        // the local memory pipe.
+         if (isFlat()) {
+-            wavefront()->decLGKMInstsIssued();
+-            wavefront()->lgkmIssued.erase(seqNum());
+             if (isLoad()) {
+                 wavefront()->rdLmReqsInPipe--;
+             } else if (isStore()) {
+diff --git a/src/gpu-compute/gpu_dyn_inst.hh b/src/gpu-compute/gpu_dyn_inst.hh
+index 16fa83548..db6f04281 100644
+--- a/src/gpu-compute/gpu_dyn_inst.hh
++++ b/src/gpu-compute/gpu_dyn_inst.hh
+@@ -203,6 +203,9 @@ class GPUDynInst : public GPUExecContext
+     Addr ldsDestinationAddr;
+     bool ldsDestinationAddrValid;
+ 
++    // Single owning allocation backing d_data/scalar_data/a_data/x_data.
++    // Those four are non-owning slices of it; only this pointer is freed.
++    uint8_t *dataArena;
+     // vector data to get written
+     uint8_t *d_data;
+     // scalar data to be transferred
+diff --git a/src/gpu-compute/lds_state.hh b/src/gpu-compute/lds_state.hh
+index d336d3507..2306290b2 100644
+--- a/src/gpu-compute/lds_state.hh
++++ b/src/gpu-compute/lds_state.hh
+@@ -74,8 +74,14 @@ class LdsChunk
+         /**
+          * For reads that are outside the bounds of the LDS
+          * chunk allocated to this WG we return 0.
++         *
++         * The whole T must fit: the access is reinterpreted at &chunk[index]
++         * and a T straddling the end would read past the backing vector.
++         * An LDS-DMA load (global/scratch/buffer_load ... lds) can name any
++         * M0 + lane*stride address, so this is reachable from ISA state
++         * rather than only from a simulator bug.
+          */
+-        if (index >= chunk.size()) {
++        if (index + sizeof(T) > chunk.size()) {
+             DPRINTF(GPULDS, "LDS[%d][%d]: Read 0 beyond size (%ld)\n",
+                     dispatchId, wgId, chunk.size());
+             return (T)0;
+@@ -113,8 +119,12 @@ class LdsChunk
+         /**
+          * Writes that are outside the bounds of the LDS
+          * chunk allocated to this WG are dropped.
++         *
++         * The whole T must fit, for the same reason as read(): a T that
++         * straddles the end of the chunk would corrupt the heap immediately
++         * after the backing vector rather than being discarded.
+          */
+-        if (index >= chunk.size()) {
++        if (index + sizeof(T) > chunk.size()) {
+             DPRINTF(GPULDS, "LDS[%d][%d]: Ignoring write beyond size (%ld)\n",
+                     dispatchId, wgId, chunk.size());
+             return;
+@@ -551,6 +561,16 @@ class LdsState: public ClockedObject
+       return bytesAllocated + x_size <= maximumSize;
+     }
+ 
++    /**
++     * The total group segment this LDS provides, and how much of it is
++     * currently held by resident workgroups. A dispatch that fails
++     * canReserve() is either asking for more than the device has -- which no
++     * amount of waiting can fix -- or waiting on a workgroup to release its
++     * chunk. Only the caller can tell those apart, so expose both.
++     */
++    int getMaximumSize() const { return maximumSize; }
++    int getBytesAllocated() const { return bytesAllocated; }
++
+   private:
+     /**
+      * give back the space
+diff --git a/src/gpu-compute/schedule_stage.cc b/src/gpu-compute/schedule_stage.cc
+index 6758f7726..90b3d1414 100644
+--- a/src/gpu-compute/schedule_stage.cc
++++ b/src/gpu-compute/schedule_stage.cc
+@@ -150,7 +150,25 @@ ScheduleStage::exec()
+                     wf->trackLGKMInst(gpu_dyn_inst);
+                 }
+             }
+-            if (gpu_dyn_inst->isStore() && gpu_dyn_inst->isGlobalSeg()) {
++            /*
++             * EXPCNT counts exports, GDS, and *vector* memory writes that
++             * have not yet read their data out of the VGPRs. A scalar memory
++             * write reads SGPRs and is accounted by LGKMCNT alone.
++             *
++             * Inst_SMEM sets both Scalar and GlobalSegment, so without the
++             * isScalar() test every s_store_dword was counted here -- and
++             * nothing ever retired it: the only release is in
++             * GlobalMemPipeline::exec(), and a scalar store is issued to the
++             * ScalarMemPipeline, whose completion path touches LGKM only. The
++             * wave's expcnt therefore never returned to zero and the next
++             * `s_waitcnt expcnt(0)` blocked it forever. In the Qwen3.5 TP1
++             * lane that wave was the producer in AITER's split-K GEMM: it
++             * stalled at s_endpgm holding the tile counter it was supposed to
++             * decrement, and every peer workgroup spun on that counter for
++             * the rest of the run.
++             */
++            if (gpu_dyn_inst->isStore() && gpu_dyn_inst->isGlobalSeg()
++                && !gpu_dyn_inst->isScalar()) {
+                 wf->incExpInstsIssued();
+                 wf->trackExpInst(gpu_dyn_inst);
+             }
+diff --git a/src/gpu-compute/scoreboard_check_stage.cc b/src/gpu-compute/scoreboard_check_stage.cc
+index fa10acab4..14bb8fc6d 100644
+--- a/src/gpu-compute/scoreboard_check_stage.cc
++++ b/src/gpu-compute/scoreboard_check_stage.cc
+@@ -161,8 +161,17 @@ ScoreboardCheckStage::ready(Wavefront *w, nonrdytype_e *rdyStatus,
+ 
+     DPRINTF(GPUExec, "CU%d: WF[%d][%d]: Checking Ready for Inst : %s\n",
+             computeUnit.cu_id, w->simdId, w->wfSlotId, ii->disassemble());
+-    w->lastInstSeqNum = ii->seqNum();
+-    w->lastInstDisasm = ii->disassemble();
++    /*
++     * A stalled wave re-checks the same instruction every cycle. Copying the
++     * disassembly string on each of those checks is a heap allocation per
++     * wavefront slot per compute-unit cycle for no change in value, so only
++     * refresh it when the instruction under check actually changes. The
++     * recorded diagnostic is identical either way.
++     */
++    if (w->lastInstSeqNum != ii->seqNum()) {
++        w->lastInstSeqNum = ii->seqNum();
++        w->lastInstDisasm = ii->disassemble();
++    }
+ 
+     // Non-scalar (i.e., vector) instructions may use VGPRs
+     if (!ii->isScalar()) {
+@@ -229,15 +238,14 @@ ScoreboardCheckStage::ready(Wavefront *w, nonrdytype_e *rdyStatus,
+     }
+     DPRINTF(GPUExec, "CU%d: WF[%d][%d]: Ready Inst : %s\n", computeUnit.cu_id,
+             w->simdId, w->wfSlotId, ii->disassemble());
+-    *exeResType = mapWaveToExeUnit(w);
++    *exeResType = mapWaveToExeUnit(w, ii);
+     *rdyStatus = INST_RDY;
+     return true;
+ }
+ 
+ int
+-ScoreboardCheckStage::mapWaveToExeUnit(Wavefront *w)
++ScoreboardCheckStage::mapWaveToExeUnit(Wavefront *w, const GPUDynInstPtr &ii)
+ {
+-    GPUDynInstPtr ii = w->nextInstr();
+     assert(ii);
+     if (ii->isFlat()) {
+         /**
+diff --git a/src/gpu-compute/scoreboard_check_stage.hh b/src/gpu-compute/scoreboard_check_stage.hh
+index 5b468c825..fd1aa8f4b 100644
+--- a/src/gpu-compute/scoreboard_check_stage.hh
++++ b/src/gpu-compute/scoreboard_check_stage.hh
+@@ -40,6 +40,7 @@
+ 
+ #include "base/statistics.hh"
+ #include "base/stats/group.hh"
++#include "gpu-compute/misc.hh"
+ 
+ namespace gem5
+ {
+@@ -86,7 +87,10 @@ class ScoreboardCheckStage
+ 
+   private:
+     void collectStatistics(nonrdytype_e rdyStatus);
+-    int mapWaveToExeUnit(Wavefront *w);
++    // Takes the instruction the caller already resolved from the wave. Looking
++    // it up again costs a hash probe of the compute unit's pipeline map on
++    // every ready wavefront slot every cycle.
++    int mapWaveToExeUnit(Wavefront *w, const GPUDynInstPtr &ii);
+     bool ready(Wavefront *w, nonrdytype_e *rdyStatus,
+                int *exeResType, int wfSlot);
+     ComputeUnit &computeUnit;
+@@ -100,7 +104,14 @@ class ScoreboardCheckStage
+ 
+     const std::string _name;
+ 
+-    std::string rdyStatusStr(const nonrdytype_e& rdyStatus) {
++    /**
++     * Returns a static string literal, not a std::string. This runs once per
++     * wavefront slot per compute-unit cycle; returning by value allocated on
++     * every call for the labels longer than the small-string buffer
++     * ("NRDY_BARRIER_WAIT", "NRDY_MATRIX_CORE"), which is precisely the state
++     * a stalled wave sits in. The stored diagnostic text is unchanged.
++     */
++    const char *rdyStatusStr(const nonrdytype_e& rdyStatus) {
+         switch (rdyStatus) {
+             case NRDY_ILLEGAL: return "NRDY_ILLEGAL";
+             case NRDY_WF_STOP: return "NRDY_WF_STOP";
+diff --git a/src/gpu-compute/wavefront.cc b/src/gpu-compute/wavefront.cc
+index f022aa424..dd743cab0 100644
+--- a/src/gpu-compute/wavefront.cc
++++ b/src/gpu-compute/wavefront.cc
+@@ -102,6 +102,7 @@ Wavefront::Wavefront(const Params &p)
+ 
+     lastInstSeqNum = 0;
+     lastInstDisasm = "none";
++    lastInstRdyStatus = "none";
+ }
+ 
+ void
+@@ -1556,15 +1557,34 @@ Wavefront::incLGKMInstsIssued()
+     ++lgkmInstsIssued;
+ }
+ 
++/*
++ * These three counters are the wave's outstanding vmcnt/expcnt/lgkmcnt, so
++ * none of them may go negative. An underflow means one instruction was
++ * retired twice, which lets a later s_waitcnt fall through while its data is
++ * still in flight and permanently blocks the dependent register. The
++ * complementary failure -- an increment with no matching release -- is not
++ * detectable here, but it is what a hung `s_waitcnt` in the progress dump
++ * shows, so both halves of every pair are worth checking together.
++ */
+ void
+ Wavefront::decVMemInstsIssued()
+ {
++    panic_if(vmemInstsIssued <= 0,
++             "CU%d: WF[%d][%d] wave[%d] kernel %d retired a VMEM "
++             "instruction that was not outstanding (count %d)",
++             computeUnit->cu_id, simdId, wfSlotId, (int)wfDynId, kernId,
++             vmemInstsIssued);
+     --vmemInstsIssued;
+ }
+ 
+ void
+ Wavefront::decExpInstsIssued()
+ {
++    panic_if(expInstsIssued <= 0,
++             "CU%d: WF[%d][%d] wave[%d] kernel %d retired an EXP "
++             "instruction that was not outstanding (count %d)",
++             computeUnit->cu_id, simdId, wfSlotId, (int)wfDynId, kernId,
++             expInstsIssued);
+     --expInstsIssued;
+ }
+ 
+diff --git a/src/gpu-compute/wavefront.hh b/src/gpu-compute/wavefront.hh
+index 66417e509..a2e122fb8 100644
+--- a/src/gpu-compute/wavefront.hh
++++ b/src/gpu-compute/wavefront.hh
+@@ -326,8 +326,13 @@ class Wavefront : public SimObject
+ 
+     // Tracking variables for periodic progress
+     InstSeqNum lastInstSeqNum;
++    // Both are refreshed by the scoreboard check stage once per wavefront
++    // slot per compute-unit cycle, so neither may allocate. lastInstDisasm
++    // aliases the static instruction's cached disassembly and is only
++    // reassigned when the instruction under check actually changes;
++    // lastInstRdyStatus points at a string literal.
+     std::string lastInstDisasm;
+-    std::string lastInstRdyStatus;
++    const char *lastInstRdyStatus;
+     bool lastVrfStatus, lastSrfStatus;
+ 
+     // For MI355X MFMA instructions using scale the value must be reprogrammed
+-- 
+2.53.0
+

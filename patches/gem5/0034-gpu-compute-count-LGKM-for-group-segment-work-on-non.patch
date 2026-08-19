@@ -1,0 +1,72 @@
+From 9d19931df73ddf3032eaeaaad9cf92ecbd983a03 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 17 Aug 2026 23:16:12 +0800
+Subject: [PATCH 34/42] gpu-compute: count LGKM for group-segment work on
+ non-memory units
+
+Wavefront::reserveResources() tests isALU()/isNop() before isLocalMem(), so a
+DS instruction that also carries those semantics is routed to a SIMD unit
+rather than to the LDS memory unit. ScheduleStage only performs
+incLGKMInstsIssued() in its memory-unit loop, so such an instruction is never
+counted at issue, yet every DS execute() retires exactly one LGKM count. The
+wave's outstanding counter then underflows.
+
+In the Vega set two instructions hit this: ds_swizzle_b32 (Load|ALU, which
+deliberately omits MemoryRef because it never touches DS storage) and ds_nop
+(Nop). Hardware makes both observable through s_waitcnt lgkmcnt, so the repair
+is to count them at issue rather than to drop the retire, which would let a
+dependent s_waitcnt fall through while the destination VGPR is still in
+flight.
+
+Count group-segment, non-scalar work in the non-memory scheduling loop. The
+predicate is a segment property, not an instruction name: GroupSegment is set
+only by Inst_DS, so it covers any future DS instruction that acquires ALU or
+Nop semantics, and it cannot match ordinary VALU or SALU work.
+
+Evidence retains an A/B on one public-HIP capsule built around
+__builtin_amdgcn_ds_swizzle, which reproduces the panic in about two minutes
+instead of the forty minute model run that first exposed it. The pre-fix
+binary aborts with "retired an LGKM instruction that was not outstanding
+(count 0)"; the rebuilt binary completes the dispatch and synchronises. The
+capsule also records that gem5 applies no permutation for
+swizzle(QUAD_PERM,3,2,1,0); that is a separate defect, not addressed here.
+
+Checkpoint-ID: CP-0058
+Goal-ID: GSIM-001
+Plan-Revision: 16
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: d61ffdc405040587694381549794fc05260a1839848a149c8ceaf252ec8ddc1b
+Change-Kind: bugfix
+Baseline-Commit: 30d2511083d7c32ffa75ef1fd1864432c3212cf8
+---
+ src/gpu-compute/schedule_stage.cc | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/src/gpu-compute/schedule_stage.cc b/src/gpu-compute/schedule_stage.cc
+index 0d54df1e7..48af8936c 100644
+--- a/src/gpu-compute/schedule_stage.cc
++++ b/src/gpu-compute/schedule_stage.cc
+@@ -181,6 +181,20 @@ ScheduleStage::exec()
+             // this wave spends in SCH stage.
+             wf->stats.schCycles++;
+             stats.addToSchListStalls[j]++;
++        } else if (gpu_dyn_inst->isGroupSeg() && !gpu_dyn_inst->isScalar()) {
++            // A group-segment (LDS) instruction normally reserves a memory
++            // execution unit and is counted by the memory loop above. One
++            // that also carries ALU or Nop semantics -- ds_swizzle_b32 and
++            // ds_nop -- is routed to a SIMD unit by
++            // Wavefront::reserveResources() instead, because isALU()/isNop()
++            // are tested before isLocalMem(). Its execute() still retires
++            // exactly one LGKM count, and the hardware likewise makes it
++            // observable through s_waitcnt lgkmcnt, so it must be counted at
++            // issue here. Without this the wave's outstanding count
++            // underflows and a later s_waitcnt falls through while the
++            // destination VGPR is still in flight.
++            wf->incLGKMInstsIssued();
++            wf->trackLGKMInst(gpu_dyn_inst);
+         }
+     }
+ 
+-- 
+2.53.0
+

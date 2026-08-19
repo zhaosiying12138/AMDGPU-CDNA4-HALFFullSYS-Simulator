@@ -1,0 +1,2095 @@
+From 800ae4e0d13affaffa64e82ea41a9238146a0a7e Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sun, 9 Aug 2026 06:55:15 +0800
+Subject: [PATCH 07/42] feat(amdgpu): add typed KMT daemon envelope
+
+Checkpoint-ID: CP-0010
+
+Goal-ID: GSIM-001
+
+Plan-Revision: 2
+
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+
+Evidence-Manifest-SHA256: 7a25cc9c8407e1e31e763ae400fb6979bbbc70ad7fcd5af2fcea801da2c70b9f
+
+Change-Kind: code
+
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/dev/amdgpu/SConscript                 |   3 +
+ src/dev/amdgpu/host_gpu_bridge.cc         |  85 ++-
+ src/dev/amdgpu/host_gpu_bridge.hh         |   4 +
+ src/dev/amdgpu/host_gpu_kmt_state.cc      | 831 ++++++++++++++++++++++
+ src/dev/amdgpu/host_gpu_kmt_state.hh      | 220 ++++++
+ src/dev/amdgpu/host_gpu_kmt_state.test.cc | 265 +++++++
+ src/dev/amdgpu/host_gpu_protocol.cc       | 169 +++++
+ src/dev/amdgpu/host_gpu_protocol.hh       | 115 +++
+ src/dev/amdgpu/host_gpu_protocol.test.cc  | 143 ++++
+ 9 files changed, 1834 insertions(+), 1 deletion(-)
+ create mode 100644 src/dev/amdgpu/host_gpu_kmt_state.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_kmt_state.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_kmt_state.test.cc
+
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index c291ee6f9..ad402d5a9 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -53,6 +53,7 @@ Source('host_gpu_dispatch_state.cc', tags=['x86 isa'])
+ Source('host_gpu_memory_state.cc', tags=['x86 isa'])
+ Source('host_gpu_queue_state.cc', tags=['x86 isa'])
+ Source('host_gpu_signal_state.cc', tags=['x86 isa'])
++Source('host_gpu_kmt_state.cc', tags=['x86 isa'])
+ Source('host_gpu_socket_utils.cc', tags=['x86 isa'])
+ Source('interrupt_handler.cc', tags=['x86 isa'])
+ Source('memory_manager.cc', tags=['x86 isa'])
+@@ -73,6 +74,8 @@ GTest('host_gpu_queue_state.test', 'host_gpu_queue_state.test.cc',
+       'host_gpu_queue_state.cc')
+ GTest('host_gpu_signal_state.test', 'host_gpu_signal_state.test.cc',
+       'host_gpu_signal_state.cc', 'host_gpu_queue_state.cc')
++GTest('host_gpu_kmt_state.test', 'host_gpu_kmt_state.test.cc',
++      'host_gpu_kmt_state.cc', 'host_gpu_protocol.cc')
+ GTest('host_gpu_socket_utils.test', 'host_gpu_socket_utils.test.cc',
+       'host_gpu_socket_utils.cc')
+ 
+diff --git a/src/dev/amdgpu/host_gpu_bridge.cc b/src/dev/amdgpu/host_gpu_bridge.cc
+index 39ecb58ac..bad899c7b 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.cc
++++ b/src/dev/amdgpu/host_gpu_bridge.cc
+@@ -506,7 +506,8 @@ HostGPUBridge::HostGPUBridge(const HostGPUBridgeParams &params)
+       recordServiceEvent([this]() { processRecords(); },
+                          name() + ".host_gpu_records"),
+       queueServiceEvent([this]() { processQueueCommands(); },
+-                        name() + ".host_gpu_queue_commands"),
++                         name() + ".host_gpu_queue_commands"),
++      kmtState(epoch),
+       dispatchState(queueState, memoryState, signalState),
+       signalServiceEvent([this]() { processSignalCompletions(); },
+                          name() + ".host_gpu_signal_completions")
+@@ -544,6 +545,8 @@ HostGPUBridge::HostGPUBridge(const HostGPUBridgeParams &params)
+         protocol::MemoryControlCapabilityMask;
+     identity.supported[protocol::SignalEventCapabilityByte] |=
+         protocol::SignalEventCapabilityMask;
++    identity.supported[protocol::KmtOperationCapabilityByte] |=
++        protocol::KmtOperationCapabilityMask;
+     if (dispatchEnabled) {
+         identity.supported[protocol::PinnedDispatchCapabilityByte] |=
+             protocol::PinnedDispatchCapabilityMask;
+@@ -1970,6 +1973,7 @@ HostGPUBridge::shutdown()
+         completedDispatchSession.reset();
+         queueState.clear();
+         memoryState.clear();
++        kmtState.clear();
+         signalState.clear();
+         if (internalQueueRegistered) {
+             hsaPacketProcessor->unregisterHostQueue(
+@@ -2330,6 +2334,7 @@ HostGPUBridge::closeClient(int fd)
+     }
+     queueState.disconnect(owner);
+     memoryState.disconnect({owner.fd, owner.clientGeneration});
++    kmtState.disconnect({owner.fd, owner.clientGeneration});
+     signalState.disconnect({owner.fd, owner.clientGeneration});
+     clients.erase(found);
+     pendingRecords.erase(std::remove_if(
+@@ -2379,6 +2384,11 @@ HostGPUBridge::processRecords()
+                    hasWireMessageType(record.bytes,
+                                       protocol::MessageType::MemoryRequest)) {
+             processMemoryRecord(record);
++        } else if (found->second->state.phase() ==
++                       ConnectionPhase::Established &&
++                   hasWireMessageType(record.bytes,
++                                      protocol::MessageType::KmtRequest)) {
++            processKmtRecord(record);
+         } else if (found->second->state.phase() ==
+                        ConnectionPhase::Established &&
+                    hasWireMessageType(record.bytes,
+@@ -2780,6 +2790,78 @@ HostGPUBridge::processMemoryRecord(const PendingRecord &record)
+     enqueueOutbound(record.clientFd, record.generation, std::move(outbound));
+ }
+ 
++void
++HostGPUBridge::processKmtRecord(const PendingRecord &record)
++{
++    auto found = clients.find(record.clientFd);
++    if (found == clients.end() ||
++        found->second->generation != record.generation) {
++        return;
++    }
++    Client &client = *found->second;
++    const auto decoded = protocol::decodeKmtRequestRecord(
++        record.bytes.data(), record.bytes.size(), maximumRecord);
++    if (decoded.action == protocol::DecodeAction::Drop) {
++        if (decoded.closeConnection)
++            closeClient(record.clientFd);
++        return;
++    }
++
++    protocol::Status sessionStatus = protocol::Status::Ok;
++    const bool kmtSelected =
++        (client.selectedCapabilities[protocol::KmtOperationCapabilityByte] &
++         protocol::KmtOperationCapabilityMask) != 0;
++    if (decoded.header.daemonUuid != identity.daemonUuid) {
++        sessionStatus = protocol::Status::InstanceMismatch;
++    } else if (decoded.header.connectionId != client.connectionId) {
++        sessionStatus = protocol::Status::ProtocolState;
++    } else if (decoded.header.jobEpoch != identity.jobEpoch) {
++        sessionStatus = protocol::Status::TopologyMismatch;
++    } else if (!kmtSelected) {
++        sessionStatus = protocol::Status::UnsupportedCapability;
++    }
++    protocol::Status status = queueRequestStatus(
++        decoded.status, sessionStatus);
++    if (status == protocol::Status::Ok &&
++        client.requestIds.observe(decoded.header.requestId) !=
++            RequestIdResult::Fresh) {
++        status = protocol::Status::ProtocolState;
++    }
++
++    protocol::KmtResponse response;
++    response.operation = decoded.request.operation;
++    response.flags = decoded.request.flags;
++    response.operationSequence = decoded.request.operationSequence;
++    response.ownerId = decoded.request.ownerId;
++    response.ownerGeneration = decoded.request.ownerGeneration;
++    response.objectId = decoded.request.objectId;
++    response.objectGeneration = decoded.request.objectGeneration;
++    response.auxId = decoded.request.auxId;
++    response.auxGeneration = decoded.request.auxGeneration;
++    if (status != protocol::Status::Ok) {
++        response.status = protocol::KmtStatus::Success;
++        response.wireStatus = static_cast<int32_t>(status);
++    } else {
++        const HostGPUKmtState::Owner owner{
++            record.clientFd, record.generation};
++        response = kmtState.submit(owner, decoded.header,
++                                   decoded.request).response;
++    }
++
++    client.state.finishEstablishedRecord();
++    const auto responseHeader = protocol::queueResponseHeader(
++        decoded.header, identity, client.connectionId);
++    const auto encoded = protocol::encodeKmtAck(responseHeader, response);
++    OutboundRecord outbound;
++    outbound.bytes = encoded;
++    outbound.kind = OutboundKind::KmtAck;
++    outbound.status = status;
++    outbound.success = response.wireStatus ==
++            static_cast<int32_t>(protocol::Status::Ok) &&
++        response.status == protocol::KmtStatus::Success;
++    enqueueOutbound(record.clientFd, record.generation, std::move(outbound));
++}
++
+ void
+ HostGPUBridge::processSignalRecord(const PendingRecord &record)
+ {
+@@ -3338,6 +3420,7 @@ HostGPUBridge::completeOutbound(int fd, uint64_t generation,
+         completeAck(fd, generation, record.status, record.success);
+         break;
+       case OutboundKind::QueueAck:
++      case OutboundKind::KmtAck:
+       case OutboundKind::SignalAck:
+         if (found->second->state.phase() == ConnectionPhase::Established &&
+             found->second->state.canReceive()) {
+diff --git a/src/dev/amdgpu/host_gpu_bridge.hh b/src/dev/amdgpu/host_gpu_bridge.hh
+index 4b713298d..252cb70c1 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.hh
++++ b/src/dev/amdgpu/host_gpu_bridge.hh
+@@ -45,6 +45,7 @@
+ #include "dev/amdgpu/host_gpu_connection_state.hh"
+ #include "dev/amdgpu/host_gpu_dispatch_state.hh"
+ #include "dev/amdgpu/host_gpu_memory_state.hh"
++#include "dev/amdgpu/host_gpu_kmt_state.hh"
+ #include "dev/amdgpu/host_gpu_protocol.hh"
+ #include "dev/amdgpu/host_gpu_queue_state.hh"
+ #include "dev/amdgpu/host_gpu_signal_state.hh"
+@@ -153,6 +154,7 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+         QueueAck,
+         QueueCompletion,
+         MemoryAck,
++        KmtAck,
+         SignalAck,
+         SignalCompletion,
+         DispatchAck,
+@@ -226,6 +228,7 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+     void processHelloRecord(const PendingRecord &record);
+     void processQueueRecord(const PendingRecord &record);
+     void processMemoryRecord(const PendingRecord &record);
++    void processKmtRecord(const PendingRecord &record);
+     void processSignalRecord(const PendingRecord &record);
+     void processDispatchRecord(const PendingRecord &record);
+     void scheduleRecordService();
+@@ -354,6 +357,7 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+     HostGPUQueueState queueState;
+     EventFunctionWrapper queueServiceEvent;
+     HostGPUMemoryState memoryState;
++    HostGPUKmtState kmtState;
+     HostGPUSignalState signalState;
+     HostGPUDispatchState dispatchState;
+     EventFunctionWrapper signalServiceEvent;
+diff --git a/src/dev/amdgpu/host_gpu_kmt_state.cc b/src/dev/amdgpu/host_gpu_kmt_state.cc
+new file mode 100644
+index 000000000..24b4cfcee
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_kmt_state.cc
+@@ -0,0 +1,831 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ */
++
++#include "dev/amdgpu/host_gpu_kmt_state.hh"
++
++#include <algorithm>
++#include <limits>
++#include <new>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++namespace
++{
++
++constexpr uint64_t U32Mask = 0xffffffffULL;
++
++bool
++pairPresent(uint64_t id, uint64_t generation)
++{
++    return id != 0 && generation != 0;
++}
++
++bool
++pairAbsent(uint64_t id, uint64_t generation)
++{
++    return id == 0 && generation == 0;
++}
++
++} // anonymous namespace
++
++HostGPUKmtState::HostGPUKmtState(uint64_t epoch) : initialEpoch(epoch)
++{
++    if (initialEpoch == 0)
++        initialEpoch = 1;
++}
++
++uint64_t
++HostGPUKmtState::splitWords(
++    const std::array<uint32_t, protocol::KmtArgumentWordCount> &words,
++    size_t high, size_t low)
++{
++    return (static_cast<uint64_t>(words[high]) << 32) | words[low];
++}
++
++void
++HostGPUKmtState::setWords(
++    std::array<uint32_t, protocol::KmtArgumentWordCount> &words,
++    size_t high, size_t low, uint64_t value)
++{
++    words[high] = static_cast<uint32_t>(value >> 32);
++    words[low] = static_cast<uint32_t>(value & U32Mask);
++}
++
++bool
++HostGPUKmtState::noWordsExcept(
++    const std::array<uint32_t, protocol::KmtArgumentWordCount> &words,
++    std::initializer_list<size_t> used)
++{
++    for (size_t index = 0; index < words.size(); ++index) {
++        if (std::find(used.begin(), used.end(), index) == used.end() &&
++            words[index] != 0) {
++            return false;
++        }
++    }
++    return true;
++}
++
++uint64_t
++HostGPUKmtState::makeId(uint64_t prefix, size_t slot)
++{
++    return prefix | static_cast<uint64_t>(slot + 1);
++}
++
++bool
++HostGPUKmtState::idHasPrefix(uint64_t id, uint64_t prefix)
++{
++    return (id & ~SlotMask) == prefix && (id & SlotMask) != 0;
++}
++
++size_t
++HostGPUKmtState::idSlot(uint64_t id)
++{
++    return static_cast<size_t>((id & SlotMask) - 1);
++}
++
++bool
++HostGPUKmtState::conditionSatisfied(
++    uint64_t value, uint32_t condition, uint64_t compare)
++{
++    switch (condition) {
++      case 0:
++        return value == compare;
++      case 1:
++        return value != compare;
++      case 2:
++        return value < compare;
++      case 3:
++        return value >= compare;
++      default:
++        return false;
++    }
++}
++
++void
++HostGPUKmtState::store16(
++    std::array<uint8_t, protocol::KmtCopiedBufferBytes> &buffer,
++    size_t offset, uint16_t value)
++{
++    buffer[offset] = static_cast<uint8_t>(value >> 8);
++    buffer[offset + 1] = static_cast<uint8_t>(value);
++}
++
++void
++HostGPUKmtState::store32(
++    std::array<uint8_t, protocol::KmtCopiedBufferBytes> &buffer,
++    size_t offset, uint32_t value)
++{
++    for (size_t index = 0; index < 4; ++index)
++        buffer[offset + index] = static_cast<uint8_t>(
++            value >> (24 - index * 8));
++}
++
++void
++HostGPUKmtState::store64(
++    std::array<uint8_t, protocol::KmtCopiedBufferBytes> &buffer,
++    size_t offset, uint64_t value)
++{
++    for (size_t index = 0; index < 8; ++index)
++        buffer[offset + index] = static_cast<uint8_t>(
++            value >> (56 - index * 8));
++}
++
++uint32_t
++HostGPUKmtState::drmArgumentBytes(uint32_t command)
++{
++    static constexpr std::array<uint32_t, 15> sizes = {
++        48, 8, 16, 24, 16, 16, 16, 32, 16, 4, 32, 8, 16, 16, 16};
++    return command < sizes.size() ? sizes[command] : 0;
++}
++
++HostGPUKmtState::Session *
++HostGPUKmtState::findSession(const Owner &transportOwner)
++{
++    for (auto &slot : sessions) {
++        if (slot && slot->transportOwner == transportOwner)
++            return &*slot;
++    }
++    return nullptr;
++}
++
++const HostGPUKmtState::Session *
++HostGPUKmtState::findSession(const Owner &transportOwner) const
++{
++    for (const auto &slot : sessions) {
++        if (slot && slot->transportOwner == transportOwner)
++            return &*slot;
++    }
++    return nullptr;
++}
++
++HostGPUKmtState::Session *
++HostGPUKmtState::findSession(
++    const Owner &transportOwner, uint64_t ownerId,
++    uint64_t ownerGeneration)
++{
++    Session *session = findSession(transportOwner);
++    if (session == nullptr || session->ownerId != ownerId ||
++        session->ownerGeneration != ownerGeneration) {
++        return nullptr;
++    }
++    return session;
++}
++
++const HostGPUKmtState::Session *
++HostGPUKmtState::findSession(
++    const Owner &transportOwner, uint64_t ownerId,
++    uint64_t ownerGeneration) const
++{
++    const Session *session = findSession(transportOwner);
++    if (session == nullptr || session->ownerId != ownerId ||
++        session->ownerGeneration != ownerGeneration) {
++        return nullptr;
++    }
++    return session;
++}
++
++uint64_t
++HostGPUKmtState::takeGeneration(uint64_t &counter, uint64_t preferred)
++{
++    if (preferred == 0)
++        preferred = initialEpoch;
++    if (counter == 0)
++        counter = preferred;
++    if (counter < preferred)
++        counter = preferred;
++    if (counter == 0 || counter == std::numeric_limits<uint64_t>::max())
++        return 0;
++    const uint64_t result = counter;
++    ++counter;
++    return result;
++}
++
++protocol::KmtResponse
++HostGPUKmtState::responseFor(const protocol::KmtRequest &request) const
++{
++    protocol::KmtResponse response;
++    response.operation = request.operation;
++    response.flags = request.flags;
++    response.operationSequence = request.operationSequence;
++    response.ownerId = request.ownerId;
++    response.ownerGeneration = request.ownerGeneration;
++    response.objectId = request.objectId;
++    response.objectGeneration = request.objectGeneration;
++    response.auxId = request.auxId;
++    response.auxGeneration = request.auxGeneration;
++    return response;
++}
++
++HostGPUKmtState::Decision
++HostGPUKmtState::wireFailure(
++    const protocol::KmtRequest &request, protocol::Status status) const
++{
++    Decision decision;
++    decision.response = responseFor(request);
++    decision.response.status = protocol::KmtStatus::Success;
++    decision.response.wireStatus = static_cast<int32_t>(status);
++    decision.response.resultWords.fill(0);
++    decision.response.resultBytes = 0;
++    decision.response.resultCrc32c = 0;
++    decision.response.copiedResult.fill(0);
++    return decision;
++}
++
++HostGPUKmtState::Decision
++HostGPUKmtState::providerFailure(
++    const protocol::KmtRequest &request, protocol::KmtStatus status) const
++{
++    Decision decision;
++    decision.response = responseFor(request);
++    decision.response.status = status;
++    decision.response.wireStatus = static_cast<int32_t>(protocol::Status::Ok);
++    decision.response.resultWords.fill(0);
++    decision.response.resultBytes = 0;
++    decision.response.resultCrc32c = 0;
++    decision.response.copiedResult.fill(0);
++    return decision;
++}
++
++HostGPUKmtState::Decision
++HostGPUKmtState::invalidParameter(const protocol::KmtRequest &request) const
++{
++    return providerFailure(request, protocol::KmtStatus::InvalidParameter);
++}
++
++HostGPUKmtState::Decision
++HostGPUKmtState::invalidHandle(const protocol::KmtRequest &request) const
++{
++    return providerFailure(request, protocol::KmtStatus::InvalidHandle);
++}
++
++bool
++HostGPUKmtState::shapeValid(
++    const protocol::KmtRequest &request, bool objectRequired,
++    uint64_t copiedBytes, std::initializer_list<size_t> usedWords) const
++{
++    const bool objectPair = pairPresent(
++        request.objectId, request.objectGeneration);
++    if ((objectRequired && !objectPair) ||
++        (!objectRequired && !pairAbsent(
++            request.objectId, request.objectGeneration))) {
++        return false;
++    }
++    if (!pairAbsent(request.auxId, request.auxGeneration) ||
++        !noWordsExcept(request.argumentWords, usedWords) ||
++        request.copiedBytes != copiedBytes) {
++        return false;
++    }
++    if (copiedBytes == 0 && request.copiedCrc32c != 0)
++        return false;
++    if (copiedBytes != 0 &&
++        protocol::crc32c(request.copiedBuffer.data(), copiedBytes) !=
++            request.copiedCrc32c)
++        return false;
++    return true;
++}
++
++HostGPUKmtState::Allocation *
++HostGPUKmtState::resolveAllocation(
++    const Session &session, const protocol::KmtRequest &request)
++{
++    if (!idHasPrefix(request.objectId, AllocationPrefix))
++        return nullptr;
++    const size_t slot = idSlot(request.objectId);
++    if (slot >= allocations.size() || !allocations[slot])
++        return nullptr;
++    Allocation &allocation = *allocations[slot];
++    if (allocation.ownerId != session.ownerId ||
++        allocation.ownerGeneration != session.ownerGeneration ||
++        allocation.generation != request.objectGeneration) {
++        return nullptr;
++    }
++    return &allocation;
++}
++
++HostGPUKmtState::Queue *
++HostGPUKmtState::resolveQueue(
++    const Session &session, const protocol::KmtRequest &request)
++{
++    if (!idHasPrefix(request.objectId, QueuePrefix))
++        return nullptr;
++    const size_t slot = idSlot(request.objectId);
++    if (slot >= queues.size() || !queues[slot])
++        return nullptr;
++    Queue &queue = *queues[slot];
++    if (queue.ownerId != session.ownerId ||
++        queue.ownerGeneration != session.ownerGeneration ||
++        queue.generation != request.objectGeneration) {
++        return nullptr;
++    }
++    return &queue;
++}
++
++HostGPUKmtState::Event *
++HostGPUKmtState::resolveEvent(
++    const Session &session, const protocol::KmtRequest &request)
++{
++    if (!idHasPrefix(request.objectId, EventPrefix))
++        return nullptr;
++    const size_t slot = idSlot(request.objectId);
++    if (slot >= events.size() || !events[slot])
++        return nullptr;
++    Event &event = *events[slot];
++    if (event.ownerId != session.ownerId ||
++        event.ownerGeneration != session.ownerGeneration ||
++        event.generation != request.objectGeneration) {
++        return nullptr;
++    }
++    return &event;
++}
++
++void
++HostGPUKmtState::releaseSessionObjects(const Session &session)
++{
++    for (auto &slot : allocations) {
++        if (slot && slot->ownerId == session.ownerId &&
++            slot->ownerGeneration == session.ownerGeneration) {
++            totalBytes -= slot->size;
++            slot.reset();
++            --liveAllocations;
++        }
++    }
++    for (auto &slot : queues) {
++        if (slot && slot->ownerId == session.ownerId &&
++            slot->ownerGeneration == session.ownerGeneration) {
++            slot.reset();
++            --liveQueues;
++        }
++    }
++    for (auto &slot : events) {
++        if (slot && slot->ownerId == session.ownerId &&
++            slot->ownerGeneration == session.ownerGeneration) {
++            slot.reset();
++            --liveEvents;
++        }
++    }
++}
++
++HostGPUKmtState::Decision
++HostGPUKmtState::submitOpen(
++    const Owner &transportOwner, const protocol::Header &header,
++    const protocol::KmtRequest &request)
++{
++    if (header.jobEpoch == 0 || request.operationSequence == 0 ||
++        request.operationSequence != 1 || request.flags != 0 ||
++        !pairAbsent(request.ownerId, request.ownerGeneration) ||
++        !pairAbsent(request.objectId, request.objectGeneration) ||
++        !pairAbsent(request.auxId, request.auxGeneration) ||
++        !noWordsExcept(request.argumentWords, {}) || request.copiedBytes != 0 ||
++        request.copiedCrc32c != 0) {
++        return wireFailure(request, protocol::Status::Malformed);
++    }
++
++    if (Session *existing = findSession(transportOwner)) {
++        if (request.operationSequence <= existing->lastSequence)
++            return wireFailure(request, protocol::Status::ProtocolState);
++        existing->lastSequence = request.operationSequence;
++        return providerFailure(request, protocol::KmtStatus::KernelAlreadyOpened);
++    }
++
++    size_t slot = 0;
++    while (slot < sessions.size() && sessions[slot])
++        ++slot;
++    if (slot == sessions.size())
++        return providerFailure(request, protocol::KmtStatus::OutOfResources);
++    const uint64_t generation = takeGeneration(nextOwnerGeneration,
++                                                header.jobEpoch);
++    if (generation == 0)
++        return providerFailure(request, protocol::KmtStatus::OutOfResources);
++
++    try {
++        sessions[slot].emplace(Session{
++            transportOwner, makeId(OwnerPrefix, slot), generation, 1,
++            header.jobEpoch});
++    } catch (const std::bad_alloc &) {
++        return providerFailure(request, protocol::KmtStatus::NoMemory);
++    }
++    ++liveOwners;
++    Decision decision;
++    decision.response = responseFor(request);
++    decision.response.status = protocol::KmtStatus::Success;
++    decision.response.ownerId = makeId(OwnerPrefix, slot);
++    decision.response.ownerGeneration = generation;
++    decision.response.objectId = 0;
++    decision.response.objectGeneration = 0;
++    decision.response.auxId = 0;
++    decision.response.auxGeneration = 0;
++    decision.sequenceConsumed = true;
++    return decision;
++}
++
++HostGPUKmtState::Decision
++HostGPUKmtState::submit(
++    const Owner &transportOwner, const protocol::Header &header,
++    const protocol::KmtRequest &request)
++{
++    if (request.operation == protocol::KmtOperation::OpenKfd)
++        return submitOpen(transportOwner, header, request);
++
++    Session *session = findSession(
++        transportOwner, request.ownerId, request.ownerGeneration);
++    if (session == nullptr)
++        return invalidHandle(request);
++    if (header.jobEpoch == 0 || header.jobEpoch != session->jobEpoch)
++        return wireFailure(request, protocol::Status::TopologyMismatch);
++    if (request.operationSequence <= session->lastSequence ||
++        request.operationSequence == std::numeric_limits<uint64_t>::max()) {
++        return wireFailure(request, protocol::Status::ProtocolState);
++    }
++    session->lastSequence = request.operationSequence;
++
++    Decision decision;
++    decision.sequenceConsumed = true;
++    decision.response = responseFor(request);
++    decision.response.ownerId = session->ownerId;
++    decision.response.ownerGeneration = session->ownerGeneration;
++    decision.response.wireStatus = static_cast<int32_t>(protocol::Status::Ok);
++
++    auto fail = [&](protocol::KmtStatus status) {
++        decision.response.status = status;
++        decision.response.objectId = request.objectId;
++        decision.response.objectGeneration = request.objectGeneration;
++        decision.response.resultWords.fill(0);
++        decision.response.resultBytes = 0;
++        decision.response.resultCrc32c = 0;
++        decision.response.copiedResult.fill(0);
++        return decision;
++    };
++    auto malformed = [&]() { return fail(protocol::KmtStatus::InvalidParameter); };
++
++    switch (request.operation) {
++      case protocol::KmtOperation::CloseKfd: {
++        if (!shapeValid(request, false, 0, {}))
++            return malformed();
++        for (const auto &allocation : allocations) {
++            if (allocation && allocation->ownerId == session->ownerId &&
++                allocation->ownerGeneration == session->ownerGeneration)
++                return fail(protocol::KmtStatus::OutOfResources);
++        }
++        for (const auto &queue : queues) {
++            if (queue && queue->ownerId == session->ownerId &&
++                queue->ownerGeneration == session->ownerGeneration)
++                return fail(protocol::KmtStatus::OutOfResources);
++        }
++        for (const auto &event : events) {
++            if (event && event->ownerId == session->ownerId &&
++                event->ownerGeneration == session->ownerGeneration)
++                return fail(protocol::KmtStatus::OutOfResources);
++        }
++        const uint64_t responseOwnerId = session->ownerId;
++        const uint64_t responseOwnerGeneration = session->ownerGeneration;
++        size_t index = sessions.size();
++        for (size_t candidate = 0; candidate < sessions.size(); ++candidate) {
++            if (sessions[candidate] && &*sessions[candidate] == session) {
++                index = candidate;
++                break;
++            }
++        }
++        if (index == sessions.size())
++            return fail(protocol::KmtStatus::InvalidHandle);
++        sessions[index].reset();
++        --liveOwners;
++        decision.response.objectId = 0;
++        decision.response.objectGeneration = 0;
++        decision.response.ownerId = responseOwnerId;
++        decision.response.ownerGeneration = responseOwnerGeneration;
++        return decision;
++      }
++
++      case protocol::KmtOperation::GetVersion:
++        if (!shapeValid(request, false, 0, {}))
++            return malformed();
++        decision.response.resultWords[0] = 1;
++        decision.response.resultWords[1] = 0;
++        decision.response.resultWords[2] = 0;
++        decision.response.resultWords[3] = 0;
++        return decision;
++
++      case protocol::KmtOperation::TopologySnapshot: {
++        if (!shapeValid(request, false, 0, {}))
++            return malformed();
++        decision.response.objectId = 1;
++        decision.response.objectGeneration = header.jobEpoch;
++        decision.response.resultWords[0] = 1;
++        decision.response.resultWords[1] = 1;
++        decision.response.resultWords[2] = 0;
++        setWords(decision.response.resultWords, 4, 5, header.jobEpoch);
++        decision.response.resultBytes = 64;
++        auto &buffer = decision.response.copiedResult;
++        store16(buffer, 0, 1);
++        store16(buffer, 2, 0);
++        store32(buffer, 4, 1);
++        store64(buffer, 8, header.jobEpoch);
++        store32(buffer, 16, 950);
++        store32(buffer, 20, 1);
++        store32(buffer, 24, 64);
++        store32(buffer, 28, 65536);
++        store32(buffer, 32, 48);
++        store32(buffer, 36, MaximumQueues);
++        store32(buffer, 40, MaximumAllocations);
++        store32(buffer, 44, MaximumEvents);
++        store16(buffer, 48, 1);
++        store16(buffer, 50, 1);
++        decision.response.resultCrc32c = protocol::crc32c(
++            buffer.data(), decision.response.resultBytes);
++        return decision;
++      }
++
++      case protocol::KmtOperation::AllocateMemory: {
++        if (!shapeValid(request, false, 0, {0, 1, 2, 3, 4, 5, 6}) ||
++            request.argumentWords[0] != 1 || request.argumentWords[5] != 0 ||
++            request.argumentWords[6] != 0)
++            return malformed();
++        const uint64_t size = splitWords(request.argumentWords, 1, 2);
++        const uint64_t alignment = splitWords(request.argumentWords, 3, 4);
++        if (size == 0 || size > MaximumAllocationBytes ||
++            alignment == 0 || alignment > (1ULL << 30) ||
++            (alignment & (alignment - 1)) != 0 ||
++            size > MaximumTotalBytes - totalBytes)
++            return fail(protocol::KmtStatus::OutOfResources);
++        size_t slot = 0;
++        while (slot < allocations.size() && allocations[slot])
++            ++slot;
++        if (slot == allocations.size())
++            return fail(protocol::KmtStatus::OutOfResources);
++        const uint64_t generation = takeGeneration(
++            nextAllocationGeneration, session->jobEpoch);
++        if (generation == 0)
++            return fail(protocol::KmtStatus::OutOfResources);
++        try {
++            allocations[slot].emplace(Allocation{
++                session->ownerId, session->ownerGeneration, generation,
++                size, alignment,
++                VirtualAddressBase + static_cast<uint64_t>(slot) *
++                    VirtualAddressStride, {}});
++        } catch (const std::bad_alloc &) {
++            return fail(protocol::KmtStatus::NoMemory);
++        }
++        ++liveAllocations;
++        totalBytes += size;
++        decision.response.objectId = makeId(AllocationPrefix, slot);
++        decision.response.objectGeneration = generation;
++        setWords(decision.response.resultWords, 1, 2, size);
++        setWords(decision.response.resultWords, 3, 4, alignment);
++        setWords(decision.response.resultWords, 5, 6,
++                 allocations[slot]->virtualAddress);
++        return decision;
++      }
++
++      case protocol::KmtOperation::FreeMemory: {
++        if (!shapeValid(request, true, 0, {}))
++            return malformed();
++        Allocation *allocation = resolveAllocation(*session, request);
++        if (allocation == nullptr)
++            return fail(protocol::KmtStatus::InvalidHandle);
++        const size_t slot = idSlot(request.objectId);
++        totalBytes -= allocation->size;
++        allocations[slot].reset();
++        --liveAllocations;
++        return decision;
++      }
++
++      case protocol::KmtOperation::CopyMemory: {
++        if (!pairPresent(request.objectId, request.objectGeneration) ||
++            !pairAbsent(request.auxId, request.auxGeneration) ||
++            request.flags != 0 || !noWordsExcept(request.argumentWords,
++                                                  {0, 1, 2, 3, 4}))
++            return malformed();
++        Allocation *allocation = resolveAllocation(*session, request);
++        if (allocation == nullptr)
++            return fail(protocol::KmtStatus::InvalidHandle);
++        const uint32_t direction = request.argumentWords[0];
++        const uint64_t offset = splitWords(request.argumentWords, 1, 2);
++        const uint64_t count = splitWords(request.argumentWords, 3, 4);
++        if ((direction != 1 && direction != 2) || count == 0 ||
++            count > MaximumTransferBytes || offset > allocation->size ||
++            count > allocation->size - offset)
++            return malformed();
++        if (direction == 1) {
++            if (request.copiedBytes != count ||
++                protocol::crc32c(request.copiedBuffer.data(), count) !=
++                    request.copiedCrc32c)
++                return malformed();
++            for (uint64_t index = 0; index < count; ++index) {
++                const uint8_t value = request.copiedBuffer[
++                    static_cast<size_t>(index)];
++                if (value == 0)
++                    allocation->bytes.erase(offset + index);
++                else
++                    allocation->bytes[offset + index] = value;
++            }
++        } else {
++            if (request.copiedBytes != 0 || request.copiedCrc32c != 0)
++                return malformed();
++            for (uint64_t index = 0; index < count; ++index) {
++                const auto found = allocation->bytes.find(offset + index);
++                decision.response.copiedResult[static_cast<size_t>(index)] =
++                    found == allocation->bytes.end() ? 0 : found->second;
++            }
++            decision.response.resultBytes = static_cast<uint32_t>(count);
++            decision.response.resultCrc32c = protocol::crc32c(
++                decision.response.copiedResult.data(), count);
++        }
++        return decision;
++      }
++
++      case protocol::KmtOperation::QueueCreate: {
++        if (!shapeValid(request, false, 0, {0, 1, 2, 3, 4}) ||
++            request.argumentWords[0] != 1 || request.argumentWords[2] == 0 ||
++            request.argumentWords[2] > (1U << 20))
++            return malformed();
++        size_t slot = 0;
++        while (slot < queues.size() && queues[slot])
++            ++slot;
++        if (slot == queues.size())
++            return fail(protocol::KmtStatus::OutOfResources);
++        const uint64_t generation = takeGeneration(
++            nextQueueGeneration, session->jobEpoch);
++        if (generation == 0)
++            return fail(protocol::KmtStatus::OutOfResources);
++        try {
++            queues[slot].emplace(Queue{
++                session->ownerId, session->ownerGeneration, generation, 0});
++        } catch (const std::bad_alloc &) {
++            return fail(protocol::KmtStatus::NoMemory);
++        }
++        ++liveQueues;
++        decision.response.objectId = makeId(QueuePrefix, slot);
++        decision.response.objectGeneration = generation;
++        decision.response.resultWords[0] = request.argumentWords[2];
++        return decision;
++      }
++
++      case protocol::KmtOperation::QueueDestroy: {
++        if (!shapeValid(request, true, 0, {}))
++            return malformed();
++        Queue *queue = resolveQueue(*session, request);
++        if (queue == nullptr)
++            return fail(protocol::KmtStatus::InvalidHandle);
++        queues[idSlot(request.objectId)].reset();
++        --liveQueues;
++        return decision;
++      }
++
++      case protocol::KmtOperation::QueueDoorbell: {
++        if (!shapeValid(request, true, 0, {0, 1}))
++            return malformed();
++        Queue *queue = resolveQueue(*session, request);
++        if (queue == nullptr)
++            return fail(protocol::KmtStatus::InvalidHandle);
++        const uint64_t sequence = splitWords(request.argumentWords, 0, 1);
++        if (sequence == 0 || sequence <= queue->lastDoorbell)
++            return malformed();
++        queue->lastDoorbell = sequence;
++        setWords(decision.response.resultWords, 0, 1, sequence);
++        return decision;
++      }
++
++      case protocol::KmtOperation::EventCreate: {
++        if (!shapeValid(request, false, 0, {0, 1}))
++            return malformed();
++        size_t slot = 0;
++        while (slot < events.size() && events[slot])
++            ++slot;
++        if (slot == events.size())
++            return fail(protocol::KmtStatus::OutOfResources);
++        const uint64_t generation = takeGeneration(
++            nextEventGeneration, session->jobEpoch);
++        if (generation == 0)
++            return fail(protocol::KmtStatus::OutOfResources);
++        try {
++            events[slot].emplace(Event{
++                session->ownerId, session->ownerGeneration, generation,
++                splitWords(request.argumentWords, 0, 1), 0});
++        } catch (const std::bad_alloc &) {
++            return fail(protocol::KmtStatus::NoMemory);
++        }
++        ++liveEvents;
++        decision.response.objectId = makeId(EventPrefix, slot);
++        decision.response.objectGeneration = generation;
++        return decision;
++      }
++
++      case protocol::KmtOperation::EventDestroy:
++      case protocol::KmtOperation::EventSet:
++      case protocol::KmtOperation::EventReset:
++      case protocol::KmtOperation::EventQuery:
++      case protocol::KmtOperation::EventWait: {
++        const bool hasValue = request.operation == protocol::KmtOperation::EventSet;
++        const bool hasWait = request.operation == protocol::KmtOperation::EventWait;
++        bool expectedShape = false;
++        if (hasWait)
++            expectedShape = shapeValid(request, true, 0, {0, 1, 2, 3});
++        else if (hasValue)
++            expectedShape = shapeValid(request, true, 0, {0, 1});
++        else
++            expectedShape = shapeValid(request, true, 0, {});
++        if (!expectedShape)
++            return malformed();
++        Event *event = resolveEvent(*session, request);
++        if (event == nullptr)
++            return fail(protocol::KmtStatus::InvalidHandle);
++        switch (request.operation) {
++          case protocol::KmtOperation::EventDestroy:
++            events[idSlot(request.objectId)].reset();
++            --liveEvents;
++            return decision;
++          case protocol::KmtOperation::EventSet:
++            event->value = splitWords(request.argumentWords, 0, 1);
++            ++event->sequence;
++            return decision;
++          case protocol::KmtOperation::EventReset:
++            event->value = 0;
++            ++event->sequence;
++            return decision;
++          case protocol::KmtOperation::EventQuery:
++            setWords(decision.response.resultWords, 0, 1, event->value);
++            decision.response.resultWords[2] = event->value != 0;
++            setWords(decision.response.resultWords, 3, 4, event->sequence);
++            return decision;
++          case protocol::KmtOperation::EventWait: {
++            const uint64_t condition = splitWords(request.argumentWords, 0, 1);
++            const uint64_t compare = splitWords(request.argumentWords, 2, 3);
++            if (condition > 3)
++                return malformed();
++            setWords(decision.response.resultWords, 0, 1, event->value);
++            if (!conditionSatisfied(event->value,
++                                    static_cast<uint32_t>(condition), compare)) {
++                decision.response.status = protocol::KmtStatus::WaitTimeout;
++            }
++            return decision;
++          }
++          default:
++            return malformed();
++        }
++      }
++
++      case protocol::KmtOperation::PointerInfo: {
++        if (!shapeValid(request, true, 0, {}))
++            return malformed();
++        Allocation *allocation = resolveAllocation(*session, request);
++        if (allocation == nullptr)
++            return fail(protocol::KmtStatus::InvalidHandle);
++        setWords(decision.response.resultWords, 1, 2, 0);
++        setWords(decision.response.resultWords, 3, 4, allocation->size);
++        return decision;
++      }
++
++      case protocol::KmtOperation::ModelDrmCall: {
++        if (!shapeValid(request, false, request.copiedBytes, {0, 1}) ||
++            request.argumentWords[0] > 14 ||
++            request.argumentWords[1] > protocol::KmtCopiedBufferBytes ||
++            request.copiedBytes != drmArgumentBytes(
++                request.argumentWords[0]))
++            return malformed();
++        return fail(protocol::KmtStatus::NotSupported);
++      }
++
++      case protocol::KmtOperation::OpenKfd:
++        return malformed();
++    }
++    return malformed();
++}
++
++void
++HostGPUKmtState::disconnect(const Owner &transportOwner)
++{
++    Session *session = findSession(transportOwner);
++    if (session == nullptr)
++        return;
++    const Session snapshot = *session;
++    releaseSessionObjects(snapshot);
++    for (auto &slot : sessions) {
++        if (slot && slot->transportOwner == transportOwner) {
++            slot.reset();
++            --liveOwners;
++            return;
++        }
++    }
++}
++
++void
++HostGPUKmtState::clear()
++{
++    sessions = {};
++    allocations = {};
++    queues = {};
++    events = {};
++    liveOwners = 0;
++    liveAllocations = 0;
++    liveQueues = 0;
++    liveEvents = 0;
++    totalBytes = 0;
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_kmt_state.hh b/src/dev/amdgpu/host_gpu_kmt_state.hh
+new file mode 100644
+index 000000000..475e12fcf
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_kmt_state.hh
+@@ -0,0 +1,220 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are
++ * met: redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer; redistributions in
++ * binary form must reproduce the above copyright notice, this list of
++ * conditions and the following disclaimer in the documentation and/or other
++ * materials provided with the distribution; neither the name of the
++ * copyright holders nor the names of its contributors may be used to endorse
++ * or promote products derived from this software without specific prior
++ * written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_KMT_STATE_HH__
++#define __DEV_AMDGPU_HOST_GPU_KMT_STATE_HH__
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <initializer_list>
++#include <optional>
++#include <unordered_map>
++
++#include "dev/amdgpu/host_gpu_protocol.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++/**
++ * Daemon-owned implementation of the CP-0010 operation envelope.
++ *
++ * This class deliberately has no device, file-descriptor, or production
++ * library dependency.  It owns only simulated handles and sparse bytes;
++ * bridge code supplies the transport owner and negotiated header identity.
++ */
++class HostGPUKmtState
++{
++  public:
++    static constexpr size_t MaximumOwners = 64;
++    static constexpr size_t MaximumAllocations = 1024;
++    static constexpr size_t MaximumQueues = 8;
++    static constexpr size_t MaximumEvents = 1024;
++    static constexpr uint64_t MaximumAllocationBytes = 2ULL << 30;
++    static constexpr uint64_t MaximumTotalBytes = 4ULL << 30;
++    static constexpr uint64_t MaximumTransferBytes = 128;
++    static constexpr uint64_t VirtualAddressBase = 0x0000200000000000ULL;
++    static constexpr uint64_t VirtualAddressStride = 2ULL << 30;
++
++    struct Owner
++    {
++        int fd = -1;
++        uint64_t clientGeneration = 0;
++
++        bool operator==(const Owner &other) const
++        {
++            return fd == other.fd &&
++                clientGeneration == other.clientGeneration;
++        }
++    };
++
++    struct Decision
++    {
++        protocol::KmtResponse response;
++        bool sequenceConsumed = false;
++    };
++
++    explicit HostGPUKmtState(uint64_t initialEpoch = 1);
++
++    Decision submit(const Owner &transportOwner,
++                    const protocol::Header &header,
++                    const protocol::KmtRequest &request);
++
++    void disconnect(const Owner &transportOwner);
++    void clear();
++
++    size_t ownerCount() const { return liveOwners; }
++    size_t allocationCount() const { return liveAllocations; }
++    size_t queueCount() const { return liveQueues; }
++    size_t eventCount() const { return liveEvents; }
++    uint64_t totalAllocatedBytes() const { return totalBytes; }
++
++  private:
++    enum class ObjectKind
++    {
++        Allocation,
++        Queue,
++        Event,
++    };
++
++    struct Session
++    {
++        Owner transportOwner;
++        uint64_t ownerId = 0;
++        uint64_t ownerGeneration = 0;
++        uint64_t lastSequence = 0;
++        uint64_t jobEpoch = 0;
++    };
++
++    struct Allocation
++    {
++        uint64_t ownerId = 0;
++        uint64_t ownerGeneration = 0;
++        uint64_t generation = 0;
++        uint64_t size = 0;
++        uint64_t alignment = 0;
++        uint64_t virtualAddress = 0;
++        std::unordered_map<uint64_t, uint8_t> bytes;
++    };
++
++    struct Queue
++    {
++        uint64_t ownerId = 0;
++        uint64_t ownerGeneration = 0;
++        uint64_t generation = 0;
++        uint64_t lastDoorbell = 0;
++    };
++
++    struct Event
++    {
++        uint64_t ownerId = 0;
++        uint64_t ownerGeneration = 0;
++        uint64_t generation = 0;
++        uint64_t value = 0;
++        uint64_t sequence = 0;
++    };
++
++    static constexpr uint64_t OwnerPrefix = 0x4b4d540000000000ULL;
++    static constexpr uint64_t AllocationPrefix = 0x4d454d0000000000ULL;
++    static constexpr uint64_t QueuePrefix = 0x5155450000000000ULL;
++    static constexpr uint64_t EventPrefix = 0x45564e0000000000ULL;
++    static constexpr uint64_t SlotMask = 0x000000ffffffffffULL;
++
++    static uint64_t splitWords(const std::array<uint32_t,
++                                                   protocol::KmtArgumentWordCount>
++                                   &words, size_t high, size_t low);
++    static void setWords(std::array<uint32_t,
++                                    protocol::KmtArgumentWordCount> &words,
++                         size_t high, size_t low, uint64_t value);
++    static bool noWordsExcept(
++        const std::array<uint32_t, protocol::KmtArgumentWordCount> &words,
++        std::initializer_list<size_t> used);
++    static uint64_t makeId(uint64_t prefix, size_t slot);
++    static bool idHasPrefix(uint64_t id, uint64_t prefix);
++    static size_t idSlot(uint64_t id);
++    static bool conditionSatisfied(uint64_t value, uint32_t condition,
++                                   uint64_t compare);
++    static void store16(std::array<uint8_t, protocol::KmtCopiedBufferBytes>
++                            &buffer, size_t offset, uint16_t value);
++    static void store32(std::array<uint8_t, protocol::KmtCopiedBufferBytes>
++                            &buffer, size_t offset, uint32_t value);
++    static void store64(std::array<uint8_t, protocol::KmtCopiedBufferBytes>
++                            &buffer, size_t offset, uint64_t value);
++    static uint32_t drmArgumentBytes(uint32_t command);
++
++    Session *findSession(const Owner &transportOwner);
++    const Session *findSession(const Owner &transportOwner) const;
++    Session *findSession(const Owner &transportOwner, uint64_t ownerId,
++                         uint64_t ownerGeneration);
++    const Session *findSession(const Owner &transportOwner, uint64_t ownerId,
++                               uint64_t ownerGeneration) const;
++    uint64_t takeGeneration(uint64_t &counter, uint64_t preferred);
++    protocol::KmtResponse responseFor(
++        const protocol::KmtRequest &request) const;
++    Decision wireFailure(const protocol::KmtRequest &request,
++                         protocol::Status status) const;
++    Decision providerFailure(const protocol::KmtRequest &request,
++                             protocol::KmtStatus status) const;
++    Decision invalidParameter(const protocol::KmtRequest &request) const;
++    Decision invalidHandle(const protocol::KmtRequest &request) const;
++    bool shapeValid(const protocol::KmtRequest &request,
++                    bool objectRequired, uint64_t copiedBytes,
++                    std::initializer_list<size_t> usedWords) const;
++    Allocation *resolveAllocation(const Session &session,
++                                   const protocol::KmtRequest &request);
++    Queue *resolveQueue(const Session &session,
++                        const protocol::KmtRequest &request);
++    Event *resolveEvent(const Session &session,
++                        const protocol::KmtRequest &request);
++    void releaseSessionObjects(const Session &session);
++    Decision submitOpen(const Owner &transportOwner,
++                        const protocol::Header &header,
++                        const protocol::KmtRequest &request);
++
++    std::array<std::optional<Session>, MaximumOwners> sessions;
++    std::array<std::optional<Allocation>, MaximumAllocations> allocations;
++    std::array<std::optional<Queue>, MaximumQueues> queues;
++    std::array<std::optional<Event>, MaximumEvents> events;
++    uint64_t nextOwnerGeneration = 0;
++    uint64_t nextAllocationGeneration = 0;
++    uint64_t nextQueueGeneration = 0;
++    uint64_t nextEventGeneration = 0;
++    uint64_t initialEpoch = 1;
++    size_t liveOwners = 0;
++    size_t liveAllocations = 0;
++    size_t liveQueues = 0;
++    size_t liveEvents = 0;
++    uint64_t totalBytes = 0;
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_KMT_STATE_HH__
+diff --git a/src/dev/amdgpu/host_gpu_kmt_state.test.cc b/src/dev/amdgpu/host_gpu_kmt_state.test.cc
+new file mode 100644
+index 000000000..1e4c045a1
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_kmt_state.test.cc
+@@ -0,0 +1,265 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ */
++
++#include <gtest/gtest.h>
++
++#include <algorithm>
++#include <cstdint>
++#include <vector>
++
++#include "dev/amdgpu/host_gpu_kmt_state.hh"
++
++namespace gem5::hostgpu
++{
++namespace
++{
++
++using Kmt = HostGPUKmtState;
++
++Kmt::Owner
++transport(int fd = 7, uint64_t generation = 11)
++{
++    return {fd, generation};
++}
++
++protocol::Header
++header(uint64_t epoch = 1, uint64_t connection = 9)
++{
++    protocol::Header result;
++    result.connectionId = connection;
++    result.jobEpoch = epoch;
++    return result;
++}
++
++protocol::KmtRequest
++request(protocol::KmtOperation operation, uint64_t sequence)
++{
++    protocol::KmtRequest result;
++    result.operation = operation;
++    result.operationSequence = sequence;
++    return result;
++}
++
++void
++setWords(std::array<uint32_t, protocol::KmtArgumentWordCount> &words,
++         size_t high, size_t low, uint64_t value)
++{
++    words[high] = static_cast<uint32_t>(value >> 32);
++    words[low] = static_cast<uint32_t>(value);
++}
++
++TEST(HostGPUKmtState, OpenVersionTopologyAndOwnerGeneration)
++{
++    Kmt state(1);
++    const auto opened = state.submit(
++        transport(), header(), request(protocol::KmtOperation::OpenKfd, 1));
++    ASSERT_EQ(opened.response.status, protocol::KmtStatus::Success);
++    EXPECT_EQ(opened.response.wireStatus, 0);
++    EXPECT_EQ(opened.response.ownerId, 0x4b4d540000000001ULL);
++    EXPECT_EQ(opened.response.ownerGeneration, 1U);
++    ASSERT_TRUE(opened.sequenceConsumed);
++
++    auto version = request(protocol::KmtOperation::GetVersion, 2);
++    version.ownerId = opened.response.ownerId;
++    version.ownerGeneration = opened.response.ownerGeneration;
++    const auto versionResponse = state.submit(transport(), header(), version);
++    ASSERT_EQ(versionResponse.response.status, protocol::KmtStatus::Success);
++    EXPECT_EQ(versionResponse.response.resultWords[0], 1U);
++    EXPECT_EQ(versionResponse.response.resultWords[1], 0U);
++
++    auto topology = request(protocol::KmtOperation::TopologySnapshot, 3);
++    topology.ownerId = opened.response.ownerId;
++    topology.ownerGeneration = opened.response.ownerGeneration;
++    const auto topologyResponse = state.submit(
++        transport(), header(), topology);
++    ASSERT_EQ(topologyResponse.response.status, protocol::KmtStatus::Success);
++    EXPECT_EQ(topologyResponse.response.objectId, 1U);
++    EXPECT_EQ(topologyResponse.response.objectGeneration, 1U);
++    EXPECT_EQ(topologyResponse.response.resultBytes, 64U);
++    EXPECT_EQ(topologyResponse.response.copiedResult[16], 0U);
++    EXPECT_EQ(topologyResponse.response.copiedResult[17], 0U);
++    EXPECT_EQ(topologyResponse.response.copiedResult[18], 3U);
++    EXPECT_EQ(topologyResponse.response.copiedResult[19], 0xb6U);
++}
++
++TEST(HostGPUKmtState, SparseMemoryCopyAndGenerationSafeReuse)
++{
++    Kmt state;
++    const auto opened = state.submit(
++        transport(), header(), request(protocol::KmtOperation::OpenKfd, 1));
++    auto allocation = request(protocol::KmtOperation::AllocateMemory, 2);
++    allocation.ownerId = opened.response.ownerId;
++    allocation.ownerGeneration = opened.response.ownerGeneration;
++    allocation.argumentWords[0] = 1;
++    setWords(allocation.argumentWords, 1, 2, 65536);
++    setWords(allocation.argumentWords, 3, 4, 65536);
++    const auto allocated = state.submit(transport(), header(), allocation);
++    ASSERT_EQ(allocated.response.status, protocol::KmtStatus::Success);
++    EXPECT_EQ(allocated.response.objectId, 0x4d454d0000000001ULL);
++    EXPECT_EQ(allocated.response.objectGeneration, 1U);
++
++    auto write = request(protocol::KmtOperation::CopyMemory, 3);
++    write.ownerId = opened.response.ownerId;
++    write.ownerGeneration = opened.response.ownerGeneration;
++    write.objectId = allocated.response.objectId;
++    write.objectGeneration = allocated.response.objectGeneration;
++    write.argumentWords[0] = 1;
++    setWords(write.argumentWords, 1, 2, 4);
++    setWords(write.argumentWords, 3, 4, 4);
++    write.copiedBytes = 4;
++    write.copiedBuffer[0] = 0xde;
++    write.copiedBuffer[1] = 0xad;
++    write.copiedBuffer[2] = 0xbe;
++    write.copiedBuffer[3] = 0xef;
++    write.copiedCrc32c = protocol::crc32c(
++        write.copiedBuffer.data(), write.copiedBytes);
++    ASSERT_EQ(state.submit(transport(), header(), write).response.status,
++              protocol::KmtStatus::Success);
++
++    auto read = write;
++    read.operation = protocol::KmtOperation::CopyMemory;
++    read.operationSequence = 4;
++    read.argumentWords[0] = 2;
++    read.copiedBytes = 0;
++    read.copiedCrc32c = 0;
++    const auto readResponse = state.submit(transport(), header(), read);
++    ASSERT_EQ(readResponse.response.status, protocol::KmtStatus::Success);
++    EXPECT_EQ(readResponse.response.resultBytes, 4U);
++    EXPECT_EQ(readResponse.response.copiedResult[0], 0xdeU);
++    EXPECT_EQ(readResponse.response.copiedResult[3], 0xefU);
++
++    auto free = request(protocol::KmtOperation::FreeMemory, 5);
++    free.ownerId = opened.response.ownerId;
++    free.ownerGeneration = opened.response.ownerGeneration;
++    free.objectId = allocated.response.objectId;
++    free.objectGeneration = allocated.response.objectGeneration;
++    ASSERT_EQ(state.submit(transport(), header(), free).response.status,
++              protocol::KmtStatus::Success);
++
++    allocation.operationSequence = 6;
++    const auto second = state.submit(transport(), header(), allocation);
++    ASSERT_EQ(second.response.status, protocol::KmtStatus::Success);
++    EXPECT_EQ(second.response.objectId, allocated.response.objectId);
++    EXPECT_NE(second.response.objectGeneration,
++              allocated.response.objectGeneration);
++}
++
++TEST(HostGPUKmtState, QueueAndEventLifecycleRejectCrossKindHandles)
++{
++    Kmt state;
++    const auto opened = state.submit(
++        transport(), header(), request(protocol::KmtOperation::OpenKfd, 1));
++    auto queue = request(protocol::KmtOperation::QueueCreate, 2);
++    queue.ownerId = opened.response.ownerId;
++    queue.ownerGeneration = opened.response.ownerGeneration;
++    queue.argumentWords[0] = 1;
++    queue.argumentWords[2] = 64;
++    const auto createdQueue = state.submit(transport(), header(), queue);
++    ASSERT_EQ(createdQueue.response.status, protocol::KmtStatus::Success);
++
++    auto bell = request(protocol::KmtOperation::QueueDoorbell, 3);
++    bell.ownerId = opened.response.ownerId;
++    bell.ownerGeneration = opened.response.ownerGeneration;
++    bell.objectId = createdQueue.response.objectId;
++    bell.objectGeneration = createdQueue.response.objectGeneration;
++    setWords(bell.argumentWords, 0, 1, 7);
++    EXPECT_EQ(state.submit(transport(), header(), bell).response.status,
++              protocol::KmtStatus::Success);
++
++    auto event = request(protocol::KmtOperation::EventCreate, 4);
++    event.ownerId = opened.response.ownerId;
++    event.ownerGeneration = opened.response.ownerGeneration;
++    setWords(event.argumentWords, 0, 1, 0);
++    const auto createdEvent = state.submit(transport(), header(), event);
++    ASSERT_EQ(createdEvent.response.status, protocol::KmtStatus::Success);
++
++    auto wrong = request(protocol::KmtOperation::EventSet, 5);
++    wrong.ownerId = opened.response.ownerId;
++    wrong.ownerGeneration = opened.response.ownerGeneration;
++    wrong.objectId = createdQueue.response.objectId;
++    wrong.objectGeneration = createdQueue.response.objectGeneration;
++    setWords(wrong.argumentWords, 0, 1, 1);
++    EXPECT_EQ(state.submit(transport(), header(), wrong).response.status,
++              protocol::KmtStatus::InvalidHandle);
++
++    auto set = wrong;
++    set.operation = protocol::KmtOperation::EventSet;
++    set.operationSequence = 6;
++    set.objectId = createdEvent.response.objectId;
++    set.objectGeneration = createdEvent.response.objectGeneration;
++    EXPECT_EQ(state.submit(transport(), header(), set).response.status,
++              protocol::KmtStatus::Success);
++
++    auto query = request(protocol::KmtOperation::EventQuery, 7);
++    query.ownerId = opened.response.ownerId;
++    query.ownerGeneration = opened.response.ownerGeneration;
++    query.objectId = createdEvent.response.objectId;
++    query.objectGeneration = createdEvent.response.objectGeneration;
++    const auto queried = state.submit(transport(), header(), query);
++    EXPECT_EQ(queried.response.resultWords[1], 1U);
++    EXPECT_EQ(queried.response.resultWords[2], 1U);
++}
++
++TEST(HostGPUKmtState, SequenceAndUnsupportedDrmAreAtomic)
++{
++    Kmt state;
++    const auto opened = state.submit(
++        transport(), header(), request(protocol::KmtOperation::OpenKfd, 1));
++    auto drm = request(protocol::KmtOperation::ModelDrmCall, 2);
++    drm.ownerId = opened.response.ownerId;
++    drm.ownerGeneration = opened.response.ownerGeneration;
++    drm.argumentWords[0] = 0;
++    drm.argumentWords[1] = 48;
++    drm.copiedBytes = 48;
++    drm.copiedCrc32c = protocol::crc32c(drm.copiedBuffer.data(), 48);
++    const auto unsupported = state.submit(transport(), header(), drm);
++    EXPECT_EQ(unsupported.response.status, protocol::KmtStatus::NotSupported);
++    EXPECT_TRUE(unsupported.sequenceConsumed);
++    EXPECT_EQ(state.ownerCount(), 1U);
++
++    auto stale = request(protocol::KmtOperation::GetVersion, 2);
++    stale.ownerId = opened.response.ownerId;
++    stale.ownerGeneration = opened.response.ownerGeneration;
++    const auto staleResponse = state.submit(transport(), header(), stale);
++    EXPECT_EQ(staleResponse.response.wireStatus,
++              static_cast<int32_t>(protocol::Status::ProtocolState));
++    EXPECT_FALSE(staleResponse.sequenceConsumed);
++
++    auto malformed = stale;
++    malformed.operationSequence = 3;
++    malformed.argumentWords[0] = 1;
++    const auto malformedResponse = state.submit(
++        transport(), header(), malformed);
++    EXPECT_EQ(malformedResponse.response.status,
++              protocol::KmtStatus::InvalidParameter);
++    EXPECT_TRUE(malformedResponse.sequenceConsumed);
++
++    auto next = request(protocol::KmtOperation::GetVersion, 4);
++    next.ownerId = opened.response.ownerId;
++    next.ownerGeneration = opened.response.ownerGeneration;
++    EXPECT_EQ(state.submit(transport(), header(), next).response.status,
++              protocol::KmtStatus::Success);
++}
++
++TEST(HostGPUKmtState, DisconnectInvalidatesAllObjects)
++{
++    Kmt state;
++    const auto opened = state.submit(
++        transport(), header(), request(protocol::KmtOperation::OpenKfd, 1));
++    auto event = request(protocol::KmtOperation::EventCreate, 2);
++    event.ownerId = opened.response.ownerId;
++    event.ownerGeneration = opened.response.ownerGeneration;
++    const auto created = state.submit(transport(), header(), event);
++    ASSERT_EQ(created.response.status, protocol::KmtStatus::Success);
++    EXPECT_EQ(state.eventCount(), 1U);
++    state.disconnect(transport());
++    EXPECT_EQ(state.ownerCount(), 0U);
++    EXPECT_EQ(state.eventCount(), 0U);
++    EXPECT_EQ(state.submit(transport(), header(), event).response.status,
++              protocol::KmtStatus::InvalidHandle);
++}
++
++} // anonymous namespace
++} // namespace gem5::hostgpu
+diff --git a/src/dev/amdgpu/host_gpu_protocol.cc b/src/dev/amdgpu/host_gpu_protocol.cc
+index ff846b1c8..5702e4654 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.cc
++++ b/src/dev/amdgpu/host_gpu_protocol.cc
+@@ -93,6 +93,13 @@ validDispatchOpcode(uint16_t raw)
+     return raw == static_cast<uint16_t>(DispatchOpcode::SubmitPinned);
+ }
+ 
++bool
++validKmtOperation(uint16_t raw)
++{
++    return raw >= static_cast<uint16_t>(KmtOperation::OpenKfd) &&
++        raw <= static_cast<uint16_t>(KmtOperation::ModelDrmCall);
++}
++
+ uint16_t
+ load16(const uint8_t *data)
+ {
+@@ -454,6 +461,14 @@ pinnedDispatchCapability()
+     return capabilities;
+ }
+ 
++Capabilities
++kmtOperationCapability()
++{
++    Capabilities capabilities = {};
++    capabilities[KmtOperationCapabilityByte] = KmtOperationCapabilityMask;
++    return capabilities;
++}
++
+ bool
+ capabilitySubset(const Capabilities &subset, const Capabilities &superset)
+ {
+@@ -1077,6 +1092,101 @@ decodeDispatchRequestRecord(const uint8_t *record, size_t size,
+     return acknowledge(Status::Ok, "valid pinned-dispatch request");
+ }
+ 
++KmtDecodeResult
++decodeKmtRequestRecord(const uint8_t *record, size_t size,
++                       uint32_t configuredMaximum)
++{
++    Header header;
++    const uint8_t *payload = nullptr;
++    std::string reason;
++    if (!decodeEstablishedEnvelope(record, size, configuredMaximum, header,
++                                   payload, reason)) {
++        KmtDecodeResult result;
++        result.reason = reason;
++        return result;
++    }
++    if (header.messageType != MessageType::KmtRequest) {
++        KmtDecodeResult result;
++        result.reason = "expected KMT_REQUEST";
++        return result;
++    }
++    if (size - HeaderBytes != KmtPayloadBytes) {
++        KmtDecodeResult result;
++        result.reason = "KMT payload length";
++        return result;
++    }
++
++    KmtRequest request;
++    request.major = load16(payload);
++    request.minor = load16(payload + 2);
++    const uint16_t rawOperation = load16(payload + 4);
++    request.operation = static_cast<KmtOperation>(rawOperation);
++    request.flags = load16(payload + 6);
++    request.operationSequence = load64(payload + 8);
++    request.ownerId = load64(payload + 16);
++    request.ownerGeneration = load64(payload + 24);
++    request.objectId = load64(payload + 32);
++    request.objectGeneration = load64(payload + 40);
++    request.auxId = load64(payload + 48);
++    request.auxGeneration = load64(payload + 56);
++    for (size_t index = 0; index < request.argumentWords.size(); ++index)
++        request.argumentWords[index] = load32(payload + 64 + index * 4);
++    request.copiedBytes = load32(payload + 96);
++    request.copiedCrc32c = load32(payload + 100);
++    std::copy_n(payload + 104, request.copiedBuffer.size(),
++                request.copiedBuffer.begin());
++
++    auto acknowledge = [&](Status status, const std::string &why) {
++        KmtDecodeResult result;
++        result.action = DecodeAction::Acknowledge;
++        result.closeConnection = false;
++        result.status = status;
++        result.reason = why;
++        result.header = header;
++        result.request = request;
++        return result;
++    };
++
++    const bool ownerPair = (request.ownerId == 0) ==
++        (request.ownerGeneration == 0);
++    const bool objectPair = (request.objectId == 0) ==
++        (request.objectGeneration == 0);
++    const bool auxPair = (request.auxId == 0) ==
++        (request.auxGeneration == 0);
++    const bool copiedPaddingZero = std::all_of(
++        request.copiedBuffer.begin() +
++            std::min<size_t>(request.copiedBytes,
++                             request.copiedBuffer.size()),
++        request.copiedBuffer.end(), [](uint8_t value) { return value == 0; });
++    const bool reservedZero = std::all_of(
++        payload + 232, payload + KmtPayloadBytes,
++        [](uint8_t value) { return value == 0; });
++    const bool copiedCrcValid = request.copiedBytes == 0 ?
++        request.copiedCrc32c == 0 :
++        request.copiedBytes <= request.copiedBuffer.size() &&
++        crc32c(request.copiedBuffer.data(), request.copiedBytes) ==
++            request.copiedCrc32c;
++
++    if (!validKmtOperation(rawOperation) || request.flags != 0 ||
++        request.operationSequence == 0 || !ownerPair || !objectPair ||
++        !auxPair || request.copiedBytes > request.copiedBuffer.size() ||
++        !copiedPaddingZero || !copiedCrcValid || !reservedZero) {
++        return acknowledge(Status::Malformed, "invalid KMT fields");
++    }
++    if (request.operation == KmtOperation::OpenKfd &&
++        (request.ownerId != 0 || request.objectId != 0 ||
++         request.auxId != 0)) {
++        return acknowledge(Status::Malformed,
++                           "OPEN_KFD carries an identity");
++    }
++    if (request.major != KmtOperationMajor ||
++        request.minor != KmtOperationMinor) {
++        return acknowledge(Status::UnsupportedVersion,
++                           "unsupported KMT operation version");
++    }
++    return acknowledge(Status::Ok, "valid KMT request");
++}
++
+ std::vector<uint8_t>
+ encodeAck(const Header &request, const Ack &ack,
+           const ServerIdentity &server, uint64_t connectionId)
+@@ -1184,6 +1294,32 @@ encodeDispatchRequest(const Header &header, const DispatchRequest &request)
+     return encodeFrame(encoded, payload);
+ }
+ 
++std::vector<uint8_t>
++encodeKmtRequest(const Header &header, const KmtRequest &request)
++{
++    std::vector<uint8_t> payload(KmtPayloadBytes, 0);
++    store16(payload, 0, request.major);
++    store16(payload, 2, request.minor);
++    store16(payload, 4, static_cast<uint16_t>(request.operation));
++    store16(payload, 6, request.flags);
++    store64(payload, 8, request.operationSequence);
++    store64(payload, 16, request.ownerId);
++    store64(payload, 24, request.ownerGeneration);
++    store64(payload, 32, request.objectId);
++    store64(payload, 40, request.objectGeneration);
++    store64(payload, 48, request.auxId);
++    store64(payload, 56, request.auxGeneration);
++    for (size_t index = 0; index < request.argumentWords.size(); ++index)
++        store32(payload, 64 + index * 4, request.argumentWords[index]);
++    store32(payload, 96, request.copiedBytes);
++    store32(payload, 100, request.copiedCrc32c);
++    std::copy(request.copiedBuffer.begin(), request.copiedBuffer.end(),
++              payload.begin() + 104);
++    Header encoded = header;
++    encoded.messageType = MessageType::KmtRequest;
++    return encodeFrame(encoded, payload);
++}
++
+ Header
+ queueResponseHeader(const Header &request, const ServerIdentity &server,
+                     uint64_t connectionId)
+@@ -1368,6 +1504,39 @@ encodeDispatchCompletion(const Header &request,
+                                   response);
+ }
+ 
++std::vector<uint8_t>
++encodeKmtAck(const Header &request, const KmtResponse &response)
++{
++    std::vector<uint8_t> payload(KmtPayloadBytes, 0);
++    store16(payload, 0, KmtOperationMajor);
++    store16(payload, 2, KmtOperationMinor);
++    store16(payload, 4, static_cast<uint16_t>(response.operation));
++    store16(payload, 6, response.flags);
++    store32(payload, 8, static_cast<uint32_t>(response.status));
++    store32(payload, 12, static_cast<uint32_t>(response.wireStatus));
++    store64(payload, 16, response.operationSequence);
++    store64(payload, 24, response.ownerId);
++    store64(payload, 32, response.ownerGeneration);
++    store64(payload, 40, response.objectId);
++    store64(payload, 48, response.objectGeneration);
++    store64(payload, 56, response.auxId);
++    store64(payload, 64, response.auxGeneration);
++    const bool providerSuccess =
++        response.wireStatus == static_cast<int32_t>(Status::Ok) &&
++        response.status == KmtStatus::Success;
++    if (providerSuccess) {
++        for (size_t index = 0; index < response.resultWords.size(); ++index)
++            store32(payload, 72 + index * 4, response.resultWords[index]);
++        store32(payload, 104, response.resultBytes);
++        store32(payload, 108, response.resultCrc32c);
++        std::copy(response.copiedResult.begin(),
++                  response.copiedResult.end(), payload.begin() + 112);
++    }
++    Header encoded = request;
++    encoded.messageType = MessageType::KmtAck;
++    return encodeFrame(encoded, payload);
++}
++
+ const char *
+ statusName(Status status)
+ {
+diff --git a/src/dev/amdgpu/host_gpu_protocol.hh b/src/dev/amdgpu/host_gpu_protocol.hh
+index 2e6d41c1f..fd4e4cdde 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.hh
++++ b/src/dev/amdgpu/host_gpu_protocol.hh
+@@ -49,6 +49,9 @@ constexpr size_t MemoryPayloadBytes = 64;
+ constexpr size_t SignalPayloadBytes = 64;
+ constexpr size_t DispatchRequestPayloadBytes = 128;
+ constexpr size_t DispatchResultPayloadBytes = 160;
++constexpr size_t KmtPayloadBytes = 256;
++constexpr size_t KmtCopiedBufferBytes = 128;
++constexpr size_t KmtArgumentWordCount = 8;
+ constexpr size_t CapabilityBytes = 32;
+ constexpr size_t UuidBytes = 16;
+ constexpr uint32_t MinimumRecordBytes = 4096;
+@@ -74,6 +77,10 @@ constexpr uint16_t PinnedDispatchMajor = 1;
+ constexpr uint16_t PinnedDispatchMinor = 0;
+ constexpr uint8_t PinnedDispatchCapabilityByte = 0;
+ constexpr uint8_t PinnedDispatchCapabilityMask = 0x10;
++constexpr uint16_t KmtOperationMajor = 1;
++constexpr uint16_t KmtOperationMinor = 0;
++constexpr uint8_t KmtOperationCapabilityByte = 0;
++constexpr uint8_t KmtOperationCapabilityMask = 0x20;
+ constexpr uint64_t PinnedDispatchFixtureId = 1;
+ constexpr size_t Sha256Bytes = 32;
+ 
+@@ -99,6 +106,55 @@ enum class MessageType : uint16_t
+     DispatchRequest = 11,
+     DispatchAck = 12,
+     DispatchCompletion = 13,
++    KmtRequest = 14,
++    KmtAck = 15,
++};
++
++enum class KmtOperation : uint16_t
++{
++    OpenKfd = 1,
++    CloseKfd = 2,
++    GetVersion = 3,
++    TopologySnapshot = 4,
++    AllocateMemory = 5,
++    FreeMemory = 6,
++    CopyMemory = 7,
++    QueueCreate = 8,
++    QueueDestroy = 9,
++    QueueDoorbell = 10,
++    EventCreate = 11,
++    EventDestroy = 12,
++    EventSet = 13,
++    EventReset = 14,
++    EventQuery = 15,
++    EventWait = 16,
++    PointerInfo = 17,
++    ModelDrmCall = 18,
++};
++
++enum class KmtStatus : uint32_t
++{
++    Success = 0,
++    Error = 1,
++    DriverMismatch = 2,
++    InvalidParameter = 3,
++    InvalidHandle = 4,
++    InvalidNodeUnit = 5,
++    NoMemory = 6,
++    BufferTooSmall = 7,
++    NotImplemented = 10,
++    NotSupported = 11,
++    Unavailable = 12,
++    OutOfResources = 13,
++    KernelIoChannelNotOpened = 20,
++    KernelCommunicationError = 21,
++    KernelAlreadyOpened = 22,
++    HsammuUnavailable = 23,
++    WaitFailure = 30,
++    WaitTimeout = 31,
++    MemoryAlreadyRegistered = 35,
++    MemoryNotRegistered = 36,
++    MemoryAlignment = 37,
+ };
+ 
+ enum class DispatchOpcode : uint16_t
+@@ -430,6 +486,58 @@ struct DispatchDecodeResult
+     DispatchRequest request;
+ };
+ 
++/** Fixed-width KFD/DRM operation request; no host pointer or FD appears. */
++struct KmtRequest
++{
++    uint16_t major = KmtOperationMajor;
++    uint16_t minor = KmtOperationMinor;
++    KmtOperation operation = KmtOperation::OpenKfd;
++    uint16_t flags = 0;
++    uint64_t operationSequence = 0;
++    uint64_t ownerId = 0;
++    uint64_t ownerGeneration = 0;
++    uint64_t objectId = 0;
++    uint64_t objectGeneration = 0;
++    uint64_t auxId = 0;
++    uint64_t auxGeneration = 0;
++    std::array<uint32_t, KmtArgumentWordCount> argumentWords = {};
++    uint32_t copiedBytes = 0;
++    uint32_t copiedCrc32c = 0;
++    std::array<uint8_t, KmtCopiedBufferBytes> copiedBuffer = {};
++};
++
++/** Canonical KMT ACK payload with separate provider and wire status. */
++struct KmtResponse
++{
++    uint16_t major = KmtOperationMajor;
++    uint16_t minor = KmtOperationMinor;
++    KmtOperation operation = KmtOperation::OpenKfd;
++    uint16_t flags = 0;
++    KmtStatus status = KmtStatus::Success;
++    int32_t wireStatus = static_cast<int32_t>(Status::Ok);
++    uint64_t operationSequence = 0;
++    uint64_t ownerId = 0;
++    uint64_t ownerGeneration = 0;
++    uint64_t objectId = 0;
++    uint64_t objectGeneration = 0;
++    uint64_t auxId = 0;
++    uint64_t auxGeneration = 0;
++    std::array<uint32_t, KmtArgumentWordCount> resultWords = {};
++    uint32_t resultBytes = 0;
++    uint32_t resultCrc32c = 0;
++    std::array<uint8_t, KmtCopiedBufferBytes> copiedResult = {};
++};
++
++struct KmtDecodeResult
++{
++    DecodeAction action = DecodeAction::Drop;
++    bool closeConnection = true;
++    Status status = Status::Malformed;
++    std::string reason;
++    Header header;
++    KmtRequest request;
++};
++
+ bool isZero(const Uuid &value);
+ bool parseUuid(const std::string &text, Uuid &value);
+ std::string formatUuid(const Uuid &value);
+@@ -439,6 +547,7 @@ Capabilities queueControlCapability();
+ Capabilities memoryControlCapability();
+ Capabilities signalEventCapability();
+ Capabilities pinnedDispatchCapability();
++Capabilities kmtOperationCapability();
+ bool capabilitySubset(const Capabilities &subset,
+                       const Capabilities &superset);
+ 
+@@ -454,6 +563,8 @@ SignalDecodeResult decodeSignalRequestRecord(
+     const uint8_t *record, size_t size, uint32_t configuredMaximum);
+ DispatchDecodeResult decodeDispatchRequestRecord(
+     const uint8_t *record, size_t size, uint32_t configuredMaximum);
++KmtDecodeResult decodeKmtRequestRecord(
++    const uint8_t *record, size_t size, uint32_t configuredMaximum);
+ NegotiationResult negotiate(const Header &header, const Hello &hello,
+                             const ServerIdentity &server,
+                             const NegotiationContext &context = {});
+@@ -490,6 +601,10 @@ std::vector<uint8_t> encodeDispatchAck(
+     const Header &request, const DispatchResponse &response);
+ std::vector<uint8_t> encodeDispatchCompletion(
+     const Header &request, const DispatchResponse &response);
++std::vector<uint8_t> encodeKmtRequest(
++    const Header &header, const KmtRequest &request);
++std::vector<uint8_t> encodeKmtAck(
++    const Header &request, const KmtResponse &response);
+ 
+ const char *statusName(Status status);
+ 
+diff --git a/src/dev/amdgpu/host_gpu_protocol.test.cc b/src/dev/amdgpu/host_gpu_protocol.test.cc
+index b608c5113..06457d374 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.test.cc
++++ b/src/dev/amdgpu/host_gpu_protocol.test.cc
+@@ -1632,6 +1632,149 @@ TEST(HostGpuProtocol, EstablishedUnknownCriticalIsProtocolState)
+               Status::ProtocolState);
+ }
+ 
++TEST(HostGpuProtocol, KmtCapabilityIsBitFiveOnly)
++{
++    const auto capability = kmtOperationCapability();
++    EXPECT_EQ(capability[KmtOperationCapabilityByte],
++              KmtOperationCapabilityMask);
++    EXPECT_EQ(std::count(capability.begin(), capability.end(), uint8_t(0)),
++              CapabilityBytes - 1);
++}
++
++TEST(HostGpuProtocol, KmtRequestRoundTripsFixedOwnerGeneration)
++{
++    KmtRequest request;
++    request.operation = KmtOperation::CopyMemory;
++    request.operationSequence = 9;
++    request.ownerId = 0x1111222233334444ULL;
++    request.ownerGeneration = 0x5555666677778888ULL;
++    request.objectId = 7;
++    request.objectGeneration = 8;
++    request.argumentWords[0] = 1;
++    request.argumentWords[1] = 0;
++    request.argumentWords[2] = 64;
++    request.copiedBytes = 4;
++    request.copiedBuffer[0] = 0xde;
++    request.copiedBuffer[1] = 0xad;
++    request.copiedBuffer[2] = 0xbe;
++    request.copiedBuffer[3] = 0xef;
++    request.copiedCrc32c = crc32c(
++        request.copiedBuffer.data(), request.copiedBytes);
++
++    const auto frame = encodeKmtRequest(goldenMemoryHeader(80), request);
++    ASSERT_EQ(frame.size(), HeaderBytes + KmtPayloadBytes);
++    EXPECT_EQ(load16(frame.data() + 14),
++              static_cast<uint16_t>(MessageType::KmtRequest));
++    const uint8_t *payload = frame.data() + HeaderBytes;
++    EXPECT_EQ(load64(payload + 16), request.ownerId);
++    EXPECT_EQ(load64(payload + 24), request.ownerGeneration);
++    EXPECT_EQ(load64(payload + 32), request.objectId);
++    EXPECT_EQ(load32(payload + 96), request.copiedBytes);
++    EXPECT_EQ(load32(payload + 100), request.copiedCrc32c);
++
++    const auto decoded = decodeKmtRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    ASSERT_EQ(decoded.action, DecodeAction::Acknowledge);
++    ASSERT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(decoded.request.operation, KmtOperation::CopyMemory);
++    EXPECT_EQ(decoded.request.ownerId, request.ownerId);
++    EXPECT_EQ(decoded.request.ownerGeneration, request.ownerGeneration);
++    EXPECT_EQ(decoded.request.objectId, request.objectId);
++    EXPECT_EQ(decoded.request.objectGeneration, request.objectGeneration);
++    EXPECT_EQ(decoded.request.copiedBytes, request.copiedBytes);
++    EXPECT_TRUE(std::equal(
++        request.copiedBuffer.begin(),
++        request.copiedBuffer.begin() + request.copiedBytes,
++        decoded.request.copiedBuffer.begin()));
++}
++
++TEST(HostGpuProtocol, KmtDecodeRejectsPaddingCrcAndSplitPairs)
++{
++    KmtRequest request;
++    request.operation = KmtOperation::GetVersion;
++    request.operationSequence = 2;
++    request.ownerId = 1;
++    request.ownerGeneration = 2;
++    auto frame = encodeKmtRequest(goldenMemoryHeader(81), request);
++
++    auto expectMalformed = [](std::vector<uint8_t> mutated) {
++        recomputeCrc(mutated);
++        const auto decoded = decodeKmtRequestRecord(
++            mutated.data(), mutated.size(), MaximumRecordBytes);
++        EXPECT_EQ(decoded.action, DecodeAction::Acknowledge);
++        EXPECT_EQ(decoded.status, Status::Malformed);
++    };
++
++    request.ownerGeneration = 0;
++    auto mutated = encodeKmtRequest(goldenMemoryHeader(81), request);
++    expectMalformed(mutated);
++    request.ownerGeneration = 2;
++    mutated = frame;
++    mutated[HeaderBytes + 232] = 1;
++    expectMalformed(mutated);
++    mutated = frame;
++    store32(mutated, HeaderBytes + 96, 1);
++    store32(mutated, HeaderBytes + 100, 0);
++    expectMalformed(mutated);
++    mutated = frame;
++    store16(mutated, HeaderBytes, 2);
++    recomputeCrc(mutated);
++    EXPECT_EQ(decodeKmtRequestRecord(
++                  mutated.data(), mutated.size(), MaximumRecordBytes).status,
++              Status::UnsupportedVersion);
++
++    mutated = frame;
++    mutated.pop_back();
++    store32(mutated, 20, KmtPayloadBytes - 1);
++    recomputeCrc(mutated);
++    EXPECT_EQ(decodeKmtRequestRecord(
++                  mutated.data(), mutated.size(), MaximumRecordBytes).action,
++              DecodeAction::Drop);
++}
++
++TEST(HostGpuProtocol, KmtAckPublishesOnlySuccessfulProviderOutput)
++{
++    KmtResponse response;
++    response.operation = KmtOperation::GetVersion;
++    response.operationSequence = 2;
++    response.ownerId = 3;
++    response.ownerGeneration = 4;
++    response.resultWords[0] = 1;
++    response.resultWords[1] = 0;
++    response.resultBytes = 4;
++    response.copiedResult[0] = 1;
++    response.resultCrc32c = crc32c(
++        response.copiedResult.data(), response.resultBytes);
++    auto frame = encodeKmtAck(goldenMemoryHeader(82), response);
++    ASSERT_EQ(frame.size(), HeaderBytes + KmtPayloadBytes);
++    const uint8_t *payload = frame.data() + HeaderBytes;
++    EXPECT_EQ(load64(payload + 24), response.ownerId);
++    EXPECT_EQ(load64(payload + 32), response.ownerGeneration);
++    EXPECT_EQ(load32(payload + 72), 1U);
++    EXPECT_EQ(load32(payload + 104), 4U);
++    EXPECT_EQ(payload[112], 1U);
++
++    response.status = KmtStatus::NotSupported;
++    response.resultWords[0] = 0xffffffffU;
++    frame = encodeKmtAck(goldenMemoryHeader(83), response);
++    payload = frame.data() + HeaderBytes;
++    EXPECT_EQ(load32(payload + 8),
++              static_cast<uint32_t>(KmtStatus::NotSupported));
++    EXPECT_EQ(load32(payload + 72), 0U);
++    EXPECT_EQ(load32(payload + 104), 0U);
++    EXPECT_TRUE(std::all_of(payload + 112, payload + 240,
++                            [](uint8_t byte) { return byte == 0; }));
++
++    response.status = KmtStatus::Success;
++    response.wireStatus = static_cast<int32_t>(Status::ProtocolState);
++    frame = encodeKmtAck(goldenMemoryHeader(84), response);
++    payload = frame.data() + HeaderBytes;
++    EXPECT_EQ(load32(payload + 12),
++              static_cast<uint32_t>(Status::ProtocolState));
++    EXPECT_EQ(load32(payload + 72), 0U);
++    EXPECT_EQ(load32(payload + 104), 0U);
++}
++
+ } // anonymous namespace
+ } // namespace protocol
+ } // namespace hostgpu
+-- 
+2.53.0
+

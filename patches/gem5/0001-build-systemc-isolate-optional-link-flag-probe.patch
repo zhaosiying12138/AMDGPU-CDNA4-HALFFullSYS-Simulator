@@ -1,0 +1,42 @@
+From 3a6f1471a617756fcb631ef0675ce7d86c197011 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sat, 8 Aug 2026 08:24:02 +0800
+Subject: [PATCH 01/42] build(systemc): isolate optional link-flag probe
+
+Checkpoint-ID: CP-0004
+Goal-ID: GSIM-001
+Plan-Revision: 1
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: cc61b236b2d25007bfed1edff59a32b300a59f6b136a489966cacfd5a836836e
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/systemc/core/SConscript | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/src/systemc/core/SConscript b/src/systemc/core/SConscript
+index c7c9dbb40..56698eb45 100644
+--- a/src/systemc/core/SConscript
++++ b/src/systemc/core/SConscript
+@@ -74,6 +74,15 @@ if env['CONF']['USE_SYSTEMC']:
+         Source('sc_time_python.cc', append=append)
+ 
+     # Disable the false positive warning for the event members of the scheduler.
+-    with gem5_scons.Configure(env) as conf:
+-        flag = '-Wno-free-nonheap-object'
+-        conf.CheckLinkFlag(flag)
++    # A configuration probe must not inherit library build nodes accumulated in
++    # the main environment. Doing so makes an optional flag check build those
++    # libraries inside SConf and can permanently poison its cached result after
++    # an interrupted dependency build.
++    flag = '-Wno-free-nonheap-object'
++    probe_env = env.Clone()
++    probe_env.Replace(LIBS=[], LIBPATH=[])
++    with gem5_scons.Configure(probe_env) as conf:
++        supported = conf.CheckLinkFlag(
++            flag, autoadd=False, set_for_shared=False)
++    if supported:
++        env.Append(LINKFLAGS=[flag], SHLINKFLAGS=[flag])
+-- 
+2.53.0
+

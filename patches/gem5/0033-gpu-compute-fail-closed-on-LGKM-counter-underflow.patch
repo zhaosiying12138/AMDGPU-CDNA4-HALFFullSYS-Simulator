@@ -1,0 +1,50 @@
+From 30d2511083d7c32ffa75ef1fd1864432c3212cf8 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 17 Aug 2026 12:53:08 +0800
+Subject: [PATCH 33/42] gpu-compute: fail closed on LGKM counter underflow
+
+Reject an impossible LGKM retirement before the outstanding count becomes negative, and include CU, wave, kernel, and prior-count context for the first shared scheduling error.
+
+Checkpoint-ID: CP-0055
+
+Goal-ID: GSIM-001
+
+Plan-Revision: 16
+
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+
+Evidence-Manifest-SHA256: 592075d1f45eba60da3b99e607431314e6e1e7d1c738e3f82fbd85b7789d8724
+
+Change-Kind: diagnostic
+
+Baseline-Commit: d9c1aa6e5a7ee0df0819c99301cd091d0d48f331
+---
+ src/gpu-compute/wavefront.cc | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/gpu-compute/wavefront.cc b/src/gpu-compute/wavefront.cc
+index 1b410d53e..f022aa424 100644
+--- a/src/gpu-compute/wavefront.cc
++++ b/src/gpu-compute/wavefront.cc
+@@ -1571,6 +1571,18 @@ Wavefront::decExpInstsIssued()
+ void
+ Wavefront::decLGKMInstsIssued()
+ {
++    /*
++     * The counter is the wave's outstanding LGKM instruction count, so it
++     * must never go negative. An underflow means one instruction was
++     * retired twice, which lets a later s_waitcnt fall through while its
++     * data is still in flight and permanently blocks the dependent
++     * register.
++     */
++    panic_if(lgkmInstsIssued <= 0,
++             "CU%d: WF[%d][%d] wave[%d] kernel %d retired an LGKM "
++             "instruction that was not outstanding (count %d)",
++             computeUnit->cu_id, simdId, wfSlotId, (int)wfDynId, kernId,
++             lgkmInstsIssued);
+     --lgkmInstsIssued;
+ }
+ 
+-- 
+2.53.0
+

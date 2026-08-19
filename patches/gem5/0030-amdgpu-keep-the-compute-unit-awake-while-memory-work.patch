@@ -1,0 +1,130 @@
+From 9df727743024f9f0cc83d2b9ef23e03b632cc513 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 17 Aug 2026 07:47:38 +0800
+Subject: [PATCH 30/42] amdgpu: keep the compute unit awake while memory work
+ is outstanding
+
+isDone() inspected wave status and the pipeline buses but not the memory
+pipelines themselves. A compute unit could therefore sleep while a global,
+local, or scalar pipeline still held an issued request or an undelivered
+response. Sleeping stops the tick that drains those responses, so the work
+could never complete. Every wave can already be stopped in that window, which
+is why the existing wave-status checks did not cover it.
+
+Add a drain predicate to each memory pipeline and require all three to be
+empty before the unit sleeps.
+
+Checkpoint-ID: CP-0032
+Goal-ID: GSIM-001
+Plan-Revision: 15
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 458368899b9122d48baf6268c84e035737cdb2e36776c5b374a26b176ed5df69
+Change-Kind: code
+Baseline-Commit: 1840a62e8a8734299d15b59f2420b14ac03c4147
+---
+ src/gpu-compute/compute_unit.cc           | 13 +++++++++++++
+ src/gpu-compute/global_memory_pipeline.hh | 12 ++++++++++++
+ src/gpu-compute/gpu_dyn_inst.hh           |  1 +
+ src/gpu-compute/local_memory_pipeline.hh  |  7 +++++++
+ src/gpu-compute/scalar_memory_pipeline.hh |  8 ++++++++
+ 5 files changed, 41 insertions(+)
+
+diff --git a/src/gpu-compute/compute_unit.cc b/src/gpu-compute/compute_unit.cc
+index 75d7bc33b..609b659cf 100644
+--- a/src/gpu-compute/compute_unit.cc
++++ b/src/gpu-compute/compute_unit.cc
+@@ -2604,6 +2604,19 @@ ComputeUnit::isDone() const
+         return false;
+     }
+ 
++    /**
++     * A memory pipeline may still own an issued request or a response that
++     * has not been written back. Sleeping here would stop the tick that
++     * drains those responses, so the work would never complete. Waves can
++     * already be stopped in that window, so the wave status checks above are
++     * not sufficient on their own.
++     */
++    if (globalMemoryPipe.hasOutstandingWork() ||
++        localMemoryPipe.hasOutstandingWork() ||
++        scalarMemoryPipe.hasOutstandingWork()) {
++        return false;
++    }
++
+     return true;
+ }
+ 
+diff --git a/src/gpu-compute/global_memory_pipeline.hh b/src/gpu-compute/global_memory_pipeline.hh
+index 6bca29875..58a09a3dd 100644
+--- a/src/gpu-compute/global_memory_pipeline.hh
++++ b/src/gpu-compute/global_memory_pipeline.hh
+@@ -97,6 +97,18 @@ class GlobalMemPipeline
+         return (gmIssuedRequests.size() + pendReqs) < gmQueueSize;
+     }
+ 
++    /**
++     * True while this pipeline still owns work: a request waiting to issue,
++     * or a response that has not been written back yet. The compute unit
++     * must keep ticking until both are empty, otherwise it can sleep while
++     * responses are still outstanding and never drain them.
++     */
++    bool
++    hasOutstandingWork() const
++    {
++        return !gmIssuedRequests.empty() || !gmOrderedRespBuffer.empty();
++    }
++
+     const std::string &name() const { return _name; }
+     void
+     incLoadVRFBankConflictCycles(int num_cycles)
+diff --git a/src/gpu-compute/gpu_dyn_inst.hh b/src/gpu-compute/gpu_dyn_inst.hh
+index 6f742f803..16fa83548 100644
+--- a/src/gpu-compute/gpu_dyn_inst.hh
++++ b/src/gpu-compute/gpu_dyn_inst.hh
+@@ -539,6 +539,7 @@ class GPUDynInst : public GPUExecContext
+     VectorMask memoryLaneMask;
+     bool memoryLaneMaskValid = false;
+ 
++
+     // the time the request was started
+     Tick accessTime = -1;
+ 
+diff --git a/src/gpu-compute/local_memory_pipeline.hh b/src/gpu-compute/local_memory_pipeline.hh
+index e7b997d3f..d199023de 100644
+--- a/src/gpu-compute/local_memory_pipeline.hh
++++ b/src/gpu-compute/local_memory_pipeline.hh
+@@ -76,6 +76,13 @@ class LocalMemPipeline
+         return (lmIssuedRequests.size() + pendReqs) < lmQueueSize;
+     }
+ 
++    /** True while a request or an undelivered response is still owned. */
++    bool
++    hasOutstandingWork() const
++    {
++        return !lmIssuedRequests.empty() || !lmReturnedRequests.empty();
++    }
++
+     const std::string& name() const { return _name; }
+ 
+     void
+diff --git a/src/gpu-compute/scalar_memory_pipeline.hh b/src/gpu-compute/scalar_memory_pipeline.hh
+index 6f990a528..c039be499 100644
+--- a/src/gpu-compute/scalar_memory_pipeline.hh
++++ b/src/gpu-compute/scalar_memory_pipeline.hh
+@@ -89,6 +89,14 @@ class ScalarMemPipeline
+         return (issuedRequests.size() + pendReqs) < queueSize;
+     }
+ 
++    /** True while a request or an undelivered response is still owned. */
++    bool
++    hasOutstandingWork() const
++    {
++        return !issuedRequests.empty() || !returnedLoads.empty() ||
++               !returnedStores.empty();
++    }
++
+     const std::string& name() const { return _name; }
+ 
+     void printProgress();
+-- 
+2.53.0
+

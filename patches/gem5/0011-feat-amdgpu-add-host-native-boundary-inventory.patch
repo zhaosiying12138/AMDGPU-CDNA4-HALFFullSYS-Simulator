@@ -1,0 +1,649 @@
+From 825af7d660170fec7c236daefc4e6590967f404c Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sun, 9 Aug 2026 14:46:04 +0800
+Subject: [PATCH 11/42] feat(amdgpu): add host-native boundary inventory
+
+Add a deterministic stdlib-only source inventory for the first host-native extraction boundary. It records reusable Vega/GPU/protocol modules, x86/SE/Process blockers, and explicit no-build/no-execution/no-Triton-E2E limits without changing any gem5 execution path.
+
+Checkpoint-ID: CP-0014
+
+Goal-ID: GSIM-001
+
+Plan-Revision: 2
+
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+
+Evidence-Manifest-SHA256: 7e68f3c3f5731923ef3d9ebbbc7b3d5636870a27a61d8bcb13d49e6d9a97ae82
+
+Change-Kind: code
+
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ util/host_native/README.md              |  23 ++
+ util/host_native/check_boundary.py      | 487 ++++++++++++++++++++++++
+ util/host_native/test_check_boundary.py |  89 +++++
+ 3 files changed, 599 insertions(+)
+ create mode 100644 util/host_native/README.md
+ create mode 100755 util/host_native/check_boundary.py
+ create mode 100755 util/host_native/test_check_boundary.py
+
+diff --git a/util/host_native/README.md b/util/host_native/README.md
+new file mode 100644
+index 000000000..5a7a24c00
+--- /dev/null
++++ b/util/host_native/README.md
+@@ -0,0 +1,23 @@
++# Host-native boundary inventory
++
++`check_boundary.py` is a source-only checkpoint tool for the first host-native
++AMDGPU extraction step. It lists the existing GPU/Vega and host-protocol files
++that can be reused, and the current files that still require an x86 CPU,
++`ThreadContext`, an SE `Process`, or x86 page-table types.
++
++Run it from any directory with:
++
++```sh
++python3 util/host_native/check_boundary.py
++python3 util/host_native/check_boundary.py --check
++```
++
++The JSON output is deterministic and contains source markers and evidence
++locations. `--check` reports a failure only when a declared file or marker is
++missing, or when the inventory schema is malformed. It does not compile or
++run gem5.
++
++The inventory intentionally makes no claim about a host-native build, an
++x86-free binary, simulator execution, Triton compilation, or an end-to-end
++`python/tutorials/01-vector-add.py` run. The existing `configs/example/apu_se.py`
++`VEGA_X86` path remains the compatibility path until those later gates pass.
+diff --git a/util/host_native/check_boundary.py b/util/host_native/check_boundary.py
+new file mode 100755
+index 000000000..5df41014b
+--- /dev/null
++++ b/util/host_native/check_boundary.py
+@@ -0,0 +1,487 @@
++#!/usr/bin/env python3
++# Copyright (c) 2026 The Regents of the University of California
++# SPDX-License-Identifier: BSD-3-Clause
++"""Inventory the first host-native extraction boundary.
++
++The inventory is deliberately source-only.  It records the GPU/Vega modules
++which can be reused and the files which still bind the current path to x86,
++SE processes, or a simulated CPU context.  It does not build or execute gem5.
++
++The output is deterministic so it can be retained as a checkpoint artifact::
++
++    python3 util/host_native/check_boundary.py
++    python3 util/host_native/check_boundary.py --check
++
++``--check`` returns non-zero only when the manifest no longer describes the
++checked source tree (or when the manifest itself violates its schema).
++"""
++
++from __future__ import annotations
++
++import argparse
++from copy import deepcopy
++import json
++from pathlib import Path, PurePosixPath
++import sys
++from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
++
++
++SCHEMA = "gem5.host-native-boundary.v1"
++DEFAULT_ROOT = Path(__file__).resolve().parents[2]
++
++
++# Keep this list small and source-grounded.  ``markers`` are intentionally
++# plain substrings: they make stale inventories fail loudly without requiring
++# a compiler or a gem5 build directory.
++BOUNDARY_MANIFEST: Dict[str, Any] = {
++    "schema": SCHEMA,
++    "reusable": [
++        {
++            "path": "src/gpu-compute/SConscript",
++            "reason": (
++                "GPU SimObjects and pipeline sources are gated by BUILD_GPU."
++            ),
++            "evidence": ["src/gpu-compute/SConscript:34-75"],
++            "markers": ["BUILD_GPU", "SimObject('GPU.py'"],
++        },
++        {
++            "path": "src/arch/amdgpu/vega/SConscript",
++            "reason": (
++                "Vega TLB, page-walker, decoder, and instruction sources are "
++                "gated by BUILD_GPU."
++            ),
++            "evidence": ["src/arch/amdgpu/vega/SConscript:36-78"],
++            "markers": ["BUILD_GPU", "VegaGPUTLB"],
++        },
++        {
++            "path": "src/arch/amdgpu/vega/tlb.cc",
++            "reason": (
++                "The Vega TLB consumes an AMDGPU VM base and device requestor "
++                "instead of an x86 page table."
++            ),
++            "evidence": [
++                "src/arch/amdgpu/vega/tlb.cc:633-638",
++                "src/arch/amdgpu/vega/tlb.cc:833-840",
++            ],
++            "markers": ["getVM().getPageTableBase", "vramRequestorId"],
++        },
++        {
++            "path": "src/arch/amdgpu/vega/pagetable_walker.cc",
++            "reason": (
++                "The Vega walker reads page-table memory through the gem5 "
++                "device-memory interface."
++            ),
++            "evidence": ["src/arch/amdgpu/vega/pagetable_walker.cc:73-89"],
++            "markers": ["startFunctional", "getDeviceMemory"],
++        },
++        {
++            "path": "src/dev/hsa/hw_scheduler.hh",
++            "reason": (
++                "Queue registration, doorbell/ring, and unregister lifecycle "
++                "is independent of a host CPU model."
++            ),
++            "evidence": ["src/dev/hsa/hw_scheduler.hh:51-74"],
++            "markers": [
++                "registerHostQueue",
++                "ringHostQueue",
++                "unregisterHostQueue",
++            ],
++        },
++        {
++            "path": "src/dev/hsa/hsa_packet_processor.hh",
++            "reason": (
++                "AQL queue events and packet processing are reusable once "
++                "memory/context callbacks are adapted."
++            ),
++            "evidence": ["src/dev/hsa/hsa_packet_processor.hh:239-310"],
++            "markers": [
++                "QueueProcessEvent",
++                "processPkt",
++                "registerHostQueue",
++            ],
++        },
++        {
++            "path": "src/dev/amdgpu/host_gpu_connection_state.hh",
++            "reason": (
++                "Connection admission and request-ID state is a protocol "
++                "state "
++                "machine, not an x86 CPU model."
++            ),
++            "evidence": ["src/dev/amdgpu/host_gpu_connection_state.hh:44-198"],
++            "markers": ["HostGPUConnectionState", "QueueRequestIdTracker"],
++        },
++        {
++            "path": "src/dev/amdgpu/host_gpu_protocol.hh",
++            "reason": (
++                "Host transport message codecs and fixed-width "
++                "request/response "
++                "types are reusable unchanged."
++            ),
++            "evidence": ["src/dev/amdgpu/host_gpu_protocol.hh:235-470"],
++            "markers": [
++                "struct Header",
++                "struct QueueRequest",
++                "struct DispatchRequest",
++            ],
++        },
++        {
++            "path": "src/dev/amdgpu/host_gpu_memory_state.hh",
++            "reason": (
++                "Bounded allocation ownership and lifecycle bookkeeping can "
++                "remain above the memory adapter."
++            ),
++            "evidence": ["src/dev/amdgpu/host_gpu_memory_state.hh:47-131"],
++            "markers": ["class HostGPUMemoryState", "struct Allocation"],
++        },
++        {
++            "path": "src/dev/amdgpu/host_gpu_queue_state.hh",
++            "reason": (
++                "Queue ownership and command bookkeeping is an existing "
++                "reusable state machine."
++            ),
++            "evidence": ["src/dev/amdgpu/host_gpu_queue_state.hh:45-121"],
++            "markers": ["class HostGPUQueueState", "struct Command"],
++        },
++        {
++            "path": "src/dev/amdgpu/host_gpu_signal_state.hh",
++            "reason": (
++                "Signal completion and wait bookkeeping is independent of CPU "
++                "instruction execution."
++            ),
++            "evidence": ["src/dev/amdgpu/host_gpu_signal_state.hh:44-129"],
++            "markers": ["class HostGPUSignalState", "struct Completion"],
++        },
++    ],
++    "x86_blocked": [
++        {
++            "path": "src/dev/amdgpu/SConscript",
++            "reason": (
++                "AMDGPU device and bridge sources are currently returned "
++                "unless "
++                "USE_X86_ISA is enabled and are tagged x86."
++            ),
++            "evidence": [
++                "src/dev/amdgpu/SConscript:32-43",
++                "src/dev/amdgpu/SConscript:45-65",
++            ],
++            "markers": ["USE_X86_ISA", "tags=['x86 isa']"],
++        },
++        {
++            "path": "configs/common/GPUTLBConfig.py",
++            "reason": (
++                "The non-full-system branch selects X86GPUTLB and the generic "
++                "x86 coalescer."
++            ),
++            "evidence": ["configs/common/GPUTLBConfig.py:38-98"],
++            "markers": ["X86GPUTLB", "full_system=False", "TLBCoalescer"],
++        },
++        {
++            "path": "src/arch/amdgpu/common/tlb.hh",
++            "reason": (
++                "The common SE TLB directly includes x86 page tables, segment "
++                "registers, and X86GPUTLB params."
++            ),
++            "evidence": ["src/arch/amdgpu/common/tlb.hh:42-52"],
++            "markers": [
++                "arch/x86/pagetable.hh",
++                "namespace X86ISA",
++                "params/X86GPUTLB.hh",
++            ],
++        },
++        {
++            "path": "src/arch/amdgpu/common/tlb_coalescer.cc",
++            "reason": (
++                "The SE coalescer uses X86ISA page-size and TLB-entry types."
++            ),
++            "evidence": ["src/arch/amdgpu/common/tlb_coalescer.cc"],
++            "markers": ["X86ISA::PageBytes", "X86ISA::TlbEntry"],
++        },
++        {
++            "path": "src/gpu-compute/shader.cc",
++            "reason": (
++                "Shader initialization requires BaseCPU/ThreadContext and "
++                "uses "
++                "x86 page-size/process allocation helpers."
++            ),
++            "evidence": [
++                "src/gpu-compute/shader.cc:117-171",
++                "src/gpu-compute/shader.cc:451-469",
++            ],
++            "markers": [
++                "X86ISA::PageBytes",
++                "cpuPointer->getContext",
++                "gpuTc->getProcessPtr",
++            ],
++        },
++        {
++            "path": "src/gpu-compute/gpu_command_processor.cc",
++            "reason": (
++                "SE dispatch translation and packet submission dereference "
++                "sys->threads[0] and SETranslatingPortProxy."
++            ),
++            "evidence": [
++                "src/gpu-compute/gpu_command_processor.cc:93-109",
++                "src/gpu-compute/gpu_command_processor.cc:217-248",
++            ],
++            "markers": ["sys->threads[0]", "SETranslatingPortProxy"],
++        },
++        {
++            "path": "src/dev/hsa/hsa_packet_processor.cc",
++            "reason": (
++                "SE AQL translation and signal completion dereference the "
++                "simulated process thread."
++            ),
++            "evidence": [
++                "src/dev/hsa/hsa_packet_processor.cc:204-228",
++                "src/dev/hsa/hsa_packet_processor.cc:753-780",
++            ],
++            "markers": ["sys->threads[0]", "getProcessPtr"],
++        },
++        {
++            "path": "src/dev/amdgpu/host_gpu_bridge.cc",
++            "reason": (
++                "Dispatch-environment setup and host memory mirroring use "
++                "Process, system->threads[0], and SE translation."
++            ),
++            "evidence": [
++                "src/dev/amdgpu/host_gpu_bridge.cc:769-810",
++                "src/dev/amdgpu/host_gpu_bridge.cc:867-968",
++            ],
++            "markers": [
++                "system->threads[0]",
++                "SETranslatingPortProxy",
++                "dispatchProcess",
++            ],
++        },
++        {
++            "path": "configs/example/gemsim/host_dispatch.py",
++            "reason": (
++                "The existing dispatch example constructs an "
++                "X86TimingSimpleCPU "
++                "and wires shader.cpu_pointer."
++            ),
++            "evidence": [
++                "configs/example/gemsim/host_dispatch.py:74-92",
++                "configs/example/gemsim/host_dispatch.py:181-223",
++            ],
++            "markers": ["X86TimingSimpleCPU", "cpu_pointer"],
++        },
++    ],
++    "native_gate": {
++        "status": "inventory_only",
++        "first_implementation": (
++            "Add a native VM/requestor adapter, route the non-FS TLB "
++            "choice to "
++            "Vega, and provide a host-native queue/dispatch context."
++        ),
++        "compatibility_path": (
++            "configs/example/apu_se.py remains the existing VEGA_X86 "
++            "compatibility path until the native gate passes."
++        ),
++    },
++    "no_claim": [
++        "No host-native gem5 build is claimed by this inventory.",
++        (
++            "No host-native simulator execution or x86-free binary is claimed "
++            "by this inventory."
++        ),
++        (
++            "No unmodified Triton vecadd end-to-end execution is claimed; the "
++            "compiler/launcher boundary is source inventory only."
++        ),
++        (
++            "No performance, timing, decoder completeness, or "
++            "functional-kernel "
++            "correctness claim is made."
++        ),
++    ],
++}
++
++
++def _manifest_errors(manifest: Mapping[str, Any]) -> List[str]:
++    """Return schema errors without inspecting the source tree."""
++
++    errors: List[str] = []
++    if manifest.get("schema") != SCHEMA:
++        errors.append("schema must be %s" % SCHEMA)
++    for key in ("reusable", "x86_blocked"):
++        entries = manifest.get(key)
++        if not isinstance(entries, list) or not entries:
++            errors.append("%s must be a non-empty list" % key)
++            continue
++        seen: set[str] = set()
++        for index, entry in enumerate(entries):
++            label = "%s[%d]" % (key, index)
++            if not isinstance(entry, Mapping):
++                errors.append("%s must be an object" % label)
++                continue
++            path = entry.get("path")
++            if not isinstance(path, str) or not path:
++                errors.append("%s.path must be a non-empty string" % label)
++            else:
++                posix = PurePosixPath(path)
++                if posix.is_absolute() or ".." in posix.parts:
++                    errors.append("%s.path must be relative" % label)
++                if path in seen:
++                    errors.append("duplicate path in %s: %s" % (key, path))
++                seen.add(path)
++            if not isinstance(entry.get("reason"), str) or not entry["reason"]:
++                errors.append("%s.reason must be non-empty" % label)
++            evidence = entry.get("evidence")
++            if not isinstance(evidence, list) or not evidence or not all(
++                isinstance(item, str) and item for item in evidence
++            ):
++                errors.append(
++                    "%s.evidence must be a non-empty string list" % label)
++            markers = entry.get("markers")
++            if not isinstance(markers, list) or not markers or not all(
++                isinstance(item, str) and item for item in markers
++            ):
++                errors.append(
++                    "%s.markers must be a non-empty string list" % label)
++    paths = []
++    for key in ("reusable", "x86_blocked"):
++        for entry in manifest.get(key, []):
++            if isinstance(entry, Mapping) and isinstance(
++                entry.get("path"), str
++            ):
++                paths.append(entry["path"])
++    if len(paths) != len(set(paths)):
++        errors.append("a path cannot be both reusable and x86_blocked")
++    no_claim = manifest.get("no_claim")
++    if not isinstance(no_claim, list) or not no_claim or not all(
++        isinstance(item, str) and item for item in no_claim
++    ):
++        errors.append("no_claim must be a non-empty string list")
++    gate = manifest.get("native_gate")
++    if not isinstance(gate, Mapping) or gate.get("status") != "inventory_only":
++        errors.append("native_gate.status must be inventory_only")
++    return errors
++
++
++def _source_errors(root: Path, manifest: Mapping[str, Any]) -> List[str]:
++    """Return errors caused by a stale or incomplete source inventory."""
++
++    errors: List[str] = []
++    if not root.is_dir():
++        return ["scan root is not a directory: %s" % root]
++    for category in ("reusable", "x86_blocked"):
++        for entry in manifest.get(category, []):
++            if not isinstance(entry, Mapping) or not isinstance(
++                entry.get("path"), str
++            ):
++                continue
++            path = root / entry["path"]
++            if not path.is_file():
++                errors.append("missing source path: %s" % entry["path"])
++                continue
++            try:
++                text = path.read_text(encoding="utf-8", errors="replace")
++            except OSError as exc:
++                errors.append("cannot read %s: %s" % (entry["path"], exc))
++                continue
++            for marker in entry.get("markers", []):
++                if marker not in text:
++                    errors.append("marker %r missing from %s" %
++                                  (marker, entry["path"]))
++    return errors
++
++
++def validate_manifest(
++    root: Path, manifest: Optional[Mapping[str, Any]] = None
++) -> List[str]:
++    """Validate schema and source markers."""
++
++    selected = BOUNDARY_MANIFEST if manifest is None else manifest
++    return _manifest_errors(selected) + _source_errors(root, selected)
++
++
++def _inventory_entries(
++    root: Path, entries: Iterable[Mapping[str, Any]]
++) -> List[Dict[str, Any]]:
++    result: List[Dict[str, Any]] = []
++    for entry in entries:
++        path = root / entry["path"]
++        present = path.is_file()
++        found: List[str] = []
++        if present:
++            text = path.read_text(encoding="utf-8", errors="replace")
++            found = [marker for marker in entry["markers"] if marker in text]
++        result.append(
++            {
++                "path": entry["path"],
++                "reason": entry["reason"],
++                "evidence": list(entry["evidence"]),
++                "markers": list(entry["markers"]),
++                "present": present,
++                "markers_found": found,
++            }
++        )
++    return result
++
++
++def build_inventory(root: Path) -> Dict[str, Any]:
++    """Build a deterministic source inventory rooted at ``root``."""
++
++    errors = validate_manifest(root)
++    return {
++        "schema": SCHEMA,
++        "scope": "gem5-source-architecture-only",
++        "scan": {
++            "files_checked": len(BOUNDARY_MANIFEST["reusable"])
++            + len(BOUNDARY_MANIFEST["x86_blocked"]),
++            "missing_paths": sorted(
++                error.split(": ", 1)[1]
++                for error in errors
++                if error.startswith("missing source path: ")
++            ),
++            "marker_errors": sorted(
++                error for error in errors if error.startswith("marker ")
++            ),
++        },
++        "reusable": _inventory_entries(root, BOUNDARY_MANIFEST["reusable"]),
++        "x86_blocked": _inventory_entries(
++            root, BOUNDARY_MANIFEST["x86_blocked"]
++        ),
++        "native_gate": deepcopy(BOUNDARY_MANIFEST["native_gate"]),
++        "no_claim": list(BOUNDARY_MANIFEST["no_claim"]),
++    }
++
++
++def render_inventory(root: Path) -> str:
++    """Render inventory JSON with stable key and list ordering."""
++
++    return json.dumps(build_inventory(root), indent=2, sort_keys=True) + "\n"
++
++
++def main(argv: Optional[Sequence[str]] = None) -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument(
++        "--root",
++        type=Path,
++        default=DEFAULT_ROOT,
++        help="gem5 source root (defaults to this checkout)",
++    )
++    parser.add_argument(
++        "--check",
++        action="store_true",
++        help="fail when the manifest schema or source markers are stale",
++    )
++    args = parser.parse_args(argv)
++    root = args.root.expanduser().resolve()
++    try:
++        output = render_inventory(root)
++        errors = validate_manifest(root)
++    except (OSError, KeyError, TypeError) as exc:
++        print("host-native boundary scan failed: %s" % exc, file=sys.stderr)
++        return 2
++    sys.stdout.write(output)
++    if args.check and errors:
++        for error in errors:
++            print("manifest error: %s" % error, file=sys.stderr)
++        return 1
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/util/host_native/test_check_boundary.py b/util/host_native/test_check_boundary.py
+new file mode 100755
+index 000000000..b67cda109
+--- /dev/null
++++ b/util/host_native/test_check_boundary.py
+@@ -0,0 +1,89 @@
++#!/usr/bin/env python3
++# Copyright (c) 2026 The Regents of the University of California
++# SPDX-License-Identifier: BSD-3-Clause
++"""Unit tests for the source-only host-native boundary inventory."""
++
++from __future__ import annotations
++
++from copy import deepcopy
++import importlib.util
++import json
++from pathlib import Path
++import subprocess
++import sys
++import unittest
++
++
++ROOT = Path(__file__).resolve().parents[2]
++SCRIPT = Path(__file__).with_name("check_boundary.py")
++
++
++def load_checker():
++    spec = importlib.util.spec_from_file_location(
++        "host_native_boundary", SCRIPT
++    )
++    if spec is None or spec.loader is None:
++        raise RuntimeError("unable to load boundary checker")
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
++
++class HostNativeBoundaryTest(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.checker = load_checker()
++
++    def test_inventory_is_complete_and_explicitly_non_execution(self):
++        checker = self.checker
++        inventory = checker.build_inventory(ROOT)
++        self.assertEqual(checker.validate_manifest(ROOT), [])
++        self.assertEqual(inventory["schema"], "gem5.host-native-boundary.v1")
++        self.assertGreaterEqual(len(inventory["reusable"]), 8)
++        self.assertGreaterEqual(len(inventory["x86_blocked"]), 8)
++        self.assertTrue(all(item["present"] for item in inventory["reusable"]))
++        self.assertTrue(
++            all(item["present"] for item in inventory["x86_blocked"])
++        )
++        self.assertEqual(inventory["native_gate"]["status"], "inventory_only")
++        self.assertTrue(
++            any("Triton" in claim for claim in inventory["no_claim"]))
++
++    def test_rendering_is_stable_and_json_decodable(self):
++        checker = self.checker
++        first = checker.render_inventory(ROOT)
++        second = checker.render_inventory(ROOT)
++        self.assertEqual(first, second)
++        self.assertTrue(first.endswith("\n"))
++        decoded = json.loads(first)
++        self.assertEqual(decoded["scan"]["missing_paths"], [])
++        self.assertEqual(decoded["scan"]["marker_errors"], [])
++
++    def test_schema_rejects_duplicate_cross_boundary_path(self):
++        checker = self.checker
++        manifest = deepcopy(checker.BOUNDARY_MANIFEST)
++        manifest["x86_blocked"].append(deepcopy(manifest["reusable"][0]))
++        errors = checker.validate_manifest(ROOT, manifest)
++        self.assertTrue(
++            any("both reusable and x86_blocked" in error for error in errors)
++        )
++
++    def test_cli_check_has_no_build_or_execution_side_effect(self):
++        proc = subprocess.run(
++            [sys.executable, str(SCRIPT), "--check"],
++            cwd=ROOT,
++            check=False,
++            stdout=subprocess.PIPE,
++            stderr=subprocess.PIPE,
++            text=True,
++        )
++        self.assertEqual(proc.returncode, 0, proc.stderr)
++        output = json.loads(proc.stdout)
++        self.assertEqual(output["scope"], "gem5-source-architecture-only")
++        self.assertIn(
++            "No unmodified Triton vecadd", " ".join(output["no_claim"])
++        )
++
++
++if __name__ == "__main__":
++    unittest.main()
+-- 
+2.53.0
+
