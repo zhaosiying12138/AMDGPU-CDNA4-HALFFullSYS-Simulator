@@ -119,8 +119,13 @@ PREFIX="${ROOT}/env/conda/rocm-pytorch-v3-fa8414cce688f934f538163621423376c2542a
 source "${PREFIX}/etc/conda/activate.d/amdgpu-sim-rocm-pytorch.sh"
 # Override the activate script's shared conda-state cache with the private
 # worktree cache prepared above (see the ROOT block comment for why).
-export TRITON_CACHE_DIR="${ZCODE_CACHE}/triton"
-export XDG_CACHE_HOME="${ZCODE_CACHE}/xdg"
+# ZCODE_SHARE_CACHES=1 is a diagnostic A/B switch that keeps the lane on the
+# shared caches exactly like the primary tree's lanes, to attribute an env
+# failure to the cache split instead of the code under test.
+if [[ -z ${ZCODE_SHARE_CACHES:-} ]]; then
+  export TRITON_CACHE_DIR="${ZCODE_CACHE}/triton"
+  export XDG_CACHE_HOME="${ZCODE_CACHE}/xdg"
+fi
 # shellcheck disable=SC1091
 source "${ROOT}/scripts/fastcopy_mode.sh" fast
 
@@ -131,10 +136,14 @@ source "${ROOT}/scripts/fastcopy_mode.sh" fast
 STALE="${ROOT}/env/rocm/product-v1-f76db762609b346cb83b920cc82cd2b734b75cd31b8562e6536ad81275fe17e1"
 HEAD_PRODUCT="${ROOT}/env/rocm/product-v1-4d9d40454031c7345f25da81b6781995b09a3b10e4dd66026e019306fc7ee39b"
 RUNTIME_BUILD="${ROOT}/projects/self-amdgpu-runtime/build/cp28-runtime-clang"
-# Keep the product as the default, but allow a lane to point at a freshly
-# rebuilt ROCr stage.  This is deliberately narrower than replacing the whole
-# product: model DSO, topology, rocminfo, and HIP remain owned by HEAD_PRODUCT.
-ROCR_LIBRARY_DIR="${SAGR_ROCR_LIBRARY_DIR:-${HEAD_PRODUCT}/lib}"
+# Keep the product as the base, but default this worktree to the rebuilt ROCr
+# stage: the conda product prefix named by the activate script predates every
+# fast-copy commit in projects/rocm-systems, and a lane that loads it falls
+# back from DTIF fast copy to blit-kernel copies and dies at the first device
+# allocation with hipErrorInvalidImage.  SAGR_ROCR_LIBRARY_DIR still overrides
+# (the upstream switch); only the default changes.  model DSO, topology,
+# rocminfo, and HIP remain owned by HEAD_PRODUCT.
+ROCR_LIBRARY_DIR="${SAGR_ROCR_LIBRARY_DIR:-${ROOT}/build/rocr-stage-0401e8cd/lib}"
 if [[ ! -f "${ROCR_LIBRARY_DIR}/libhsa-runtime64.so.1" ]]; then
   printf 'ROCr library directory is missing libhsa-runtime64.so.1: %s\n' \
     "$ROCR_LIBRARY_DIR" >&2
