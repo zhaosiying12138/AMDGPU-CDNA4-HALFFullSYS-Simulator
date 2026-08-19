@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +52,29 @@ class RunIdentityGateTest(unittest.TestCase):
         resolved = MODULE.resolve_loaded("libm.so.6")
         self.assertIsNotNone(resolved)
         self.assertTrue(str(resolved).startswith("/"))
+
+    def test_resolver_child_strips_runtime_and_diagnostic_injection(self) -> None:
+        injected = {
+            "LD_PRELOAD": "/tmp/should-not-reach-child.so",
+            "PYTHONPATH": "/tmp/diagnostic-sitecustomize",
+            "SAGR_QWEN35_SGLANG_LAYER_GATE_OUTPUT": "/tmp/layer-gate",
+            "SAGR_QWEN35_SGLANG_LAYER_GATE_GOLDEN": "/tmp/golden",
+            "SAGR_QWEN35_OPERATOR_GOLDEN": "/tmp/operator-golden",
+            "SAGR_TRITON_LAUNCH_LOG": "/tmp/triton.jsonl",
+        }
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="/usr/lib/libm.so.6\n", stderr=""
+        )
+        with mock.patch.dict(os.environ, injected, clear=False):
+            with mock.patch.object(
+                MODULE.subprocess, "run", return_value=completed
+            ) as run:
+                self.assertEqual(
+                    MODULE.resolve_loaded("libm.so.6"), "/usr/lib/libm.so.6"
+                )
+        child_environment = run.call_args.kwargs["env"]
+        for name in injected:
+            self.assertNotIn(name, child_environment)
 
     def test_gate_does_not_start_a_simulator(self) -> None:
         # The gate must never *call* hsa_init or a HIP entry point; doing so

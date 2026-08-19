@@ -89,9 +89,23 @@ def resolve_loaded(soname: str) -> str | None:
         "        print(path)\n"
         "        break\n"
     )
+    # The lane preloads ROCr so the real framework binds exactly that file.
+    # Letting this helper inherit LD_PRELOAD would initialize the simulator in
+    # the helper *before* its dlopen program runs; nested helper processes can
+    # then recursively create managed gem5 sessions.  Resolution still follows
+    # the lane's LD_LIBRARY_PATH, and an explicitly preloaded tracked soname is
+    # handled by ``preloaded_path`` in build_record.
+    environment = dict(os.environ)
+    environment.pop("LD_PRELOAD", None)
+    environment.pop("PYTHONPATH", None)
+    environment.pop("SAGR_QWEN35_SGLANG_LAYER_GATE_OUTPUT", None)
+    environment.pop("SAGR_QWEN35_SGLANG_LAYER_GATE_GOLDEN", None)
+    environment.pop("SAGR_QWEN35_OPERATOR_GOLDEN", None)
+    environment.pop("SAGR_TRITON_LAUNCH_LOG", None)
     completed = subprocess.run(
         [sys.executable, "-c", program],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False,
+        env=environment,
     )
     if completed.returncode != 0:
         return None
@@ -129,8 +143,30 @@ def active_product() -> dict[str, Any] | None:
         return None
 
 
+def preloaded_path(soname: str) -> str | None:
+    """Resolve an absolute LD_PRELOAD entry that provides ``soname``."""
+
+    for raw in os.environ.get("LD_PRELOAD", "").replace(" ", ":").split(":"):
+        if not raw:
+            continue
+        path = Path(raw)
+        if not path.is_absolute():
+            continue
+        try:
+            real = path.resolve(strict=True)
+        except OSError:
+            continue
+        names = {path.name, real.name}
+        if soname in names or any(name.startswith(soname + ".") for name in names):
+            return str(real)
+    return None
+
+
 def build_record() -> dict[str, Any]:
-    libraries = {name: describe(resolve_loaded(name)) for name in TRACKED_SONAMES}
+    libraries = {
+        name: describe(preloaded_path(name) or resolve_loaded(name))
+        for name in TRACKED_SONAMES
+    }
 
     model_lib = os.environ.get("HSA_MODEL_LIB")
     gem5 = os.environ.get("SAGR_MANAGED_GEM5")

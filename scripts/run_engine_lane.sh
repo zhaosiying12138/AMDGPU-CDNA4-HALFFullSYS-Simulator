@@ -28,6 +28,7 @@ dummy_weights=0
 capsule=""
 max_new_tokens=1
 product_hip=0
+debug_layer_gate=0
 # Number of compute units to expose in the gem5 host bridge.  The managed
 # runtime deliberately scrubs arbitrary environment variables before spawning
 # gem5, so a lane-owned wrapper is generated below when this is set.  Keeping
@@ -48,6 +49,7 @@ while (($#)); do
     --dummy-weights) dummy_weights=1; shift ;;
     --max-new-tokens) max_new_tokens=${2:?}; shift 2 ;;
     --product-hip) product_hip=1; shift ;;
+    --debug-layer-gate) debug_layer_gate=1; shift ;;
     --gem5) gem5=${2:?}; shift 2 ;;
     --compute-units) compute_units=${2:?}; shift 2 ;;
     --fast) gem5="${ROOT}/projects/gem5/build/VEGA_X86/gem5.opt.fastwrap"; shift ;;
@@ -76,6 +78,14 @@ if ! [[ $tp =~ ^[0-9]+$ ]] || (( tp < 1 )); then
 fi
 if ! [[ $max_new_tokens =~ ^[0-9]+$ ]] || (( max_new_tokens < 1 )); then
   printf 'max new tokens must be a positive integer\n' >&2
+  exit 2
+fi
+if (( debug_layer_gate )) && { [[ $engine != sglang ]] || (( tp != 1 )); }; then
+  printf '%s\n' '--debug-layer-gate requires --engine sglang --tp 1' >&2
+  exit 2
+fi
+if (( debug_layer_gate && dummy_weights )); then
+  printf '%s\n' '--debug-layer-gate requires checkpoint weights' >&2
   exit 2
 fi
 if [[ -n $compute_units ]] && {
@@ -109,6 +119,15 @@ source "${ROOT}/scripts/fastcopy_mode.sh" fast
 STALE="${ROOT}/env/rocm/product-v1-f76db762609b346cb83b920cc82cd2b734b75cd31b8562e6536ad81275fe17e1"
 HEAD_PRODUCT="${ROOT}/env/rocm/product-v1-4d9d40454031c7345f25da81b6781995b09a3b10e4dd66026e019306fc7ee39b"
 RUNTIME_BUILD="${ROOT}/projects/self-amdgpu-runtime/build/cp28-runtime-clang"
+# Keep the product as the default, but allow a lane to point at a freshly
+# rebuilt ROCr stage.  This is deliberately narrower than replacing the whole
+# product: model DSO, topology, rocminfo, and HIP remain owned by HEAD_PRODUCT.
+ROCR_LIBRARY_DIR="${SAGR_ROCR_LIBRARY_DIR:-${HEAD_PRODUCT}/lib}"
+if [[ ! -f "${ROCR_LIBRARY_DIR}/libhsa-runtime64.so.1" ]]; then
+  printf 'ROCr library directory is missing libhsa-runtime64.so.1: %s\n' \
+    "$ROCR_LIBRARY_DIR" >&2
+  exit 2
+fi
 
 export LD_LIBRARY_PATH="$(echo "${LD_LIBRARY_PATH}" | sed "s|${STALE}|${HEAD_PRODUCT}|g")"
 export HSA_PATH="${HEAD_PRODUCT}"
@@ -155,8 +174,10 @@ else
   hip_mode=stock
   export LD_LIBRARY_PATH="${RUNTIME_BUILD}:${LD_LIBRARY_PATH}"
 fi
-export LD_PRELOAD="${ROOT}/build/rocr_logging_preload.so:$(echo "${LD_PRELOAD:-}" | sed "s|${STALE}|${HEAD_PRODUCT}|g")"
-export LD_PRELOAD="${LD_PRELOAD%:}"
+# The selected ROCr is first and explicit.  Do not retain the activation
+# script's stale preload when a lane requests an isolated rebuilt stage.
+export LD_LIBRARY_PATH="${RUNTIME_BUILD}:${ROCR_LIBRARY_DIR}:${LD_LIBRARY_PATH}"
+export LD_PRELOAD="${ROOT}/build/rocr_logging_preload.so:${ROCR_LIBRARY_DIR}/libhsa-runtime64.so.1"
 export HSA_MODEL_LIB="${RUNTIME_BUILD}/libself_amdgpu_hsakmt_model.so.1"
 
 # Device discovery belongs to this product, and some consumers reach it by
@@ -231,7 +252,17 @@ unset SAGR_OPENCL_ENDPOINT SAGR_OPENCL_SOCKET SAGR_OPENCL_GEM5_EXTERNAL
 unset CUDA_VISIBLE_DEVICES
 
 if [[ $engine == sglang ]]; then
-  export PYTHONPATH="${ROOT}/projects/sglang-0.5.17:${ROOT}/env/sglang-overlay-cp312"
+  if (( debug_layer_gate )); then
+    layer_gate_root="${ROOT}/tools/qwen35_sglang_layer_gate"
+    layer_gate_output="$(dirname "$log")/layer-gate"
+    export SAGR_QWEN35_SGLANG_LAYER_GATE_OUTPUT="$layer_gate_output"
+    export SAGR_QWEN35_SGLANG_LAYER_GATE_GOLDEN="${ROOT}/artifacts/qwen35-nvidia-golden/20260812-prefill2-max24-v1"
+    export SAGR_QWEN35_OPERATOR_GOLDEN="${ROOT}/artifacts/qwen35-nvidia-operator-golden/20260819-prefill2-layer0-v3"
+    export SAGR_TRITON_LAUNCH_LOG="$(dirname "$log")/triton-launches.jsonl"
+    export PYTHONPATH="${layer_gate_root}:${ROOT}/tools/triton_launch_probe:${ROOT}/projects/sglang-0.5.17:${ROOT}/env/sglang-overlay-cp312"
+  else
+    export PYTHONPATH="${ROOT}/projects/sglang-0.5.17:${ROOT}/env/sglang-overlay-cp312"
+  fi
   export SGLANG_USE_AITER=1
   export FLA_CACHE_RESULTS=1
 else
@@ -276,6 +307,8 @@ fi
   echo "repo_head=$(git -C "$ROOT" rev-parse HEAD)"
   echo "rocm_systems_head=$(git -C "${ROOT}/projects/rocm-systems" rev-parse HEAD)"
   echo "product=${HEAD_PRODUCT}"
+  echo "rocr_library_dir=${ROCR_LIBRARY_DIR}"
+  echo "rocr_library_sha256=$(sha256sum "${ROCR_LIBRARY_DIR}/libhsa-runtime64.so.1.21.0" 2>/dev/null | cut -d' ' -f1)"
   echo "runtime_sha256=$(sha256sum "${RUNTIME_BUILD}/libself_amdgpu_runtime.so.0.8.0" | cut -d' ' -f1)"
   echo "model_lib_sha256=$(sha256sum "${HSA_MODEL_LIB}" | cut -d' ' -f1)"
   echo "gpu_archs=${GPU_ARCHS}"
@@ -284,9 +317,20 @@ fi
   echo "gem5=${SAGR_MANAGED_GEM5}"
   echo "gem5_sha256=$(sha256sum "${SAGR_MANAGED_GEM5}" | cut -d' ' -f1)"
   echo "gem5_base=${gem5_base:-${SAGR_MANAGED_GEM5}}"
+  echo "gem5_base_sha256=$(sha256sum "${gem5_base:-${SAGR_MANAGED_GEM5}}" | cut -d' ' -f1)"
   echo "compute_units=${compute_units:-default}"
   echo "max_new_tokens=${max_new_tokens}"
   echo "hip_mode=${hip_mode}"
+  echo "debug_layer_gate=${debug_layer_gate}"
+  if (( debug_layer_gate )); then
+    echo "layer_gate_output=${SAGR_QWEN35_SGLANG_LAYER_GATE_OUTPUT}"
+    echo "layer_gate_golden=${SAGR_QWEN35_SGLANG_LAYER_GATE_GOLDEN}"
+    echo "operator_gate_golden=${SAGR_QWEN35_OPERATOR_GOLDEN}"
+    echo "operator_gate_golden_metadata_sha256=$(sha256sum "${SAGR_QWEN35_OPERATOR_GOLDEN}/metadata.json" | cut -d' ' -f1)"
+    echo "operator_gate_golden_results_sha256=$(sha256sum "${SAGR_QWEN35_OPERATOR_GOLDEN}/results.safetensors" | cut -d' ' -f1)"
+    echo "layer_gate_sha256=$(sha256sum "${ROOT}/tools/qwen35_sglang_layer_gate/qwen35_sglang_layer_gate.py" | cut -d' ' -f1)"
+    echo "triton_launch_log=${SAGR_TRITON_LAUNCH_LOG}"
+  fi
   echo "hip_runtime_library=${HIP_RUNTIME_LIBRARY:-<loader>}"
   echo "fastcopy=HSA_ENABLE_DTIF_FAST_COPY=${HSA_ENABLE_DTIF_FAST_COPY} SAGR_HSAKMT_MODEL_FAST_COPY=${SAGR_HSAKMT_MODEL_FAST_COPY}"
   if [[ $engine == vllm ]]; then
@@ -334,7 +378,8 @@ elif [[ $engine == sglang ]]; then
   sglang_args=(
     --tp-size "$tp" --attention-backend aiter
     --context-length 16 --max-total-tokens 16 --max-mamba-cache-size 5
-    --max-new-tokens "$max_new_tokens" --watchdog-timeout 86400 --model-path "$model"
+    --max-new-tokens "$max_new_tokens" --seed 0 --watchdog-timeout 86400
+    --dist-timeout 86400 --model-path "$model"
   )
   (( dummy_weights )) && sglang_args+=(--load-format dummy)
   unshare -r -m bash -c '
@@ -346,6 +391,7 @@ else
   vllm_args=(
     --tp-size "$tp" --model-path "$model"
     --context-length 16 --max-new-tokens "$max_new_tokens" --max-num-seqs 1
+    --seed 0
   )
   (( dummy_weights )) && vllm_args+=(--load-format dummy)
   # A real file, not a heredoc: with tensor_parallel_size > 1 vLLM spawns
