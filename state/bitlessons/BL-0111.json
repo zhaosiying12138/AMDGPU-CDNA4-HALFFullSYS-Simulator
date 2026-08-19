@@ -1,0 +1,23 @@
+{
+    "schema": "amdgpu-sim.bitlesson.v1",
+    "id": "BL-0111",
+    "checkpoint_id": "CP-0071",
+    "status": "active",
+    "confidence": "high",
+    "supersedes": [],
+    "evidence_ids": [],
+    "applies_to": [
+        "projects/gem5/src/arch/amdgpu/vega/insts/inst_util.hh",
+        "projects/gem5/src/arch/amdgpu/vega/insts/vop_semantics.hh",
+        "artifacts/evidence/gem5-dpp-write-mask-v1/manifest.json"
+    ],
+    "question_or_symptom": "Why did the layer-0 GDN recurrent operator diverge (relative L2 0.44, cosine 0.897) while its elementwise max-abs error stayed under tolerance and all fourteen upstream operators matched the oracle?",
+    "observation": "gem5's processDPP treated ROW_MASK/BANK_MASK and BOUND_CTRL=0 invalid sources as 'substitute the source's own unpermuted value' instead of the ISA's 'suppress the destination write'. The compiler's canonical wave reduction pairs a row_shr:N and a row_shl:N into the same destination under complementary bank masks; the substituted values self-doubled the partial sum in 24 of every 32 lanes of the q/k L2 norm. A lane-exact software emulation of the wrong semantics reproduced the captured simulator output 4096/4096 bit-exact, proving the mechanism before any rebuild.",
+    "conclusion": "A masked DPP lane is a write-suppression contract with the destination register, not a pass-through of the source. Any DPP consumer must merge results under a written-lane mask against the destination's prior contents. Structural low-cosine divergence with near-zero elementwise outliers indicates a systematic lane-group corruption, not accumulated rounding.",
+    "decision": "Express DPP control semantics as value-level functions (dppLaneWriteEnabled, dppSourceLane) unit-testable without a register file; have processDPP return the written-lane VectorMask; make every call site read the destination first and write only inside that mask. Prove root causes with bit-exact software emulation of the captured tensors before rebuilding the simulator.",
+    "invalidated_assumptions": [
+        "Elementwise atol/rtol tolerance alone can catch a systematic reduction corruption.",
+        "A DPP permutation can be modeled as an in-place source transform with all lanes written.",
+        "The first divergent operator's kernel is where the defective instruction semantics must live; the defect was in a generic ISA helper shared by every DPP opcode."
+    ]
+}
