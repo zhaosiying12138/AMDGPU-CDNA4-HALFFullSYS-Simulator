@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 import threading
 from typing import Any
 
@@ -1028,10 +1029,20 @@ class LayerGate:
         *,
         operator: bool = False,
     ) -> None:
-        if self._published_mismatch:
+        # Survey mode trades fail-fast for coverage: every mismatching
+        # boundary is captured under its own numbered package and the run
+        # continues, so one 40-minute model pass yields the full defect
+        # list instead of one frontier per run.  It is opt-in and remains
+        # diagnostic-only; the fail-fast default is unchanged.
+        survey = bool(os.environ.get("SAGR_QWEN35_SGLANG_LAYER_GATE_SURVEY"))
+        if self._published_mismatch and not survey:
             raise FirstNumericalMismatch("additional mismatch after first mismatch")
+        if survey:
+            self._survey_mismatches = getattr(self, "_survey_mismatches", 0) + 1
+            package = self.output / f"mismatch-{self._survey_mismatches:03d}"
+        else:
+            package = self.output / "first-mismatch"
         self._published_mismatch = True
-        package = self.output / "first-mismatch"
         package.mkdir(mode=0o700)
         clean_tensors = {
             key: value.detach().cpu().contiguous()
@@ -1059,6 +1070,16 @@ class LayerGate:
             },
         }
         _atomic_write(package / "result.json", _canonical_json(result))
+        if survey:
+            print(
+                f"[layer-gate survey] mismatch {self._survey_mismatches}: "
+                f"phase={record['phase']} layer={record['layer']} "
+                f"operator={record.get('operator', '<layer-boundary>')} "
+                f"evidence={package}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return
         raise FirstNumericalMismatch(
             f"Qwen3.5 first numerical mismatch: phase={record['phase']} "
             f"layer={record['layer']} "
