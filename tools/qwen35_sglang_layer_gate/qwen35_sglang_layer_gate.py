@@ -525,6 +525,14 @@ class LayerGate:
             value = value[0].contiguous()
         if name == "conv_state" and tuple(value.shape) == (1, 6144, 3):
             value = value[0].contiguous()
+        # SGLang's RMSNormGated for the GDN path folds (seq, heads) into one
+        # row dimension, while the golden stores the unpacked (seq, heads,
+        # dim).  The reshape is a pure view of the same bytes; comparing the
+        # folded form against the unpacked golden rejected a numerically
+        # correct kernel (2026-08-20 zcode lane, ordinal 17: 0/4096 over
+        # tolerance once reshaped) before any metric was computed.
+        if name == "output_rms_norm_gate" and tuple(value.shape) == (32, 128):
+            value = value.view(2, 16, 128).contiguous()
         return value
 
     @staticmethod
