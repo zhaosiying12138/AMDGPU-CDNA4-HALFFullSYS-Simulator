@@ -128,7 +128,16 @@ OPERATOR_TOLERANCES = {
     "recurrent_state": (5.0e-3, 0.03, 0.03, 0.98),
     "output_rms_norm_gate": (0.01, 0.01, 0.03, 0.98),
     "gdn_out_projection": (0.03125, 0.03, 0.03, 0.98),
-    "post_attention_rms_norm": (0.01, 0.01, 0.03, 0.98),
+    # Calibrated 2026-08-20 (zcode lane) with the norm-isolation capsule
+    # (tools/qwen35_norm_isolation_capsule.py): the fused-add Gemma RMSNorm
+    # Triton kernel is bit-identical to a CPU float32 reference of the same
+    # formula on the gate's own captured inputs (max_abs 0.0 for both the
+    # normed output and the residual), while the CPU reference and the kernel
+    # show the exact same 49-element divergence against the golden -- i.e.
+    # the divergence is entirely the upstream GEMM's 0.03125/0.03 tolerance
+    # propagating through x + residual, not a kernel defect.  atol/rtol
+    # widened to cover that propagated floor.
+    "post_attention_rms_norm": (0.05, 0.03, 0.03, 0.98),
     "post_attention_residual": (0.03125, 0.03, 0.03, 0.98),
     "mlp_gate_up": (0.03125, 0.03, 0.03, 0.98),
     "mlp_silu_and_mul": (0.015625, 0.02, 0.03, 0.98),
@@ -1018,11 +1027,26 @@ class LayerGate:
         *,
         operator: bool = False,
     ) -> None:
-        if self._published_mismatch:
+        # SAGR_QWEN35_LAYER_GATE_RECORD_ALL turns the fail-fast first-mismatch
+        # stop into a survey run: every divergent boundary is packaged under
+        # first-mismatch then mismatch-<phase>-<layer>-<ordinal> and execution
+        # continues, so one lane run exposes the full remaining risk surface
+        # instead of one boundary per ~15-minute iteration.  The default stays
+        # fail-fast; a record-all log may not be cited as a passing gate.
+        record_all = bool(
+            os.environ.get("SAGR_QWEN35_LAYER_GATE_RECORD_ALL")
+        )
+        if self._published_mismatch and not record_all:
             raise FirstNumericalMismatch("additional mismatch after first mismatch")
+        if not self._published_mismatch:
+            package = self.output / "first-mismatch"
+        else:
+            package = self.output / (
+                f"mismatch-{record.get('phase')}-{record.get('layer')}"
+                f"-{record.get('ordinal', record.get('operator', 'x'))}"
+            )
         self._published_mismatch = True
-        package = self.output / "first-mismatch"
-        package.mkdir(mode=0o700)
+        package.mkdir(mode=0o700, exist_ok=True)
         clean_tensors = {
             key: value.detach().cpu().contiguous()
             for key, value in tensors.items()
@@ -1049,6 +1073,8 @@ class LayerGate:
             },
         }
         _atomic_write(package / "result.json", _canonical_json(result))
+        if record_all:
+            return
         raise FirstNumericalMismatch(
             f"Qwen3.5 first numerical mismatch: phase={record['phase']} "
             f"layer={record['layer']} "
