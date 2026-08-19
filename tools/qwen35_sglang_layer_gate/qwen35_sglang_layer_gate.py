@@ -114,7 +114,15 @@ OPERATOR_TOLERANCES = {
     "gdn_g": (1.0e-5, 1.0e-4, 1.0e-4, 0.9999),
     "gdn_beta_output": (1.0e-5, 1.0e-4, 1.0e-4, 0.9999),
     "gdn_recurrent_output": (0.015625, 0.02, 0.03, 0.98),
-    "recurrent_state": (1.0e-4, 0.03, 0.03, 0.98),
+    # The cache state is stored in FP32 but is a sum of outer products of
+    # BF16-rounded intermediates (l2norm, A, u and v are each cast to BF16
+    # inside the kernels), so its per-element error scale is BF16 epsilon,
+    # not FP32.  An FP64 oracle over the captured inputs showed both
+    # architectures land within ~1e-3 of the true value -- with the NVIDIA
+    # reference farther from the oracle than the simulator at the worst
+    # elements -- so demanding 1e-4 here flagged legitimate cross-device
+    # rounding as a first divergence.
+    "recurrent_state": (0.00390625, 0.03, 0.03, 0.98),
     "output_rms_norm_gate": (0.01, 0.01, 0.03, 0.98),
     "gdn_out_projection": (0.03125, 0.03, 0.03, 0.98),
     "post_attention_rms_norm": (0.01, 0.01, 0.03, 0.98),
