@@ -3,6 +3,7 @@
 #
 #   scripts/run_engine_lane.sh --engine sglang --tp 1 <logfile>
 #   scripts/run_engine_lane.sh --engine vllm   --tp 16 <logfile>
+#   scripts/run_engine_lane.sh --engine sglang --tp 1 --product-hip <logfile>
 #
 # This replaces six near-identical scripts. They had drifted apart in ways that
 # cost real time: only one of them prepended the freshly built runtime to
@@ -26,6 +27,7 @@ model=""
 dummy_weights=0
 capsule=""
 max_new_tokens=1
+product_hip=0
 # Number of compute units to expose in the gem5 host bridge.  The managed
 # runtime deliberately scrubs arbitrary environment variables before spawning
 # gem5, so a lane-owned wrapper is generated below when this is set.  Keeping
@@ -45,6 +47,7 @@ while (($#)); do
     --model) model=${2:?}; shift 2 ;;
     --dummy-weights) dummy_weights=1; shift ;;
     --max-new-tokens) max_new_tokens=${2:?}; shift 2 ;;
+    --product-hip) product_hip=1; shift ;;
     --gem5) gem5=${2:?}; shift 2 ;;
     --compute-units) compute_units=${2:?}; shift 2 ;;
     --fast) gem5="${ROOT}/projects/gem5/build/VEGA_X86/gem5.opt.fastwrap"; shift ;;
@@ -131,25 +134,27 @@ else
   export HSA_MODEL_TOPOLOGY="${HEAD_PRODUCT}/share/self-amdgpu-runtime/hsakmt-topology"
 fi
 
-# Order matters and is deliberate. Only the freshly built runtime is prepended,
-# so the self-runtime under test is the one that loads. The product's lib
-# directory is deliberately NOT prepended.
-#
-# It is tempting to prepend it -- doing so makes HIP resolve to the HEAD
-# product's libamdhip64 instead of the stock ROCm 7.2.3 that sits earlier on
-# the activate script's path, which looks more consistent. It is not: PyTorch's
-# precompiled device code in this prefix was built against ROCm 7.2.3, and
-# loading the HEAD product's HIP invalidates every one of those code objects.
-# Both engines then die at the first device allocation with
-#
-#   torch.AcceleratorError: CUDA error: device kernel image is invalid
-#   (hipErrorInvalidImage)
-#
-# The combination that works, and that every successful run here has used, is
-# stock ROCm 7.2.3 HIP plus the HEAD product's ROCr -- ROCr resolves to the
-# product regardless of order because no other libhsa-runtime64.so.1 exists
-# under the prefix. The identity gate below records what actually loaded.
-export LD_LIBRARY_PATH="${RUNTIME_BUILD}:${LD_LIBRARY_PATH}"
+# Order matters. The default keeps the previously accepted stock ROCm 7.2.3
+# HIP plus HEAD-product ROCr combination. `--product-hip` is an explicit,
+# auditable comparison mode: the immutable product lib directory comes first,
+# so both libamdhip64 and its matching libamd_comgr resolve from the product.
+# HIP_PATH/ROCM_PATH remain the pinned compiler environment; this switch only
+# changes the runtime libraries loaded by the model process.
+if (( product_hip )); then
+  hip_mode=product
+  # Keep the mutable runtime build first: the product also contains an older
+  # copy of libself_amdgpu_runtime.so.1, and letting that copy win silently
+  # disables run-root confinement. The build has no HIP soname, so product HIP
+  # and COMGR still win over the Conda copies at the next path element.
+  export LD_LIBRARY_PATH="${RUNTIME_BUILD}:${HEAD_PRODUCT}/lib:${LD_LIBRARY_PATH}"
+  # The generic HIP capsule accepts this explicit runtime path and records it
+  # in its result. Frameworks still bind through the normal ELF loader; the
+  # variable is a lane identity aid, not a framework-specific hook.
+  export HIP_RUNTIME_LIBRARY="${HEAD_PRODUCT}/lib/libamdhip64.so.7"
+else
+  hip_mode=stock
+  export LD_LIBRARY_PATH="${RUNTIME_BUILD}:${LD_LIBRARY_PATH}"
+fi
 export LD_PRELOAD="${ROOT}/build/rocr_logging_preload.so:$(echo "${LD_PRELOAD:-}" | sed "s|${STALE}|${HEAD_PRODUCT}|g")"
 export LD_PRELOAD="${LD_PRELOAD%:}"
 export HSA_MODEL_LIB="${RUNTIME_BUILD}/libself_amdgpu_hsakmt_model.so.1"
@@ -281,6 +286,8 @@ fi
   echo "gem5_base=${gem5_base:-${SAGR_MANAGED_GEM5}}"
   echo "compute_units=${compute_units:-default}"
   echo "max_new_tokens=${max_new_tokens}"
+  echo "hip_mode=${hip_mode}"
+  echo "hip_runtime_library=${HIP_RUNTIME_LIBRARY:-<loader>}"
   echo "fastcopy=HSA_ENABLE_DTIF_FAST_COPY=${HSA_ENABLE_DTIF_FAST_COPY} SAGR_HSAKMT_MODEL_FAST_COPY=${SAGR_HSAKMT_MODEL_FAST_COPY}"
   if [[ $engine == vllm ]]; then
     echo "# unchanged-upstream evidence"
@@ -294,8 +301,17 @@ fi
   fi
   echo "started=$(date -Is)"
   echo "--- run-identity-gate ---"
-  python3 tools/run_identity_gate.py --format text 2>&1
+  identity_gate_args=(--format text)
+  if (( product_hip )); then
+    identity_gate_args+=(--require-active-product=libhsa-runtime64.so.1,libamdhip64.so.7)
+  fi
+  python3 tools/run_identity_gate.py "${identity_gate_args[@]}" 2>&1
 } >"$log"
+identity_gate_status=$?
+if (( product_hip && identity_gate_status != 0 )); then
+  printf 'product HIP identity gate failed; see %s\n' "$log" >&2
+  exit 2
+fi
 
 # --- the run ----------------------------------------------------------------
 # This host exposes a real NVIDIA RTX 5090 through WSL. With the
