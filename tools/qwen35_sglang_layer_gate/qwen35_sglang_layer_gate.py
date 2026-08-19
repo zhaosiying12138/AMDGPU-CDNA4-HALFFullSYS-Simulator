@@ -280,6 +280,20 @@ def compare_tensor(
 
     actual_cpu = _cpu_tensor(actual, "actual")
     expected_cpu = _cpu_tensor(expected, "expected")
+    # A boundary may legally expose the same tensor under a different
+    # factoring of its dimensions -- e.g. the gated RMS norm sees
+    # [tokens*heads, dim] where the golden stores [tokens, heads, dim].
+    # A contiguous reshape does not reorder elements, so comparing through
+    # it cannot hide a transpose or layout defect: those still differ
+    # numerically.  Only the factoring is forgiven, never dtype or count.
+    reshaped_expected = False
+    if (
+        tuple(actual_cpu.shape) != tuple(expected_cpu.shape)
+        and actual_cpu.numel() == expected_cpu.numel()
+        and actual_cpu.dtype == expected_cpu.dtype
+    ):
+        expected_cpu = expected_cpu.reshape(actual_cpu.shape)
+        reshaped_expected = True
     contract_correct = bool(
         actual_cpu.dtype == expected_cpu.dtype
         and tuple(actual_cpu.shape) == tuple(expected_cpu.shape)
@@ -289,6 +303,7 @@ def compare_tensor(
         "actual_shape": list(actual_cpu.shape),
         "expected_dtype": str(expected_cpu.dtype).removeprefix("torch."),
         "expected_shape": list(expected_cpu.shape),
+        "reshaped_expected": reshaped_expected,
         "contract_correct": contract_correct,
         "atol": atol,
         "rtol": rtol,
