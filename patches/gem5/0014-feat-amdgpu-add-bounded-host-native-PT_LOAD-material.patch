@@ -1,0 +1,1382 @@
+From ad5172cd761d6638ef473bc4150682c882f778be Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sun, 9 Aug 2026 21:07:47 +0800
+Subject: [PATCH 14/42] feat(amdgpu): add bounded host-native PT_LOAD
+ materializer
+
+Reuse the committed code-object staging validator and host memory oracle to materialize the locked gfx950 gpuReadWrite PT_LOAD image in a no-x86 target. Keep the gate fixture-scoped and explicit about the AQL/execution boundary.
+
+Checkpoint-ID: CP-0017
+
+Goal-ID: GSIM-001
+
+Plan-Revision: 2
+
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+
+Evidence-Manifest-SHA256: 81e4871f1b089b076bb5a9731418eb730c55459639fa03e6fd1fdddb32518096
+
+Change-Kind: code
+
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/dev/amdgpu/SConscript                     |  12 +
+ src/dev/amdgpu/host_gpu_code_object_state.cc  |   6 +
+ src/dev/amdgpu/host_gpu_code_object_state.hh  |   4 +
+ src/dev/amdgpu/host_gpu_memory_state.cc       |  11 +
+ src/dev/amdgpu/host_gpu_memory_state.hh       |   3 +
+ src/dev/amdgpu/host_gpu_native_ptload_main.cc | 533 ++++++++++++++++++
+ .../amdgpu/host_native_code_object_mapper.cc  | 466 +++++++++++++++
+ .../amdgpu/host_native_code_object_mapper.hh  | 144 +++++
+ src/dev/amdgpu/host_native_memory_context.cc  |  12 +
+ src/dev/amdgpu/host_native_memory_context.hh  |   2 +
+ util/host_native/check_control_core.py        |  26 +-
+ 11 files changed, 1217 insertions(+), 2 deletions(-)
+ create mode 100644 src/dev/amdgpu/host_gpu_native_ptload_main.cc
+ create mode 100644 src/dev/amdgpu/host_native_code_object_mapper.cc
+ create mode 100644 src/dev/amdgpu/host_native_code_object_mapper.hh
+
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index 8a8b2e3be..0e3be40f4 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -55,6 +55,18 @@ Executable('host_gpu_native_fixture_core',
+            'host_gpu_queue_state.cc',
+            'host_gpu_signal_state.cc')
+ 
++# CP17-A bounded functional PT_LOAD staging.  The parser/state sources are
++# intentionally linked here, before the legacy x86 ISA gate; this target owns
++# no CPU, Process, TLB, AQL, or GPU execution path.
++Executable('host_gpu_native_ptload_core',
++           'host_gpu_native_ptload_main.cc',
++           'host_native_code_object_mapper.cc',
++           'host_native_memory_context.cc',
++           'host_gpu_code_object_image.cc',
++           'host_gpu_code_object_state.cc',
++           'host_gpu_protocol.cc',
++           'host_gpu_memory_state.cc')
++
+ if not env['CONF']['USE_X86_ISA']:
+     Return()
+ 
+diff --git a/src/dev/amdgpu/host_gpu_code_object_state.cc b/src/dev/amdgpu/host_gpu_code_object_state.cc
+index 895ddc263..564e54433 100644
+--- a/src/dev/amdgpu/host_gpu_code_object_state.cc
++++ b/src/dev/amdgpu/host_gpu_code_object_state.cc
+@@ -245,6 +245,12 @@ HostGPUCodeObjectState::sha256(const std::vector<uint8_t> &image)
+     return result;
+ }
+ 
++protocol::Sha256
++HostGPUCodeObjectState::imageSha256(const std::vector<uint8_t> &image)
++{
++    return sha256(image);
++}
++
+ HostGPUCodeObjectState::Decision
+ HostGPUCodeObjectState::submit(
+     const Owner &owner, const protocol::CodeObjectRequest &request,
+diff --git a/src/dev/amdgpu/host_gpu_code_object_state.hh b/src/dev/amdgpu/host_gpu_code_object_state.hh
+index 7a0182351..27cbe8125 100644
+--- a/src/dev/amdgpu/host_gpu_code_object_state.hh
++++ b/src/dev/amdgpu/host_gpu_code_object_state.hh
+@@ -78,6 +78,10 @@ class HostGPUCodeObjectState
+         const protocol::CodeObjectRequest &request, protocol::Status status,
+         uint64_t now);
+ 
++    /** Return the canonical SHA-256 digest used by code-object COMMIT. */
++    static protocol::Sha256 imageSha256(
++        const std::vector<uint8_t> &image);
++
+     bool readCommittedImage(const Owner &owner, uint64_t objectId,
+                             uint64_t generation,
+                             std::vector<uint8_t> &image) const;
+diff --git a/src/dev/amdgpu/host_gpu_memory_state.cc b/src/dev/amdgpu/host_gpu_memory_state.cc
+index 6d5742534..bc88e1a6f 100644
+--- a/src/dev/amdgpu/host_gpu_memory_state.cc
++++ b/src/dev/amdgpu/host_gpu_memory_state.cc
+@@ -413,6 +413,17 @@ HostGPUMemoryState::releaseFunctionalPage(
+     return allocation->functionalPageTokens.erase(token) == 1;
+ }
+ 
++size_t
++HostGPUMemoryState::functionalPageLeaseCount(
++    const Owner &owner, uint64_t allocationId, uint64_t generation) const
++{
++    protocol::MemoryRequest request;
++    request.allocationId = allocationId;
++    request.generation = generation;
++    const Allocation *allocation = resolve(owner, request);
++    return allocation == nullptr ? 0 : allocation->functionalPageTokens.size();
++}
++
+ protocol::MemoryResponse
+ HostGPUMemoryState::copyFromHost(
+     const Owner &owner, const protocol::MemoryRequest &request,
+diff --git a/src/dev/amdgpu/host_gpu_memory_state.hh b/src/dev/amdgpu/host_gpu_memory_state.hh
+index f60bd2a96..21eeb3977 100644
+--- a/src/dev/amdgpu/host_gpu_memory_state.hh
++++ b/src/dev/amdgpu/host_gpu_memory_state.hh
+@@ -104,6 +104,9 @@ class HostGPUMemoryState
+     bool releaseFunctionalPage(
+         const Owner &owner, uint64_t allocationId, uint64_t generation,
+         uint64_t token);
++    size_t functionalPageLeaseCount(
++        const Owner &owner, uint64_t allocationId,
++        uint64_t generation) const;
+     protocol::Status validatePinnedDispatchAllocation(
+         const Owner &owner, uint64_t allocationId, uint64_t generation,
+         uint64_t minimumBytes) const;
+diff --git a/src/dev/amdgpu/host_gpu_native_ptload_main.cc b/src/dev/amdgpu/host_gpu_native_ptload_main.cc
+new file mode 100644
+index 000000000..b769a5dd6
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_ptload_main.cc
+@@ -0,0 +1,533 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; neither the name of the
++ * copyright holders nor the names of its contributors may be used to endorse
++ * or promote products derived from this software without specific prior
++ * written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
++ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
++ * DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_code_object_fixture.hh"
++#include "dev/amdgpu/host_gpu_code_object_state.hh"
++#include "dev/amdgpu/host_native_code_object_mapper.hh"
++
++#include "base/types.hh"
++
++#include <algorithm>
++#include <array>
++#include <cstdint>
++#include <fstream>
++#include <iostream>
++#include <iterator>
++#include <limits>
++#include <stdexcept>
++#include <string>
++#include <vector>
++
++namespace
++{
++
++using namespace gem5::hostgpu;
++
++constexpr const char *FixtureRelativePath =
++    "projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/"
++    "hsaco/gfx950/gpuReadWrite_kernels.hsaco";
++
++void
++require(bool condition, const char *message)
++{
++    if (!condition)
++        throw std::runtime_error(message);
++}
++
++std::vector<uint8_t>
++readFixture(int argc, char **argv)
++{
++    std::vector<std::string> candidates;
++    if (argc > 1)
++        candidates.emplace_back(argv[1]);
++    candidates.emplace_back(FixtureRelativePath);
++    candidates.emplace_back(
++        std::string("../") + std::string(FixtureRelativePath).substr(9));
++    candidates.emplace_back(std::string("../../") + FixtureRelativePath);
++    candidates.emplace_back(std::string("../../../") + FixtureRelativePath);
++
++    for (const auto &candidate : candidates) {
++        std::ifstream input(candidate, std::ios::binary);
++        if (!input)
++            continue;
++        return {std::istreambuf_iterator<char>(input),
++                std::istreambuf_iterator<char>()};
++    }
++    throw std::runtime_error(
++        "locked gpuReadWrite HSACO fixture is unavailable");
++}
++
++protocol::CodeObjectManifest
++fixtureManifest(const std::vector<uint8_t> &image)
++{
++    protocol::CodeObjectManifest manifest;
++    manifest.imageSize = image.size();
++    manifest.chunkCount = 2;
++    manifest.segmentCount = 3;
++    manifest.kernelIndex = 0;
++    manifest.imageSha256 = {
++        0x7b, 0x6a, 0x4d, 0x2b, 0xb7, 0xf9, 0xc4, 0xe7,
++        0x46, 0x6b, 0xcf, 0x69, 0xf3, 0x11, 0x0e, 0xcb,
++        0xfa, 0xb5, 0x4d, 0x07, 0xab, 0xd4, 0xc7, 0x0b,
++        0x6b, 0xd9, 0x6b, 0x6a, 0x6f, 0xb9, 0xde, 0x56,
++    };
++    manifest.elfMachine = code_object_fixture::ElfMachine;
++    manifest.elfType = code_object_fixture::ElfTypeDyn;
++    manifest.elfOsabi = code_object_fixture::ElfOsabiAmdgpuHsa;
++    manifest.elfAbiVersion = code_object_fixture::ElfAbiVersion;
++    manifest.elfFlags = code_object_fixture::ElfFlags;
++    manifest.gfxTarget = code_object_fixture::GfxTarget;
++    manifest.codeObjectVersion = code_object_fixture::CodeObjectVersion;
++    manifest.metadataMajor = code_object_fixture::MetadataMajor;
++    manifest.metadataMinor = code_object_fixture::MetadataMinor;
++    manifest.relocationCount = code_object_fixture::RelocationCount;
++    manifest.kernargSegmentSize = 280;
++    manifest.kernargSegmentAlign = 8;
++    manifest.maxFlatWorkgroupSize = 256;
++    manifest.wavefrontSize = 64;
++    manifest.sgprCount = 22;
++    manifest.vgprCount = 6;
++    manifest.descriptorSize = code_object_fixture::DescriptorBytes;
++    manifest.kernelCodeEntryByteOffset = 0x1100;
++    manifest.codeVirtualAddress = 0x1900;
++    manifest.codeFileOffset = 0x900;
++    manifest.codeSize = 0x78;
++    manifest.descriptorVirtualAddress = 0x800;
++    manifest.descriptorFileOffset = 0x800;
++    const char *kernel = "gpuReadWrite";
++    const char *descriptor = "gpuReadWrite.kd";
++    std::copy(kernel, kernel + std::char_traits<char>::length(kernel),
++              manifest.kernelName.begin());
++    std::copy(descriptor,
++              descriptor + std::char_traits<char>::length(descriptor),
++              manifest.descriptorSymbol.begin());
++    require(image.size() == 5528, "gpuReadWrite fixture size");
++    std::copy_n(
++        image.begin() + manifest.descriptorFileOffset,
++        protocol::CodeObjectDescriptorBytes, manifest.descriptor.begin());
++    manifest.segments[0] = {1, 4, 0, 0, 0x840, 0x840, 0x1000};
++    manifest.segments[1] = {1, 5, 0x900, 0x1900, 0x480, 0x480, 0x1000};
++    manifest.segments[2] = {1, 6, 0xd80, 0x2d80, 0x70, 0x280, 0x1000};
++    return manifest;
++}
++
++struct Counts
++{
++    size_t allocations = 0;
++    uint64_t bytes = 0;
++    size_t chunks = 0;
++    size_t leases = 0;
++};
++
++struct StagedFixture
++{
++    std::vector<uint8_t> image;
++    protocol::CodeObjectManifest manifest;
++};
++
++bool
++sameManifest(const protocol::CodeObjectManifest &left,
++             const protocol::CodeObjectManifest &right)
++{
++    if (left.imageSize != right.imageSize ||
++        left.chunkDataBytes != right.chunkDataBytes ||
++        left.chunkCount != right.chunkCount ||
++        left.segmentCount != right.segmentCount ||
++        left.kernelIndex != right.kernelIndex ||
++        left.imageSha256 != right.imageSha256 ||
++        left.elfMachine != right.elfMachine || left.elfType != right.elfType ||
++        left.elfOsabi != right.elfOsabi ||
++        left.elfAbiVersion != right.elfAbiVersion ||
++        left.elfReserved != right.elfReserved ||
++        left.elfFlags != right.elfFlags || left.gfxTarget != right.gfxTarget ||
++        left.codeObjectVersion != right.codeObjectVersion ||
++        left.metadataMajor != right.metadataMajor ||
++        left.metadataMinor != right.metadataMinor ||
++        left.relocationCount != right.relocationCount ||
++        left.kernargSegmentSize != right.kernargSegmentSize ||
++        left.kernargSegmentAlign != right.kernargSegmentAlign ||
++        left.groupSegmentFixedSize != right.groupSegmentFixedSize ||
++        left.privateSegmentFixedSize != right.privateSegmentFixedSize ||
++        left.maxFlatWorkgroupSize != right.maxFlatWorkgroupSize ||
++        left.wavefrontSize != right.wavefrontSize ||
++        left.sgprCount != right.sgprCount ||
++        left.vgprCount != right.vgprCount ||
++        left.usesDynamicStack != right.usesDynamicStack ||
++        left.descriptorSize != right.descriptorSize ||
++        left.kernelCodeEntryByteOffset != right.kernelCodeEntryByteOffset ||
++        left.codeVirtualAddress != right.codeVirtualAddress ||
++        left.codeFileOffset != right.codeFileOffset ||
++        left.codeSize != right.codeSize ||
++        left.descriptorVirtualAddress != right.descriptorVirtualAddress ||
++        left.descriptorFileOffset != right.descriptorFileOffset ||
++        left.kernelName != right.kernelName ||
++        left.descriptorSymbol != right.descriptorSymbol ||
++        left.descriptor != right.descriptor) {
++        return false;
++    }
++    for (size_t index = 0; index < protocol::CodeObjectMaximumSegments;
++         ++index) {
++        const auto &a = left.segments[index];
++        const auto &b = right.segments[index];
++        if (a.type != b.type || a.flags != b.flags ||
++            a.fileOffset != b.fileOffset ||
++            a.virtualAddress != b.virtualAddress || a.fileSize != b.fileSize ||
++            a.memorySize != b.memorySize || a.alignment != b.alignment) {
++            return false;
++        }
++    }
++    return true;
++}
++
++StagedFixture
++stageFixture(const std::vector<uint8_t> &image,
++             const protocol::CodeObjectManifest &manifest)
++{
++    HostGPUCodeObjectState state;
++    const HostGPUCodeObjectState::Owner owner{37, 1};
++    protocol::CodeObjectRequest begin;
++    begin.opcode = protocol::CodeObjectOpcode::Begin;
++    begin.manifest = manifest;
++    const auto beginResult = state.submit(owner, begin, 1);
++    require(beginResult.accepted && beginResult.response.status ==
++                protocol::Status::Ok,
++            "code-object begin");
++
++    uint64_t offset = 0;
++    for (uint32_t index = 0; index < manifest.chunkCount; ++index) {
++        protocol::CodeObjectRequest chunk;
++        chunk.opcode = protocol::CodeObjectOpcode::Chunk;
++        chunk.objectId = beginResult.response.objectId;
++        chunk.generation = beginResult.response.generation;
++        chunk.imageOffset = offset;
++        chunk.chunkIndex = index;
++        const uint32_t count = static_cast<uint32_t>(std::min<uint64_t>(
++            manifest.imageSize - offset, protocol::CodeObjectChunkDataBytes));
++        chunk.byteCount = count;
++        std::copy_n(image.begin() + static_cast<size_t>(offset), count,
++                    chunk.chunkData.begin());
++        chunk.chunkCrc32c = protocol::crc32c(chunk.chunkData.data(), count);
++        const auto chunkResult = state.submit(owner, chunk, 2 + index);
++        require(chunkResult.accepted && chunkResult.response.status ==
++                    protocol::Status::Ok,
++                "code-object chunk");
++        offset += count;
++    }
++
++    protocol::CodeObjectRequest commit;
++    commit.opcode = protocol::CodeObjectOpcode::Commit;
++    commit.objectId = beginResult.response.objectId;
++    commit.generation = beginResult.response.generation;
++    commit.byteCount = manifest.imageSize;
++    commit.chunkIndex = manifest.chunkCount;
++    commit.commitSha256 = manifest.imageSha256;
++    const auto commitResult = state.submit(owner, commit, 4);
++    require(commitResult.committed && commitResult.response.status ==
++                protocol::Status::Ok,
++            "code-object commit");
++
++    StagedFixture staged;
++    require(state.readCommittedImage(
++                owner, beginResult.response.objectId,
++                beginResult.response.generation, staged.image) &&
++                staged.image == image,
++            "code-object committed image");
++    const auto committedManifest = state.committedManifest(
++        owner, beginResult.response.objectId, beginResult.response.generation);
++    require(committedManifest && sameManifest(*committedManifest, manifest),
++            "code-object committed manifest");
++    staged.manifest = *committedManifest;
++    return staged;
++}
++
++Counts
++counts(const HostGPUMemoryState &memory,
++       const HostNativeMemoryContext &context)
++{
++    return {memory.allocationCount(), memory.totalBytes(),
++            memory.committedChunkCount(), context.leaseCount()};
++}
++
++bool
++sameCounts(const Counts &left, const Counts &right)
++{
++    return left.allocations == right.allocations &&
++        left.bytes == right.bytes && left.chunks == right.chunks &&
++        left.leases == right.leases;
++}
++
++bool
++sameSegment(const protocol::CodeObjectSegment &left,
++            const protocol::CodeObjectSegment &right)
++{
++    return left.type == right.type && left.flags == right.flags &&
++        left.fileOffset == right.fileOffset &&
++        left.virtualAddress == right.virtualAddress &&
++        left.fileSize == right.fileSize &&
++        left.memorySize == right.memorySize &&
++        left.alignment == right.alignment;
++}
++
++bool
++readEquals(HostNativeMemoryContext &context, gem5::Addr address,
++           const std::vector<uint8_t> &expected)
++{
++    std::vector<uint8_t> observed;
++    return context.functionalRead(address, expected.size(), observed) &&
++        observed == expected;
++}
++
++bool
++readZero(HostNativeMemoryContext &context, gem5::Addr address, uint64_t bytes)
++{
++    if (bytes == 0)
++        return true;
++    std::vector<uint8_t> observed;
++    return context.functionalRead(address, bytes, observed) &&
++        std::all_of(observed.begin(), observed.end(),
++                    [](uint8_t byte) { return byte == 0; });
++}
++
++bool
++rejectsAtomically(HostNativeCodeObjectMapper &mapper,
++                  const std::vector<uint8_t> &image,
++                  const protocol::CodeObjectManifest &manifest,
++                  const Counts &before, const HostGPUMemoryState &memory,
++                  const HostNativeMemoryContext &context)
++{
++    const auto rejected = mapper.map(image, manifest);
++    return !rejected && sameCounts(before, counts(memory, context));
++}
++
++void
++runSelfTest(const std::vector<uint8_t> &image)
++{
++    const auto sourceManifest = fixtureManifest(image);
++    require(HostGPUCodeObjectState::imageSha256(image) ==
++                sourceManifest.imageSha256,
++            "fixture SHA-256");
++    const auto staged = stageFixture(image, sourceManifest);
++    const auto &stagedImage = staged.image;
++    const auto &manifest = staged.manifest;
++    require(protocol::validateCodeObjectManifest(manifest) ==
++                protocol::CodeObjectManifestValidation::Valid,
++            "fixture manifest");
++
++    HostGPUMemoryState memory;
++    const HostGPUMemoryState::Owner owner{37, 1};
++    HostNativeMemoryContext context(memory, owner);
++    HostNativeMemoryContext competingContext(memory, owner);
++    HostNativeCodeObjectMapper mapper(memory, context, owner);
++    const Counts empty = counts(memory, context);
++
++    const auto mapped = mapper.map(stagedImage, manifest);
++    require(mapped && mapped->valid(), "PT_LOAD map");
++    const auto &mapping = *mapped;
++    require(mapping.imageVirtualBase == 0 &&
++                mapping.imageVirtualEnd == 0x3000 &&
++                mapping.mappedBytes == 0x3000 &&
++                mapping.lease.pageCount == 3,
++            "PT_LOAD union pages");
++
++    const std::array<protocol::CodeObjectSegment, 3> expected = {{
++        {1, 4, 0, 0, 0x840, 0x840, 0x1000},
++        {1, 5, 0x900, 0x1900, 0x480, 0x480, 0x1000},
++        {1, 6, 0xd80, 0x2d80, 0x70, 0x280, 0x1000},
++    }};
++    for (size_t index = 0; index < expected.size(); ++index) {
++        require(sameSegment(mapping.segments[index].segment, expected[index]),
++                "exact PT_LOAD tuple");
++        require(mapping.segments[index].mappedAddress ==
++                    mapping.allocation.gpuVa +
++                        expected[index].virtualAddress -
++                        mapping.imageVirtualBase,
++                "PT_LOAD mapped address");
++        const std::vector<uint8_t> bytes(
++            stagedImage.begin() + expected[index].fileOffset,
++            stagedImage.begin() + expected[index].fileOffset +
++                expected[index].fileSize);
++        require(readEquals(context, mapping.segments[index].mappedAddress,
++                           bytes),
++                "PT_LOAD file bytes");
++        require(readZero(
++                    context,
++                    mapping.segments[index].mappedAddress +
++                        expected[index].fileSize,
++                    expected[index].memorySize - expected[index].fileSize),
++                "PT_LOAD zero fill");
++    }
++    require(mapping.descriptorGpuVa == mapping.allocation.gpuVa + 0x800 &&
++                mapping.codeGpuVa == mapping.allocation.gpuVa + 0x1900 &&
++                mapping.entryGpuVa == mapping.codeGpuVa &&
++                mapping.descriptorGpuVa + 0x1100 == mapping.entryGpuVa,
++            "descriptor entry relation");
++
++    const Counts mappedCounts = counts(memory, context);
++    require(mappedCounts.allocations == empty.allocations + 1 &&
++                mappedCounts.leases == empty.leases + 1,
++            "mapping lifetime count");
++
++    auto wrongLease = mapping.lease;
++    ++wrongLease.token;
++    require(!context.unmap(wrongLease) && context.leaseCount() == 1,
++            "wrong lease rejection");
++    const auto competingLease = context.map(mapping.allocation.gpuVa, 1);
++    require(competingLease && !mapper.unmap(mapping) &&
++                mapper.failure() == HostNativeCodeObjectMapper::Failure::Busy &&
++                memory.allocationCount() == 1 && context.leaseCount() == 2,
++            "busy unmap retains mapping");
++    require(context.unmap(*competingLease) && context.leaseCount() == 1,
++            "busy unmap retry preparation");
++    protocol::MemoryRequest tokenProbeRequest;
++    tokenProbeRequest.opcode = protocol::MemoryOpcode::Allocate;
++    tokenProbeRequest.byteCount = 4096;
++    tokenProbeRequest.argument = 4096;
++    const auto tokenProbe = memory.allocate(owner, tokenProbeRequest, 2);
++    require(tokenProbe.status == protocol::Status::Ok,
++            "cross-context token probe allocation");
++    const auto tokenProbeLease = competingContext.map(tokenProbe.value0, 1);
++    require(tokenProbeLease && competingContext.unmap(*tokenProbeLease),
++            "cross-context token probe lease");
++    protocol::MemoryRequest tokenProbeFree;
++    tokenProbeFree.opcode = protocol::MemoryOpcode::Free;
++    tokenProbeFree.allocationId = tokenProbe.allocationId;
++    tokenProbeFree.generation = tokenProbe.generation;
++    require(memory.free(owner, tokenProbeFree, 2).status ==
++                protocol::Status::Ok,
++            "cross-context token probe free");
++    const auto competingContextLease = competingContext.map(
++        mapping.allocation.gpuVa + 0x100, 1);
++    require(static_cast<bool>(competingContextLease),
++            "cross-context lease map");
++    require(memory.functionalPageLeaseCount(
++                owner, mapping.allocation.allocationId,
++                mapping.allocation.generation) == 2,
++            "cross-context global lease count");
++    require(!mapper.unmap(mapping) &&
++                mapper.failure() == HostNativeCodeObjectMapper::Failure::Busy,
++            "cross-context busy unmap");
++    require(context.leaseCount() == 1 && competingContext.leaseCount() == 1,
++            "cross-context lease retention");
++    require(competingContext.unmap(*competingContextLease),
++            "cross-context lease release");
++    require(memory.pinPinnedDispatchAllocation(
++                owner, mapping.allocation.allocationId,
++                mapping.allocation.generation, 99) &&
++                !mapper.unmap(mapping) &&
++                mapper.failure() == HostNativeCodeObjectMapper::Failure::Busy &&
++                context.leaseCount() == 1 &&
++                memory.releasePinnedDispatchAllocation(
++                    owner, mapping.allocation.allocationId,
++                    mapping.allocation.generation, 99),
++            "pinned unmap retains mapping");
++    protocol::MemoryRequest freeRequest;
++    freeRequest.opcode = protocol::MemoryOpcode::Free;
++    freeRequest.allocationId = mapping.allocation.allocationId;
++    freeRequest.generation = mapping.allocation.generation;
++    require(memory.free(owner, freeRequest, 1).status ==
++                protocol::Status::Busy,
++            "mapped allocation busy");
++
++    auto relocation = manifest;
++    relocation.relocationCount = 1;
++    require(rejectsAtomically(mapper, stagedImage, relocation, mappedCounts,
++                              memory,
++                              context),
++            "nonzero relocation rejection");
++    auto overlap = manifest;
++    overlap.segments[2].virtualAddress = 0x1900;
++    require(rejectsAtomically(
++                mapper, stagedImage, overlap, mappedCounts, memory, context),
++            "overlap rejection");
++    auto overflow = manifest;
++    overflow.segments[2].virtualAddress =
++        std::numeric_limits<uint64_t>::max() - 0x100;
++    overflow.segments[2].memorySize = 0x200;
++    require(rejectsAtomically(mapper, stagedImage, overflow, mappedCounts,
++                              memory,
++                              context),
++            "overflow rejection");
++    auto unsupportedTarget = manifest;
++    unsupportedTarget.gfxTarget = 949;
++    require(rejectsAtomically(mapper, stagedImage, unsupportedTarget,
++                              mappedCounts,
++                              memory, context),
++            "unsupported target rejection");
++    auto unsupportedVersion = manifest;
++    unsupportedVersion.codeObjectVersion = 7;
++    require(rejectsAtomically(mapper, stagedImage, unsupportedVersion,
++                              mappedCounts,
++                              memory, context),
++            "unsupported version rejection");
++
++    memory.disconnect(owner);
++    require(memory.allocationCount() == 1 && context.leaseCount() == 1,
++            "disconnect retains leased allocation");
++    require(mapper.unmap(mapping), "PT_LOAD unmap");
++    require(sameCounts(empty, counts(memory, context)),
++            "PT_LOAD release lifetime");
++}
++
++} // anonymous namespace
++
++int
++main(int argc, char **argv)
++{
++    try {
++        const auto image = readFixture(argc, argv);
++        runSelfTest(image);
++        std::cout
++            << "{\"schema\":\"gem5.host-native.ptload.v1\","
++               "\"ptload_mapping\":true,"
++               "\"fixture_oracle\":true,"
++               "\"staged_image_roundtrip\":true,"
++               "\"exact_ptload_tuples\":true,"
++               "\"descriptor_entry_relation\":true,"
++               "\"filesz_copy\":true,"
++               "\"memsz_zero_fill\":true,"
++               "\"atomic_rejections\":true,"
++               "\"preallocation_atomic_rejections\":true,"
++               "\"nonzero_relocation_rejected\":true,"
++               "\"overlap_rejected\":true,"
++               "\"overflow_rejected\":true,"
++               "\"unsupported_target_rejected\":true,"
++               "\"unsupported_version_rejected\":true,"
++               "\"functional_page_lifetime\":true,"
++               "\"no_aql\":true,"
++               "\"aql_submitted\":false,"
++               "\"kernel_executed\":false,"
++               "\"cpu_fallback\":false,"
++               "\"vega_x86\":false,"
++               "\"gpu_pipeline_connected\":false,"
++               "\"blocker\":\"fixture-scoped image-relative PT_LOAD staging; "
++               "pre-allocation malformed/unsupported rejection only; no "
++               "permissions, relocations, kernarg, AQL, or execution\"}\n";
++    } catch (const std::exception &error) {
++        std::cerr << "host-native PT_LOAD self-test failed: " << error.what()
++                  << '\n';
++        return 1;
++    }
++    return 0;
++}
+diff --git a/src/dev/amdgpu/host_native_code_object_mapper.cc b/src/dev/amdgpu/host_native_code_object_mapper.cc
+new file mode 100644
+index 000000000..ab2d80a4a
+--- /dev/null
++++ b/src/dev/amdgpu/host_native_code_object_mapper.cc
+@@ -0,0 +1,466 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are
++ * met: redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer; neither the name of
++ * the copyright holders nor the names of its contributors may be used to
++ * endorse or promote products derived from this software without specific
++ * prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_native_code_object_mapper.hh"
++
++#include "dev/amdgpu/host_gpu_code_object_image.hh"
++#include "dev/amdgpu/host_gpu_code_object_state.hh"
++
++#include <algorithm>
++#include <limits>
++#include <new>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++namespace
++{
++
++bool
++powerOfTwo(uint64_t value)
++{
++    return value != 0 && (value & (value - 1)) == 0;
++}
++
++} // anonymous namespace
++
++HostNativeCodeObjectMapper::HostNativeCodeObjectMapper(
++    HostGPUMemoryState &memoryState, HostNativeMemoryContext &memoryContext,
++    const HostGPUMemoryState::Owner &memoryOwner)
++    : memory(memoryState), context(memoryContext), owner(memoryOwner)
++{}
++
++const char *
++HostNativeCodeObjectMapper::failureName(Failure value)
++{
++    switch (value) {
++      case Failure::None:
++        return "none";
++      case Failure::InvalidPageSize:
++        return "invalid_page_size";
++      case Failure::MalformedManifest:
++        return "malformed_manifest";
++      case Failure::UnsupportedVersion:
++        return "unsupported_version";
++      case Failure::TopologyMismatch:
++        return "topology_mismatch";
++      case Failure::ImageMismatch:
++        return "image_mismatch";
++      case Failure::InvalidImage:
++        return "invalid_image";
++      case Failure::InvalidSegment:
++        return "invalid_segment";
++      case Failure::RangeOverflow:
++        return "range_overflow";
++      case Failure::Busy:
++        return "busy";
++      case Failure::Allocation:
++        return "allocation";
++      case Failure::PageMap:
++        return "page_map";
++      case Failure::Copy:
++        return "copy";
++    }
++    return "unknown";
++}
++
++bool
++HostNativeCodeObjectMapper::rangeEnd(
++    uint64_t start, uint64_t size, uint64_t &end)
++{
++    if (size > std::numeric_limits<uint64_t>::max() - start)
++        return false;
++    end = start + size;
++    return true;
++}
++
++bool
++HostNativeCodeObjectMapper::rangesOverlap(
++    uint64_t leftStart, uint64_t leftSize,
++    uint64_t rightStart, uint64_t rightSize)
++{
++    uint64_t leftEnd = 0;
++    uint64_t rightEnd = 0;
++    if (!rangeEnd(leftStart, leftSize, leftEnd) ||
++        !rangeEnd(rightStart, rightSize, rightEnd)) {
++        return true;
++    }
++    return leftStart < rightEnd && rightStart < leftEnd;
++}
++
++bool
++HostNativeCodeObjectMapper::signedRelation(
++    uint64_t descriptor, int64_t offset, uint64_t code, uint64_t &entry)
++{
++    if (offset >= 0) {
++        const uint64_t positive = static_cast<uint64_t>(offset);
++        if (descriptor > std::numeric_limits<uint64_t>::max() - positive)
++            return false;
++        entry = descriptor + positive;
++    } else {
++        /* Avoid negating INT64_MIN directly. */
++        const uint64_t magnitude = static_cast<uint64_t>(-(offset + 1)) + 1;
++        if (descriptor < magnitude)
++            return false;
++        entry = descriptor - magnitude;
++    }
++    return entry == code;
++}
++
++bool
++HostNativeCodeObjectMapper::validateSegments(
++    const std::vector<uint8_t> &image,
++    const protocol::CodeObjectManifest &manifest,
++    uint64_t &imageVirtualBase, uint64_t &imageVirtualEnd)
++{
++    imageVirtualBase = std::numeric_limits<uint64_t>::max();
++    imageVirtualEnd = 0;
++    if (manifest.segmentCount == 0 ||
++        manifest.segmentCount > protocol::CodeObjectMaximumSegments) {
++        fail(Failure::InvalidSegment);
++        return false;
++    }
++
++    for (size_t index = 0; index < protocol::CodeObjectMaximumSegments;
++         ++index) {
++        const auto &segment = manifest.segments[index];
++        if (index >= manifest.segmentCount) {
++            if (segment.type != 0 || segment.flags != 0 ||
++                segment.fileOffset != 0 || segment.virtualAddress != 0 ||
++                segment.fileSize != 0 || segment.memorySize != 0 ||
++                segment.alignment != 0) {
++                fail(Failure::InvalidSegment);
++                return false;
++            }
++            continue;
++        }
++
++        if (segment.type != 1 || segment.memorySize == 0 ||
++            segment.memorySize < segment.fileSize ||
++            (segment.flags != 4 && segment.flags != 5 && segment.flags != 6) ||
++            !powerOfTwo(segment.alignment) ||
++            segment.fileOffset > image.size() ||
++            segment.fileSize > image.size() - segment.fileOffset ||
++            segment.fileOffset % segment.alignment !=
++                segment.virtualAddress % segment.alignment) {
++            fail(Failure::InvalidSegment);
++            return false;
++        }
++
++        uint64_t virtualEnd = 0;
++        if (!rangeEnd(segment.virtualAddress, segment.memorySize, virtualEnd)) {
++            fail(Failure::RangeOverflow);
++            return false;
++        }
++        imageVirtualBase = std::min(imageVirtualBase, segment.virtualAddress);
++        imageVirtualEnd = std::max(imageVirtualEnd, virtualEnd);
++
++        for (size_t other = index + 1;
++             other < manifest.segmentCount; ++other) {
++            const auto &right = manifest.segments[other];
++            if (rangesOverlap(segment.fileOffset, segment.fileSize,
++                              right.fileOffset, right.fileSize) ||
++                rangesOverlap(segment.virtualAddress, segment.memorySize,
++                              right.virtualAddress, right.memorySize)) {
++                fail(Failure::InvalidSegment);
++                return false;
++            }
++        }
++    }
++
++    if (imageVirtualBase == std::numeric_limits<uint64_t>::max() ||
++        imageVirtualEnd <= imageVirtualBase) {
++        fail(Failure::InvalidSegment);
++        return false;
++    }
++    uint64_t ignoredEntry = 0;
++    if (!signedRelation(manifest.descriptorVirtualAddress,
++                        manifest.kernelCodeEntryByteOffset,
++                        manifest.codeVirtualAddress, ignoredEntry)) {
++        fail(Failure::InvalidSegment);
++        return false;
++    }
++    return true;
++}
++
++bool
++HostNativeCodeObjectMapper::writeRange(
++    Addr address, const uint8_t *source, uint64_t bytes)
++{
++    if (bytes == 0 || source == nullptr)
++        return bytes == 0;
++    uint64_t copied = 0;
++    while (copied < bytes) {
++        const uint64_t count = std::min<uint64_t>(
++            bytes - copied, HostGPUMemoryState::MaximumTransferBytes);
++        if (address > std::numeric_limits<Addr>::max() - copied ||
++            !context.functionalWrite(address + copied, source + copied,
++                                     count)) {
++            return false;
++        }
++        copied += count;
++    }
++    return true;
++}
++
++bool
++HostNativeCodeObjectMapper::zeroRange(Addr address, uint64_t bytes)
++{
++    if (bytes == 0)
++        return true;
++    try {
++        const uint64_t chunk = std::min<uint64_t>(
++            bytes, HostGPUMemoryState::MaximumTransferBytes);
++        const std::vector<uint8_t> zeros(static_cast<size_t>(chunk), 0);
++        uint64_t cleared = 0;
++        while (cleared < bytes) {
++            const uint64_t count = std::min<uint64_t>(chunk, bytes - cleared);
++            if (address > std::numeric_limits<Addr>::max() - cleared ||
++                !context.functionalWrite(address + cleared, zeros.data(),
++                                         count)) {
++                return false;
++            }
++            cleared += count;
++        }
++    } catch (const std::bad_alloc &) {
++        return false;
++    }
++    return true;
++}
++
++void
++HostNativeCodeObjectMapper::rollback(
++    const std::optional<HostNativeMemoryContext::PageLease> &lease,
++    const protocol::MemoryResponse &allocation)
++{
++    bool leaseReleased = !(lease && lease->valid());
++    if (!leaseReleased &&
++        memory.functionalPageLeaseCount(
++            owner, lease->allocationId, lease->generation) == 1 &&
++        !memory.pinnedDispatchAllocationBusy(
++            owner, lease->allocationId, lease->generation)) {
++        leaseReleased = context.unmap(*lease);
++    }
++    if (allocation.status == protocol::Status::Ok && leaseReleased &&
++        memory.functionalPageLeaseCount(
++            owner, allocation.allocationId, allocation.generation) == 0 &&
++        !memory.pinnedDispatchAllocationBusy(
++            owner, allocation.allocationId, allocation.generation)) {
++        protocol::MemoryRequest freeRequest;
++        freeRequest.opcode = protocol::MemoryOpcode::Free;
++        freeRequest.allocationId = allocation.allocationId;
++        freeRequest.generation = allocation.generation;
++        memory.free(owner, freeRequest, 0);
++    }
++}
++
++std::optional<HostNativeCodeObjectMapper::Mapping>
++HostNativeCodeObjectMapper::map(
++    const std::vector<uint8_t> &image,
++    const protocol::CodeObjectManifest &manifest)
++{
++    lastFailure = Failure::None;
++    const uint64_t pageBytes = context.pageBytes();
++    if (pageBytes != 4096 && pageBytes != 65536) {
++        fail(Failure::InvalidPageSize);
++        return std::nullopt;
++    }
++    const auto manifestStatus = protocol::validateCodeObjectManifest(manifest);
++    switch (manifestStatus) {
++      case protocol::CodeObjectManifestValidation::Valid:
++        break;
++      case protocol::CodeObjectManifestValidation::UnsupportedVersion:
++        fail(Failure::UnsupportedVersion);
++        return std::nullopt;
++      case protocol::CodeObjectManifestValidation::TopologyMismatch:
++        fail(Failure::TopologyMismatch);
++        return std::nullopt;
++      case protocol::CodeObjectManifestValidation::Malformed:
++        fail(Failure::MalformedManifest);
++        return std::nullopt;
++    }
++
++    if (image.empty() || image.size() != manifest.imageSize ||
++        image.size() > protocol::CodeObjectMaximumImageBytes) {
++        fail(Failure::ImageMismatch);
++        return std::nullopt;
++    }
++    try {
++        if (HostGPUCodeObjectState::imageSha256(image) !=
++            manifest.imageSha256) {
++            fail(Failure::ImageMismatch);
++            return std::nullopt;
++        }
++    } catch (const std::bad_alloc &) {
++        fail(Failure::ImageMismatch);
++        return std::nullopt;
++    }
++    if (!validateCodeObjectImage(image, manifest)) {
++        fail(Failure::InvalidImage);
++        return std::nullopt;
++    }
++
++    uint64_t imageVirtualBase = 0;
++    uint64_t imageVirtualEnd = 0;
++    if (!validateSegments(image, manifest, imageVirtualBase,
++                          imageVirtualEnd)) {
++        if (lastFailure == Failure::None)
++            fail(Failure::InvalidSegment);
++        return std::nullopt;
++    }
++
++    if (imageVirtualEnd > std::numeric_limits<uint64_t>::max() -
++            (pageBytes - 1)) {
++        fail(Failure::RangeOverflow);
++        return std::nullopt;
++    }
++    const uint64_t mappedBase = imageVirtualBase & ~(pageBytes - 1);
++    const uint64_t mappedEnd =
++        (imageVirtualEnd + pageBytes - 1) & ~(pageBytes - 1);
++    if (mappedEnd <= mappedBase || mappedEnd - mappedBase >
++            HostGPUMemoryState::MaximumAllocationBytes) {
++        fail(Failure::RangeOverflow);
++        return std::nullopt;
++    }
++    const uint64_t mappedBytes = mappedEnd - mappedBase;
++
++    protocol::MemoryRequest allocateRequest;
++    allocateRequest.opcode = protocol::MemoryOpcode::Allocate;
++    allocateRequest.byteCount = mappedBytes;
++    allocateRequest.argument = pageBytes;
++    const auto allocation = memory.allocate(owner, allocateRequest, 0);
++    if (allocation.status != protocol::Status::Ok) {
++        fail(Failure::Allocation);
++        return std::nullopt;
++    }
++
++    std::optional<HostNativeMemoryContext::PageLease> lease;
++    try {
++        lease = context.map(allocation.value0, mappedBytes);
++    } catch (const std::bad_alloc &) {
++        lease.reset();
++    }
++    if (!lease) {
++        rollback(lease, allocation);
++        fail(Failure::PageMap);
++        return std::nullopt;
++    }
++
++    Mapping result;
++    result.allocation = {
++        allocation.allocationId, allocation.generation, allocation.value0,
++        mappedBytes, pageBytes};
++    result.lease = *lease;
++    result.imageVirtualBase = mappedBase;
++    result.imageVirtualEnd = mappedEnd;
++    result.mappedBytes = mappedBytes;
++    result.segmentCount = manifest.segmentCount;
++    for (size_t index = 0; index < manifest.segmentCount; ++index) {
++        const auto &segment = manifest.segments[index];
++        const uint64_t relative = segment.virtualAddress - mappedBase;
++        if (relative > mappedBytes ||
++            segment.memorySize > mappedBytes - relative ||
++            allocation.value0 > std::numeric_limits<Addr>::max() - relative) {
++            rollback(lease, allocation);
++            fail(Failure::RangeOverflow);
++            return std::nullopt;
++        }
++        result.segments[index] = {
++            segment, allocation.value0 + relative};
++        if (!writeRange(result.segments[index].mappedAddress,
++                        image.data() + static_cast<size_t>(segment.fileOffset),
++                        segment.fileSize) ||
++            !zeroRange(result.segments[index].mappedAddress + segment.fileSize,
++                       segment.memorySize - segment.fileSize)) {
++            rollback(lease, allocation);
++            fail(Failure::Copy);
++            return std::nullopt;
++        }
++    }
++
++    const uint64_t descriptorRelative =
++        manifest.descriptorVirtualAddress - mappedBase;
++    const uint64_t codeRelative = manifest.codeVirtualAddress - mappedBase;
++    if (descriptorRelative > mappedBytes || codeRelative > mappedBytes ||
++        allocation.value0 > std::numeric_limits<Addr>::max() -
++            descriptorRelative ||
++        allocation.value0 > std::numeric_limits<Addr>::max() - codeRelative) {
++        rollback(lease, allocation);
++        fail(Failure::RangeOverflow);
++        return std::nullopt;
++    }
++    result.descriptorGpuVa = allocation.value0 + descriptorRelative;
++    result.codeGpuVa = allocation.value0 + codeRelative;
++    uint64_t entryVirtual = 0;
++    if (!signedRelation(result.descriptorGpuVa,
++                        manifest.kernelCodeEntryByteOffset, result.codeGpuVa,
++                        entryVirtual)) {
++        rollback(lease, allocation);
++        fail(Failure::InvalidSegment);
++        return std::nullopt;
++    }
++    result.entryGpuVa = entryVirtual;
++    return result;
++}
++
++bool
++HostNativeCodeObjectMapper::unmap(const Mapping &mapping)
++{
++    if (!mapping.valid()) {
++        fail(Failure::PageMap);
++        return false;
++    }
++    if (mapping.lease.allocationId != mapping.allocation.allocationId ||
++        mapping.lease.generation != mapping.allocation.generation ||
++        memory.functionalPageLeaseCount(
++            owner, mapping.allocation.allocationId,
++            mapping.allocation.generation) != 1 ||
++        memory.pinnedDispatchAllocationBusy(
++            owner, mapping.allocation.allocationId,
++            mapping.allocation.generation)) {
++        fail(Failure::Busy);
++        return false;
++    }
++    if (!context.unmap(mapping.lease)) {
++        fail(Failure::PageMap);
++        return false;
++    }
++    protocol::MemoryRequest freeRequest;
++    freeRequest.opcode = protocol::MemoryOpcode::Free;
++    freeRequest.allocationId = mapping.allocation.allocationId;
++    freeRequest.generation = mapping.allocation.generation;
++    const auto response = memory.free(owner, freeRequest, 0);
++    if (response.status != protocol::Status::Ok) {
++        fail(Failure::Allocation);
++        return false;
++    }
++    lastFailure = Failure::None;
++    return true;
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_native_code_object_mapper.hh b/src/dev/amdgpu/host_native_code_object_mapper.hh
+new file mode 100644
+index 000000000..e2d0cdbe0
+--- /dev/null
++++ b/src/dev/amdgpu/host_native_code_object_mapper.hh
+@@ -0,0 +1,144 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are
++ * met: redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer; neither the name of
++ * the copyright holders nor the names of its contributors may be used to
++ * endorse or promote products derived from this software without specific
++ * prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_NATIVE_CODE_OBJECT_MAPPER_HH__
++#define __DEV_AMDGPU_HOST_NATIVE_CODE_OBJECT_MAPPER_HH__
++
++#include <array>
++#include <cstdint>
++#include <optional>
++#include <vector>
++
++#include "base/types.hh"
++#include "dev/amdgpu/host_gpu_memory_state.hh"
++#include "dev/amdgpu/host_gpu_protocol.hh"
++#include "dev/amdgpu/host_native_memory_context.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++/**
++ * Functional PT_LOAD materializer for the host-native control core.
++ *
++ * This adapter deliberately stops at bytes in HostGPUMemoryState.  It does
++ * not apply relocations, create an AQL packet, publish a queue object, or
++ * invoke a GPU dispatcher.  A successful Mapping owns one allocation and one
++ * page lease; callers must release it with unmap().
++ */
++class HostNativeCodeObjectMapper
++{
++  public:
++    enum class Failure
++    {
++        None,
++        InvalidPageSize,
++        MalformedManifest,
++        UnsupportedVersion,
++        TopologyMismatch,
++        ImageMismatch,
++        InvalidImage,
++        InvalidSegment,
++        RangeOverflow,
++        Busy,
++        Allocation,
++        PageMap,
++        Copy,
++    };
++
++    struct SegmentMapping
++    {
++        protocol::CodeObjectSegment segment;
++        Addr mappedAddress = 0;
++    };
++
++    struct Mapping
++    {
++        HostGPUMemoryState::AllocationView allocation;
++        HostNativeMemoryContext::PageLease lease;
++        /* Page-aligned bounds of the union of all PT_LOAD memory ranges. */
++        uint64_t imageVirtualBase = 0;
++        uint64_t imageVirtualEnd = 0;
++        uint64_t mappedBytes = 0;
++        Addr descriptorGpuVa = 0;
++        Addr codeGpuVa = 0;
++        Addr entryGpuVa = 0;
++        uint32_t segmentCount = 0;
++        std::array<SegmentMapping, protocol::CodeObjectMaximumSegments>
++            segments = {};
++
++        bool valid() const
++        {
++            return allocation.allocationId != 0 && lease.valid() &&
++                mappedBytes != 0 && segmentCount != 0;
++        }
++    };
++
++    HostNativeCodeObjectMapper(
++        HostGPUMemoryState &memory, HostNativeMemoryContext &context,
++        const HostGPUMemoryState::Owner &owner);
++
++    HostNativeCodeObjectMapper(const HostNativeCodeObjectMapper &) = delete;
++    HostNativeCodeObjectMapper &operator=(
++        const HostNativeCodeObjectMapper &) = delete;
++
++    std::optional<Mapping> map(
++        const std::vector<uint8_t> &image,
++        const protocol::CodeObjectManifest &manifest);
++    bool unmap(const Mapping &mapping);
++
++    Failure failure() const { return lastFailure; }
++    static const char *failureName(Failure failure);
++
++  private:
++    void fail(Failure value) { lastFailure = value; }
++    bool validateSegments(
++        const std::vector<uint8_t> &image,
++        const protocol::CodeObjectManifest &manifest,
++        uint64_t &imageVirtualBase, uint64_t &imageVirtualEnd);
++    static bool rangeEnd(uint64_t start, uint64_t size, uint64_t &end);
++    static bool rangesOverlap(
++        uint64_t leftStart, uint64_t leftSize,
++        uint64_t rightStart, uint64_t rightSize);
++    static bool signedRelation(
++        uint64_t descriptor, int64_t offset, uint64_t code,
++        uint64_t &entry);
++    bool writeRange(Addr address, const uint8_t *source, uint64_t bytes);
++    bool zeroRange(Addr address, uint64_t bytes);
++    void rollback(
++        const std::optional<HostNativeMemoryContext::PageLease> &lease,
++        const protocol::MemoryResponse &allocation);
++
++    HostGPUMemoryState &memory;
++    HostNativeMemoryContext &context;
++    HostGPUMemoryState::Owner owner;
++    Failure lastFailure = Failure::None;
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_NATIVE_CODE_OBJECT_MAPPER_HH__
+diff --git a/src/dev/amdgpu/host_native_memory_context.cc b/src/dev/amdgpu/host_native_memory_context.cc
+index eccd5f9d0..46215b6f5 100644
+--- a/src/dev/amdgpu/host_native_memory_context.cc
++++ b/src/dev/amdgpu/host_native_memory_context.cc
+@@ -246,6 +246,18 @@ HostNativeMemoryContext::functionalWrite(
+     return functionalWrite(address, bytes, dispatchRequestId);
+ }
+ 
++size_t
++HostNativeMemoryContext::allocationLeaseCount(
++    uint64_t allocationId, uint64_t generation) const
++{
++    return std::count_if(
++        leases.begin(), leases.end(),
++        [allocationId, generation](const auto &entry) {
++            return entry.second.allocationId == allocationId &&
++                entry.second.generation == generation;
++        });
++}
++
+ void
+ HostNativeMemoryContext::clear()
+ {
+diff --git a/src/dev/amdgpu/host_native_memory_context.hh b/src/dev/amdgpu/host_native_memory_context.hh
+index 9262512df..02115133e 100644
+--- a/src/dev/amdgpu/host_native_memory_context.hh
++++ b/src/dev/amdgpu/host_native_memory_context.hh
+@@ -92,6 +92,8 @@ class HostNativeMemoryContext
+         uint64_t dispatchRequestId = 0);
+ 
+     size_t leaseCount() const { return leases.size(); }
++    size_t allocationLeaseCount(
++        uint64_t allocationId, uint64_t generation) const;
+     uint64_t pageBytes() const { return pageSize; }
+     void clear();
+ 
+diff --git a/util/host_native/check_control_core.py b/util/host_native/check_control_core.py
+index 5a7f3b28c..3476ae1f5 100644
+--- a/util/host_native/check_control_core.py
++++ b/util/host_native/check_control_core.py
+@@ -21,6 +21,8 @@ SCHEMA = "gem5.host-native.control-core.v1"
+ AUDIT_SCHEMA = "gem5.host-native.control-core.audit.v1"
+ FIXTURE_SCHEMA = "gem5.host-native.fixture-parity.v1"
+ FIXTURE_AUDIT_SCHEMA = "gem5.host-native.fixture-parity.audit.v1"
++PTLOAD_SCHEMA = "gem5.host-native.ptload.v1"
++PTLOAD_AUDIT_SCHEMA = "gem5.host-native.ptload.audit.v1"
+ DEFAULT_BUILD_OPTS = (
+     Path(__file__).resolve().parents[2] / "build_opts/HOSTGPU_NATIVE_CONTROL"
+ )
+@@ -137,6 +139,26 @@ PROFILES = {
+             "kernel_executed", "cpu_fallback", "vega_x86",
+             "gpu_pipeline_connected",
+         ),
++        "require_blocker": True,
++    },
++    "ptload": {
++        "schema": PTLOAD_SCHEMA,
++        "audit_schema": PTLOAD_AUDIT_SCHEMA,
++        "true_flags": (
++            "ptload_mapping", "fixture_oracle", "staged_image_roundtrip",
++            "exact_ptload_tuples",
++            "descriptor_entry_relation", "filesz_copy", "memsz_zero_fill",
++            "atomic_rejections", "preallocation_atomic_rejections",
++            "nonzero_relocation_rejected",
++            "overlap_rejected", "overflow_rejected",
++            "unsupported_target_rejected", "unsupported_version_rejected",
++            "functional_page_lifetime", "no_aql",
++        ),
++        "false_flags": (
++            "aql_submitted", "kernel_executed", "cpu_fallback", "vega_x86",
++            "gpu_pipeline_connected",
++        ),
++        "require_blocker": True,
+     },
+ }
+ 
+@@ -211,10 +233,10 @@ def main() -> int:
+     for key in profile["true_flags"]:
+         if result.get(key) is not True:
+             raise SystemExit(f"self-test flag is not true: {key}")
+-    if args.profile == "fixture":
++    if profile.get("require_blocker"):
+         blocker = result.get("blocker")
+         if not isinstance(blocker, str) or not blocker:
+-            raise SystemExit("fixture self-test blocker is not explicit")
++            raise SystemExit("self-test blocker is not explicit")
+ 
+     print(json.dumps({
+         "schema": profile["audit_schema"],
+-- 
+2.53.0
+

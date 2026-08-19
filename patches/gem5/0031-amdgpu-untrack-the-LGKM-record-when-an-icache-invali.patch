@@ -1,0 +1,42 @@
+From 768972909e9843a32cbae0105fff459e0ef276ed Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 17 Aug 2026 09:12:39 +0800
+Subject: [PATCH 31/42] amdgpu: untrack the LGKM record when an icache
+ invalidate has no lanes
+
+Inst_SOPP__S_ICACHE_INV decremented the LGKM counter on the empty execution
+mask path but left its entry in the issued-instruction record, unlike every
+other memory instruction. The stale entry produced a spurious "not in LGKM
+issued" warning when the record was later retired.
+
+This affects the diagnostic record only; the wait counter itself was already
+balanced, so no wait condition changes. The warning only became visible after
+the periodic progress report was enabled, because the record is not maintained
+when that report is disabled.
+
+Checkpoint-ID: CP-0032
+Goal-ID: GSIM-001
+Plan-Revision: 15
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 458368899b9122d48baf6268c84e035737cdb2e36776c5b374a26b176ed5df69
+Change-Kind: code
+Baseline-Commit: 9df727743024f9f0cc83d2b9ef23e03b632cc513
+---
+ src/arch/amdgpu/vega/insts/sopp.cc | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/arch/amdgpu/vega/insts/sopp.cc b/src/arch/amdgpu/vega/insts/sopp.cc
+index 781113b20..6c0339ccd 100644
+--- a/src/arch/amdgpu/vega/insts/sopp.cc
++++ b/src/arch/amdgpu/vega/insts/sopp.cc
+@@ -690,6 +690,7 @@ namespace VegaISA
+ 
+         if (gpuDynInst->exec_mask.none()) {
+             wf->decLGKMInstsIssued();
++            wf->untrackLGKMInst(gpuDynInst);
+             return;
+         }
+ 
+-- 
+2.53.0
+

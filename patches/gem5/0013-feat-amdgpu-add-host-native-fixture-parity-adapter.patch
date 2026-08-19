@@ -1,0 +1,1133 @@
+From d69dee63c79a9784d5fbccbd6740a300f986d6ed Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sun, 9 Aug 2026 18:31:47 +0800
+Subject: [PATCH 13/42] feat(amdgpu): add host-native fixture parity adapter
+
+Reuse the sparse host memory oracle and pinned dispatch state for a functional gfx950 XOR fixture. Add page leases and explicit negative/lifetime checks while keeping the real GPU pipeline out of scope.
+
+Checkpoint-ID: CP-0016
+Goal-ID: GSIM-001
+Plan-Revision: 2
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: f775b483fa49bcf1cd6b8bd81816741ad45f4cab62606ff7259d229340f30786
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/dev/amdgpu/SConscript                     |  12 +
+ src/dev/amdgpu/host_gpu_memory_state.cc       |  71 ++-
+ src/dev/amdgpu/host_gpu_memory_state.hh       |  21 +-
+ .../amdgpu/host_gpu_native_fixture_main.cc    | 410 ++++++++++++++++++
+ src/dev/amdgpu/host_native_memory_context.cc  | 261 +++++++++++
+ src/dev/amdgpu/host_native_memory_context.hh  | 123 ++++++
+ util/host_native/check_control_core.py        |  49 ++-
+ 7 files changed, 929 insertions(+), 18 deletions(-)
+ create mode 100644 src/dev/amdgpu/host_gpu_native_fixture_main.cc
+ create mode 100644 src/dev/amdgpu/host_native_memory_context.cc
+ create mode 100644 src/dev/amdgpu/host_native_memory_context.hh
+
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index a5de8865b..8a8b2e3be 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -43,6 +43,18 @@ Executable('host_gpu_control_core',
+            'host_gpu_queue_state.cc',
+            'host_gpu_signal_state.cc')
+ 
++# A2 functional-parity harness: it reuses the CP13 pinned-dispatch state
++# machine and the sparse memory oracle, while the actual HSAPP/CP/dispatcher
++# pipeline remains behind its existing x86/Process/TLB boundary.
++Executable('host_gpu_native_fixture_core',
++           'host_gpu_native_fixture_main.cc',
++           'host_native_memory_context.cc',
++           'host_gpu_dispatch_state.cc',
++           'host_gpu_protocol.cc',
++           'host_gpu_memory_state.cc',
++           'host_gpu_queue_state.cc',
++           'host_gpu_signal_state.cc')
++
+ if not env['CONF']['USE_X86_ISA']:
+     Return()
+ 
+diff --git a/src/dev/amdgpu/host_gpu_memory_state.cc b/src/dev/amdgpu/host_gpu_memory_state.cc
+index 7bf3cc955..6d5742534 100644
+--- a/src/dev/amdgpu/host_gpu_memory_state.cc
++++ b/src/dev/amdgpu/host_gpu_memory_state.cc
+@@ -141,7 +141,7 @@ HostGPUMemoryState::allocate(
+         return response;
+     try {
+         allocations[slot].emplace(Allocation{
+-            owner, generation, request.byteCount, request.argument, 0, {}});
++            owner, generation, request.byteCount, request.argument, 0, {}, {}});
+     } catch (const std::bad_alloc &) {
+         return responseFor(request, protocol::Status::Internal);
+     }
+@@ -165,7 +165,8 @@ HostGPUMemoryState::free(
+     Allocation *allocation = resolve(owner, request);
+     if (allocation == nullptr)
+         return response;
+-    if (allocation->dispatchRequestId != 0) {
++    if (allocation->dispatchRequestId != 0 ||
++        !allocation->functionalPageTokens.empty()) {
+         response.status = protocol::Status::Busy;
+         return response;
+     }
+@@ -180,7 +181,8 @@ HostGPUMemoryState::free(
+ 
+ protocol::MemoryResponse
+ HostGPUMemoryState::validateCopy(
+-    const Owner &owner, const protocol::MemoryRequest &request) const
++    const Owner &owner, const protocol::MemoryRequest &request,
++    uint64_t dispatchRequestId) const
+ {
+     if (request.byteCount == 0 ||
+         request.offset > std::numeric_limits<uint64_t>::max() -
+@@ -191,7 +193,8 @@ HostGPUMemoryState::validateCopy(
+     const Allocation *allocation = resolve(owner, request);
+     if (allocation == nullptr || !rangeValid(*allocation, request))
+         return response;
+-    if (allocation->dispatchRequestId != 0) {
++    if (allocation->dispatchRequestId != 0 &&
++        allocation->dispatchRequestId != dispatchRequestId) {
+         response.status = protocol::Status::Busy;
+         return response;
+     }
+@@ -363,12 +366,60 @@ HostGPUMemoryState::readBytes(
+     return true;
+ }
+ 
++protocol::MemoryResponse
++HostGPUMemoryState::functionalWriteBytes(
++    const Owner &owner, uint64_t allocationId, uint64_t generation,
++    uint64_t offset, const std::vector<uint8_t> &source,
++    uint64_t dispatchRequestId)
++{
++    protocol::MemoryRequest request;
++    request.opcode = protocol::MemoryOpcode::CopyH2D;
++    request.allocationId = allocationId;
++    request.generation = generation;
++    request.offset = offset;
++    request.byteCount = source.size();
++    request.argument = protocol::crc32c(source.data(), source.size());
++    return copyFromHost(
++        owner, request, source, 0, dispatchRequestId);
++}
++
++bool
++HostGPUMemoryState::retainFunctionalPage(
++    const Owner &owner, uint64_t allocationId, uint64_t generation,
++    uint64_t token)
++{
++    if (token == 0)
++        return false;
++    protocol::MemoryRequest request;
++    request.allocationId = allocationId;
++    request.generation = generation;
++    Allocation *allocation = resolve(owner, request);
++    if (allocation == nullptr)
++        return false;
++    return allocation->functionalPageTokens.insert(token).second;
++}
++
++bool
++HostGPUMemoryState::releaseFunctionalPage(
++    const Owner &owner, uint64_t allocationId, uint64_t generation,
++    uint64_t token)
++{
++    protocol::MemoryRequest request;
++    request.allocationId = allocationId;
++    request.generation = generation;
++    Allocation *allocation = resolve(owner, request);
++    if (allocation == nullptr || token == 0)
++        return false;
++    return allocation->functionalPageTokens.erase(token) == 1;
++}
++
+ protocol::MemoryResponse
+ HostGPUMemoryState::copyFromHost(
+     const Owner &owner, const protocol::MemoryRequest &request,
+-    const std::vector<uint8_t> &source, uint64_t now)
++    const std::vector<uint8_t> &source, uint64_t now,
++    uint64_t dispatchRequestId)
+ {
+-    auto response = validateCopy(owner, request);
++    auto response = validateCopy(owner, request, dispatchRequestId);
+     if (response.status != protocol::Status::Ok)
+         return response;
+     if (request.opcode != protocol::MemoryOpcode::CopyH2D ||
+@@ -432,10 +483,11 @@ HostGPUMemoryState::copyFromHost(
+ protocol::MemoryResponse
+ HostGPUMemoryState::copyToHost(
+     const Owner &owner, const protocol::MemoryRequest &request,
+-    std::vector<uint8_t> &destination, uint64_t now) const
++    std::vector<uint8_t> &destination, uint64_t now,
++    uint64_t dispatchRequestId) const
+ {
+     destination.clear();
+-    auto response = validateCopy(owner, request);
++    auto response = validateCopy(owner, request, dispatchRequestId);
+     if (response.status != protocol::Status::Ok)
+         return response;
+     if (request.opcode != protocol::MemoryOpcode::CopyD2H)
+@@ -476,7 +528,8 @@ HostGPUMemoryState::disconnect(const Owner &owner)
+ {
+     for (auto &slot : allocations) {
+         if (slot && slot->owner == owner &&
+-            slot->dispatchRequestId == 0) {
++            slot->dispatchRequestId == 0 &&
++            slot->functionalPageTokens.empty()) {
+             liveBytes -= slot->size;
+             --liveAllocations;
+             slot.reset();
+diff --git a/src/dev/amdgpu/host_gpu_memory_state.hh b/src/dev/amdgpu/host_gpu_memory_state.hh
+index 923409727..f60bd2a96 100644
+--- a/src/dev/amdgpu/host_gpu_memory_state.hh
++++ b/src/dev/amdgpu/host_gpu_memory_state.hh
+@@ -34,6 +34,7 @@
+ #include <memory>
+ #include <optional>
+ #include <unordered_map>
++#include <unordered_set>
+ #include <vector>
+ 
+ #include "dev/amdgpu/host_gpu_protocol.hh"
+@@ -83,13 +84,26 @@ class HostGPUMemoryState
+         const Owner &owner, const protocol::MemoryRequest &request,
+         uint64_t now);
+     protocol::MemoryResponse validateCopy(
+-        const Owner &owner, const protocol::MemoryRequest &request) const;
++        const Owner &owner, const protocol::MemoryRequest &request,
++        uint64_t dispatchRequestId = 0) const;
+     protocol::MemoryResponse copyFromHost(
+         const Owner &owner, const protocol::MemoryRequest &request,
+-        const std::vector<uint8_t> &source, uint64_t now);
++        const std::vector<uint8_t> &source, uint64_t now,
++        uint64_t dispatchRequestId = 0);
+     protocol::MemoryResponse copyToHost(
+         const Owner &owner, const protocol::MemoryRequest &request,
+-        std::vector<uint8_t> &destination, uint64_t now) const;
++        std::vector<uint8_t> &destination, uint64_t now,
++        uint64_t dispatchRequestId = 0) const;
++    protocol::MemoryResponse functionalWriteBytes(
++        const Owner &owner, uint64_t allocationId, uint64_t generation,
++        uint64_t offset, const std::vector<uint8_t> &source,
++        uint64_t dispatchRequestId = 0);
++    bool retainFunctionalPage(
++        const Owner &owner, uint64_t allocationId, uint64_t generation,
++        uint64_t token);
++    bool releaseFunctionalPage(
++        const Owner &owner, uint64_t allocationId, uint64_t generation,
++        uint64_t token);
+     protocol::Status validatePinnedDispatchAllocation(
+         const Owner &owner, uint64_t allocationId, uint64_t generation,
+         uint64_t minimumBytes) const;
+@@ -136,6 +150,7 @@ class HostGPUMemoryState
+         uint64_t alignment = 0;
+         uint64_t dispatchRequestId = 0;
+         std::unordered_map<uint64_t, std::unique_ptr<Chunk>> chunks;
++        std::unordered_set<uint64_t> functionalPageTokens;
+     };
+ 
+     static protocol::MemoryResponse responseFor(
+diff --git a/src/dev/amdgpu/host_gpu_native_fixture_main.cc b/src/dev/amdgpu/host_gpu_native_fixture_main.cc
+new file mode 100644
+index 000000000..9e5b75b0f
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_fixture_main.cc
+@@ -0,0 +1,410 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_code_object_fixture.hh"
++#include "dev/amdgpu/host_gpu_dispatch_fixture.hh"
++#include "dev/amdgpu/host_gpu_dispatch_state.hh"
++#include "dev/amdgpu/host_native_memory_context.hh"
++
++#include <algorithm>
++#include <array>
++#include <cstdint>
++#include <exception>
++#include <iostream>
++#include <stdexcept>
++#include <vector>
++
++namespace gem5::hostgpu
++{
++namespace
++{
++
++void
++require(bool condition, const char *message)
++{
++    if (!condition)
++        throw std::runtime_error(message);
++}
++
++protocol::Header
++fixtureHeader(uint64_t requestId)
++{
++    protocol::Header header;
++    header.requestId = requestId;
++    header.connectionId = 0x1020304050607080ULL;
++    header.jobEpoch = 0x0102030405060708ULL;
++    for (size_t index = 0; index < header.daemonUuid.size(); ++index)
++        header.daemonUuid[index] = static_cast<uint8_t>(index + 1);
++    return header;
++}
++
++std::vector<uint8_t>
++goldenInput()
++{
++    return {dispatch_fixture::GoldenInput.begin(),
++            dispatch_fixture::GoldenInput.end()};
++}
++
++std::vector<uint8_t>
++goldenOutput()
++{
++    return {dispatch_fixture::GoldenOutput.begin(),
++            dispatch_fixture::GoldenOutput.end()};
++}
++
++struct FixtureHarness
++{
++    HostGPUDispatchState::Owner owner{17, 1};
++    HostGPUQueueState queues;
++    HostGPUMemoryState memory;
++    HostGPUSignalState signals;
++    HostGPUDispatchState dispatch{queues, memory, signals};
++    HostNativeMemoryContext context{memory, {owner.fd, owner.clientGeneration}};
++    HostNativeMemoryContext::PageLease inputLease;
++    HostNativeMemoryContext::PageLease outputLease;
++    protocol::Header header = fixtureHeader(100);
++    protocol::DispatchRequest request;
++
++    FixtureHarness()
++    {
++        const HostGPUQueueState::Owner queueOwner{
++            owner.fd, owner.clientGeneration};
++        const HostGPUMemoryState::Owner memoryOwner{
++            owner.fd, owner.clientGeneration};
++        const HostGPUSignalState::Owner signalOwner{
++            owner.fd, owner.clientGeneration};
++
++        protocol::QueueRequest createQueue;
++        createQueue.opcode = protocol::QueueOpcode::Create;
++        createQueue.arg0 = 1;
++        const auto queue = queues.submit(queueOwner, header, createQueue, 1);
++        require(queue.response.status == protocol::Status::Ok,
++                "fixture queue create");
++
++        protocol::MemoryRequest allocate;
++        allocate.opcode = protocol::MemoryOpcode::Allocate;
++        allocate.byteCount = 4096;
++        allocate.argument = 4096;
++        const auto input = memory.allocate(memoryOwner, allocate, 2);
++        const auto output = memory.allocate(memoryOwner, allocate, 3);
++        require(input.status == protocol::Status::Ok &&
++                    output.status == protocol::Status::Ok,
++                "fixture memory allocate");
++
++        const auto inputLeaseResult = context.map(
++            input.value0, dispatch_fixture::BufferBytes);
++        const auto outputLeaseResult = context.map(
++            output.value0, dispatch_fixture::BufferBytes);
++        require(inputLeaseResult && outputLeaseResult,
++                "fixture page map");
++        inputLease = *inputLeaseResult;
++        outputLease = *outputLeaseResult;
++
++        const auto inputBytes = goldenInput();
++        require(context.functionalWrite(input.value0, inputBytes),
++                "fixture input write");
++        std::vector<uint8_t> initialOutput;
++        require(context.functionalRead(
++                    output.value0, dispatch_fixture::BufferBytes,
++                    initialOutput) &&
++                    std::all_of(
++                        initialOutput.begin(), initialOutput.end(),
++                        [](uint8_t byte) { return byte == 0; }),
++                "fixture output zero");
++
++        protocol::SignalRequest createSignal;
++        createSignal.opcode = protocol::SignalOpcode::Create;
++        createSignal.value = 1;
++        const auto signal = signals.submit(
++            signalOwner, header, createSignal, 4);
++        require(signal.status == protocol::Status::Ok,
++                "fixture signal create");
++
++        protocol::SignalRequest wait;
++        wait.opcode = protocol::SignalOpcode::Wait;
++        wait.signalId = signal.signalId;
++        wait.generation = signal.generation;
++        wait.sequence = 1;
++        wait.value = 0;
++        wait.condition = protocol::SignalCondition::Equal;
++        protocol::Header waitHeader = header;
++        waitHeader.requestId = 99;
++        const auto waiting = signals.submit(
++            signalOwner, waitHeader, wait, 5);
++        require(waiting.status == protocol::Status::Ok && waiting.ready == 0,
++                "fixture signal wait");
++
++        request.queueId = queue.response.queueId;
++        request.queueGeneration = queue.response.generation;
++        request.queueSequence = 1;
++        request.fixtureId = protocol::PinnedDispatchFixtureId;
++        request.inputAllocationId = input.allocationId;
++        request.inputGeneration = input.generation;
++        request.outputAllocationId = output.allocationId;
++        request.outputGeneration = output.generation;
++        request.signalId = signal.signalId;
++        request.signalGeneration = signal.generation;
++        request.expectedSignalValue = 0;
++        request.fixtureManifestSha256 = protocol::PinnedDispatchManifestSha256;
++    }
++
++    void
++    finish()
++    {
++        const HostGPUQueueState::Owner queueOwner{
++            owner.fd, owner.clientGeneration};
++        const HostGPUMemoryState::Owner memoryOwner{
++            owner.fd, owner.clientGeneration};
++        const HostGPUSignalState::Owner signalOwner{
++            owner.fd, owner.clientGeneration};
++
++        require(dispatch.pending() == std::nullopt,
++                "fixture dispatch still pending");
++        require(context.unmap(inputLease) && context.unmap(outputLease),
++                "fixture page unmap");
++
++        protocol::MemoryRequest freeInput;
++        freeInput.opcode = protocol::MemoryOpcode::Free;
++        freeInput.allocationId = request.inputAllocationId;
++        freeInput.generation = request.inputGeneration;
++        protocol::MemoryRequest freeOutput = freeInput;
++        freeOutput.allocationId = request.outputAllocationId;
++        freeOutput.generation = request.outputGeneration;
++        require(memory.free(memoryOwner, freeInput, 24).status ==
++                    protocol::Status::Ok &&
++                    memory.free(memoryOwner, freeOutput, 24).status ==
++                    protocol::Status::Ok,
++                "fixture memory free");
++
++        protocol::SignalRequest destroySignal;
++        destroySignal.opcode = protocol::SignalOpcode::Destroy;
++        destroySignal.signalId = request.signalId;
++        destroySignal.generation = request.signalGeneration;
++        require(signals.submit(
++                    signalOwner, fixtureHeader(103), destroySignal, 24).status ==
++                    protocol::Status::Ok,
++                "fixture signal destroy");
++
++        protocol::QueueRequest destroyQueue;
++        destroyQueue.opcode = protocol::QueueOpcode::Destroy;
++        destroyQueue.queueId = request.queueId;
++        destroyQueue.generation = request.queueGeneration;
++        require(queues.submit(
++                    queueOwner, fixtureHeader(104), destroyQueue, 24)
++                        .response.status == protocol::Status::Ok,
++                "fixture queue destroy");
++    }
++};
++
++void
++runFixtureParity()
++{
++    require(code_object_fixture::Images.size() == 2 &&
++                code_object_fixture::GfxTarget == 950 &&
++                !code_object_fixture::Gem5IsaSupported,
++            "gfx950 fixture provenance");
++    require(dispatch_fixture::CodeImage.size() == 108,
++            "gfx950 fixture code image");
++    const auto packet = dispatch_fixture::materializeAql();
++    require(protocol::crc32c(packet.data(), packet.size()) ==
++                dispatch_fixture::PacketCrc32c,
++            "fixture AQL oracle");
++
++    FixtureHarness fixture;
++
++    auto wrongLease = fixture.inputLease;
++    wrongLease.address += 1;
++    require(!fixture.context.unmap(wrongLease) &&
++                fixture.context.leaseCount() == 2,
++            "fixture rejects mismatched lease unmap");
++
++    std::vector<uint8_t> crossAllocationRead;
++    const auto crossAllocationWrite = std::vector<uint8_t>(32, 0xa5);
++    const Addr inputEnd = fixture.inputLease.address + 4096 - 16;
++    require(!fixture.context.functionalRead(
++                inputEnd, crossAllocationWrite.size(), crossAllocationRead) &&
++                !fixture.context.functionalWrite(
++                    inputEnd, crossAllocationWrite),
++            "fixture rejects cross-allocation functional access");
++
++    protocol::MemoryRequest probeAllocate;
++    probeAllocate.opcode = protocol::MemoryOpcode::Allocate;
++    probeAllocate.byteCount = 4096;
++    probeAllocate.argument = 4096;
++    const auto probe = fixture.memory.allocate(
++        {fixture.owner.fd, fixture.owner.clientGeneration}, probeAllocate, 6);
++    require(probe.status == protocol::Status::Ok,
++            "fixture unmapped probe allocate");
++    std::vector<uint8_t> unmappedRead;
++    const auto unmappedWrite = std::vector<uint8_t>(64, 0x3c);
++    require(!fixture.context.functionalRead(
++                probe.value0, unmappedWrite.size(), unmappedRead) &&
++                !fixture.context.functionalWrite(probe.value0, unmappedWrite),
++            "fixture rejects unmapped functional access");
++    protocol::MemoryRequest freeProbe;
++    freeProbe.opcode = protocol::MemoryOpcode::Free;
++    freeProbe.allocationId = probe.allocationId;
++    freeProbe.generation = probe.generation;
++    require(fixture.memory.free(
++                {fixture.owner.fd, fixture.owner.clientGeneration},
++                freeProbe, 7).status == protocol::Status::Ok,
++            "fixture unmapped probe free");
++
++    const auto admission = fixture.dispatch.admit(
++        fixture.owner, fixture.header, fixture.request, 10,
++        dispatch_fixture::PacketVa);
++    require(admission.admitted && admission.response.status == protocol::Status::Ok,
++            "fixture dispatch admission");
++    require(admission.response.inputGpuVa != 0 &&
++                admission.response.outputGpuVa != 0,
++            "fixture dispatch virtual addresses");
++
++    const auto kernarg = dispatch_fixture::materializeKernarg(
++        admission.response.inputGpuVa, admission.response.outputGpuVa);
++    require(kernarg.size() == 16, "fixture kernarg materialization");
++
++    require(fixture.dispatch.markGpuIssued(
++                dispatch_fixture::PacketVa,
++                dispatch_fixture::InternalQueueGeneration),
++            "fixture GPU issue state");
++    require(fixture.dispatch.markCommandProcessorSubmitted(
++                dispatch_fixture::PacketVa, 42),
++            "fixture CP submission state");
++    require(fixture.dispatch.markDispatcherStarted(
++                dispatch_fixture::PacketVa, 42, 12),
++            "fixture dispatcher state");
++
++    const auto output = goldenOutput();
++    require(!fixture.context.functionalWrite(
++                admission.response.outputGpuVa, output, 999),
++            "fixture rejects foreign functional writer");
++    require(fixture.context.functionalWrite(
++                admission.response.outputGpuVa, output,
++                fixture.header.requestId),
++            "fixture functional XOR oracle write");
++    std::vector<uint8_t> observed;
++    require(fixture.context.functionalRead(
++                admission.response.outputGpuVa,
++                dispatch_fixture::BufferBytes, observed,
++                fixture.header.requestId) && observed == output,
++            "fixture functional XOR oracle read");
++    require(protocol::crc32c(observed.data(), observed.size()) ==
++                dispatch_fixture::GoldenOutputCrc32c,
++            "fixture output CRC oracle");
++
++    const auto completion = fixture.dispatch.retire(
++        dispatch_fixture::PacketVa, 42,
++        dispatch_fixture::GoldenOutputCrc32c, 20, 20);
++    require(completion && completion->response.outputCrc32c ==
++                dispatch_fixture::GoldenOutputCrc32c,
++            "fixture dispatch retire state");
++    require(!fixture.signals.popReady(20),
++            "fixture signal ordering");
++    const auto signalCompletion = fixture.signals.popReady(21);
++    require(signalCompletion && fixture.signals.complete(*signalCompletion),
++            "fixture signal completion");
++    require(fixture.dispatch.completeRetired(*completion),
++            "fixture dispatch completion state");
++
++    protocol::MemoryRequest free;
++    free.opcode = protocol::MemoryOpcode::Free;
++    free.allocationId = fixture.request.outputAllocationId;
++    free.generation = fixture.request.outputGeneration;
++    require(fixture.memory.free(
++                {fixture.owner.fd, fixture.owner.clientGeneration}, free, 22)
++                .status == protocol::Status::Busy,
++            "fixture mapped output lifetime");
++
++    protocol::MemoryRequest lifetimeAllocate;
++    lifetimeAllocate.opcode = protocol::MemoryOpcode::Allocate;
++    lifetimeAllocate.byteCount = 4096;
++    lifetimeAllocate.argument = 4096;
++    const auto lifetime = fixture.memory.allocate(
++        {fixture.owner.fd, fixture.owner.clientGeneration},
++        lifetimeAllocate, 23);
++    require(lifetime.status == protocol::Status::Ok,
++            "fixture lifetime allocation");
++    HostNativeMemoryContext lifetimeContext(
++        fixture.memory,
++        {fixture.owner.fd, fixture.owner.clientGeneration});
++    const auto lifetimeLease = lifetimeContext.map(
++        lifetime.value0, dispatch_fixture::BufferBytes);
++    require(lifetimeLease.has_value(), "fixture lifetime page map");
++    protocol::MemoryRequest freeLifetime = freeProbe;
++    freeLifetime.allocationId = lifetime.allocationId;
++    freeLifetime.generation = lifetime.generation;
++    require(fixture.memory.free(
++                {fixture.owner.fd, fixture.owner.clientGeneration},
++                freeLifetime, 24).status == protocol::Status::Busy,
++            "fixture functional page lifetime busy");
++    fixture.memory.disconnect(
++        {fixture.owner.fd, fixture.owner.clientGeneration});
++    require(fixture.memory.allocationView(
++                {fixture.owner.fd, fixture.owner.clientGeneration},
++                lifetime.allocationId, lifetime.generation).has_value(),
++            "fixture disconnect retains leased allocation");
++    lifetimeContext.clear();
++    require(fixture.memory.allocationView(
++                {fixture.owner.fd, fixture.owner.clientGeneration},
++                lifetime.allocationId, lifetime.generation).has_value(),
++            "fixture clear releases token without reclaim");
++    require(fixture.memory.free(
++                {fixture.owner.fd, fixture.owner.clientGeneration},
++                freeLifetime, 25).status == protocol::Status::Ok,
++            "fixture clear permits lifetime free");
++
++    fixture.finish();
++}
++
++} // namespace
++} // namespace gem5::hostgpu
++
++int
++main()
++{
++    try {
++        gem5::hostgpu::runFixtureParity();
++    } catch (const std::exception &error) {
++        std::cerr << "host_gpu_native_fixture_core self-test failed: "
++                  << error.what() << '\n';
++        return 1;
++    }
++
++    constexpr char output[] =
++        "{\"schema\":\"gem5.host-native.fixture-parity.v1\","
++        "\"functional_parity\":true,\"fixture_oracle\":true,"
++        "\"memory_context\":true,\"dispatch_state_machine\":true,"
++        "\"gfx950_fixture\":true,\"negative_access_checks\":true,"
++        "\"functional_page_lifetime\":true,"
++        "\"kernel_executed\":false,"
++        "\"cpu_fallback\":false,\"vega_x86\":false,"
++        "\"gpu_pipeline_connected\":false,"
++        "\"blocker\":\"HSAPacketProcessor/GPUDispatcher/ComputeUnit "
++        "still require x86 Process/ThreadContext/SE TLB\"}";
++    std::cout << output << '\n';
++    return 0;
++}
+diff --git a/src/dev/amdgpu/host_native_memory_context.cc b/src/dev/amdgpu/host_native_memory_context.cc
+new file mode 100644
+index 000000000..eccd5f9d0
+--- /dev/null
++++ b/src/dev/amdgpu/host_native_memory_context.cc
+@@ -0,0 +1,261 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_native_memory_context.hh"
++
++#include <algorithm>
++#include <cstring>
++#include <limits>
++#include <new>
++#include <stdexcept>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++HostNativeMemoryContext::HostNativeMemoryContext(
++    HostGPUMemoryState &memoryState,
++    const HostGPUMemoryState::Owner &memoryOwner, uint64_t pageBytes)
++    : memory(memoryState), owner(memoryOwner), pageSize(pageBytes)
++{
++    if (pageSize == 0 || (pageSize & (pageSize - 1)) != 0)
++        throw std::invalid_argument("host-native page size must be a power of two");
++}
++
++HostNativeMemoryContext::~HostNativeMemoryContext()
++{
++    clear();
++}
++
++bool
++HostNativeMemoryContext::takeToken(uint64_t &token)
++{
++    if (tokensExhausted || nextToken == 0)
++        return false;
++    token = nextToken;
++    if (nextToken == std::numeric_limits<uint64_t>::max()) {
++        tokensExhausted = true;
++    } else {
++        ++nextToken;
++    }
++    return true;
++}
++
++bool
++HostNativeMemoryContext::resolveRange(
++    Addr address, uint64_t byteCount, ResolvedRange &resolved) const
++{
++    if (byteCount == 0 ||
++        address > std::numeric_limits<Addr>::max() - (byteCount - 1)) {
++        return false;
++    }
++    for (const auto &allocation : memory.allocationsForOwner(owner)) {
++        if (address < allocation.gpuVa)
++            continue;
++        const uint64_t offset = address - allocation.gpuVa;
++        if (offset <= allocation.size &&
++            byteCount <= allocation.size - offset) {
++            resolved = {allocation, offset};
++            return true;
++        }
++    }
++    return false;
++}
++
++bool
++HostNativeMemoryContext::coveredByLease(
++    const ResolvedRange &resolved, Addr address, uint64_t byteCount) const
++{
++    if (byteCount == 0 ||
++        address > std::numeric_limits<Addr>::max() - (byteCount - 1)) {
++        return false;
++    }
++    const Addr end = address + byteCount;
++    for (const auto &entry : leases) {
++        const auto &lease = entry.second;
++        if (lease.allocationId != resolved.allocation.allocationId ||
++            lease.generation != resolved.allocation.generation) {
++            continue;
++        }
++        if (lease.pageCount > std::numeric_limits<Addr>::max() / pageSize)
++            continue;
++        const Addr leaseEnd = lease.firstPage +
++            static_cast<Addr>(lease.pageCount * pageSize);
++        if (leaseEnd < lease.firstPage)
++            continue;
++        if (address >= lease.firstPage && end <= leaseEnd)
++            return true;
++    }
++    return false;
++}
++
++std::optional<HostNativeMemoryContext::PageLease>
++HostNativeMemoryContext::map(Addr address, uint64_t byteCount)
++{
++    ResolvedRange resolved;
++    if (!resolveRange(address, byteCount, resolved))
++        return std::nullopt;
++
++    const Addr firstPage = address & ~(static_cast<Addr>(pageSize) - 1);
++    const Addr lastAddress = address + byteCount - 1;
++    const Addr lastPage = lastAddress &
++        ~(static_cast<Addr>(pageSize) - 1);
++    if (lastPage < firstPage)
++        return std::nullopt;
++    const uint64_t pageCount =
++        (lastPage - firstPage) / pageSize + 1;
++    uint64_t token = 0;
++    if (!takeToken(token) ||
++        !memory.retainFunctionalPage(
++            owner, resolved.allocation.allocationId,
++            resolved.allocation.generation, token)) {
++        return std::nullopt;
++    }
++
++    PageLease lease{
++        token, resolved.allocation.allocationId,
++        resolved.allocation.generation, firstPage, pageCount,
++        address, byteCount};
++    try {
++        leases.emplace(token, lease);
++    } catch (const std::bad_alloc &) {
++        memory.releaseFunctionalPage(
++            owner, resolved.allocation.allocationId,
++            resolved.allocation.generation, token);
++        return std::nullopt;
++    }
++    return lease;
++}
++
++bool
++HostNativeMemoryContext::unmap(const PageLease &lease)
++{
++    const auto found = leases.find(lease.token);
++    if (found == leases.end())
++        return false;
++    const auto &current = found->second;
++    if (current.allocationId != lease.allocationId ||
++        current.generation != lease.generation ||
++        current.firstPage != lease.firstPage ||
++        current.pageCount != lease.pageCount ||
++        current.address != lease.address ||
++        current.byteCount != lease.byteCount) {
++        return false;
++    }
++    if (!memory.releaseFunctionalPage(
++            owner, current.allocationId, current.generation, current.token)) {
++        return false;
++    }
++    leases.erase(found);
++    return true;
++}
++
++bool
++HostNativeMemoryContext::functionalRead(
++    Addr address, uint64_t byteCount, std::vector<uint8_t> &destination,
++    uint64_t dispatchRequestId) const
++{
++    ResolvedRange resolved;
++    if (!resolveRange(address, byteCount, resolved) ||
++        !coveredByLease(resolved, address, byteCount)) {
++        destination.clear();
++        return false;
++    }
++    protocol::MemoryRequest request;
++    request.opcode = protocol::MemoryOpcode::CopyD2H;
++    request.allocationId = resolved.allocation.allocationId;
++    request.generation = resolved.allocation.generation;
++    request.offset = resolved.offset;
++    request.byteCount = byteCount;
++    return memory.copyToHost(
++               owner, request, destination, 0, dispatchRequestId).status ==
++        protocol::Status::Ok;
++}
++
++bool
++HostNativeMemoryContext::functionalRead(
++    Addr address, void *destination, uint64_t byteCount,
++    uint64_t dispatchRequestId) const
++{
++    if (!destination)
++        return false;
++    std::vector<uint8_t> bytes;
++    if (!functionalRead(address, byteCount, bytes, dispatchRequestId))
++        return false;
++    std::memcpy(destination, bytes.data(), bytes.size());
++    return true;
++}
++
++bool
++HostNativeMemoryContext::functionalWrite(
++    Addr address, const std::vector<uint8_t> &source,
++    uint64_t dispatchRequestId)
++{
++    ResolvedRange resolved;
++    if (!resolveRange(address, source.size(), resolved) ||
++        !coveredByLease(resolved, address, source.size())) {
++        return false;
++    }
++    return memory.functionalWriteBytes(
++               owner, resolved.allocation.allocationId,
++               resolved.allocation.generation, resolved.offset,
++               source, dispatchRequestId).status == protocol::Status::Ok;
++}
++
++bool
++HostNativeMemoryContext::functionalWrite(
++    Addr address, const void *source, uint64_t byteCount,
++    uint64_t dispatchRequestId)
++{
++    if (!source || byteCount == 0 ||
++        byteCount > std::numeric_limits<size_t>::max()) {
++        return false;
++    }
++    std::vector<uint8_t> bytes;
++    try {
++        bytes.assign(static_cast<const uint8_t *>(source),
++                     static_cast<const uint8_t *>(source) + byteCount);
++    } catch (const std::bad_alloc &) {
++        return false;
++    }
++    return functionalWrite(address, bytes, dispatchRequestId);
++}
++
++void
++HostNativeMemoryContext::clear()
++{
++    for (const auto &entry : leases) {
++        const auto &lease = entry.second;
++        memory.releaseFunctionalPage(
++            owner, lease.allocationId, lease.generation, lease.token);
++    }
++    leases.clear();
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_native_memory_context.hh b/src/dev/amdgpu/host_native_memory_context.hh
+new file mode 100644
+index 000000000..9262512df
+--- /dev/null
++++ b/src/dev/amdgpu/host_native_memory_context.hh
+@@ -0,0 +1,123 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_NATIVE_MEMORY_CONTEXT_HH__
++#define __DEV_AMDGPU_HOST_NATIVE_MEMORY_CONTEXT_HH__
++
++#include <cstddef>
++#include <cstdint>
++#include <optional>
++#include <unordered_map>
++#include <vector>
++
++#include "base/types.hh"
++#include "dev/amdgpu/host_gpu_memory_state.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++/**
++ * Host-owned functional address-space adapter for the extracted control core.
++ *
++ * HostGPUMemoryState remains the allocation/chunk oracle.  This class only
++ * adds GPU-VA range resolution, page-granular lifetime leases, and functional
++ * byte access.  It has no Process, ThreadContext, MMU, or gem5 System input.
++ */
++class HostNativeMemoryContext
++{
++  public:
++    struct PageLease
++    {
++        uint64_t token = 0;
++        uint64_t allocationId = 0;
++        uint64_t generation = 0;
++        Addr firstPage = 0;
++        uint64_t pageCount = 0;
++        Addr address = 0;
++        uint64_t byteCount = 0;
++
++        bool valid() const { return token != 0 && pageCount != 0; }
++    };
++
++    HostNativeMemoryContext(
++        HostGPUMemoryState &memory, const HostGPUMemoryState::Owner &owner,
++        uint64_t pageBytes = 4096);
++    ~HostNativeMemoryContext();
++
++    HostNativeMemoryContext(const HostNativeMemoryContext &) = delete;
++    HostNativeMemoryContext &operator=(
++        const HostNativeMemoryContext &) = delete;
++
++    std::optional<PageLease> map(Addr address, uint64_t byteCount);
++    bool unmap(const PageLease &lease);
++
++    bool functionalRead(
++        Addr address, uint64_t byteCount,
++        std::vector<uint8_t> &destination,
++        uint64_t dispatchRequestId = 0) const;
++    bool functionalRead(
++        Addr address, void *destination, uint64_t byteCount,
++        uint64_t dispatchRequestId = 0) const;
++    bool functionalWrite(
++        Addr address, const std::vector<uint8_t> &source,
++        uint64_t dispatchRequestId = 0);
++    bool functionalWrite(
++        Addr address, const void *source, uint64_t byteCount,
++        uint64_t dispatchRequestId = 0);
++
++    size_t leaseCount() const { return leases.size(); }
++    uint64_t pageBytes() const { return pageSize; }
++    void clear();
++
++  private:
++    struct ResolvedRange
++    {
++        HostGPUMemoryState::AllocationView allocation;
++        uint64_t offset = 0;
++    };
++
++    bool resolveRange(
++        Addr address, uint64_t byteCount, ResolvedRange &resolved) const;
++    bool coveredByLease(
++        const ResolvedRange &resolved, Addr address,
++        uint64_t byteCount) const;
++    bool takeToken(uint64_t &token);
++
++    HostGPUMemoryState &memory;
++    HostGPUMemoryState::Owner owner;
++    uint64_t pageSize;
++    uint64_t nextToken = 1;
++    bool tokensExhausted = false;
++    std::unordered_map<uint64_t, PageLease> leases;
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_NATIVE_MEMORY_CONTEXT_HH__
+diff --git a/util/host_native/check_control_core.py b/util/host_native/check_control_core.py
+index d6a06a4d8..5a7f3b28c 100644
+--- a/util/host_native/check_control_core.py
++++ b/util/host_native/check_control_core.py
+@@ -19,6 +19,8 @@ from pathlib import Path
+ 
+ SCHEMA = "gem5.host-native.control-core.v1"
+ AUDIT_SCHEMA = "gem5.host-native.control-core.audit.v1"
++FIXTURE_SCHEMA = "gem5.host-native.fixture-parity.v1"
++FIXTURE_AUDIT_SCHEMA = "gem5.host-native.fixture-parity.audit.v1"
+ DEFAULT_BUILD_OPTS = (
+     Path(__file__).resolve().parents[2] / "build_opts/HOSTGPU_NATIVE_CONTROL"
+ )
+@@ -113,14 +115,45 @@ def forbidden_lines(output: str) -> list[str]:
+             if FORBIDDEN_SYMBOL.search(line)]
+ 
+ 
++PROFILES = {
++    "control": {
++        "schema": SCHEMA,
++        "audit_schema": AUDIT_SCHEMA,
++        "true_flags": (
++            "protocol_self_test", "memory_self_test", "queue_self_test",
++            "signal_self_test",
++        ),
++        "false_flags": ("kernel_executed", "cpu_fallback", "vega_x86"),
++    },
++    "fixture": {
++        "schema": FIXTURE_SCHEMA,
++        "audit_schema": FIXTURE_AUDIT_SCHEMA,
++        "true_flags": (
++            "functional_parity", "fixture_oracle", "memory_context",
++            "dispatch_state_machine", "gfx950_fixture",
++            "negative_access_checks", "functional_page_lifetime",
++        ),
++        "false_flags": (
++            "kernel_executed", "cpu_fallback", "vega_x86",
++            "gpu_pipeline_connected",
++        ),
++    },
++}
++
++
+ def main() -> int:
+     parser = argparse.ArgumentParser()
+     parser.add_argument("executable", type=Path)
++    parser.add_argument(
++        "--profile", choices=tuple(PROFILES), default="control",
++        help="self-test contract to validate (default: %(default)s)",
++    )
+     parser.add_argument(
+         "--build-opts", type=Path, default=DEFAULT_BUILD_OPTS,
+         help=("build-options file to validate (default: %(default)s)"),
+     )
+     args = parser.parse_args()
++    profile = PROFILES[args.profile]
+     executable = args.executable.resolve()
+     if not executable.is_file():
+         raise SystemExit(f"missing executable: {executable}")
+@@ -170,18 +203,22 @@ def main() -> int:
+         result = json.loads(self_test.stdout)
+     except json.JSONDecodeError as error:
+         raise SystemExit(f"self-test did not emit JSON: {error}") from error
+-    if not isinstance(result, dict) or result.get("schema") != SCHEMA:
++    if (not isinstance(result, dict) or
++            result.get("schema") != profile["schema"]):
+         raise SystemExit(f"self-test schema mismatch: {result!r}")
+-    expected_false = ("kernel_executed", "cpu_fallback", "vega_x86")
+-    if any(result.get(key) is not False for key in expected_false):
++    if any(result.get(key) is not False for key in profile["false_flags"]):
+         raise SystemExit("self-test scope flags are not explicit false")
+-    for key in ("protocol_self_test", "memory_self_test",
+-                "queue_self_test", "signal_self_test"):
++    for key in profile["true_flags"]:
+         if result.get(key) is not True:
+             raise SystemExit(f"self-test flag is not true: {key}")
++    if args.profile == "fixture":
++        blocker = result.get("blocker")
++        if not isinstance(blocker, str) or not blocker:
++            raise SystemExit("fixture self-test blocker is not explicit")
+ 
+     print(json.dumps({
+-        "schema": AUDIT_SCHEMA,
++        "schema": profile["audit_schema"],
++        "profile": args.profile,
+         "executable": str(executable),
+         "build_opts": str(build_opts),
+         "build_options": parsed_opts,
+-- 
+2.53.0
+

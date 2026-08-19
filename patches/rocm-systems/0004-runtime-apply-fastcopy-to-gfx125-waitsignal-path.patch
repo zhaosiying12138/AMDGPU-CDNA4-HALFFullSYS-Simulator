@@ -1,0 +1,46 @@
+From d140452e1c6eecab6f6fbe21622c5b75e10d1bbf Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 17 Aug 2026 16:17:45 +0800
+Subject: [PATCH 4/5] runtime: apply fastcopy to gfx125 waitsignal path
+
+Route the gfx125-plus fused WaitSignal SDMA path through the same generic host-accessible fast-copy eligibility helper used by ordinary linear copies. Dependency, profiling, D2D, invalid-range and other ineligible cases continue through the existing path. The current gfx950 target cannot execute this branch, so acceptance is limited to source review and a focused ROCr build; no gfx125 runtime claim is made.
+
+Checkpoint-ID: CP-0056
+Goal-ID: GSIM-001
+Plan-Revision: 16
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 04ca73c2f7a9c68c5fbba028b3c72021fc9248825dfe410168be255764fb5cd4
+Change-Kind: bugfix
+Baseline-Commit: cc2d5989ca03307dceb2bf473e5f95ea05fa0236
+---
+ .../hsa-runtime/core/runtime/amd_gpu_agent.cpp     | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_gpu_agent.cpp b/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_gpu_agent.cpp
+index 7bbfba9b46..b9de23e333 100644
+--- a/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_gpu_agent.cpp
++++ b/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_gpu_agent.cpp
+@@ -1473,6 +1473,20 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
+   if (blit->isSDMA()) {
+     BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
+     if (sdma_blit->IsGfx125Plus()) {
++      // This fused path bypasses the regular SubmitLinearCopyCommand entry
++      // point, where all other blits run the same eligibility check.
++      std::vector<core::Signal*> no_gang;
++      const auto fast_copy = TryHostAccessibleFastCopy(
++          dst, src, size, &dep_signals, &out_signal, &no_gang);
++      if (fast_copy == FastCopyResult::Success) {
++        LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS,
++                 "[ROCDTIF SDMA WaitSignal] Fast copy success: src=%p, dst=%p, size=0x%lx",
++                 src, dst, size);
++        return HSA_STATUS_SUCCESS;
++      }
++      if (fast_copy == FastCopyResult::InvalidArgument) {
++        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
++      }
+       return sdma_blit->SubmitLinearCopyBodyWaitSignal(
+           dst, src, size, dep_signals, out_signal);
+     }
+-- 
+2.53.0
+

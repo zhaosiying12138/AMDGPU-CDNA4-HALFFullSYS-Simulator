@@ -1,0 +1,96 @@
+From 0401e8cdb61403df1678c8e9fbfbdd76acd3b13d Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Wed, 19 Aug 2026 07:17:20 +0800
+Subject: [PATCH 5/5] runtime: report why a host-accessible fast copy was
+ refused
+
+A refused fast copy silently costs a full AQL blit-kernel dispatch, which on a
+simulated device is orders of magnitude more expensive than the memcpy it
+replaces. With no record of the decision, "why is the weight load slow" needed
+another instrumented rebuild to answer. Name the rejection reason -- dependent
+signals, gang signals, a read-only destination, endpoint kinds -- so the
+question becomes one grep over an existing run log. The reporting is diagnostic
+only: it records the decision and never influences it.
+
+UNVERIFIED AT HANDOFF: this change is carried forward from an earlier session
+and has not been exercised by a completed model run.
+
+Checkpoint-ID: CP-0065
+Goal-ID: GSIM-001
+Plan-Revision: 16
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 3da978c32055239a056d892ab835013b541962d50ac5e6152ee57561e6a7f145
+Change-Kind: code
+Baseline-Commit: d140452e1c6eecab6f6fbe21622c5b75e10d1bbf
+---
+ .../core/runtime/amd_gpu_agent.cpp            | 41 ++++++++++++++++---
+ 1 file changed, 36 insertions(+), 5 deletions(-)
+
+diff --git a/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_gpu_agent.cpp b/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_gpu_agent.cpp
+index b9de23e333..f844535eb7 100644
+--- a/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_gpu_agent.cpp
++++ b/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_gpu_agent.cpp
+@@ -1119,10 +1119,29 @@ GpuAgent::FastCopyResult GpuAgent::TryHostAccessibleFastCopy(
+     return FastCopyResult::Fallback;
+   }
+ 
+-  const bool async = out_signal != nullptr;
+-  if (async && (dep_signals == nullptr || gang_signals == nullptr ||
+-                !dep_signals->empty() || !gang_signals->empty())) {
++  // A rejected copy costs a full AQL blit-kernel dispatch, which on a simulated
++  // device is orders of magnitude more expensive than the memcpy it replaces.
++  // Naming the rejection reason turns "why is the weight load slow" into one
++  // grep instead of another instrumented rebuild. This is diagnostic only: it
++  // reports the decision, it never influences it.
++  const auto reject = [&](const char* reason) {
++    LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS,
++             "[ROCDTIF fastcopy] reject reason=%s src=%p dst=%p size=0x%lx "
++             "async=%d deps=%zu",
++             reason, src, dst, size, out_signal != nullptr,
++             dep_signals ? dep_signals->size() : size_t(0));
+     return FastCopyResult::Fallback;
++  };
++
++  const bool async = out_signal != nullptr;
++  if (async && (dep_signals == nullptr || gang_signals == nullptr)) {
++    return reject("null-signal-vector");
++  }
++  if (async && !gang_signals->empty()) {
++    return reject("gang-signals");
++  }
++  if (async && !dep_signals->empty()) {
++    return reject("dependent-signals");
+   }
+ 
+   enum class EndpointKind { Host, Device, Unsupported };
+@@ -1206,13 +1225,25 @@ GpuAgent::FastCopyResult GpuAgent::TryHostAccessibleFastCopy(
+   if (dst_endpoint.range_overflow || src_endpoint.range_overflow) {
+     return FastCopyResult::InvalidArgument;
+   }
+-  if (dst_endpoint.read_only) return FastCopyResult::Fallback;
++  if (dst_endpoint.read_only) return reject("read-only-destination");
+ 
+   const bool h2d = dst_endpoint.kind == EndpointKind::Device &&
+                    src_endpoint.kind == EndpointKind::Host;
+   const bool d2h = dst_endpoint.kind == EndpointKind::Host &&
+                    src_endpoint.kind == EndpointKind::Device;
+-  if (!h2d && !d2h) return FastCopyResult::Fallback;
++  if (!h2d && !d2h) {
++    const auto name = [](EndpointKind kind) {
++      switch (kind) {
++        case EndpointKind::Host: return "host";
++        case EndpointKind::Device: return "device";
++        default: return "unsupported";
++      }
++    };
++    LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS,
++             "[ROCDTIF fastcopy] endpoints dst=%s src=%s",
++             name(dst_endpoint.kind), name(src_endpoint.kind));
++    return reject("not-h2d-or-d2h");
++  }
+ 
+   std::memcpy(dst_endpoint.cpu_address, src_endpoint.cpu_address, size);
+   if (async) {
+-- 
+2.53.0
+

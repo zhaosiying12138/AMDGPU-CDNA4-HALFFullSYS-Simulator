@@ -1,0 +1,287 @@
+From 61aa4be538ed85e23a8a72b5437b327b1e50c201 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sun, 16 Aug 2026 20:18:21 +0800
+Subject: [PATCH 2/5] runtime: gate host copies by allocation semantics
+
+Centralize ROCr H2D and D2H fast-copy eligibility. Only host-accessible allocations owned by the active GPU may use the CPU alias; dependencies, gang signals, profiling, D2D, private, peer, VMM, IPC and unsupported ranges retain the legacy blit path. Publish asynchronous completion with release ordering after memcpy.
+
+Checkpoint-ID: CP-0041
+
+Goal-ID: GSIM-001
+
+Plan-Revision: 16
+
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+
+Evidence-Manifest-SHA256: c24c382fba2a844be8f7424a46a8d8494b3728edf11542e7533d11e6eaefd04e
+
+Change-Kind: code
+
+Baseline-Commit: 4c7de84a26941fd851d9c8a13b9c97349de371f6
+---
+ .../hsa-runtime/core/inc/amd_gpu_agent.h      |  15 +++
+ .../core/runtime/amd_blit_kernel.cpp          |  25 ++--
+ .../core/runtime/amd_blit_sdma.cpp            |  25 ++--
+ .../core/runtime/amd_gpu_agent.cpp            | 111 ++++++++++++++++++
+ 4 files changed, 156 insertions(+), 20 deletions(-)
+
+diff --git a/projects/rocr-runtime/runtime/hsa-runtime/core/inc/amd_gpu_agent.h b/projects/rocr-runtime/runtime/hsa-runtime/core/inc/amd_gpu_agent.h
+index a141d354c9..dc2af8c597 100644
+--- a/projects/rocr-runtime/runtime/hsa-runtime/core/inc/amd_gpu_agent.h
++++ b/projects/rocr-runtime/runtime/hsa-runtime/core/inc/amd_gpu_agent.h
+@@ -216,6 +216,12 @@ class GpuAgentInt : public core::Agent {
+ 
+ class GpuAgent : public GpuAgentInt {
+  public:
++  enum class FastCopyResult {
++    Fallback,
++    Success,
++    InvalidArgument,
++  };
++
+   // @brief GPU agent constructor.
+   //
+   // @param [in] node Node id. Each CPU in different socket will get distinct
+@@ -283,6 +289,15 @@ class GpuAgent : public GpuAgentInt {
+   // @brief Override from core::Agent.
+   hsa_status_t DmaCopy(void* dst, const void* src, size_t size) override;
+ 
++  // Perform a CPU copy only when exactly one endpoint is host-accessible
++  // memory owned by this GPU and the other endpoint is host memory. Unsupported
++  // memory types return Fallback so the caller can submit the regular blit.
++  FastCopyResult TryHostAccessibleFastCopy(
++      void* dst, const void* src, size_t size,
++      const std::vector<core::Signal*>* dep_signals = nullptr,
++      core::Signal* out_signal = nullptr,
++      const std::vector<core::Signal*>* gang_signals = nullptr) const;
++
+   // @brief Override from core::Agent.
+   hsa_status_t DmaCopy(void* dst, core::Agent& dst_agent, const void* src,
+                        core::Agent& src_agent, size_t size,
+diff --git a/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_blit_kernel.cpp b/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_blit_kernel.cpp
+index 94958c0caf..b1d890ca30 100644
+--- a/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_blit_kernel.cpp
++++ b/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_blit_kernel.cpp
+@@ -614,12 +614,16 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
+   // Protect completion_signal_.
+   std::lock_guard<std::mutex> guard(lock_);
+ 
+-  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy()) {
++  const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent_);
++  const auto fast_copy = gpu_agent->TryHostAccessibleFastCopy(dst, src, size);
++  if (fast_copy == AMD::GpuAgent::FastCopyResult::Success) {
+     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] src = %p, dst = %p, size = 0x%lx", src, dst, size);
+-    memcpy(dst, src, size);
+     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] Fast copy success");
+     return HSA_STATUS_SUCCESS;
+   }
++  if (fast_copy == AMD::GpuAgent::FastCopyResult::InvalidArgument) {
++    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
++  }
+ 
+   HSA::hsa_signal_store_relaxed(completion_signal_, 1);
+ 
+@@ -653,18 +657,19 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
+     std::vector<core::Signal*>& dep_signals, core::Signal& out_signal,
+     std::vector<core::Signal*>& gang_signals) {
+ 
+-  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy() && dep_signals.empty()) {
++  const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent_);
++  const auto fast_copy = gpu_agent->TryHostAccessibleFastCopy(
++      dst, src, size, &dep_signals, &out_signal, &gang_signals);
++  if (fast_copy == AMD::GpuAgent::FastCopyResult::Success) {
+     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] src = %p, dst = %p, size = 0x%lx", src, dst, size);
+-    memcpy(dst, src, size);
+     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] Fast copy success");
+-
+-    hsa_signal_t signal = {(core::Signal::Convert(&out_signal)).handle};
+-    if (signal.handle) {
+-      LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] completion_signal = 0x%zx", signal.handle);
+-      hsa_signal_subtract_relaxed(signal, 1);
+-    }
++    LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] completion_signal = 0x%zx",
++             core::Signal::Convert(&out_signal).handle);
+     return HSA_STATUS_SUCCESS;
+   }
++  if (fast_copy == AMD::GpuAgent::FastCopyResult::InvalidArgument) {
++    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
++  }
+ 
+   // Reserve write index for barrier(s) + dispatch packet.
+   const uint32_t num_barrier_packet = uint32_t((dep_signals.size() + 4) / 5);
+diff --git a/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_blit_sdma.cpp b/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_blit_sdma.cpp
+index e82cc51220..8848657f11 100644
+--- a/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_blit_sdma.cpp
++++ b/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_blit_sdma.cpp
+@@ -1575,12 +1575,16 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitBodies(
+ 
+ template <bool useGCR, bool scopeFields>
+ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyCommand(void* dst, const void* src, size_t size) {
+-  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy()) {
++  const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent_);
++  const auto fast_copy = gpu_agent->TryHostAccessibleFastCopy(dst, src, size);
++  if (fast_copy == AMD::GpuAgent::FastCopyResult::Success) {
+     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] src = %p, dst = %p, size = 0x%lx", src, dst, size);
+-    memcpy(dst, src, size);
+     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] Fast copy success");
+     return HSA_STATUS_SUCCESS;
+   }
++  if (fast_copy == AMD::GpuAgent::FastCopyResult::InvalidArgument) {
++    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
++  }
+ 
+   // Break the copy into multiple copy operation incase the copy size exceeds
+   // the SDMA linear copy limit.
+@@ -1604,18 +1608,19 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyCommand(void* dst, c
+                                                        core::Signal& out_signal,
+                                                        std::vector<core::Signal*>& gang_signals) {
+ 
+-  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy() && dep_signals.empty()) {
++  const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent_);
++  const auto fast_copy = gpu_agent->TryHostAccessibleFastCopy(
++      dst, src, size, &dep_signals, &out_signal, &gang_signals);
++  if (fast_copy == AMD::GpuAgent::FastCopyResult::Success) {
+     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] src = %p, dst = %p, size = 0x%lx", src, dst, size);
+-    memcpy(dst, src, size);
+     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] Fast copy success");
+-
+-    hsa_signal_t signal = {(core::Signal::Convert(&out_signal)).handle};
+-    if (signal.handle) {
+-      LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] completion_signal = 0x%zx", signal.handle);
+-      hsa_signal_subtract_relaxed(signal, 1);
+-    }
++    LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF SDMA] completion_signal = 0x%zx",
++             core::Signal::Convert(&out_signal).handle);
+     return HSA_STATUS_SUCCESS;
+   }
++  if (fast_copy == AMD::GpuAgent::FastCopyResult::InvalidArgument) {
++    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
++  }
+ 
+   // Break the copy into multiple copy operations when the copy size exceeds
+   // the SDMA linear copy limit.
+diff --git a/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_gpu_agent.cpp b/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_gpu_agent.cpp
+index 939b369397..7bbfba9b46 100644
+--- a/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_gpu_agent.cpp
++++ b/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/amd_gpu_agent.cpp
+@@ -1110,6 +1110,117 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, const void* src, size_t size) {
+   return blits_[BlitDevToDev]->SubmitLinearCopyCommand(dst, src, size);
+ }
+ 
++GpuAgent::FastCopyResult GpuAgent::TryHostAccessibleFastCopy(
++    void* dst, const void* src, size_t size,
++    const std::vector<core::Signal*>* dep_signals, core::Signal* out_signal,
++    const std::vector<core::Signal*>* gang_signals) const {
++  auto* runtime = core::Runtime::runtime_singleton_;
++  if (!runtime->flag().enable_dtif_fast_copy() || profiling_enabled()) {
++    return FastCopyResult::Fallback;
++  }
++
++  const bool async = out_signal != nullptr;
++  if (async && (dep_signals == nullptr || gang_signals == nullptr ||
++                !dep_signals->empty() || !gang_signals->empty())) {
++    return FastCopyResult::Fallback;
++  }
++
++  enum class EndpointKind { Host, Device, Unsupported };
++  struct Endpoint {
++    EndpointKind kind = EndpointKind::Unsupported;
++    void* cpu_address = nullptr;
++    bool range_overflow = false;
++    bool read_only = false;
++  };
++
++  const auto classify = [&](const void* ptr) {
++    Endpoint endpoint;
++    hsa_amd_pointer_info_t info = {};
++    info.size = sizeof(info);
++    if (runtime->PtrInfo(ptr, &info, nullptr, nullptr, nullptr) != HSA_STATUS_SUCCESS) {
++      return endpoint;
++    }
++
++    if (info.type == HSA_EXT_POINTER_TYPE_UNKNOWN) {
++      endpoint.kind = EndpointKind::Host;
++      endpoint.cpu_address = const_cast<void*>(ptr);
++      return endpoint;
++    }
++
++    const uintptr_t address = reinterpret_cast<uintptr_t>(ptr);
++    bool address_in_range = false;
++    size_t offset = 0;
++    const auto resolve_range = [&](const void* base) {
++      if (base == nullptr) return false;
++      const uintptr_t base_address = reinterpret_cast<uintptr_t>(base);
++      if (address < base_address) return false;
++      const uintptr_t candidate_offset = address - base_address;
++      if (candidate_offset >= info.sizeInBytes) return false;
++      address_in_range = true;
++      if (size > info.sizeInBytes - candidate_offset) {
++        return false;
++      }
++      offset = static_cast<size_t>(candidate_offset);
++      return true;
++    };
++
++    // Prefer the host alias when the caller supplied it. Locked allocations
++    // may expose a distinct GPU alias for the same backing store.
++    bool complete_range = resolve_range(info.hostBaseAddress);
++    if (!complete_range) complete_range = resolve_range(info.agentBaseAddress);
++    if (!complete_range) {
++      endpoint.range_overflow = address_in_range;
++      return endpoint;
++    }
++
++    if (info.hostBaseAddress == nullptr) return endpoint;
++    endpoint.cpu_address = reinterpret_cast<void*>(
++        reinterpret_cast<uintptr_t>(info.hostBaseAddress) + offset);
++    endpoint.read_only =
++        (info.alloc_flags & HSA_AMD_POINTER_INFO_ALLOC_FLAG_READONLY) != 0;
++
++    if (info.type == HSA_EXT_POINTER_TYPE_LOCKED) {
++      endpoint.kind = EndpointKind::Host;
++      return endpoint;
++    }
++    if (info.type != HSA_EXT_POINTER_TYPE_HSA) return endpoint;
++
++    if (info.agentOwner.handle == public_handle().handle) {
++      if ((info.alloc_flags & HSA_AMD_POINTER_INFO_ALLOC_FLAG_HOST_ACCESS) != 0) {
++        endpoint.kind = EndpointKind::Device;
++      }
++      return endpoint;
++    }
++
++    for (const auto* cpu_agent : runtime->cpu_agents()) {
++      if (info.agentOwner.handle == cpu_agent->public_handle().handle) {
++        endpoint.kind = EndpointKind::Host;
++        break;
++      }
++    }
++    return endpoint;
++  };
++
++  Endpoint dst_endpoint = classify(dst);
++  Endpoint src_endpoint = classify(src);
++  if (dst_endpoint.range_overflow || src_endpoint.range_overflow) {
++    return FastCopyResult::InvalidArgument;
++  }
++  if (dst_endpoint.read_only) return FastCopyResult::Fallback;
++
++  const bool h2d = dst_endpoint.kind == EndpointKind::Device &&
++                   src_endpoint.kind == EndpointKind::Host;
++  const bool d2h = dst_endpoint.kind == EndpointKind::Host &&
++                   src_endpoint.kind == EndpointKind::Device;
++  if (!h2d && !d2h) return FastCopyResult::Fallback;
++
++  std::memcpy(dst_endpoint.cpu_address, src_endpoint.cpu_address, size);
++  if (async) {
++    HSA::hsa_signal_subtract_screlease(core::Signal::Convert(out_signal), 1);
++  }
++  return FastCopyResult::Success;
++}
++
+ void GpuAgent::SetCopyRequestRefCount(bool set) {
+   std::unique_lock<std::mutex> lock(blit_lock_);
+   while (pending_copy_stat_check_ref_.load(std::memory_order_acquire)) {
+-- 
+2.53.0
+

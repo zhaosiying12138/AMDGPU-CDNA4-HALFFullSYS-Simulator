@@ -1,0 +1,2486 @@
+From 299a79212ff4f9abcb4a6a6fbd434f5bd443a1d5 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sat, 8 Aug 2026 12:18:38 +0800
+Subject: [PATCH 04/42] feat(amdgpu): add sealed simulated memory transport
+
+Checkpoint-ID: CP-0006
+Goal-ID: GSIM-001
+Plan-Revision: 1
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 9c556f0baf6c4169ca67b5701f68e906cc012fdad45eda90ac0a708c8ea542ea
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/dev/amdgpu/SConscript                    |   3 +
+ src/dev/amdgpu/host_gpu_bridge.cc            | 207 ++++++++++-
+ src/dev/amdgpu/host_gpu_bridge.hh            |   6 +
+ src/dev/amdgpu/host_gpu_memory_state.cc      | 339 +++++++++++++++++++
+ src/dev/amdgpu/host_gpu_memory_state.hh      | 125 +++++++
+ src/dev/amdgpu/host_gpu_memory_state.test.cc | 279 +++++++++++++++
+ src/dev/amdgpu/host_gpu_protocol.cc          | 207 +++++++++--
+ src/dev/amdgpu/host_gpu_protocol.hh          |  61 ++++
+ src/dev/amdgpu/host_gpu_protocol.test.cc     | 268 +++++++++++++++
+ src/dev/amdgpu/host_gpu_socket_utils.cc      | 208 +++++++++++-
+ src/dev/amdgpu/host_gpu_socket_utils.hh      |  72 ++++
+ src/dev/amdgpu/host_gpu_socket_utils.test.cc | 221 +++++++++++-
+ 12 files changed, 1957 insertions(+), 39 deletions(-)
+ create mode 100644 src/dev/amdgpu/host_gpu_memory_state.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_memory_state.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_memory_state.test.cc
+
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index 47938786d..33eef62ad 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -49,6 +49,7 @@ Source('amdgpu_smu.cc', tags=['x86 isa'])
+ Source('amdgpu_vm.cc', tags=['x86 isa'])
+ Source('host_gpu_protocol.cc', tags=['x86 isa'])
+ Source('host_gpu_bridge.cc', tags=['x86 isa'])
++Source('host_gpu_memory_state.cc', tags=['x86 isa'])
+ Source('host_gpu_queue_state.cc', tags=['x86 isa'])
+ Source('host_gpu_socket_utils.cc', tags=['x86 isa'])
+ Source('interrupt_handler.cc', tags=['x86 isa'])
+@@ -60,6 +61,8 @@ Source('system_hub.cc', tags=['x86 isa'])
+ 
+ GTest('host_gpu_protocol.test', 'host_gpu_protocol.test.cc',
+       'host_gpu_protocol.cc')
++GTest('host_gpu_memory_state.test', 'host_gpu_memory_state.test.cc',
++      'host_gpu_memory_state.cc', 'host_gpu_protocol.cc')
+ GTest('host_gpu_queue_state.test', 'host_gpu_queue_state.test.cc',
+       'host_gpu_queue_state.cc')
+ GTest('host_gpu_socket_utils.test', 'host_gpu_socket_utils.test.cc',
+diff --git a/src/dev/amdgpu/host_gpu_bridge.cc b/src/dev/amdgpu/host_gpu_bridge.cc
+index e8b99075f..247d544a8 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.cc
++++ b/src/dev/amdgpu/host_gpu_bridge.cc
+@@ -44,6 +44,7 @@
+ #include <cstddef>
+ #include <cstring>
+ #include <limits>
++#include <new>
+ #include <utility>
+ 
+ #include "base/logging.hh"
+@@ -227,6 +228,35 @@ millisecondsRemaining(const timespec &deadline)
+         rounded, std::numeric_limits<int>::max()));
+ }
+ 
++bool
++readExactAt(int fd, std::vector<uint8_t> &bytes)
++{
++    size_t offset = 0;
++    while (offset < bytes.size()) {
++        const ssize_t result = ::pread(
++            fd, bytes.data() + offset, bytes.size() - offset,
++            static_cast<off_t>(offset));
++        if (result < 0 && errno == EINTR)
++            continue;
++        if (result <= 0)
++            return false;
++        offset += static_cast<size_t>(result);
++    }
++    return true;
++}
++
++protocol::MemoryResponse
++memoryFailure(const protocol::MemoryRequest &request,
++              protocol::Status status)
++{
++    protocol::MemoryResponse response;
++    response.status = status;
++    response.opcode = request.opcode;
++    response.allocationId = request.allocationId;
++    response.generation = request.generation;
++    return response;
++}
++
+ } // anonymous namespace
+ 
+ HostGPUBridge::ListenEvent::ListenEvent(HostGPUBridge &bridge, int fd)
+@@ -333,6 +363,8 @@ HostGPUBridge::HostGPUBridge(const HostGPUBridgeParams &params)
+     identity.supported = protocol::topologyCapability();
+     identity.supported[protocol::QueueControlCapabilityByte] |=
+         protocol::QueueControlCapabilityMask;
++    identity.supported[protocol::MemoryControlCapabilityByte] |=
++        protocol::MemoryControlCapabilityMask;
+ }
+ 
+ HostGPUBridge::~HostGPUBridge()
+@@ -777,6 +809,7 @@ HostGPUBridge::shutdown()
+         admissionBudget.reset();
+         pendingRecords.clear();
+         queueState.clear();
++        memoryState.clear();
+     }
+     endpointCleanupDone = cleanupEndpoint();
+ }
+@@ -970,7 +1003,8 @@ HostGPUBridge::receiveRecords(int fd)
+ 
+     for (size_t attempt = 0; attempt < MaximumRecordsPerWakeup; ++attempt) {
+         std::vector<uint8_t> bytes(maximumRecord);
+-        std::array<uint8_t, CMSG_SPACE(sizeof(int) * 4)> control = {};
++        alignas(cmsghdr)
++            std::array<uint8_t, CMSG_SPACE(sizeof(int) * 4)> control = {};
+         iovec vector = {bytes.data(), bytes.size()};
+         msghdr message = {};
+         message.msg_iov = &vector;
+@@ -987,9 +1021,9 @@ HostGPUBridge::receiveRecords(int fd)
+             scheduleClientClose(fd, generation);
+             return;
+         }
+-        closeReceivedFileDescriptors(message);
++        auto rights = takeReceivedFileDescriptor(message);
+         if (received == 0 || (message.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) ||
+-            message.msg_controllen != 0) {
++            rights.status == ReceivedRightsStatus::Invalid) {
+             scheduleClientClose(fd, generation);
+             return;
+         }
+@@ -998,6 +1032,11 @@ HostGPUBridge::receiveRecords(int fd)
+             return;
+         }
+         bytes.resize(static_cast<size_t>(received));
++        if (rights.status == ReceivedRightsStatus::One &&
++            !hasWireMessageType(bytes, protocol::MessageType::MemoryRequest)) {
++            scheduleClientClose(fd, generation);
++            return;
++        }
+         found = clients.find(fd);
+         if (found == clients.end() || found->second->generation != generation ||
+             !found->second->state.canReceive()) {
+@@ -1005,7 +1044,8 @@ HostGPUBridge::receiveRecords(int fd)
+         }
+         found->second->state.noteRecordReceived();
+         found->second->socketEvent->setReadable(false);
+-        pendingRecords.push_back({fd, generation, std::move(bytes)});
++        pendingRecords.push_back({
++            fd, generation, std::move(bytes), std::move(rights.descriptor)});
+         scheduleRecordService();
+         return;
+     }
+@@ -1053,6 +1093,7 @@ HostGPUBridge::closeClient(int fd)
+         activeClientFd = -1;
+     admissionBudget.release(found->second->admission);
+     queueState.disconnect(owner);
++    memoryState.disconnect({owner.fd, owner.clientGeneration});
+     clients.erase(found);
+     pendingRecords.erase(std::remove_if(
+         pendingRecords.begin(), pendingRecords.end(),
+@@ -1086,6 +1127,11 @@ HostGPUBridge::processRecords()
+             hasWireMessageType(record.bytes,
+                                protocol::MessageType::QueueRequest)) {
+             processQueueRecord(record);
++        } else if (found->second->state.phase() ==
++                       ConnectionPhase::Established &&
++                   hasWireMessageType(record.bytes,
++                                      protocol::MessageType::MemoryRequest)) {
++            processMemoryRecord(record);
+         } else {
+             processHelloRecord(record);
+         }
+@@ -1239,6 +1285,158 @@ HostGPUBridge::processQueueRecord(const PendingRecord &record)
+         scheduleQueueService();
+ }
+ 
++void
++HostGPUBridge::processMemoryRecord(const PendingRecord &record)
++{
++    auto found = clients.find(record.clientFd);
++    if (found == clients.end() ||
++        found->second->generation != record.generation) {
++        return;
++    }
++    Client &client = *found->second;
++    const auto decoded = protocol::decodeMemoryRequestRecord(
++        record.bytes.data(), record.bytes.size(), maximumRecord);
++    if (decoded.action == protocol::DecodeAction::Drop) {
++        if (decoded.closeConnection)
++            closeClient(record.clientFd);
++        return;
++    }
++
++    const bool copyOpcode =
++        decoded.request.opcode == protocol::MemoryOpcode::CopyH2D ||
++        decoded.request.opcode == protocol::MemoryOpcode::CopyD2H;
++    const bool hasCarrier = static_cast<bool>(record.carrier);
++    protocol::Status decodedStatus = decoded.status;
++    if (copyOpcode != hasCarrier)
++        decodedStatus = protocol::Status::Malformed;
++
++    protocol::Status sessionStatus = protocol::Status::Ok;
++    const bool memorySelected =
++        (client.selectedCapabilities[
++             protocol::MemoryControlCapabilityByte] &
++         protocol::MemoryControlCapabilityMask) != 0;
++    if (decoded.header.daemonUuid != identity.daemonUuid) {
++        sessionStatus = protocol::Status::InstanceMismatch;
++    } else if (decoded.header.connectionId != client.connectionId) {
++        sessionStatus = protocol::Status::ProtocolState;
++    } else if (decoded.header.jobEpoch != identity.jobEpoch) {
++        sessionStatus = protocol::Status::TopologyMismatch;
++    } else if (!memorySelected) {
++        sessionStatus = protocol::Status::UnsupportedCapability;
++    }
++    protocol::Status status = queueRequestStatus(
++        decodedStatus, sessionStatus);
++    if (status == protocol::Status::Ok) {
++        if (client.requestIds.observe(decoded.header.requestId) !=
++            RequestIdResult::Fresh) {
++            status = protocol::Status::ProtocolState;
++        }
++    }
++
++    protocol::MemoryResponse response = memoryFailure(
++        decoded.request, status);
++    if (status == protocol::Status::Ok) {
++        const HostGPUMemoryState::Owner owner{
++            record.clientFd, record.generation};
++        switch (decoded.request.opcode) {
++          case protocol::MemoryOpcode::Allocate:
++            response = memoryState.allocate(
++                owner, decoded.request, curTick());
++            break;
++          case protocol::MemoryOpcode::Free:
++            response = memoryState.free(owner, decoded.request, curTick());
++            break;
++          case protocol::MemoryOpcode::CopyH2D:
++          case protocol::MemoryOpcode::CopyD2H: {
++            response = memoryState.validateCopy(owner, decoded.request);
++            if (response.status != protocol::Status::Ok)
++                break;
++            const auto access = decoded.request.opcode ==
++                    protocol::MemoryOpcode::CopyH2D ?
++                MemoryCarrierAccess::HostToDevice :
++                MemoryCarrierAccess::DeviceToHost;
++            if (!validateMemoryCarrier(
++                    record.carrier.get(), client.uid,
++                    decoded.request.byteCount, access)) {
++                response = memoryFailure(
++                    decoded.request, protocol::Status::Unauthorized);
++                break;
++            }
++
++            std::vector<uint8_t> bytes;
++            if (decoded.request.opcode ==
++                    protocol::MemoryOpcode::CopyH2D) {
++                try {
++                    bytes.resize(
++                        static_cast<size_t>(decoded.request.byteCount));
++                } catch (const std::bad_alloc &) {
++                    response = memoryFailure(
++                        decoded.request, protocol::Status::Internal);
++                    break;
++                }
++                if (!readExactAt(record.carrier.get(), bytes)) {
++                    response = memoryFailure(
++                        decoded.request, protocol::Status::Internal);
++                    break;
++                }
++                response = memoryState.copyFromHost(
++                    owner, decoded.request, bytes, curTick());
++                break;
++            }
++
++            response = memoryState.copyToHost(
++                owner, decoded.request, bytes, curTick());
++            if (response.status != protocol::Status::Ok)
++                break;
++            const auto writeResult = writeMemoryCarrier(
++                record.carrier.get(), bytes.data(), bytes.size());
++            if (writeResult != MemoryCarrierIoResult::Ok) {
++                response = memoryFailure(
++                    decoded.request,
++                    writeResult == MemoryCarrierIoResult::ResourceExhausted ?
++                        protocol::Status::ResourceExhausted :
++                        protocol::Status::Internal);
++                break;
++            }
++            const auto finalizeResult = finalizeDeviceToHostCarrier(
++                record.carrier.get());
++            if (finalizeResult != MemoryCarrierFinalizeResult::Ok) {
++                response = memoryFailure(
++                    decoded.request,
++                    finalizeResult ==
++                            MemoryCarrierFinalizeResult::Unauthorized ?
++                        protocol::Status::Unauthorized :
++                        protocol::Status::Internal);
++                break;
++            }
++            std::vector<uint8_t> verified;
++            try {
++                verified.resize(bytes.size());
++            } catch (const std::bad_alloc &) {
++                response = memoryFailure(
++                    decoded.request, protocol::Status::Internal);
++                break;
++            }
++            if (!readExactAt(record.carrier.get(), verified) ||
++                verified != bytes ||
++                protocol::crc32c(verified.data(), verified.size()) !=
++                    response.value2) {
++                response = memoryFailure(
++                    decoded.request, protocol::Status::Internal);
++            }
++            break;
++          }
++        }
++    }
++
++    client.state.finishEstablishedRecord();
++    const auto responseHeader = protocol::queueResponseHeader(
++        decoded.header, identity, client.connectionId);
++    const auto encoded = protocol::encodeMemoryAck(responseHeader, response);
++    sendQueueResponse(record.clientFd, record.generation, encoded,
++                      OutboundKind::MemoryAck);
++}
++
+ void
+ HostGPUBridge::scheduleQueueService()
+ {
+@@ -1360,6 +1558,7 @@ HostGPUBridge::completeOutbound(int fd, uint64_t generation,
+         completeAck(fd, generation, record.status, record.success);
+         break;
+       case OutboundKind::QueueAck:
++      case OutboundKind::MemoryAck:
+         if (found->second->state.phase() == ConnectionPhase::Established &&
+             found->second->state.canReceive()) {
+             found->second->socketEvent->setReadable(true);
+diff --git a/src/dev/amdgpu/host_gpu_bridge.hh b/src/dev/amdgpu/host_gpu_bridge.hh
+index cbbf5594d..db4f00bae 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.hh
++++ b/src/dev/amdgpu/host_gpu_bridge.hh
+@@ -41,8 +41,10 @@
+ 
+ #include "base/pollevent.hh"
+ #include "dev/amdgpu/host_gpu_connection_state.hh"
++#include "dev/amdgpu/host_gpu_memory_state.hh"
+ #include "dev/amdgpu/host_gpu_protocol.hh"
+ #include "dev/amdgpu/host_gpu_queue_state.hh"
++#include "dev/amdgpu/host_gpu_socket_utils.hh"
+ #include "params/HostGPUBridge.hh"
+ #include "sim/eventq.hh"
+ #include "sim/sim_object.hh"
+@@ -111,6 +113,7 @@ class HostGPUBridge : public SimObject
+         int clientFd = -1;
+         uint64_t generation = 0;
+         std::vector<uint8_t> bytes;
++        OwnedFileDescriptor carrier;
+     };
+ 
+     enum class OutboundKind
+@@ -118,6 +121,7 @@ class HostGPUBridge : public SimObject
+         HandshakeAck,
+         QueueAck,
+         QueueCompletion,
++        MemoryAck,
+     };
+ 
+     struct OutboundRecord
+@@ -168,6 +172,7 @@ class HostGPUBridge : public SimObject
+     void processRecords();
+     void processHelloRecord(const PendingRecord &record);
+     void processQueueRecord(const PendingRecord &record);
++    void processMemoryRecord(const PendingRecord &record);
+     void scheduleRecordService();
+     void scheduleQueueService();
+     void processQueueCommands();
+@@ -224,6 +229,7 @@ class HostGPUBridge : public SimObject
+     EventFunctionWrapper recordServiceEvent;
+     HostGPUQueueState queueState;
+     EventFunctionWrapper queueServiceEvent;
++    HostGPUMemoryState memoryState;
+     uint64_t nextClientGeneration = 1;
+     std::unordered_set<uint64_t> usedConnectionIds;
+     int activeClientFd = -1;
+diff --git a/src/dev/amdgpu/host_gpu_memory_state.cc b/src/dev/amdgpu/host_gpu_memory_state.cc
+new file mode 100644
+index 000000000..b5274f97d
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_memory_state.cc
+@@ -0,0 +1,339 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE OWNER OR CONTRIBUTORS BE LIABLE FOR
++ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
++ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
++ * DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_memory_state.hh"
++
++#include <algorithm>
++#include <cassert>
++#include <limits>
++#include <new>
++#include <utility>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++protocol::MemoryResponse
++HostGPUMemoryState::responseFor(
++    const protocol::MemoryRequest &request, protocol::Status status)
++{
++    protocol::MemoryResponse response;
++    response.status = status;
++    response.opcode = request.opcode;
++    response.allocationId = request.allocationId;
++    response.generation = request.generation;
++    return response;
++}
++
++uint64_t
++HostGPUMemoryState::virtualAddress(size_t slot)
++{
++    assert(slot < MaximumAllocations);
++    assert(slot <=
++           (std::numeric_limits<uint64_t>::max() - VirtualAddressBase) /
++               VirtualAddressStride);
++    return VirtualAddressBase +
++        static_cast<uint64_t>(slot) * VirtualAddressStride;
++}
++
++bool
++HostGPUMemoryState::takeGeneration(uint64_t &generation)
++{
++    if (generationExhausted || nextGeneration == 0)
++        return false;
++    generation = nextGeneration;
++    if (nextGeneration == std::numeric_limits<uint64_t>::max()) {
++        generationExhausted = true;
++    } else {
++        ++nextGeneration;
++    }
++    return true;
++}
++
++HostGPUMemoryState::Allocation *
++HostGPUMemoryState::resolve(
++    const Owner &owner, const protocol::MemoryRequest &request)
++{
++    if (request.allocationId == 0 ||
++        request.allocationId > allocations.size()) {
++        return nullptr;
++    }
++    auto &slot = allocations[request.allocationId - 1];
++    if (!slot || !(slot->owner == owner) ||
++        slot->generation != request.generation) {
++        return nullptr;
++    }
++    return &*slot;
++}
++
++const HostGPUMemoryState::Allocation *
++HostGPUMemoryState::resolve(
++    const Owner &owner, const protocol::MemoryRequest &request) const
++{
++    if (request.allocationId == 0 ||
++        request.allocationId > allocations.size()) {
++        return nullptr;
++    }
++    const auto &slot = allocations[request.allocationId - 1];
++    if (!slot || !(slot->owner == owner) ||
++        slot->generation != request.generation) {
++        return nullptr;
++    }
++    return &*slot;
++}
++
++bool
++HostGPUMemoryState::rangeValid(
++    const Allocation &allocation, const protocol::MemoryRequest &request)
++{
++    return request.offset <= allocation.size &&
++        request.byteCount <= allocation.size - request.offset;
++}
++
++protocol::MemoryResponse
++HostGPUMemoryState::allocate(
++    const Owner &owner, const protocol::MemoryRequest &request, uint64_t now)
++{
++    if (request.byteCount == 0 ||
++        (request.argument != 4096 && request.argument != 65536)) {
++        return responseFor(request, protocol::Status::Malformed);
++    }
++    auto response = responseFor(request, protocol::Status::ResourceExhausted);
++    if (request.byteCount > MaximumAllocationBytes ||
++        request.byteCount > MaximumTotalBytes - liveBytes ||
++        liveAllocations >= MaximumAllocations) {
++        return response;
++    }
++
++    size_t slot = 0;
++    while (slot < allocations.size() && allocations[slot])
++        ++slot;
++    if (slot == allocations.size())
++        return response;
++
++    uint64_t generation = 0;
++    if (!takeGeneration(generation))
++        return response;
++    try {
++        allocations[slot].emplace(Allocation{
++            owner, generation, request.byteCount, request.argument, {}});
++    } catch (const std::bad_alloc &) {
++        return responseFor(request, protocol::Status::Internal);
++    }
++    ++liveAllocations;
++    liveBytes += request.byteCount;
++    response.status = protocol::Status::Ok;
++    response.allocationId = slot + 1;
++    response.generation = generation;
++    response.value0 = virtualAddress(slot);
++    response.value1 = request.byteCount;
++    response.value2 = request.argument;
++    response.simTick = now;
++    return response;
++}
++
++protocol::MemoryResponse
++HostGPUMemoryState::free(
++    const Owner &owner, const protocol::MemoryRequest &request, uint64_t now)
++{
++    auto response = responseFor(request, protocol::Status::ProtocolState);
++    Allocation *allocation = resolve(owner, request);
++    if (allocation == nullptr)
++        return response;
++    const uint64_t released = allocation->size;
++    allocations[request.allocationId - 1].reset();
++    --liveAllocations;
++    liveBytes -= released;
++    response.status = protocol::Status::Ok;
++    response.simTick = now;
++    return response;
++}
++
++protocol::MemoryResponse
++HostGPUMemoryState::validateCopy(
++    const Owner &owner, const protocol::MemoryRequest &request) const
++{
++    if (request.byteCount == 0 ||
++        request.offset > std::numeric_limits<uint64_t>::max() -
++            request.byteCount) {
++        return responseFor(request, protocol::Status::Malformed);
++    }
++    auto response = responseFor(request, protocol::Status::ProtocolState);
++    const Allocation *allocation = resolve(owner, request);
++    if (allocation == nullptr || !rangeValid(*allocation, request))
++        return response;
++    if (request.byteCount > MaximumTransferBytes) {
++        response.status = protocol::Status::ResourceExhausted;
++        return response;
++    }
++    response.status = protocol::Status::Ok;
++    return response;
++}
++
++protocol::MemoryResponse
++HostGPUMemoryState::copyFromHost(
++    const Owner &owner, const protocol::MemoryRequest &request,
++    const std::vector<uint8_t> &source, uint64_t now)
++{
++    auto response = validateCopy(owner, request);
++    if (response.status != protocol::Status::Ok)
++        return response;
++    if (request.opcode != protocol::MemoryOpcode::CopyH2D ||
++        source.size() != request.byteCount) {
++        return responseFor(request, protocol::Status::Internal);
++    }
++    const uint32_t crc = protocol::crc32c(source.data(), source.size());
++    if (request.argument != crc)
++        return responseFor(request, protocol::Status::Malformed);
++
++    Allocation *allocation = resolve(owner, request);
++    const uint64_t firstChunk = request.offset / ChunkBytes;
++    const uint64_t lastChunk =
++        (request.offset + request.byteCount - 1) / ChunkBytes;
++    std::vector<std::pair<uint64_t, std::unique_ptr<Chunk>>> prepared;
++    std::vector<uint64_t> inserted;
++    try {
++        prepared.reserve(static_cast<size_t>(lastChunk - firstChunk + 1));
++        for (uint64_t chunk = firstChunk; chunk <= lastChunk; ++chunk) {
++            if (allocation->chunks.find(chunk) == allocation->chunks.end()) {
++                prepared.emplace_back(chunk, std::make_unique<Chunk>());
++            }
++        }
++        allocation->chunks.reserve(
++            allocation->chunks.size() + prepared.size());
++        inserted.reserve(prepared.size());
++        for (auto &entry : prepared) {
++            const auto result = allocation->chunks.emplace(
++                entry.first, std::move(entry.second));
++            if (!result.second)
++                throw std::bad_alloc();
++            inserted.push_back(entry.first);
++        }
++    } catch (const std::bad_alloc &) {
++        for (const uint64_t chunk : inserted)
++            allocation->chunks.erase(chunk);
++        return responseFor(request, protocol::Status::Internal);
++    }
++
++    uint64_t copied = 0;
++    while (copied < request.byteCount) {
++        const uint64_t address = request.offset + copied;
++        const uint64_t chunkIndex = address / ChunkBytes;
++        const size_t chunkOffset = static_cast<size_t>(address % ChunkBytes);
++        const size_t count = static_cast<size_t>(std::min<uint64_t>(
++            request.byteCount - copied, ChunkBytes - chunkOffset));
++        auto &chunk = *allocation->chunks.at(chunkIndex);
++        std::copy_n(source.data() + static_cast<size_t>(copied), count,
++                    chunk.data() + chunkOffset);
++        copied += count;
++    }
++
++    response.status = protocol::Status::Ok;
++    response.value0 = request.offset;
++    response.value1 = request.byteCount;
++    response.value2 = crc;
++    response.simTick = now;
++    return response;
++}
++
++protocol::MemoryResponse
++HostGPUMemoryState::copyToHost(
++    const Owner &owner, const protocol::MemoryRequest &request,
++    std::vector<uint8_t> &destination, uint64_t now) const
++{
++    destination.clear();
++    auto response = validateCopy(owner, request);
++    if (response.status != protocol::Status::Ok)
++        return response;
++    if (request.opcode != protocol::MemoryOpcode::CopyD2H)
++        return responseFor(request, protocol::Status::Internal);
++
++    try {
++        destination.assign(static_cast<size_t>(request.byteCount), 0);
++    } catch (const std::bad_alloc &) {
++        return responseFor(request, protocol::Status::Internal);
++    }
++    const Allocation *allocation = resolve(owner, request);
++    uint64_t copied = 0;
++    while (copied < request.byteCount) {
++        const uint64_t address = request.offset + copied;
++        const uint64_t chunkIndex = address / ChunkBytes;
++        const size_t chunkOffset = static_cast<size_t>(address % ChunkBytes);
++        const size_t count = static_cast<size_t>(std::min<uint64_t>(
++            request.byteCount - copied, ChunkBytes - chunkOffset));
++        const auto found = allocation->chunks.find(chunkIndex);
++        if (found != allocation->chunks.end()) {
++            std::copy_n(found->second->data() + chunkOffset, count,
++                        destination.data() + static_cast<size_t>(copied));
++        }
++        copied += count;
++    }
++    const uint32_t crc = protocol::crc32c(
++        destination.data(), destination.size());
++    response.status = protocol::Status::Ok;
++    response.value0 = request.offset;
++    response.value1 = request.byteCount;
++    response.value2 = crc;
++    response.simTick = now;
++    return response;
++}
++
++void
++HostGPUMemoryState::disconnect(const Owner &owner)
++{
++    for (auto &slot : allocations) {
++        if (slot && slot->owner == owner) {
++            liveBytes -= slot->size;
++            --liveAllocations;
++            slot.reset();
++        }
++    }
++}
++
++void
++HostGPUMemoryState::clear()
++{
++    for (auto &slot : allocations)
++        slot.reset();
++    liveAllocations = 0;
++    liveBytes = 0;
++}
++
++size_t
++HostGPUMemoryState::committedChunkCount() const
++{
++    size_t count = 0;
++    for (const auto &slot : allocations) {
++        if (slot)
++            count += slot->chunks.size();
++    }
++    return count;
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_memory_state.hh b/src/dev/amdgpu/host_gpu_memory_state.hh
+new file mode 100644
+index 000000000..b20eaa088
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_memory_state.hh
+@@ -0,0 +1,125 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE OWNER OR CONTRIBUTORS BE LIABLE FOR
++ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
++ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
++ * DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_MEMORY_STATE_HH__
++#define __DEV_AMDGPU_HOST_GPU_MEMORY_STATE_HH__
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <memory>
++#include <optional>
++#include <unordered_map>
++#include <vector>
++
++#include "dev/amdgpu/host_gpu_protocol.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++/** Bounded bridge-owned functional memory; no GPU packet path is involved. */
++class HostGPUMemoryState
++{
++  public:
++    static constexpr size_t MaximumAllocations = 1024;
++    static constexpr uint64_t MaximumAllocationBytes = 2ULL << 30;
++    static constexpr uint64_t MaximumTotalBytes = 4ULL << 30;
++    static constexpr uint64_t MaximumTransferBytes = 16ULL << 20;
++    static constexpr size_t ChunkBytes = 64ULL << 10;
++    static constexpr uint64_t VirtualAddressBase = 0x0000100000000000ULL;
++    static constexpr uint64_t VirtualAddressStride = 2ULL << 30;
++
++    struct Owner
++    {
++        int fd = -1;
++        uint64_t clientGeneration = 0;
++
++        bool operator==(const Owner &other) const
++        {
++            return fd == other.fd &&
++                   clientGeneration == other.clientGeneration;
++        }
++    };
++
++    protocol::MemoryResponse allocate(
++        const Owner &owner, const protocol::MemoryRequest &request,
++        uint64_t now);
++    protocol::MemoryResponse free(
++        const Owner &owner, const protocol::MemoryRequest &request,
++        uint64_t now);
++    protocol::MemoryResponse validateCopy(
++        const Owner &owner, const protocol::MemoryRequest &request) const;
++    protocol::MemoryResponse copyFromHost(
++        const Owner &owner, const protocol::MemoryRequest &request,
++        const std::vector<uint8_t> &source, uint64_t now);
++    protocol::MemoryResponse copyToHost(
++        const Owner &owner, const protocol::MemoryRequest &request,
++        std::vector<uint8_t> &destination, uint64_t now) const;
++
++    void disconnect(const Owner &owner);
++    void clear();
++
++    size_t allocationCount() const { return liveAllocations; }
++    uint64_t totalBytes() const { return liveBytes; }
++    size_t committedChunkCount() const;
++
++  private:
++    using Chunk = std::array<uint8_t, ChunkBytes>;
++
++    struct Allocation
++    {
++        Owner owner;
++        uint64_t generation = 0;
++        uint64_t size = 0;
++        uint64_t alignment = 0;
++        std::unordered_map<uint64_t, std::unique_ptr<Chunk>> chunks;
++    };
++
++    static protocol::MemoryResponse responseFor(
++        const protocol::MemoryRequest &request, protocol::Status status);
++    Allocation *resolve(
++        const Owner &owner, const protocol::MemoryRequest &request);
++    const Allocation *resolve(
++        const Owner &owner, const protocol::MemoryRequest &request) const;
++    static bool rangeValid(
++        const Allocation &allocation, const protocol::MemoryRequest &request);
++    bool takeGeneration(uint64_t &generation);
++    static uint64_t virtualAddress(size_t slot);
++
++    std::array<std::optional<Allocation>, MaximumAllocations> allocations;
++    uint64_t nextGeneration = 1;
++    bool generationExhausted = false;
++    size_t liveAllocations = 0;
++    uint64_t liveBytes = 0;
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_MEMORY_STATE_HH__
+diff --git a/src/dev/amdgpu/host_gpu_memory_state.test.cc b/src/dev/amdgpu/host_gpu_memory_state.test.cc
+new file mode 100644
+index 000000000..5496a9888
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_memory_state.test.cc
+@@ -0,0 +1,279 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE OWNER OR CONTRIBUTORS BE LIABLE FOR
++ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
++ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
++ * DAMAGE.
++ */
++
++#include <gtest/gtest.h>
++
++#include <algorithm>
++#include <cstdint>
++#include <limits>
++#include <vector>
++
++#include "dev/amdgpu/host_gpu_memory_state.hh"
++
++namespace gem5::hostgpu
++{
++namespace
++{
++
++HostGPUMemoryState::Owner
++owner(int fd = 7, uint64_t generation = 11)
++{
++    return {fd, generation};
++}
++
++protocol::MemoryRequest
++allocate(uint64_t bytes, uint64_t alignment = 4096)
++{
++    protocol::MemoryRequest request;
++    request.opcode = protocol::MemoryOpcode::Allocate;
++    request.byteCount = bytes;
++    request.argument = alignment;
++    return request;
++}
++
++protocol::MemoryRequest
++freeRequest(const protocol::MemoryResponse &allocation)
++{
++    protocol::MemoryRequest request;
++    request.opcode = protocol::MemoryOpcode::Free;
++    request.allocationId = allocation.allocationId;
++    request.generation = allocation.generation;
++    return request;
++}
++
++protocol::MemoryRequest
++copyRequest(const protocol::MemoryResponse &allocation,
++            protocol::MemoryOpcode opcode, uint64_t offset, uint64_t bytes)
++{
++    protocol::MemoryRequest request;
++    request.opcode = opcode;
++    request.allocationId = allocation.allocationId;
++    request.generation = allocation.generation;
++    request.offset = offset;
++    request.byteCount = bytes;
++    return request;
++}
++
++TEST(HostGPUMemoryState, LargeAllocationIsSparseAndInitiallyZero)
++{
++    HostGPUMemoryState state;
++    const auto allocation = state.allocate(
++        owner(), allocate(HostGPUMemoryState::MaximumAllocationBytes, 65536),
++        10);
++    ASSERT_EQ(allocation.status, protocol::Status::Ok);
++    EXPECT_EQ(allocation.allocationId, 1U);
++    EXPECT_NE(allocation.generation, 0U);
++    EXPECT_EQ(allocation.value0, HostGPUMemoryState::VirtualAddressBase);
++    EXPECT_EQ(allocation.value1,
++              HostGPUMemoryState::MaximumAllocationBytes);
++    EXPECT_EQ(state.committedChunkCount(), 0U);
++
++    auto read = copyRequest(allocation, protocol::MemoryOpcode::CopyD2H,
++                            HostGPUMemoryState::ChunkBytes - 8, 16);
++    std::vector<uint8_t> bytes;
++    const auto response = state.copyToHost(owner(), read, bytes, 11);
++    EXPECT_EQ(response.status, protocol::Status::Ok);
++    EXPECT_EQ(bytes, std::vector<uint8_t>(16, 0));
++    EXPECT_EQ(state.committedChunkCount(), 0U);
++}
++
++TEST(HostGPUMemoryState, CrossChunkWriteCommitsOnlyAfterCrcValidation)
++{
++    HostGPUMemoryState state;
++    const auto allocation = state.allocate(
++        owner(), allocate(HostGPUMemoryState::ChunkBytes * 2), 1);
++    ASSERT_EQ(allocation.status, protocol::Status::Ok);
++
++    std::vector<uint8_t> source(96);
++    for (size_t index = 0; index < source.size(); ++index)
++        source[index] = static_cast<uint8_t>(index * 7 + 3);
++    auto write = copyRequest(allocation, protocol::MemoryOpcode::CopyH2D,
++                             HostGPUMemoryState::ChunkBytes - 8,
++                             source.size());
++    write.argument = protocol::crc32c(source.data(), source.size()) ^ 1U;
++    EXPECT_EQ(state.copyFromHost(owner(), write, source, 2).status,
++              protocol::Status::Malformed);
++    EXPECT_EQ(state.committedChunkCount(), 0U);
++
++    write.argument = protocol::crc32c(source.data(), source.size());
++    const auto stored = state.copyFromHost(owner(), write, source, 3);
++    EXPECT_EQ(stored.status, protocol::Status::Ok);
++    EXPECT_EQ(stored.value0, write.offset);
++    EXPECT_EQ(stored.value1, source.size());
++    EXPECT_EQ(stored.value2, write.argument);
++    EXPECT_EQ(state.committedChunkCount(), 2U);
++
++    auto read = copyRequest(allocation, protocol::MemoryOpcode::CopyD2H,
++                            write.offset - 4, source.size() + 8);
++    std::vector<uint8_t> result;
++    const auto loaded = state.copyToHost(owner(), read, result, 4);
++    ASSERT_EQ(loaded.status, protocol::Status::Ok);
++    ASSERT_EQ(result.size(), source.size() + 8);
++    EXPECT_TRUE(std::all_of(result.begin(), result.begin() + 4,
++                            [](uint8_t byte) { return byte == 0; }));
++    EXPECT_TRUE(std::equal(source.begin(), source.end(), result.begin() + 4));
++    EXPECT_TRUE(std::all_of(result.end() - 4, result.end(),
++                            [](uint8_t byte) { return byte == 0; }));
++    EXPECT_EQ(loaded.value2, protocol::crc32c(result.data(), result.size()));
++}
++
++TEST(HostGPUMemoryState, ReusesSlotOnlyWithNewGenerationAndZeroBacking)
++{
++    HostGPUMemoryState state;
++    const auto first = state.allocate(owner(), allocate(65536), 1);
++    ASSERT_EQ(first.status, protocol::Status::Ok);
++    std::vector<uint8_t> bytes(16, 0xa5);
++    auto write = copyRequest(
++        first, protocol::MemoryOpcode::CopyH2D, 0, bytes.size());
++    write.argument = protocol::crc32c(bytes.data(), bytes.size());
++    ASSERT_EQ(state.copyFromHost(owner(), write, bytes, 2).status,
++              protocol::Status::Ok);
++    ASSERT_EQ(state.free(owner(), freeRequest(first), 3).status,
++              protocol::Status::Ok);
++
++    const auto second = state.allocate(owner(), allocate(65536), 4);
++    ASSERT_EQ(second.status, protocol::Status::Ok);
++    EXPECT_EQ(second.allocationId, first.allocationId);
++    EXPECT_NE(second.generation, first.generation);
++    EXPECT_EQ(second.value0, first.value0);
++    EXPECT_EQ(state.free(owner(), freeRequest(first), 5).status,
++              protocol::Status::ProtocolState);
++
++    std::vector<uint8_t> loaded;
++    const auto read = copyRequest(
++        second, protocol::MemoryOpcode::CopyD2H, 0, bytes.size());
++    ASSERT_EQ(state.copyToHost(owner(), read, loaded, 6).status,
++              protocol::Status::Ok);
++    EXPECT_EQ(loaded, std::vector<uint8_t>(bytes.size(), 0));
++}
++
++TEST(HostGPUMemoryState, EnforcesRangeTransferAndLogicalByteLimits)
++{
++    HostGPUMemoryState state;
++    const auto first = state.allocate(
++        owner(), allocate(HostGPUMemoryState::MaximumAllocationBytes), 1);
++    const auto second = state.allocate(
++        owner(), allocate(HostGPUMemoryState::MaximumAllocationBytes), 2);
++    ASSERT_EQ(first.status, protocol::Status::Ok);
++    ASSERT_EQ(second.status, protocol::Status::Ok);
++    EXPECT_EQ(state.totalBytes(), HostGPUMemoryState::MaximumTotalBytes);
++    EXPECT_EQ(state.allocate(owner(), allocate(1), 3).status,
++              protocol::Status::ResourceExhausted);
++    const auto tooLarge = state.allocate(
++        owner(), allocate(HostGPUMemoryState::MaximumAllocationBytes + 1), 4);
++    EXPECT_EQ(tooLarge.status, protocol::Status::ResourceExhausted);
++    EXPECT_EQ(tooLarge.value0, 0U);
++    EXPECT_EQ(tooLarge.value1, 0U);
++    EXPECT_EQ(tooLarge.value2, 0U);
++    EXPECT_EQ(tooLarge.simTick, 0U);
++
++    auto oversized = copyRequest(
++        first, protocol::MemoryOpcode::CopyD2H, 0,
++        HostGPUMemoryState::MaximumTransferBytes + 1);
++    EXPECT_EQ(state.validateCopy(owner(), oversized).status,
++              protocol::Status::ResourceExhausted);
++    auto outside = copyRequest(
++        first, protocol::MemoryOpcode::CopyD2H,
++        HostGPUMemoryState::MaximumAllocationBytes - 7, 8);
++    EXPECT_EQ(state.validateCopy(owner(), outside).status,
++              protocol::Status::ProtocolState);
++    EXPECT_EQ(state.validateCopy(owner(8, 11),
++                                 copyRequest(first,
++                                     protocol::MemoryOpcode::CopyD2H, 0, 1))
++                  .status,
++              protocol::Status::ProtocolState);
++
++    auto zero = copyRequest(
++        first, protocol::MemoryOpcode::CopyD2H, 0, 0);
++    EXPECT_EQ(state.validateCopy(owner(), zero).status,
++              protocol::Status::Malformed);
++    auto overflow = copyRequest(
++        first, protocol::MemoryOpcode::CopyD2H,
++        std::numeric_limits<uint64_t>::max(), 2);
++    EXPECT_EQ(state.validateCopy(owner(), overflow).status,
++              protocol::Status::Malformed);
++}
++
++TEST(HostGPUMemoryState, SlotSevenUsesFrozenVirtualAddressFormula)
++{
++    HostGPUMemoryState state;
++    protocol::MemoryResponse seventh;
++    for (size_t slot = 0; slot < 7; ++slot) {
++        seventh = state.allocate(owner(), allocate(4096), slot + 1);
++        ASSERT_EQ(seventh.status, protocol::Status::Ok);
++    }
++    EXPECT_EQ(seventh.allocationId, 7U);
++    EXPECT_EQ(seventh.value0, 0x0000100300000000ULL);
++}
++
++TEST(HostGPUMemoryState, ClearDoesNotReuseDaemonLifetimeGeneration)
++{
++    HostGPUMemoryState state;
++    const auto first = state.allocate(owner(), allocate(4096), 1);
++    ASSERT_EQ(first.status, protocol::Status::Ok);
++    state.clear();
++    const auto second = state.allocate(owner(), allocate(4096), 2);
++    ASSERT_EQ(second.status, protocol::Status::Ok);
++    EXPECT_EQ(second.allocationId, first.allocationId);
++    EXPECT_GT(second.generation, first.generation);
++}
++
++TEST(HostGPUMemoryState, DisconnectReclaimsOnlyMatchingClientGeneration)
++{
++    HostGPUMemoryState state;
++    const auto first = state.allocate(owner(9, 1), allocate(4096), 1);
++    const auto second = state.allocate(owner(9, 2), allocate(8192), 2);
++    ASSERT_EQ(first.status, protocol::Status::Ok);
++    ASSERT_EQ(second.status, protocol::Status::Ok);
++    state.disconnect(owner(9, 1));
++    EXPECT_EQ(state.allocationCount(), 1U);
++    EXPECT_EQ(state.totalBytes(), 8192U);
++    EXPECT_EQ(state.free(owner(9, 1), freeRequest(first), 3).status,
++              protocol::Status::ProtocolState);
++    EXPECT_EQ(state.free(owner(9, 2), freeRequest(second), 4).status,
++              protocol::Status::Ok);
++    EXPECT_EQ(state.allocationCount(), 0U);
++}
++
++TEST(HostGPUMemoryState, EnforcesSlotLimitWithoutEagerBacking)
++{
++    HostGPUMemoryState state;
++    std::vector<protocol::MemoryResponse> allocations;
++    allocations.reserve(HostGPUMemoryState::MaximumAllocations);
++    for (size_t index = 0; index < HostGPUMemoryState::MaximumAllocations;
++         ++index) {
++        const auto allocation = state.allocate(owner(), allocate(1), index);
++        ASSERT_EQ(allocation.status, protocol::Status::Ok);
++        allocations.push_back(allocation);
++    }
++    EXPECT_EQ(state.committedChunkCount(), 0U);
++    EXPECT_EQ(state.allocate(owner(), allocate(1), 2000).status,
++              protocol::Status::ResourceExhausted);
++}
++
++} // anonymous namespace
++} // namespace gem5::hostgpu
+diff --git a/src/dev/amdgpu/host_gpu_protocol.cc b/src/dev/amdgpu/host_gpu_protocol.cc
+index 9ccb6c9bf..6479482fa 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.cc
++++ b/src/dev/amdgpu/host_gpu_protocol.cc
+@@ -58,6 +58,13 @@ validQueueOpcode(uint16_t raw)
+            raw <= static_cast<uint16_t>(QueueOpcode::Doorbell);
+ }
+ 
++bool
++validMemoryOpcode(uint16_t raw)
++{
++    return raw >= static_cast<uint16_t>(MemoryOpcode::Allocate) &&
++           raw <= static_cast<uint16_t>(MemoryOpcode::CopyD2H);
++}
++
+ uint16_t
+ load16(const uint8_t *data)
+ {
+@@ -109,6 +116,25 @@ store64(std::vector<uint8_t> &data, size_t offset, uint64_t value)
+     }
+ }
+ 
++uint32_t
++calculateCrc32c(const uint8_t *data, size_t size, bool zeroRecordChecksum)
++{
++    uint32_t crc = 0xffffffffU;
++    for (size_t index = 0; index < size; ++index) {
++        uint8_t byte = data[index];
++        if (zeroRecordChecksum && index >= CrcOffset &&
++            index < CrcOffset + sizeof(uint32_t)) {
++            byte = 0;
++        }
++        crc ^= byte;
++        for (unsigned bit = 0; bit < 8; ++bit) {
++            const uint32_t mask = 0U - (crc & 1U);
++            crc = (crc >> 1) ^ (0x82f63b78U & mask);
++        }
++    }
++    return crc ^ 0xffffffffU;
++}
++
+ template <size_t N>
+ void
+ storeBytes(std::vector<uint8_t> &data, size_t offset,
+@@ -176,7 +202,8 @@ encodeFrame(const Header &header, const std::vector<uint8_t> &payload)
+     store64(frame, 48, header.connectionId);
+     store64(frame, 56, header.jobEpoch);
+     std::copy(payload.begin(), payload.end(), frame.begin() + HeaderBytes);
+-    store32(frame, CrcOffset, crc32c(frame.data(), frame.size()));
++    store32(frame, CrcOffset,
++            calculateCrc32c(frame.data(), frame.size(), true));
+     return frame;
+ }
+ 
+@@ -358,6 +385,14 @@ queueControlCapability()
+     return capabilities;
+ }
+ 
++Capabilities
++memoryControlCapability()
++{
++    Capabilities capabilities = {};
++    capabilities[MemoryControlCapabilityByte] = MemoryControlCapabilityMask;
++    return capabilities;
++}
++
+ bool
+ capabilitySubset(const Capabilities &subset, const Capabilities &superset)
+ {
+@@ -371,18 +406,7 @@ capabilitySubset(const Capabilities &subset, const Capabilities &superset)
+ uint32_t
+ crc32c(const uint8_t *data, size_t size)
+ {
+-    uint32_t crc = 0xffffffffU;
+-    for (size_t index = 0; index < size; ++index) {
+-        uint8_t byte = data[index];
+-        if (index >= CrcOffset && index < CrcOffset + sizeof(uint32_t))
+-            byte = 0;
+-        crc ^= byte;
+-        for (unsigned bit = 0; bit < 8; ++bit) {
+-            const uint32_t mask = 0U - (crc & 1U);
+-            crc = (crc >> 1) ^ (0x82f63b78U & mask);
+-        }
+-    }
+-    return crc ^ 0xffffffffU;
++    return calculateCrc32c(data, size, false);
+ }
+ 
+ DecodeResult
+@@ -420,7 +444,7 @@ decodeHelloRecord(const uint8_t *record, size_t size,
+         load64(record + 72) != 0) {
+         return drop("request or reserved field");
+     }
+-    if (crc32c(record, size) != load32(record + CrcOffset))
++    if (calculateCrc32c(record, size, true) != load32(record + CrcOffset))
+         return drop("CRC32C");
+ 
+     const uint8_t *payload = record + HeaderBytes;
+@@ -501,6 +525,11 @@ negotiate(const Header &header, const Hello &hello,
+         result.selected[QueueControlCapabilityByte] &=
+             ~QueueControlCapabilityMask;
+     }
++    if ((hello.required[MemoryControlCapabilityByte] &
++         MemoryControlCapabilityMask) == 0) {
++        result.selected[MemoryControlCapabilityByte] &=
++            ~MemoryControlCapabilityMask;
++    }
+     if (hello.unknownCriticalTlv ||
+         !capabilitySubset(hello.required, result.selected) ||
+         (hello.offered[0] & 1) == 0 ||
+@@ -597,9 +626,9 @@ queueAcknowledge(Status status, const std::string &reason,
+ }
+ 
+ bool
+-decodeQueueEnvelope(const uint8_t *record, size_t size,
+-                    uint32_t configuredMaximum, Header &header,
+-                    const uint8_t *&payload, std::string &reason)
++decodeEstablishedEnvelope(const uint8_t *record, size_t size,
++                          uint32_t configuredMaximum, Header &header,
++                          const uint8_t *&payload, std::string &reason)
+ {
+     if (record == nullptr || size < HeaderBytes ||
+         size > MaximumRecordBytes || size > configuredMaximum) {
+@@ -628,7 +657,8 @@ decodeQueueEnvelope(const uint8_t *record, size_t size,
+         reason = "request identity or reserved field";
+         return false;
+     }
+-    if (crc32c(record, size) != load32(record + CrcOffset)) {
++    if (calculateCrc32c(record, size, true) !=
++        load32(record + CrcOffset)) {
+         reason = "CRC32C";
+         return false;
+     }
+@@ -645,8 +675,8 @@ decodeQueueRequestRecord(const uint8_t *record, size_t size,
+     Header header;
+     const uint8_t *payload = nullptr;
+     std::string reason;
+-    if (!decodeQueueEnvelope(record, size, configuredMaximum, header, payload,
+-                             reason))
++    if (!decodeEstablishedEnvelope(record, size, configuredMaximum, header,
++                                   payload, reason))
+         return queueDrop(reason);
+     if (header.messageType != MessageType::QueueRequest)
+         return queueDrop("expected QUEUE_REQUEST");
+@@ -713,6 +743,104 @@ decodeQueueRequestRecord(const uint8_t *record, size_t size,
+                             request);
+ }
+ 
++MemoryDecodeResult
++decodeMemoryRequestRecord(const uint8_t *record, size_t size,
++                          uint32_t configuredMaximum)
++{
++    Header header;
++    const uint8_t *payload = nullptr;
++    std::string reason;
++    if (!decodeEstablishedEnvelope(record, size, configuredMaximum, header,
++                                   payload, reason)) {
++        MemoryDecodeResult result;
++        result.reason = reason;
++        return result;
++    }
++    if (header.messageType != MessageType::MemoryRequest) {
++        MemoryDecodeResult result;
++        result.reason = "expected MEMORY_REQUEST";
++        return result;
++    }
++    if (size - HeaderBytes != MemoryPayloadBytes) {
++        MemoryDecodeResult result;
++        result.reason = "memory payload length";
++        return result;
++    }
++
++    MemoryRequest request;
++    request.major = load16(payload);
++    request.minor = load16(payload + 2);
++    const uint16_t rawOpcode = load16(payload + 4);
++    request.opcode = static_cast<MemoryOpcode>(rawOpcode);
++    request.flags = load16(payload + 6);
++    request.allocationId = load64(payload + 8);
++    request.generation = load64(payload + 16);
++    request.offset = load64(payload + 24);
++    request.byteCount = load64(payload + 32);
++    request.argument = load64(payload + 40);
++    const uint64_t reserved0 = load64(payload + 48);
++    const uint64_t reserved1 = load64(payload + 56);
++
++    auto acknowledge = [&](Status status, const std::string &why) {
++        MemoryDecodeResult result;
++        result.action = DecodeAction::Acknowledge;
++        result.closeConnection = false;
++        result.status = status;
++        result.reason = why;
++        result.header = header;
++        result.request = request;
++        return result;
++    };
++
++    if (!validMemoryOpcode(rawOpcode) || request.flags != 0 ||
++        reserved0 != 0 || reserved1 != 0) {
++        return acknowledge(Status::Malformed,
++                           "invalid simulated-memory fields");
++    }
++
++    switch (request.opcode) {
++      case MemoryOpcode::Allocate:
++        if (request.allocationId != 0 || request.generation != 0 ||
++            request.offset != 0 || request.byteCount == 0 ||
++            (request.argument != 4096 && request.argument != 65536)) {
++            return acknowledge(Status::Malformed,
++                               "invalid allocation fields");
++        }
++        break;
++      case MemoryOpcode::Free:
++        if (request.allocationId == 0 || request.generation == 0 ||
++            request.offset != 0 || request.byteCount != 0 ||
++            request.argument != 0) {
++            return acknowledge(Status::Malformed, "invalid free fields");
++        }
++        break;
++      case MemoryOpcode::CopyH2D:
++        if (request.allocationId == 0 || request.generation == 0 ||
++            request.byteCount == 0 ||
++            request.offset > std::numeric_limits<uint64_t>::max() -
++                request.byteCount ||
++            request.argument > std::numeric_limits<uint32_t>::max()) {
++            return acknowledge(Status::Malformed, "invalid H2D fields");
++        }
++        break;
++      case MemoryOpcode::CopyD2H:
++        if (request.allocationId == 0 || request.generation == 0 ||
++            request.byteCount == 0 ||
++            request.offset > std::numeric_limits<uint64_t>::max() -
++                request.byteCount ||
++            request.argument != 0) {
++            return acknowledge(Status::Malformed, "invalid D2H fields");
++        }
++        break;
++    }
++    if (request.major != MemoryControlMajor ||
++        request.minor != MemoryControlMinor) {
++        return acknowledge(Status::UnsupportedVersion,
++                           "unsupported simulated-memory version");
++    }
++    return acknowledge(Status::Ok, "valid simulated-memory request");
++}
++
+ std::vector<uint8_t>
+ encodeAck(const Header &request, const Ack &ack,
+           const ServerIdentity &server, uint64_t connectionId)
+@@ -759,6 +887,24 @@ encodeQueueRequest(const Header &header, const QueueRequest &request)
+     return encodeFrame(encoded, payload);
+ }
+ 
++std::vector<uint8_t>
++encodeMemoryRequest(const Header &header, const MemoryRequest &request)
++{
++    std::vector<uint8_t> payload(MemoryPayloadBytes, 0);
++    store16(payload, 0, request.major);
++    store16(payload, 2, request.minor);
++    store16(payload, 4, static_cast<uint16_t>(request.opcode));
++    store16(payload, 6, request.flags);
++    store64(payload, 8, request.allocationId);
++    store64(payload, 16, request.generation);
++    store64(payload, 24, request.offset);
++    store64(payload, 32, request.byteCount);
++    store64(payload, 40, request.argument);
++    Header encoded = header;
++    encoded.messageType = MessageType::MemoryRequest;
++    return encodeFrame(encoded, payload);
++}
++
+ Header
+ queueResponseHeader(const Header &request, const ServerIdentity &server,
+                     uint64_t connectionId)
+@@ -810,6 +956,27 @@ encodeQueueCompletion(const Header &request, const QueueResponse &response)
+                                response);
+ }
+ 
++std::vector<uint8_t>
++encodeMemoryAck(const Header &request, const MemoryResponse &response)
++{
++    std::vector<uint8_t> payload(MemoryPayloadBytes, 0);
++    store16(payload, 0, MemoryControlMajor);
++    store16(payload, 2, MemoryControlMinor);
++    store32(payload, 4, static_cast<uint32_t>(response.status));
++    store16(payload, 8, static_cast<uint16_t>(response.opcode));
++    store64(payload, 16, response.allocationId);
++    store64(payload, 24, response.generation);
++    if (response.status == Status::Ok) {
++        store64(payload, 32, response.value0);
++        store64(payload, 40, response.value1);
++        store64(payload, 48, response.value2);
++        store64(payload, 56, response.simTick);
++    }
++    Header encoded = request;
++    encoded.messageType = MessageType::MemoryAck;
++    return encodeFrame(encoded, payload);
++}
++
+ const char *
+ statusName(Status status)
+ {
+diff --git a/src/dev/amdgpu/host_gpu_protocol.hh b/src/dev/amdgpu/host_gpu_protocol.hh
+index d49a50f79..821f0c80b 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.hh
++++ b/src/dev/amdgpu/host_gpu_protocol.hh
+@@ -45,6 +45,7 @@ constexpr size_t HeaderBytes = 80;
+ constexpr size_t HelloFixedBytes = 96;
+ constexpr size_t AckFixedBytes = 80;
+ constexpr size_t QueuePayloadBytes = 64;
++constexpr size_t MemoryPayloadBytes = 64;
+ constexpr size_t CapabilityBytes = 32;
+ constexpr size_t UuidBytes = 16;
+ constexpr uint32_t MinimumRecordBytes = 4096;
+@@ -58,6 +59,10 @@ constexpr uint16_t QueueControlMajor = 1;
+ constexpr uint16_t QueueControlMinor = 0;
+ constexpr uint8_t QueueControlCapabilityByte = 0;
+ constexpr uint8_t QueueControlCapabilityMask = 0x02;
++constexpr uint16_t MemoryControlMajor = 1;
++constexpr uint16_t MemoryControlMinor = 0;
++constexpr uint8_t MemoryControlCapabilityByte = 0;
++constexpr uint8_t MemoryControlCapabilityMask = 0x04;
+ 
+ using Uuid = std::array<uint8_t, UuidBytes>;
+ using Capabilities = std::array<uint8_t, CapabilityBytes>;
+@@ -70,6 +75,16 @@ enum class MessageType : uint16_t
+     QueueRequest = 3,
+     QueueAck = 4,
+     QueueCompletion = 5,
++    MemoryRequest = 6,
++    MemoryAck = 7,
++};
++
++enum class MemoryOpcode : uint16_t
++{
++    Allocate = 1,
++    Free = 2,
++    CopyH2D = 3,
++    CopyD2H = 4,
+ };
+ 
+ enum class QueueOpcode : uint16_t
+@@ -234,12 +249,52 @@ struct QueueDecodeResult
+     QueueRequest request;
+ };
+ 
++/** Versioned simulated-memory request; payload bytes travel only by memfd. */
++struct MemoryRequest
++{
++    uint16_t major = MemoryControlMajor;
++    uint16_t minor = MemoryControlMinor;
++    MemoryOpcode opcode = MemoryOpcode::Allocate;
++    uint16_t flags = 0;
++    uint64_t allocationId = 0;
++    uint64_t generation = 0;
++    uint64_t offset = 0;
++    uint64_t byteCount = 0;
++    uint64_t argument = 0;
++};
++
++/** Fixed-width terminal result for a simulated-memory request. */
++struct MemoryResponse
++{
++    uint16_t major = MemoryControlMajor;
++    uint16_t minor = MemoryControlMinor;
++    Status status = Status::Internal;
++    MemoryOpcode opcode = MemoryOpcode::Allocate;
++    uint64_t allocationId = 0;
++    uint64_t generation = 0;
++    uint64_t value0 = 0;
++    uint64_t value1 = 0;
++    uint64_t value2 = 0;
++    uint64_t simTick = 0;
++};
++
++struct MemoryDecodeResult
++{
++    DecodeAction action = DecodeAction::Drop;
++    bool closeConnection = true;
++    Status status = Status::Malformed;
++    std::string reason;
++    Header header;
++    MemoryRequest request;
++};
++
+ bool isZero(const Uuid &value);
+ bool parseUuid(const std::string &text, Uuid &value);
+ std::string formatUuid(const Uuid &value);
+ 
+ Capabilities topologyCapability();
+ Capabilities queueControlCapability();
++Capabilities memoryControlCapability();
+ bool capabilitySubset(const Capabilities &subset,
+                       const Capabilities &superset);
+ 
+@@ -249,6 +304,8 @@ DecodeResult decodeHelloRecord(const uint8_t *record, size_t size,
+                                uint32_t configuredMaximum);
+ QueueDecodeResult decodeQueueRequestRecord(const uint8_t *record, size_t size,
+                                            uint32_t configuredMaximum);
++MemoryDecodeResult decodeMemoryRequestRecord(
++    const uint8_t *record, size_t size, uint32_t configuredMaximum);
+ NegotiationResult negotiate(const Header &header, const Hello &hello,
+                             const ServerIdentity &server,
+                             const NegotiationContext &context = {});
+@@ -266,6 +323,10 @@ std::vector<uint8_t> encodeQueueAck(const Header &request,
+                                     const QueueResponse &response);
+ std::vector<uint8_t> encodeQueueCompletion(const Header &request,
+                                             const QueueResponse &response);
++std::vector<uint8_t> encodeMemoryRequest(const Header &header,
++                                         const MemoryRequest &request);
++std::vector<uint8_t> encodeMemoryAck(const Header &request,
++                                     const MemoryResponse &response);
+ 
+ const char *statusName(Status status);
+ 
+diff --git a/src/dev/amdgpu/host_gpu_protocol.test.cc b/src/dev/amdgpu/host_gpu_protocol.test.cc
+index bdd92dd67..625f8fcc5 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.test.cc
++++ b/src/dev/amdgpu/host_gpu_protocol.test.cc
+@@ -98,6 +98,70 @@ constexpr char GoldenQueueErrorCompletionHex[] =
+     "102030405060708088776655443322110100000000000002"
+     "00000000000000020000000000000001123456789abcdef1";
+ 
++constexpr char GoldenMemoryAllocRequestHex[] =
++    "4753494d5250430000010000005000060000000000000040"
++    "0123456789abcdf100112233445566778899aabbccddeeff"
++    "1122334455667788010203040506070891fdb84e00000000"
++    "000000000000000000010000000100000000000000000000"
++    "000000000000000000000000000000000000000000010000"
++    "000000000001000000000000000000000000000000000000";
++
++constexpr char GoldenMemoryAllocAckHex[] =
++    "4753494d5250430000010000005000070000000000000040"
++    "0123456789abcdf100112233445566778899aabbccddeeff"
++    "11223344556677880102030405060708c6f7e53000000000"
++    "000000000000000000010000000000000001000000000000"
++    "000000000000000788776655443322110000100300000000"
++    "00000000000100000000000000010000123456789abcdef2";
++
++constexpr char GoldenMemoryH2DRequestHex[] =
++    "4753494d5250430000010000005000060000000000000040"
++    "0123456789abcdf200112233445566778899aabbccddeeff"
++    "112233445566778801020304050607085d4ceda600000000"
++    "000000000000000000010000000300000000000000000007"
++    "887766554433221100000000000010000000000000000010"
++    "0000000048dfe98200000000000000000000000000000000";
++
++constexpr char GoldenMemoryH2DAckHex[] =
++    "4753494d5250430000010000005000070000000000000040"
++    "0123456789abcdf200112233445566778899aabbccddeeff"
++    "112233445566778801020304050607087f6468ee00000000"
++    "000000000000000000010000000000000003000000000000"
++    "000000000000000788776655443322110000000000001000"
++    "00000000000000100000000048dfe982123456789abcdef3";
++
++constexpr char GoldenMemoryD2HRequestHex[] =
++    "4753494d5250430000010000005000060000000000000040"
++    "0123456789abcdf300112233445566778899aabbccddeeff"
++    "112233445566778801020304050607089cc6b0a700000000"
++    "000000000000000000010000000400000000000000000007"
++    "887766554433221100000000000010000000000000000010"
++    "000000000000000000000000000000000000000000000000";
++
++constexpr char GoldenMemoryD2HAckHex[] =
++    "4753494d5250430000010000005000070000000000000040"
++    "0123456789abcdf300112233445566778899aabbccddeeff"
++    "112233445566778801020304050607089465fa5e00000000"
++    "000000000000000000010000000000000004000000000000"
++    "000000000000000788776655443322110000000000001000"
++    "00000000000000100000000048dfe982123456789abcdef4";
++
++constexpr char GoldenMemoryFreeRequestHex[] =
++    "4753494d5250430000010000005000060000000000000040"
++    "0123456789abcdf400112233445566778899aabbccddeeff"
++    "11223344556677880102030405060708a966c7a900000000"
++    "000000000000000000010000000200000000000000000007"
++    "887766554433221100000000000000000000000000000000"
++    "000000000000000000000000000000000000000000000000";
++
++constexpr char GoldenMemoryFreeAckHex[] =
++    "4753494d5250430000010000005000070000000000000040"
++    "0123456789abcdf400112233445566778899aabbccddeeff"
++    "11223344556677880102030405060708e6b8578e00000000"
++    "000000000000000000010000000000000002000000000000"
++    "000000000000000788776655443322110000000000000000"
++    "00000000000000000000000000000000123456789abcdef5";
++
+ std::vector<uint8_t>
+ fromHex(const std::string &text)
+ {
+@@ -154,6 +218,13 @@ load64(const uint8_t *data)
+     return value;
+ }
+ 
++uint16_t
++load16(const uint8_t *data)
++{
++    return (static_cast<uint16_t>(data[0]) << 8) |
++        static_cast<uint16_t>(data[1]);
++}
++
+ void
+ recomputeCrc(std::vector<uint8_t> &frame)
+ {
+@@ -206,6 +277,15 @@ goldenQueueHeader()
+     return header;
+ }
+ 
++Header
++goldenMemoryHeader(uint64_t requestId)
++{
++    Header header = goldenHeader();
++    header.requestId = requestId;
++    header.connectionId = 0x1122334455667788ULL;
++    return header;
++}
++
+ QueueRequest
+ goldenQueueRequest()
+ {
+@@ -253,6 +333,18 @@ TEST(HostGpuProtocol, Crc32cCheckVector)
+     EXPECT_EQ(crc32c(check.data(), check.size()), 0xe3069283U);
+ }
+ 
++TEST(HostGpuProtocol, ContentCrcDoesNotIgnoreFrameChecksumOffsets)
++{
++    std::array<uint8_t, 80> zero = {};
++    auto changed = zero;
++    changed[64] = 0x12;
++    changed[65] = 0x34;
++    changed[66] = 0x56;
++    changed[67] = 0x78;
++    EXPECT_NE(crc32c(zero.data(), zero.size()),
++              crc32c(changed.data(), changed.size()));
++}
++
+ TEST(HostGpuProtocol, GoldenHelloIsByteExact)
+ {
+     const auto expected = fromHex(GoldenHelloHex);
+@@ -332,6 +424,182 @@ TEST(HostGpuProtocol, QueueControlMustBeOfferedAndRequired)
+               QueueControlCapabilityMask);
+ }
+ 
++TEST(HostGpuProtocol, MemoryControlMustBeOfferedAndRequiredIndependently)
++{
++    const auto capability = memoryControlCapability();
++    EXPECT_EQ(capability[MemoryControlCapabilityByte],
++              MemoryControlCapabilityMask);
++    EXPECT_EQ(std::count(capability.begin(), capability.end(), uint8_t(0)),
++              CapabilityBytes - 1);
++
++    auto server = goldenServer();
++    server.supported[0] |= QueueControlCapabilityMask |
++                           MemoryControlCapabilityMask;
++    auto hello = goldenHello();
++    hello.offered[0] |= QueueControlCapabilityMask |
++                        MemoryControlCapabilityMask;
++    auto negotiated = negotiate(goldenHeader(), hello, server);
++    ASSERT_EQ(negotiated.status, Status::Ok);
++    EXPECT_EQ(negotiated.selected[0] &
++                  (QueueControlCapabilityMask | MemoryControlCapabilityMask),
++              0);
++
++    hello.required[0] |= MemoryControlCapabilityMask;
++    negotiated = negotiate(goldenHeader(), hello, server);
++    ASSERT_EQ(negotiated.status, Status::Ok);
++    EXPECT_EQ(negotiated.selected[0] & MemoryControlCapabilityMask,
++              MemoryControlCapabilityMask);
++    EXPECT_EQ(negotiated.selected[0] & QueueControlCapabilityMask, 0);
++}
++
++TEST(HostGpuProtocol, GoldenMemoryFramesAreByteExact)
++{
++    MemoryRequest allocate;
++    allocate.opcode = MemoryOpcode::Allocate;
++    allocate.byteCount = 65536;
++    allocate.argument = 65536;
++    auto frame = encodeMemoryRequest(
++        goldenMemoryHeader(0x0123456789abcdf1ULL), allocate);
++    EXPECT_EQ(frame, fromHex(GoldenMemoryAllocRequestHex));
++    auto decoded = decodeMemoryRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    ASSERT_EQ(decoded.action, DecodeAction::Acknowledge);
++    EXPECT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(decoded.request.opcode, MemoryOpcode::Allocate);
++    EXPECT_EQ(decoded.request.byteCount, 65536U);
++
++    MemoryResponse response;
++    response.status = Status::Ok;
++    response.opcode = MemoryOpcode::Allocate;
++    response.allocationId = 7;
++    response.generation = 0x8877665544332211ULL;
++    response.value0 = 0x0000100300000000ULL;
++    response.value1 = 65536;
++    response.value2 = 65536;
++    response.simTick = 0x123456789abcdef2ULL;
++    frame = encodeMemoryAck(
++        goldenMemoryHeader(0x0123456789abcdf1ULL), response);
++    EXPECT_EQ(frame, fromHex(GoldenMemoryAllocAckHex));
++
++    MemoryRequest copy;
++    copy.opcode = MemoryOpcode::CopyH2D;
++    copy.allocationId = response.allocationId;
++    copy.generation = response.generation;
++    copy.offset = 4096;
++    copy.byteCount = 16;
++    copy.argument = 0x48dfe982;
++    frame = encodeMemoryRequest(
++        goldenMemoryHeader(0x0123456789abcdf2ULL), copy);
++    EXPECT_EQ(frame, fromHex(GoldenMemoryH2DRequestHex));
++    decoded = decodeMemoryRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    EXPECT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(decoded.request.argument, 0x48dfe982U);
++
++    response.opcode = MemoryOpcode::CopyH2D;
++    response.value0 = 4096;
++    response.value1 = 16;
++    response.value2 = 0x48dfe982;
++    response.simTick = 0x123456789abcdef3ULL;
++    frame = encodeMemoryAck(
++        goldenMemoryHeader(0x0123456789abcdf2ULL), response);
++    EXPECT_EQ(frame, fromHex(GoldenMemoryH2DAckHex));
++
++    copy.opcode = MemoryOpcode::CopyD2H;
++    copy.argument = 0;
++    frame = encodeMemoryRequest(
++        goldenMemoryHeader(0x0123456789abcdf3ULL), copy);
++    EXPECT_EQ(frame, fromHex(GoldenMemoryD2HRequestHex));
++    response.opcode = MemoryOpcode::CopyD2H;
++    response.simTick = 0x123456789abcdef4ULL;
++    frame = encodeMemoryAck(
++        goldenMemoryHeader(0x0123456789abcdf3ULL), response);
++    EXPECT_EQ(frame, fromHex(GoldenMemoryD2HAckHex));
++
++    MemoryRequest freeRequest;
++    freeRequest.opcode = MemoryOpcode::Free;
++    freeRequest.allocationId = response.allocationId;
++    freeRequest.generation = response.generation;
++    frame = encodeMemoryRequest(
++        goldenMemoryHeader(0x0123456789abcdf4ULL), freeRequest);
++    EXPECT_EQ(frame, fromHex(GoldenMemoryFreeRequestHex));
++    response.opcode = MemoryOpcode::Free;
++    response.value0 = response.value1 = response.value2 = 0;
++    response.simTick = 0x123456789abcdef5ULL;
++    frame = encodeMemoryAck(
++        goldenMemoryHeader(0x0123456789abcdf4ULL), response);
++    EXPECT_EQ(frame, fromHex(GoldenMemoryFreeAckHex));
++}
++
++TEST(HostGpuProtocol, MemoryDecodeSeparatesCanonicalAndResourceFailures)
++{
++    MemoryRequest request;
++    request.opcode = MemoryOpcode::CopyD2H;
++    request.allocationId = 1;
++    request.generation = 2;
++    request.offset = std::numeric_limits<uint64_t>::max();
++    request.byteCount = 2;
++    auto frame = encodeMemoryRequest(goldenMemoryHeader(20), request);
++    auto decoded = decodeMemoryRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    EXPECT_EQ(decoded.action, DecodeAction::Acknowledge);
++    EXPECT_EQ(decoded.status, Status::Malformed);
++
++    request.offset = 0;
++    request.byteCount = 16 * 1024 * 1024 + 1;
++    frame = encodeMemoryRequest(goldenMemoryHeader(21), request);
++    decoded = decodeMemoryRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    EXPECT_EQ(decoded.status, Status::Ok);
++
++    MemoryRequest allocate;
++    allocate.byteCount = (2ULL << 30) + 1;
++    allocate.argument = 4096;
++    frame = encodeMemoryRequest(goldenMemoryHeader(22), allocate);
++    decoded = decodeMemoryRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    EXPECT_EQ(decoded.status, Status::Ok);
++
++    request.major = MemoryControlMajor + 1;
++    frame = encodeMemoryRequest(goldenMemoryHeader(23), request);
++    decoded = decodeMemoryRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    EXPECT_EQ(decoded.status, Status::UnsupportedVersion);
++
++    request.flags = 1;
++    frame = encodeMemoryRequest(goldenMemoryHeader(24), request);
++    decoded = decodeMemoryRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes);
++    EXPECT_EQ(decoded.status, Status::Malformed);
++}
++
++TEST(HostGpuProtocol, FailedMemoryAckIsCanonicalized)
++{
++    MemoryResponse response;
++    response.major = 9;
++    response.minor = 9;
++    response.status = Status::ResourceExhausted;
++    response.opcode = MemoryOpcode::Allocate;
++    response.allocationId = 7;
++    response.generation = 8;
++    response.value0 = 1;
++    response.value1 = 2;
++    response.value2 = 3;
++    response.simTick = 4;
++
++    const auto frame = encodeMemoryAck(goldenMemoryHeader(25), response);
++    ASSERT_EQ(frame.size(), HeaderBytes + MemoryPayloadBytes);
++    const uint8_t *payload = frame.data() + HeaderBytes;
++    EXPECT_EQ(load16(payload), MemoryControlMajor);
++    EXPECT_EQ(load16(payload + 2), MemoryControlMinor);
++    EXPECT_EQ(load64(payload + 16), 7U);
++    EXPECT_EQ(load64(payload + 24), 8U);
++    EXPECT_EQ(load64(payload + 32), 0U);
++    EXPECT_EQ(load64(payload + 40), 0U);
++    EXPECT_EQ(load64(payload + 48), 0U);
++    EXPECT_EQ(load64(payload + 56), 0U);
++}
++
+ TEST(HostGpuProtocol, GoldenQueueRequestIsByteExact)
+ {
+     const auto actual = encodeQueueRequest(
+diff --git a/src/dev/amdgpu/host_gpu_socket_utils.cc b/src/dev/amdgpu/host_gpu_socket_utils.cc
+index 622619c7d..5e73fee8c 100644
+--- a/src/dev/amdgpu/host_gpu_socket_utils.cc
++++ b/src/dev/amdgpu/host_gpu_socket_utils.cc
+@@ -32,6 +32,7 @@
+ 
+ #include <cerrno>
+ #include <cstring>
++#include <limits>
+ #include <string>
+ 
+ namespace gem5
+@@ -57,34 +58,217 @@ closeWithErrno(int fd, int error)
+     errno = error;
+ }
+ 
++template <typename Visitor>
++bool
++walkControlMessages(const msghdr &message, Visitor &&visitor)
++{
++    if (message.msg_controllen == 0)
++        return true;
++    if (message.msg_control == nullptr)
++        return false;
++
++    const auto *control = static_cast<const uint8_t *>(message.msg_control);
++    size_t offset = 0;
++    while (offset < message.msg_controllen) {
++        const size_t remaining = message.msg_controllen - offset;
++        if (remaining < CMSG_LEN(0))
++            return false;
++
++        cmsghdr header = {};
++        std::memcpy(&header, control + offset, sizeof(header));
++        if (header.cmsg_len < CMSG_LEN(0) ||
++            header.cmsg_len > remaining) {
++            return false;
++        }
++        const size_t payloadBytes = header.cmsg_len - CMSG_LEN(0);
++        visitor(header, control + offset + CMSG_LEN(0), payloadBytes);
++
++        const size_t aligned = CMSG_ALIGN(header.cmsg_len);
++        if (aligned > remaining) {
++            if (header.cmsg_len != remaining)
++                return false;
++            offset = message.msg_controllen;
++        } else {
++            offset += aligned;
++        }
++    }
++    return true;
++}
++
+ } // anonymous namespace
+ 
++OwnedFileDescriptor::~OwnedFileDescriptor()
++{
++    reset();
++}
++
++OwnedFileDescriptor::OwnedFileDescriptor(OwnedFileDescriptor &&other) noexcept
++    : descriptor(other.release())
++{
++}
++
++OwnedFileDescriptor &
++OwnedFileDescriptor::operator=(OwnedFileDescriptor &&other) noexcept
++{
++    if (this != &other)
++        reset(other.release());
++    return *this;
++}
++
++int
++OwnedFileDescriptor::release()
++{
++    const int fd = descriptor;
++    descriptor = -1;
++    return fd;
++}
++
++void
++OwnedFileDescriptor::reset(int fd)
++{
++    if (descriptor >= 0)
++        ::close(descriptor);
++    descriptor = fd;
++}
++
++ReceivedRights
++takeReceivedFileDescriptor(const msghdr &message)
++{
++    ReceivedRights result;
++    bool sawControl = false;
++    bool invalid = false;
++
++    const bool structurallyValid = walkControlMessages(
++        message, [&](const cmsghdr &control, const uint8_t *payload,
++                     size_t payloadBytes) {
++        sawControl = true;
++        if (control.cmsg_level != SOL_SOCKET ||
++            control.cmsg_type != SCM_RIGHTS) {
++            invalid = true;
++            return;
++        }
++        if (payloadBytes == 0 || payloadBytes % sizeof(int) != 0)
++            invalid = true;
++        const size_t descriptorCount = payloadBytes / sizeof(int);
++        for (size_t index = 0; index < descriptorCount; ++index) {
++            int fd = -1;
++            std::memcpy(&fd, payload + index * sizeof(fd),
++                        sizeof(fd));
++            if (fd < 0) {
++                invalid = true;
++                continue;
++            }
++            ++result.visibleCount;
++            if (!result.descriptor) {
++                result.descriptor.reset(fd);
++            } else {
++                ::close(fd);
++            }
++        }
++    });
++
++    if (!structurallyValid || (message.msg_controllen != 0 && !sawControl))
++        invalid = true;
++    if (invalid || result.visibleCount > 1) {
++        result.descriptor.reset();
++        result.status = ReceivedRightsStatus::Invalid;
++    } else if (result.visibleCount == 1) {
++        result.status = ReceivedRightsStatus::One;
++    }
++    return result;
++}
++
++bool
++validateMemoryCarrier(int fd, uid_t owner, uint64_t byteCount,
++                      MemoryCarrierAccess access)
++{
++    if (fd < 0 || byteCount == 0 ||
++        byteCount > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) {
++        return false;
++    }
++    struct stat metadata = {};
++    if (::fstat(fd, &metadata) != 0 || !S_ISREG(metadata.st_mode) ||
++        metadata.st_uid != owner || metadata.st_nlink != 0 ||
++        (metadata.st_mode & 07777) != 0600 || metadata.st_size < 0 ||
++        static_cast<uint64_t>(metadata.st_size) != byteCount) {
++        return false;
++    }
++    const int descriptorFlags = ::fcntl(fd, F_GETFD);
++    const int fileFlags = ::fcntl(fd, F_GETFL);
++    const int seals = ::fcntl(fd, F_GET_SEALS);
++    if (descriptorFlags < 0 || (descriptorFlags & FD_CLOEXEC) == 0 ||
++        fileFlags < 0 || seals < 0) {
++        return false;
++    }
++
++    constexpr int SizeSeals = F_SEAL_SHRINK | F_SEAL_GROW;
++    constexpr int CompleteSeals =
++        SizeSeals | F_SEAL_WRITE | F_SEAL_SEAL;
++    const int mode = fileFlags & O_ACCMODE;
++    if (access == MemoryCarrierAccess::HostToDevice) {
++        return (mode == O_RDONLY || mode == O_RDWR) &&
++               seals == CompleteSeals;
++    }
++    return mode == O_RDWR && seals == SizeSeals;
++}
++
++MemoryCarrierIoResult
++writeMemoryCarrier(int fd, const uint8_t *bytes, size_t size)
++{
++    size_t offset = 0;
++    while (offset < size) {
++        const ssize_t result = ::pwrite(
++            fd, bytes + offset, size - offset, static_cast<off_t>(offset));
++        if (result < 0 && errno == EINTR)
++            continue;
++        if (result < 0) {
++            return errno == ENOSPC ?
++                MemoryCarrierIoResult::ResourceExhausted :
++                MemoryCarrierIoResult::Internal;
++        }
++        if (result == 0)
++            return MemoryCarrierIoResult::Internal;
++        offset += static_cast<size_t>(result);
++    }
++    return MemoryCarrierIoResult::Ok;
++}
++
++MemoryCarrierFinalizeResult
++finalizeDeviceToHostCarrier(int fd)
++{
++    constexpr int CompleteSeals = F_SEAL_SHRINK | F_SEAL_GROW |
++        F_SEAL_WRITE | F_SEAL_SEAL;
++    if (::fcntl(fd, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_SEAL) != 0) {
++        return errno == EBUSY ? MemoryCarrierFinalizeResult::Unauthorized :
++            MemoryCarrierFinalizeResult::Internal;
++    }
++    return ::fcntl(fd, F_GET_SEALS) == CompleteSeals ?
++        MemoryCarrierFinalizeResult::Ok :
++        MemoryCarrierFinalizeResult::Internal;
++}
++
+ size_t
+ closeReceivedFileDescriptors(const msghdr &message)
+ {
+-    msghdr view = message;
+     size_t closed = 0;
+-    for (cmsghdr *control = CMSG_FIRSTHDR(&view); control != nullptr;
+-         control = CMSG_NXTHDR(&view, control)) {
+-        if (control->cmsg_len < CMSG_LEN(0))
+-            break;
+-        if (control->cmsg_level != SOL_SOCKET ||
+-            control->cmsg_type != SCM_RIGHTS) {
+-            continue;
++    walkControlMessages(
++        message, [&](const cmsghdr &control, const uint8_t *payload,
++                     size_t payloadBytes) {
++        if (control.cmsg_level != SOL_SOCKET ||
++            control.cmsg_type != SCM_RIGHTS) {
++            return;
+         }
+-
+-        const size_t payloadBytes = control->cmsg_len - CMSG_LEN(0);
+         const size_t descriptorCount = payloadBytes / sizeof(int);
+         for (size_t index = 0; index < descriptorCount; ++index) {
+             int fd = -1;
+-            std::memcpy(&fd, CMSG_DATA(control) + index * sizeof(fd),
++            std::memcpy(&fd, payload + index * sizeof(fd),
+                         sizeof(fd));
+             if (fd >= 0) {
+                 ::close(fd);
+                 ++closed;
+             }
+         }
+-    }
++    });
+     return closed;
+ }
+ 
+diff --git a/src/dev/amdgpu/host_gpu_socket_utils.hh b/src/dev/amdgpu/host_gpu_socket_utils.hh
+index 982ced834..1c593f89f 100644
+--- a/src/dev/amdgpu/host_gpu_socket_utils.hh
++++ b/src/dev/amdgpu/host_gpu_socket_utils.hh
+@@ -32,6 +32,7 @@
+ #include <sys/stat.h>
+ 
+ #include <cstddef>
++#include <cstdint>
+ #include <functional>
+ #include <string>
+ 
+@@ -40,6 +41,77 @@ namespace gem5
+ namespace hostgpu
+ {
+ 
++class OwnedFileDescriptor
++{
++  public:
++    OwnedFileDescriptor() = default;
++    explicit OwnedFileDescriptor(int fd) : descriptor(fd) {}
++    ~OwnedFileDescriptor();
++
++    OwnedFileDescriptor(const OwnedFileDescriptor &) = delete;
++    OwnedFileDescriptor &operator=(const OwnedFileDescriptor &) = delete;
++    OwnedFileDescriptor(OwnedFileDescriptor &&other) noexcept;
++    OwnedFileDescriptor &operator=(OwnedFileDescriptor &&other) noexcept;
++
++    int get() const { return descriptor; }
++    explicit operator bool() const { return descriptor >= 0; }
++    int release();
++    void reset(int fd = -1);
++
++  private:
++    int descriptor = -1;
++};
++
++enum class ReceivedRightsStatus
++{
++    None,
++    One,
++    Invalid,
++};
++
++struct ReceivedRights
++{
++    ReceivedRightsStatus status = ReceivedRightsStatus::None;
++    OwnedFileDescriptor descriptor;
++    size_t visibleCount = 0;
++};
++
++/**
++ * Take ownership of exactly one SCM_RIGHTS descriptor or close all visible.
++ */
++ReceivedRights takeReceivedFileDescriptor(const msghdr &message);
++
++enum class MemoryCarrierAccess
++{
++    HostToDevice,
++    DeviceToHost,
++};
++
++enum class MemoryCarrierFinalizeResult
++{
++    Ok,
++    Unauthorized,
++    Internal,
++};
++
++enum class MemoryCarrierIoResult
++{
++    Ok,
++    ResourceExhausted,
++    Internal,
++};
++
++/** Validate the complete observable memfd carrier policy. */
++bool validateMemoryCarrier(int fd, uid_t owner, uint64_t byteCount,
++                           MemoryCarrierAccess access);
++
++/** Write a complete D2H carrier from offset zero and preserve ENOSPC. */
++MemoryCarrierIoResult writeMemoryCarrier(
++    int fd, const uint8_t *bytes, size_t size);
++
++/** Seal a completed D2H carrier and classify a writable-mapping conflict. */
++MemoryCarrierFinalizeResult finalizeDeviceToHostCarrier(int fd);
++
+ /** Close every complete SCM_RIGHTS descriptor visible in a recvmsg result. */
+ size_t closeReceivedFileDescriptors(const msghdr &message);
+ 
+diff --git a/src/dev/amdgpu/host_gpu_socket_utils.test.cc b/src/dev/amdgpu/host_gpu_socket_utils.test.cc
+index a227c4aa4..8b59c46a0 100644
+--- a/src/dev/amdgpu/host_gpu_socket_utils.test.cc
++++ b/src/dev/amdgpu/host_gpu_socket_utils.test.cc
+@@ -30,6 +30,7 @@
+ 
+ #include <dirent.h>
+ #include <fcntl.h>
++#include <sys/mman.h>
+ #include <sys/socket.h>
+ #include <sys/un.h>
+ #include <unistd.h>
+@@ -39,6 +40,7 @@
+ #include <cstdlib>
+ #include <cstring>
+ #include <string>
++#include <type_traits>
+ #include <vector>
+ 
+ #include "gtest/gtest.h"
+@@ -49,6 +51,11 @@ namespace gem5::hostgpu
+ namespace
+ {
+ 
++static_assert(!std::is_copy_constructible_v<OwnedFileDescriptor>);
++static_assert(!std::is_copy_assignable_v<OwnedFileDescriptor>);
++static_assert(std::is_nothrow_move_constructible_v<OwnedFileDescriptor>);
++static_assert(std::is_nothrow_move_assignable_v<OwnedFileDescriptor>);
++
+ size_t
+ openFileDescriptorCount()
+ {
+@@ -131,7 +138,8 @@ TEST(HostGPUSocketUtils, ClosesRightsWithZeroPayload)
+     ASSERT_GE(sendRights(sockets[0], pipeFds, 2, false), 0);
+ 
+     std::array<uint8_t, 1> payload = {0};
+-    std::array<uint8_t, CMSG_SPACE(sizeof(int) * 2)> control = {};
++    alignas(cmsghdr)
++        std::array<uint8_t, CMSG_SPACE(sizeof(int) * 2)> control = {};
+     msghdr message = {};
+     iovec vector = {payload.data(), payload.size()};
+     message.msg_iov = &vector;
+@@ -169,7 +177,8 @@ TEST(HostGPUSocketUtils, ClosesVisibleRightsWhenControlIsTruncated)
+     ASSERT_GT(sendRights(sockets[0], pipeFds, 4, true), 0);
+ 
+     std::array<uint8_t, 1> payload = {0};
+-    std::array<uint8_t, CMSG_SPACE(sizeof(int))> control = {};
++    alignas(cmsghdr)
++        std::array<uint8_t, CMSG_SPACE(sizeof(int))> control = {};
+     msghdr message = {};
+     iovec vector = {payload.data(), payload.size()};
+     message.msg_iov = &vector;
+@@ -188,7 +197,12 @@ TEST(HostGPUSocketUtils, ClosesVisibleRightsWhenControlIsTruncated)
+     std::vector<int> received(visible, -1);
+     std::memcpy(received.data(), CMSG_DATA(header), visible * sizeof(int));
+     EXPECT_EQ(openFileDescriptorCount(), beforeReceive + visible);
+-    EXPECT_EQ(closeReceivedFileDescriptors(message), visible);
++    {
++        auto rights = takeReceivedFileDescriptor(message);
++        EXPECT_EQ(rights.visibleCount, visible);
++        EXPECT_EQ(rights.status, visible == 1 ? ReceivedRightsStatus::One :
++                                               ReceivedRightsStatus::Invalid);
++    }
+     EXPECT_EQ(openFileDescriptorCount(), beforeReceive);
+     for (const int fd : received) {
+         errno = 0;
+@@ -201,6 +215,207 @@ TEST(HostGPUSocketUtils, ClosesVisibleRightsWhenControlIsTruncated)
+     ::close(sockets[1]);
+ }
+ 
++TEST(HostGPUSocketUtils, TakesOneDescriptorAndClosesMultipleDescriptors)
++{
++    int sockets[2] = {-1, -1};
++    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sockets),
++              0);
++    int pipeFds[2] = {-1, -1};
++    ASSERT_EQ(::pipe2(pipeFds, O_CLOEXEC), 0);
++
++    ASSERT_GT(sendRights(sockets[0], pipeFds, 1, true), 0);
++    std::array<uint8_t, 1> payload = {};
++    alignas(cmsghdr)
++        std::array<uint8_t, CMSG_SPACE(sizeof(int) * 2)> control = {};
++    msghdr message = {};
++    iovec vector = {payload.data(), payload.size()};
++    message.msg_iov = &vector;
++    message.msg_iovlen = 1;
++    message.msg_control = control.data();
++    message.msg_controllen = control.size();
++    ASSERT_EQ(::recvmsg(sockets[1], &message, MSG_CMSG_CLOEXEC), 1);
++    const size_t beforeTake = openFileDescriptorCount();
++    {
++        auto received = takeReceivedFileDescriptor(message);
++        EXPECT_EQ(received.status, ReceivedRightsStatus::One);
++        EXPECT_EQ(received.visibleCount, 1U);
++        ASSERT_TRUE(received.descriptor);
++        EXPECT_NE(::fcntl(received.descriptor.get(), F_GETFD) & FD_CLOEXEC, 0);
++        EXPECT_EQ(openFileDescriptorCount(), beforeTake);
++    }
++    EXPECT_EQ(openFileDescriptorCount(), beforeTake - 1);
++
++    ASSERT_GT(sendRights(sockets[0], pipeFds, 2, true), 0);
++    control.fill(0);
++    message.msg_controllen = control.size();
++    message.msg_flags = 0;
++    ASSERT_EQ(::recvmsg(sockets[1], &message, MSG_CMSG_CLOEXEC), 1);
++    const size_t beforeInvalid = openFileDescriptorCount();
++    auto invalid = takeReceivedFileDescriptor(message);
++    EXPECT_EQ(invalid.status, ReceivedRightsStatus::Invalid);
++    EXPECT_EQ(invalid.visibleCount, 2U);
++    EXPECT_FALSE(invalid.descriptor);
++    EXPECT_EQ(openFileDescriptorCount(), beforeInvalid - 2);
++
++    ::close(pipeFds[0]);
++    ::close(pipeFds[1]);
++    ::close(sockets[0]);
++    ::close(sockets[1]);
++}
++
++TEST(HostGPUSocketUtils, RejectsMalformedControlAndClosesVisibleRights)
++{
++    int pipeFds[2] = {-1, -1};
++    ASSERT_EQ(::pipe2(pipeFds, O_CLOEXEC), 0);
++    const int receivedFd = ::dup(pipeFds[0]);
++    ASSERT_GE(receivedFd, 0);
++
++    alignas(cmsghdr)
++        std::array<uint8_t, CMSG_SPACE(sizeof(int) + 1)> control = {};
++    msghdr message = {};
++    message.msg_control = control.data();
++    message.msg_controllen = control.size();
++    cmsghdr *header = CMSG_FIRSTHDR(&message);
++    ASSERT_NE(header, nullptr);
++    header->cmsg_level = SOL_SOCKET;
++    header->cmsg_type = SCM_RIGHTS;
++    header->cmsg_len = CMSG_LEN(sizeof(int) + 1);
++    std::memcpy(CMSG_DATA(header), &receivedFd, sizeof(receivedFd));
++
++    const auto rights = takeReceivedFileDescriptor(message);
++    EXPECT_EQ(rights.status, ReceivedRightsStatus::Invalid);
++    EXPECT_EQ(rights.visibleCount, 1U);
++    EXPECT_FALSE(rights.descriptor);
++    errno = 0;
++    EXPECT_EQ(::fcntl(receivedFd, F_GETFD), -1);
++    EXPECT_EQ(errno, EBADF);
++
++    ::close(pipeFds[0]);
++    ::close(pipeFds[1]);
++}
++
++TEST(HostGPUSocketUtils, UnknownControlStillClosesVisibleRights)
++{
++    int pipeFds[2] = {-1, -1};
++    ASSERT_EQ(::pipe2(pipeFds, O_CLOEXEC), 0);
++    const int receivedFd = ::dup(pipeFds[0]);
++    ASSERT_GE(receivedFd, 0);
++
++    constexpr size_t UnknownBytes = CMSG_SPACE(0);
++    alignas(cmsghdr) std::array<
++        uint8_t, UnknownBytes + CMSG_SPACE(sizeof(int))> control = {};
++    cmsghdr unknown = {};
++    unknown.cmsg_len = CMSG_LEN(0);
++    unknown.cmsg_level = 0x1234;
++    std::memcpy(control.data(), &unknown, sizeof(unknown));
++    cmsghdr rightsHeader = {};
++    rightsHeader.cmsg_len = CMSG_LEN(sizeof(int));
++    rightsHeader.cmsg_level = SOL_SOCKET;
++    rightsHeader.cmsg_type = SCM_RIGHTS;
++    std::memcpy(control.data() + UnknownBytes, &rightsHeader,
++                sizeof(rightsHeader));
++    std::memcpy(control.data() + UnknownBytes + CMSG_LEN(0), &receivedFd,
++                sizeof(receivedFd));
++    msghdr message = {};
++    message.msg_control = control.data();
++    message.msg_controllen = control.size();
++
++    const auto rights = takeReceivedFileDescriptor(message);
++    EXPECT_EQ(rights.status, ReceivedRightsStatus::Invalid);
++    EXPECT_EQ(rights.visibleCount, 1U);
++    EXPECT_FALSE(rights.descriptor);
++    errno = 0;
++    EXPECT_EQ(::fcntl(receivedFd, F_GETFD), -1);
++    EXPECT_EQ(errno, EBADF);
++
++    ::close(pipeFds[0]);
++    ::close(pipeFds[1]);
++}
++
++TEST(HostGPUSocketUtils, ValidatesAndFinalizesMemoryCarriers)
++{
++    constexpr size_t Bytes = 4096;
++    const int h2d = ::memfd_create(
++        "gem5-hostgpu-h2d", MFD_CLOEXEC | MFD_ALLOW_SEALING);
++    ASSERT_GE(h2d, 0);
++    ASSERT_EQ(::fchmod(h2d, 0600), 0);
++    ASSERT_EQ(::ftruncate(h2d, Bytes), 0);
++    ASSERT_EQ(::fcntl(h2d, F_ADD_SEALS,
++                      F_SEAL_SHRINK | F_SEAL_GROW |
++                      F_SEAL_WRITE | F_SEAL_SEAL),
++              0);
++    EXPECT_TRUE(validateMemoryCarrier(
++        h2d, ::geteuid(), Bytes, MemoryCarrierAccess::HostToDevice));
++    EXPECT_FALSE(validateMemoryCarrier(
++        h2d, ::geteuid(), Bytes, MemoryCarrierAccess::DeviceToHost));
++
++    const int d2h = ::memfd_create(
++        "gem5-hostgpu-d2h", MFD_CLOEXEC | MFD_ALLOW_SEALING);
++    ASSERT_GE(d2h, 0);
++    ASSERT_EQ(::fchmod(d2h, 0600), 0);
++    ASSERT_EQ(::ftruncate(d2h, Bytes), 0);
++    ASSERT_EQ(::fcntl(d2h, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW), 0);
++    EXPECT_TRUE(validateMemoryCarrier(
++        d2h, ::geteuid(), Bytes, MemoryCarrierAccess::DeviceToHost));
++    EXPECT_EQ(finalizeDeviceToHostCarrier(d2h),
++              MemoryCarrierFinalizeResult::Ok);
++    EXPECT_EQ(::fcntl(d2h, F_GET_SEALS),
++              F_SEAL_SHRINK | F_SEAL_GROW |
++              F_SEAL_WRITE | F_SEAL_SEAL);
++    EXPECT_FALSE(validateMemoryCarrier(
++        d2h, ::geteuid(), Bytes, MemoryCarrierAccess::DeviceToHost));
++
++    EXPECT_FALSE(validateMemoryCarrier(
++        h2d, ::geteuid(), Bytes + 1, MemoryCarrierAccess::HostToDevice));
++    EXPECT_FALSE(validateMemoryCarrier(
++        h2d, static_cast<uid_t>(::geteuid() + 1), Bytes,
++        MemoryCarrierAccess::HostToDevice));
++
++    ASSERT_EQ(::fchmod(h2d, 01600), 0);
++    EXPECT_FALSE(validateMemoryCarrier(
++        h2d, ::geteuid(), Bytes, MemoryCarrierAccess::HostToDevice));
++    ASSERT_EQ(::fchmod(h2d, 0600), 0);
++
++    const int d2hBusy = ::memfd_create(
++        "gem5-hostgpu-d2h-busy", MFD_CLOEXEC | MFD_ALLOW_SEALING);
++    ASSERT_GE(d2hBusy, 0);
++    ASSERT_EQ(::fchmod(d2hBusy, 0600), 0);
++    ASSERT_EQ(::ftruncate(d2hBusy, Bytes), 0);
++    ASSERT_EQ(::fcntl(d2hBusy, F_ADD_SEALS,
++                      F_SEAL_SHRINK | F_SEAL_GROW), 0);
++    void *mapping = ::mmap(
++        nullptr, Bytes, PROT_READ | PROT_WRITE, MAP_SHARED, d2hBusy, 0);
++    ASSERT_NE(mapping, MAP_FAILED);
++    EXPECT_EQ(finalizeDeviceToHostCarrier(d2hBusy),
++              MemoryCarrierFinalizeResult::Unauthorized);
++    ASSERT_EQ(::munmap(mapping, Bytes), 0);
++    EXPECT_EQ(finalizeDeviceToHostCarrier(d2hBusy),
++              MemoryCarrierFinalizeResult::Ok);
++
++    std::array<uint8_t, 8> written = {0, 1, 2, 3, 4, 5, 6, 7};
++    const int writable = ::memfd_create(
++        "gem5-hostgpu-write", MFD_CLOEXEC | MFD_ALLOW_SEALING);
++    ASSERT_GE(writable, 0);
++    ASSERT_EQ(::ftruncate(writable, written.size()), 0);
++    EXPECT_EQ(writeMemoryCarrier(writable, written.data(), written.size()),
++              MemoryCarrierIoResult::Ok);
++    std::array<uint8_t, 8> loaded = {};
++    ASSERT_EQ(::pread(writable, loaded.data(), loaded.size(), 0),
++              static_cast<ssize_t>(loaded.size()));
++    EXPECT_EQ(loaded, written);
++
++    const int full = ::open("/dev/full", O_WRONLY | O_CLOEXEC);
++    ASSERT_GE(full, 0);
++    EXPECT_EQ(writeMemoryCarrier(full, written.data(), written.size()),
++              MemoryCarrierIoResult::ResourceExhausted);
++
++    ::close(h2d);
++    ::close(d2h);
++    ::close(d2hBusy);
++    ::close(writable);
++    ::close(full);
++}
++
+ TEST(HostGPUSocketUtils, PinnedChmodNeverTouchesReplacement)
+ {
+     const std::string directory = temporaryDirectory();
+-- 
+2.53.0
+

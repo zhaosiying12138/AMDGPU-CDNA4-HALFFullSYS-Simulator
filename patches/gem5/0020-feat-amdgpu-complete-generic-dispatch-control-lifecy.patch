@@ -1,0 +1,1585 @@
+From bc63345542950293182bf951b61f26ede32e6974 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 10 Aug 2026 12:09:44 +0800
+Subject: [PATCH 20/42] feat(amdgpu): complete generic dispatch control
+ lifecycle
+
+Advertise bit 8 only with owner-bound MAP/ALLOC/H2D/SUBMIT/type20/UNMAP; separate logical ABI alignment from backing-page alignment; preserve durable ACK/completion ordering and disconnect cleanup. This is native admission/retire only and makes no GPU execution claim.
+
+Checkpoint-ID: CP-0025
+Goal-ID: GSIM-001
+Plan-Revision: 2
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 6b911ed3b5df86ea0d028a0c760b0c82c100adb74d7f297f1660c7c6a478a23a
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/dev/amdgpu/SConscript                     |  10 +-
+ src/dev/amdgpu/amdgpu_device.cc               |   4 +-
+ src/dev/amdgpu/host_gpu_bridge.cc             | 522 +++++++++++++++++-
+ src/dev/amdgpu/host_gpu_bridge.hh             |   7 +-
+ src/dev/amdgpu/host_gpu_connection_state.hh   |  11 +
+ .../amdgpu/host_gpu_generic_dispatch_route.cc |  18 +-
+ .../host_gpu_generic_dispatch_route_main.cc   |  78 ++-
+ .../host_gpu_native_dispatch_state_v2.cc      |  71 +--
+ .../host_gpu_native_dispatch_state_v2.hh      |   4 +
+ .../host_gpu_native_dispatch_state_v2_main.cc |  95 +++-
+ src/dev/amdgpu/host_gpu_native_queue_core.cc  |  14 +-
+ src/dev/amdgpu/host_gpu_native_queue_core.hh  |   3 +-
+ src/dev/amdgpu/host_gpu_queue_state.test.cc   |  39 ++
+ src/dev/amdgpu/host_gpu_signal_state.cc       |  37 ++
+ src/dev/amdgpu/host_gpu_signal_state.hh       |   7 +
+ src/dev/amdgpu/host_gpu_signal_state.test.cc  |  43 ++
+ src/dev/amdgpu/host_gpu_socket_utils.test.cc  |  16 +
+ 17 files changed, 874 insertions(+), 105 deletions(-)
+
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index c0ee882b1..d811bb705 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -124,7 +124,10 @@ Executable('host_gpu_native_b1_core',
+            native_source('host_gpu_code_object_image.cc'),
+            native_source('host_gpu_code_object_state.cc'),
+            native_source('host_gpu_protocol.cc'),
+-           native_source('host_gpu_memory_state.cc'))
++           native_source('host_gpu_memory_state.cc'),
++           '../../base/cprintf.cc',
++           '../../base/logging.cc',
++           '../../base/hostinfo.cc')
+ 
+ # CP23 owner-bound generic-dispatch-v2 bridge adapter.  This target exercises
+ # MAP/ALLOC/publish/SUBMIT admission and retirement only; it deliberately has
+@@ -140,7 +143,10 @@ Executable('host_gpu_native_dispatch_state_v2_core',
+            native_source('host_gpu_code_object_image.cc'),
+            native_source('host_gpu_code_object_state.cc'),
+            native_source('host_gpu_protocol.cc'),
+-           native_source('host_gpu_memory_state.cc'))
++           native_source('host_gpu_memory_state.cc'),
++           '../../base/cprintf.cc',
++           '../../base/logging.cc',
++           '../../base/hostinfo.cc')
+ 
+ # CP24 bridge-facing policy harness.  It exercises the exact type-18 session
+ # and stage gates used by HostGPUBridge without claiming GPU execution.
+diff --git a/src/dev/amdgpu/amdgpu_device.cc b/src/dev/amdgpu/amdgpu_device.cc
+index 74b076ef8..a84aac311 100644
+--- a/src/dev/amdgpu/amdgpu_device.cc
++++ b/src/dev/amdgpu/amdgpu_device.cc
+@@ -495,7 +495,7 @@ AMDGPUDevice::readFrame(PacketPtr pkt, Addr offset)
+         uint8_t *dataPtr = new uint8_t[pkt->getSize()];
+         readPkt->dataDynamic(dataPtr);
+ 
+-        auto system = cp->shader()->gpuCmdProc.system();
++        auto system = cp->shader()->gpuCmdProc->system();
+         system->getDeviceMemory(readPkt)->access(readPkt);
+     }
+ 
+@@ -577,7 +577,7 @@ AMDGPUDevice::writeFrame(PacketPtr pkt, Addr offset)
+                 pkt->getSize() * sizeof(uint8_t));
+     writePkt->dataDynamic(dataPtr);
+ 
+-    auto system = cp->shader()->gpuCmdProc.system();
++    auto system = cp->shader()->gpuCmdProc->system();
+ 
+     // If for some reason no device memory is found for this address, ignore
+     // the packet. This is an extremely rare situation and seems to only
+diff --git a/src/dev/amdgpu/host_gpu_bridge.cc b/src/dev/amdgpu/host_gpu_bridge.cc
+index a66b8674f..e9f60c6a7 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.cc
++++ b/src/dev/amdgpu/host_gpu_bridge.cc
+@@ -79,6 +79,10 @@ constexpr size_t MaximumRecordsPerWakeup = 8;
+ constexpr size_t MaximumAliasCleanupAttempts = 4;
+ constexpr int StaleProbeTimeoutMs = 100;
+ constexpr HostGPUDispatchState::Owner InternalDispatchOwner{-2, 1};
++constexpr uint64_t GenericNativeQueueId = 511;
++constexpr uint32_t GenericNativeQueueBytes = 4096;
++constexpr uint32_t GenericNativeDoorbellBytes = 8;
++constexpr uint16_t GenericDispatchHeader = 0x1502;
+ 
+ uint32_t
+ rotateRight(uint32_t value, unsigned amount)
+@@ -400,35 +404,50 @@ dispatchFailure(const protocol::DispatchRequest &request,
+ 
+ } // anonymous namespace
+ 
+-/*
+- * The generic adapter is owner-bound and intentionally has one mapping and
+- * one kernarg lease.  Keep the complete dependency graph per client so a
+- * disconnect cannot accidentally reuse a lease or state record from another
+- * socket generation.  SUBMIT is deliberately not represented here yet: the
+- * wire route rejects it before native queue admission until packet/tick and
+- * completion ownership are fully wired.
+- */
+ struct HostGPUBridge::GenericDispatchSession
+ {
+     using Owner = HostGPUMemoryState::Owner;
+ 
++    struct PrivateAllocation
++    {
++        HostGPUMemoryState::AllocationView view;
++        HostNativeMemoryContext::PageLease lease;
++    };
++
++    HostGPUMemoryState &memory;
+     Owner owner;
+     std::unique_ptr<HostNativeMemoryContext> context;
+     std::unique_ptr<HostNativeCodeObjectMapper> mapper;
+     std::unique_ptr<HostNativeCommandProcessorCore> commandProcessor;
+     std::unique_ptr<HostNativeDispatchStateV2> state;
++    std::unique_ptr<HostNativeQueueCore> nativeQueue;
++    std::unique_ptr<HostNativeCommandProcessorCore::Result> cpResult;
++    std::optional<PrivateAllocation> packetAllocation;
++    std::optional<PrivateAllocation> signalAllocation;
++    std::optional<PrivateAllocation> mqdAllocation;
++    protocol::CodeObjectManifest manifest;
+     protocol::GenericDispatchRequest mapRequest;
+     protocol::GenericDispatchRequest allocRequest;
++    protocol::GenericDispatchRequest submitRequest;
+     protocol::GenericDispatchResponse mapResponse;
+     protocol::GenericDispatchResponse allocResponse;
++    protocol::GenericDispatchResponse submitResponse;
++    protocol::Header submitResponseHeader;
++    uint64_t submitRequestId = 0;
++    uint64_t privateRequestId = 0;
+     bool mapped = false;
+     bool allocated = false;
+     bool kernargTombstone = false;
++    bool nativeAdmitted = false;
++    bool queuePinned = false;
++    bool signalPinned = false;
++    bool ackSent = false;
++    bool completionQueued = false;
+ 
+     GenericDispatchSession(
+         HostGPUMemoryState &memory, const Owner &sessionOwner,
+         uint64_t pageBytes)
+-        : owner(sessionOwner),
++        : memory(memory), owner(sessionOwner),
+           context(std::make_unique<HostNativeMemoryContext>(
+               memory, owner, pageBytes)),
+           mapper(std::make_unique<HostNativeCodeObjectMapper>(
+@@ -439,6 +458,212 @@ struct HostGPUBridge::GenericDispatchSession
+     {
+     }
+ 
++    ~GenericDispatchSession()
++    {
++        clear(0);
++    }
++
++    bool allocatePrivate(
++        std::optional<PrivateAllocation> &destination, uint64_t bytes,
++        uint64_t requestId, uint64_t now)
++    {
++        protocol::MemoryRequest request;
++        request.opcode = protocol::MemoryOpcode::Allocate;
++        request.byteCount = std::max<uint64_t>(bytes, context->pageBytes());
++        request.argument = context->pageBytes();
++        const auto allocated = memory.allocate(owner, request, now);
++        if (allocated.status != protocol::Status::Ok)
++            return false;
++        const auto view = memory.allocationView(
++            owner, allocated.allocationId, allocated.generation);
++        const auto lease = view ? context->map(view->gpuVa, view->size) :
++            std::nullopt;
++        if (!view || !lease || !memory.pinPinnedDispatchAllocation(
++                owner, view->allocationId, view->generation, requestId)) {
++            if (lease)
++                context->unmap(*lease);
++            protocol::MemoryRequest release;
++            release.opcode = protocol::MemoryOpcode::Free;
++            release.allocationId = allocated.allocationId;
++            release.generation = allocated.generation;
++            memory.free(owner, release, now);
++            return false;
++        }
++        destination.emplace(PrivateAllocation{*view, *lease});
++        return true;
++    }
++
++    bool releasePrivate(
++        std::optional<PrivateAllocation> &allocation, uint64_t requestId,
++        uint64_t now)
++    {
++        if (!allocation)
++            return true;
++        const auto value = *allocation;
++        if (!memory.releasePinnedDispatchAllocation(
++                owner, value.view.allocationId, value.view.generation,
++                requestId)) {
++            return false;
++        }
++        if (!context->unmap(value.lease))
++            return false;
++        protocol::MemoryRequest release;
++        release.opcode = protocol::MemoryOpcode::Free;
++        release.allocationId = value.view.allocationId;
++        release.generation = value.view.generation;
++        if (memory.free(owner, release, now).status != protocol::Status::Ok)
++            return false;
++        allocation.reset();
++        return true;
++    }
++
++    bool releasePrivateResources(uint64_t now)
++    {
++        bool ok = true;
++        cpResult.reset();
++        if (nativeQueue && nativeQueue->isRegistered() &&
++            !nativeQueue->unregisterQueue()) {
++            /* Pre-admission failures can leave a published but unaccepted
++             * private slot.  No external queue observes this object. */
++            nativeQueue->abandonQueue();
++        }
++        nativeQueue.reset();
++        if (privateRequestId != 0) {
++            ok = releasePrivate(mqdAllocation, privateRequestId, now) && ok;
++            ok = releasePrivate(signalAllocation, privateRequestId, now) && ok;
++            ok = releasePrivate(packetAllocation, privateRequestId, now) && ok;
++        } else if (mqdAllocation || signalAllocation || packetAllocation) {
++            ok = false;
++        }
++        if (!mqdAllocation && !signalAllocation && !packetAllocation)
++            privateRequestId = 0;
++        return ok;
++    }
++
++    bool prepareSubmit(
++        const protocol::GenericDispatchRequest &request, uint64_t requestId,
++        uint64_t now, protocol::GenericDispatchResponse &response)
++    {
++        if (!state || state->hasSubmission() || nativeQueue || cpResult ||
++            packetAllocation || signalAllocation || mqdAllocation ||
++            requestId == 0) {
++            response.status = protocol::Status::Busy;
++            return false;
++        }
++        privateRequestId = requestId;
++        if (!allocatePrivate(
++                packetAllocation, GenericNativeQueueBytes, requestId, now) ||
++            !allocatePrivate(
++                signalAllocation, sizeof(uint64_t), requestId, now) ||
++            !allocatePrivate(
++                mqdAllocation, sizeof(_amd_queue_t), requestId, now)) {
++            response.status = protocol::Status::ResourceExhausted;
++            releasePrivateResources(now);
++            return false;
++        }
++
++        const uint64_t signalValue = 1;
++        if (!context->functionalWrite(
++                signalAllocation->view.gpuVa, &signalValue,
++                sizeof(signalValue), requestId)) {
++            response.status = protocol::Status::Internal;
++            releasePrivateResources(now);
++            return false;
++        }
++
++        _amd_queue_t mqd = {};
++        mqd.hsa_queue.type = _HSA_QUEUE_TYPE_MULTI;
++        mqd.hsa_queue.base_address = reinterpret_cast<void *>(
++            packetAllocation->view.gpuVa);
++        mqd.hsa_queue.size =
++            GenericNativeQueueBytes / HostNativeQueueCore::PacketBytes;
++        mqd.hsa_queue.id = GenericNativeQueueId;
++        mqd.read_dispatch_id_field_base_byte_offset =
++            offsetof(_amd_queue_t, read_dispatch_id);
++        if (!context->functionalWrite(
++                mqdAllocation->view.gpuVa, &mqd, sizeof(mqd), requestId)) {
++            response.status = protocol::Status::Internal;
++            releasePrivateResources(now);
++            return false;
++        }
++
++        nativeQueue = std::make_unique<HostNativeQueueCore>(*context);
++        HostNativeQueueCore::Config config;
++        config.baseVa = packetAllocation->view.gpuVa;
++        config.hostReadIndexVa = mqdAllocation->view.gpuVa +
++            offsetof(_amd_queue_t, read_dispatch_id);
++        config.activeQueueId = GenericNativeQueueId;
++        config.generation = owner.clientGeneration;
++        config.registeredIndex = 0;
++        config.queueBytes = GenericNativeQueueBytes;
++        config.doorbellBytes = GenericNativeDoorbellBytes;
++        if (!nativeQueue->registerQueue(config, requestId)) {
++            response.status = protocol::Status::Internal;
++            releasePrivateResources(now);
++            return false;
++        }
++
++        _hsa_dispatch_packet_t packet = {};
++        packet.header = GenericDispatchHeader;
++        packet.setup = 1;
++        packet.workgroup_size_x = request.submit.workgroupX;
++        packet.workgroup_size_y = request.submit.workgroupY;
++        packet.workgroup_size_z = request.submit.workgroupZ;
++        packet.grid_size_x = request.submit.gridX;
++        packet.grid_size_y = request.submit.gridY;
++        packet.grid_size_z = request.submit.gridZ;
++        packet.private_segment_size = manifest.privateSegmentFixedSize;
++        packet.group_segment_size = manifest.groupSegmentFixedSize;
++        packet.kernel_object = mapResponse.descriptorVa;
++        packet.kernarg_address = allocResponse.kernargVa +
++            request.submit.kernargOffset;
++        packet.completion_signal = signalAllocation->view.gpuVa;
++        std::array<uint8_t, HostNativeQueueCore::PacketBytes> packetBytes = {};
++        std::memcpy(packetBytes.data(), &packet, packetBytes.size());
++        const uint32_t packetCrc = protocol::crc32c(
++            packetBytes.data(), packetBytes.size());
++        if (!nativeQueue->publish(
++                packetAllocation->view.gpuVa, packetBytes.data(),
++                packetBytes.size(), requestId)) {
++            response.status = protocol::Status::Internal;
++            releasePrivateResources(now);
++            return false;
++        }
++        uint32_t registeredIndex = 0;
++        if (!nativeQueue->ring(1, registeredIndex) || registeredIndex != 0) {
++            response.status = protocol::Status::Internal;
++            releasePrivateResources(now);
++            return false;
++        }
++        mqd.write_dispatch_id = 1;
++        if (!context->functionalWrite(
++                mqdAllocation->view.gpuVa, &mqd, sizeof(mqd), requestId)) {
++            response.status = protocol::Status::Internal;
++            releasePrivateResources(now);
++            return false;
++        }
++        HostNativeQueueCore::FetchedPacket fetched;
++        if (!nativeQueue->fetch(fetched, nullptr, requestId)) {
++            response.status = protocol::Status::Internal;
++            releasePrivateResources(now);
++            return false;
++        }
++        cpResult = std::make_unique<HostNativeCommandProcessorCore::Result>();
++        if (!state->submit(
++                {owner, requestId}, request, signalAllocation->view.gpuVa,
++                *nativeQueue, fetched, *cpResult, response)) {
++            if (nativeQueue->ownsPending(fetched))
++                nativeQueue->cancelFetch(fetched.ticket);
++            releasePrivateResources(now);
++            return false;
++        }
++        response.packetCrc32c = packetCrc;
++        response.simTick = now;
++        response.admissionTick = now;
++        nativeAdmitted = true;
++        return true;
++    }
++
+     bool ownsKernarg(uint64_t allocationId, uint64_t generation) const
+     {
+         return allocated && allocResponse.status == protocol::Status::Ok &&
+@@ -474,9 +699,15 @@ struct HostGPUBridge::GenericDispatchSession
+             memoryRequest.allocationId, memoryRequest.generation, bytes);
+     }
+ 
+-    bool clear()
++    bool clear(uint64_t now)
+     {
+-        return !state || state->clear();
++        bool ok = true;
++        if (state && state->hasSubmission())
++            ok = state->abandonSubmission() && ok;
++        nativeAdmitted = false;
++        ok = releasePrivateResources(now) && ok;
++        ok = (!state || state->clear()) && ok;
++        return ok;
+     }
+ };
+ 
+@@ -633,10 +864,8 @@ HostGPUBridge::HostGPUBridge(const HostGPUBridgeParams &params)
+         protocol::KmtOperationCapabilityMask;
+     identity.supported[protocol::CodeObjectTransferCapabilityByte] |=
+         protocol::CodeObjectTransferCapabilityMask;
+-    /* CP24 keeps GENERIC_DISPATCH_V2 (runtime bit 8 / wire byte 1 bit 0)
+-     * unadvertised.  The handler remains test-injectable, but production
+-     * negotiation cannot select a route whose SUBMIT/tick contract is absent.
+-     */
++    identity.supported[protocol::GenericDispatchCapabilityByte] |=
++        protocol::GenericDispatchCapabilityMask;
+     if (dispatchEnabled) {
+         identity.supported[protocol::PinnedDispatchCapabilityByte] |=
+             protocol::PinnedDispatchCapabilityMask;
+@@ -2412,8 +2641,7 @@ HostGPUBridge::closeClient(int fd)
+             "%s: cannot persist dispatch owner disconnect", name());
+     }
+     found->second->state.close();
+-    if (activeClientFd == fd)
+-        activeClientFd = -1;
++    releaseActiveClientSession(fd, activeClientFd, sessionEstablished);
+     admissionBudget.release(found->second->admission);
+     dispatchState.disconnect({owner.fd, owner.clientGeneration});
+     releaseMappings({owner.fd, owner.clientGeneration});
+@@ -2424,9 +2652,29 @@ HostGPUBridge::closeClient(int fd)
+         retiredDispatchCompletion.reset();
+     }
+     if (found->second->genericDispatch) {
+-        if (!found->second->genericDispatch->clear()) {
+-            warn("%s: generic dispatch session close retained native state",
+-                 name());
++        GenericDispatchSession &session = *found->second->genericDispatch;
++        if (!session.clear(curTick())) {
++            warn("%s: generic dispatch session close cleanup failed", name());
++        }
++        if (session.signalPinned) {
++            const HostGPUSignalState::Owner signalOwner{
++                owner.fd, owner.clientGeneration};
++            if (!signalState.releasePinnedDispatchSignal(
++                    signalOwner, session.submitRequest.submit.signalId,
++                    session.submitRequest.submit.signalGeneration,
++                    session.submitRequestId)) {
++                warn("%s: generic signal pin close cleanup failed", name());
++            }
++            session.signalPinned = false;
++        }
++        if (session.queuePinned) {
++            if (!queueState.releasePinnedDispatch(
++                    owner, session.submitRequest.queueId,
++                    session.submitRequest.queueGeneration,
++                    session.submitRequestId)) {
++                warn("%s: generic queue pin close cleanup failed", name());
++            }
++            session.queuePinned = false;
+         }
+         found->second->genericDispatch.reset();
+     }
+@@ -3158,6 +3406,7 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+             if (routeSuccess && response.status == protocol::Status::Ok) {
+                 client.genericDispatch->mapRequest = decoded.request;
+                 client.genericDispatch->mapResponse = response;
++                client.genericDispatch->manifest = *manifest;
+                 client.genericDispatch->mapped = true;
+             } else if (createdSession &&
+                        !client.genericDispatch->state->hasMapping() &&
+@@ -3190,10 +3439,94 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+                 client.genericDispatch->kernargTombstone = false;
+             }
+             break;
+-          case protocol::GenericDispatchOpcode::SubmitAql:
++          case protocol::GenericDispatchOpcode::SubmitAql: {
+             response.status = generic_dispatch_route::stageStatus(
+                 decoded.request);
++            if (response.status != protocol::Status::Ok)
++                break;
++            if (!client.genericDispatch ||
++                !client.genericDispatch->state ||
++                !client.genericDispatch->mapped ||
++                !client.genericDispatch->allocated ||
++                client.genericDispatch->state->hasSubmission() ||
++                curTick() == 0) {
++                response.status = curTick() == 0 ?
++                    protocol::Status::Internal : protocol::Status::ProtocolState;
++                break;
++            }
++            const HostGPUQueueState::Owner queueOwner{
++                owner.fd, owner.clientGeneration};
++            response.status = queueState.validatePinnedDispatch(
++                queueOwner, decoded.request.queueId,
++                decoded.request.queueGeneration,
++                decoded.request.queueSequence);
++            if (response.status != protocol::Status::Ok)
++                break;
++            const HostGPUSignalState::Owner signalOwner{
++                owner.fd, owner.clientGeneration};
++            response.status = signalState.validateGenericDispatchSignal(
++                signalOwner, decoded.request.submit.signalId,
++                decoded.request.submit.signalGeneration);
++            if (response.status != protocol::Status::Ok)
++                break;
++            if (!queueState.pinPinnedDispatch(
++                    queueOwner, decoded.request.queueId,
++                    decoded.request.queueGeneration,
++                    decoded.request.queueSequence, decoded.header.requestId)) {
++                response.status = protocol::Status::Busy;
++                break;
++            }
++            client.genericDispatch->queuePinned = true;
++            if (!signalState.pinGenericDispatchSignal(
++                    signalOwner, decoded.request.submit.signalId,
++                    decoded.request.submit.signalGeneration,
++                    decoded.header.requestId)) {
++                queueState.cancelPinnedDispatch(
++                    queueOwner, decoded.request.queueId,
++                    decoded.request.queueGeneration,
++                    decoded.request.queueSequence, decoded.header.requestId);
++                client.genericDispatch->queuePinned = false;
++                response.status = protocol::Status::Busy;
++                break;
++            }
++            client.genericDispatch->signalPinned = true;
++            routeSuccess = client.genericDispatch->prepareSubmit(
++                decoded.request, decoded.header.requestId, curTick(), response);
++            if (routeSuccess && response.status == protocol::Status::Ok &&
++                client.genericDispatch->cpResult &&
++                client.genericDispatch->cpResult->taskValid &&
++                client.genericDispatch->cpResult->commandProcessorSubmitted &&
++                !client.genericDispatch->cpResult->kernelExecuted) {
++                client.genericDispatch->submitRequest = decoded.request;
++                client.genericDispatch->submitResponse = response;
++                client.genericDispatch->submitRequestId =
++                    decoded.header.requestId;
++            } else {
++                if (client.genericDispatch->state->hasSubmission())
++                    client.genericDispatch->state->abandonSubmission();
++                client.genericDispatch->nativeAdmitted = false;
++                client.genericDispatch->releasePrivateResources(curTick());
++                if (client.genericDispatch->signalPinned) {
++                    signalState.releasePinnedDispatchSignal(
++                        signalOwner, decoded.request.submit.signalId,
++                        decoded.request.submit.signalGeneration,
++                        decoded.header.requestId);
++                    client.genericDispatch->signalPinned = false;
++                }
++                if (client.genericDispatch->queuePinned) {
++                    queueState.cancelPinnedDispatch(
++                        queueOwner, decoded.request.queueId,
++                        decoded.request.queueGeneration,
++                        decoded.request.queueSequence,
++                        decoded.header.requestId);
++                    client.genericDispatch->queuePinned = false;
++                }
++                routeSuccess = false;
++                if (response.status == protocol::Status::Ok)
++                    response.status = protocol::Status::Internal;
++            }
+             break;
++          }
+           case protocol::GenericDispatchOpcode::UnmapObject:
+             if (!client.genericDispatch ||
+                 !client.genericDispatch->state ||
+@@ -3229,6 +3562,11 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+     currentClient.state.finishEstablishedRecord();
+     const auto responseHeader = protocol::queueResponseHeader(
+         decoded.header, identity, currentClient.connectionId);
++    const bool submitAccepted = routeSuccess &&
++        response.status == protocol::Status::Ok &&
++        response.opcode == protocol::GenericDispatchOpcode::SubmitAql;
++    if (submitAccepted && currentClient.genericDispatch)
++        currentClient.genericDispatch->submitResponseHeader = responseHeader;
+     auto encoded = protocol::encodeGenericDispatchAck(
+         responseHeader, response, currentClient.selectedCapabilities);
+     if (encoded.empty()) {
+@@ -3244,7 +3582,76 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+     sendGenericDispatchResponse(
+         record.clientFd, record.generation, std::move(encoded),
+         OutboundKind::GenericDispatchAck, response.status,
+-        routeSuccess && response.status == protocol::Status::Ok);
++        routeSuccess && response.status == protocol::Status::Ok,
++        submitAccepted ?
++            std::optional<protocol::GenericDispatchResponse>(response) :
++            std::nullopt);
++}
++
++void
++HostGPUBridge::processGenericDispatchCompletion(int fd, uint64_t generation)
++{
++    auto found = clients.find(fd);
++    if (found == clients.end() || found->second->generation != generation ||
++        !found->second->genericDispatch) {
++        return;
++    }
++    GenericDispatchSession &session = *found->second->genericDispatch;
++    if (!session.ackSent || session.completionQueued ||
++        !session.nativeAdmitted || !session.state ||
++        !session.nativeQueue || !session.state->hasSubmission() ||
++        session.submitRequestId == 0 || curTick() == 0 ||
++        curTick() < session.submitResponse.admissionTick) {
++        closeClient(fd);
++        return;
++    }
++    if (!session.state->retire(
++            {session.owner, session.submitRequestId}, session.submitRequest,
++            *session.nativeQueue)) {
++        closeClient(fd);
++        return;
++    }
++    session.nativeAdmitted = false;
++
++    const HostGPUQueueState::Owner queueOwner{
++        session.owner.fd, session.owner.clientGeneration};
++    if (!session.queuePinned || !queueState.releasePinnedDispatch(
++            queueOwner, session.submitRequest.queueId,
++            session.submitRequest.queueGeneration,
++            session.submitRequestId)) {
++        closeClient(fd);
++        return;
++    }
++    session.queuePinned = false;
++    const HostGPUSignalState::Owner signalOwner{
++        session.owner.fd, session.owner.clientGeneration};
++    if (!session.signalPinned || !signalState.releasePinnedDispatchSignal(
++            signalOwner, session.submitRequest.submit.signalId,
++            session.submitRequest.submit.signalGeneration,
++            session.submitRequestId)) {
++        closeClient(fd);
++        return;
++    }
++    session.signalPinned = false;
++
++    protocol::GenericDispatchResponse completion = session.submitResponse;
++    completion.simTick = curTick();
++    completion.startTick = curTick();
++    completion.endTick = curTick();
++    completion.retireTick = curTick();
++    completion.outputCrc32c = 0;
++    auto encoded = protocol::encodeGenericDispatchCompletion(
++        session.submitResponseHeader, completion,
++        found->second->selectedCapabilities);
++    if (encoded.empty()) {
++        closeClient(fd);
++        return;
++    }
++    session.completionQueued = true;
++    sendGenericDispatchResponse(
++        fd, generation, std::move(encoded),
++        OutboundKind::GenericDispatchCompletion, protocol::Status::Ok, true,
++        completion);
+ }
+ 
+ void
+@@ -3682,7 +4089,7 @@ HostGPUBridge::processSignalCompletions()
+             OutboundRecord{std::move(encoded),
+                            OutboundKind::SignalCompletion,
+                            protocol::Status::Ok, true, *completion,
+-                           std::nullopt});
++                           std::nullopt, false, std::nullopt});
+         if (dispatchSignal) {
+             found = clients.find(completion->owner.fd);
+             if (found == clients.end() || found->second->generation !=
+@@ -3720,7 +4127,7 @@ HostGPUBridge::sendAck(int fd, uint64_t generation,
+         return;
+     enqueueOutbound(fd, generation, OutboundRecord{
+         std::move(record), OutboundKind::HandshakeAck, status, success,
+-        std::nullopt, std::nullopt});
++        std::nullopt, std::nullopt, false, std::nullopt});
+ }
+ 
+ void
+@@ -3730,16 +4137,18 @@ HostGPUBridge::sendQueueResponse(int fd, uint64_t generation,
+ {
+     enqueueOutbound(fd, generation, OutboundRecord{
+         std::move(record), kind, protocol::Status::Ok, true, std::nullopt,
+-        std::nullopt});
++        std::nullopt, false, std::nullopt});
+ }
+ 
+ void
+ HostGPUBridge::sendGenericDispatchResponse(
+     int fd, uint64_t generation, std::vector<uint8_t> record,
+-    OutboundKind kind, protocol::Status status, bool success)
++    OutboundKind kind, protocol::Status status, bool success,
++    std::optional<protocol::GenericDispatchResponse> correlation)
+ {
+     enqueueOutbound(fd, generation, OutboundRecord{
+-        std::move(record), kind, status, success, std::nullopt, std::nullopt});
++        std::move(record), kind, status, success, std::nullopt, std::nullopt,
++        false, std::move(correlation)});
+ }
+ 
+ void
+@@ -3817,13 +4226,68 @@ HostGPUBridge::completeOutbound(int fd, uint64_t generation,
+       case OutboundKind::KmtAck:
+       case OutboundKind::SignalAck:
+       case OutboundKind::CodeObjectAck:
+-      case OutboundKind::GenericDispatchAck:
+-      case OutboundKind::GenericDispatchCompletion:
+         if (found->second->state.phase() == ConnectionPhase::Established &&
+             found->second->state.canReceive()) {
+             found->second->socketEvent->setReadable(true);
+         }
+         break;
++      case OutboundKind::GenericDispatchAck: {
++        const bool successfulSubmit = record.success &&
++            record.genericDispatchResponse &&
++            record.genericDispatchResponse->opcode ==
++                protocol::GenericDispatchOpcode::SubmitAql;
++        if (!successfulSubmit) {
++            if (found->second->state.phase() ==
++                    ConnectionPhase::Established &&
++                found->second->state.canReceive()) {
++                found->second->socketEvent->setReadable(true);
++            }
++            break;
++        }
++        GenericDispatchSession *session = found->second->genericDispatch.get();
++        if (!session || !session->nativeAdmitted || session->ackSent ||
++            session->completionQueued ||
++            session->submitResponse.traceId !=
++                record.genericDispatchResponse->traceId ||
++            session->submitResponse.ticketId !=
++                record.genericDispatchResponse->ticketId ||
++            session->submitResponse.packetVa !=
++                record.genericDispatchResponse->packetVa ||
++            curTick() == std::numeric_limits<Tick>::max()) {
++            closeClient(fd);
++            break;
++        }
++        session->ackSent = true;
++        auto *event = new EventFunctionWrapper(
++            [this, fd, generation]() {
++                processGenericDispatchCompletion(fd, generation);
++            }, name() + ".host_gpu_generic_dispatch_completion", true);
++        schedule(event, curTick() + 1);
++        break;
++      }
++      case OutboundKind::GenericDispatchCompletion: {
++        GenericDispatchSession *session = found->second->genericDispatch.get();
++        if (!record.success || !record.genericDispatchResponse || !session ||
++            !session->completionQueued || session->nativeAdmitted ||
++            session->queuePinned || session->signalPinned ||
++            session->submitResponse.traceId !=
++                record.genericDispatchResponse->traceId ||
++            !session->releasePrivateResources(curTick())) {
++            closeClient(fd);
++            break;
++        }
++        session->completionQueued = false;
++        session->ackSent = false;
++        session->submitRequestId = 0;
++        session->submitRequest = {};
++        session->submitResponse = {};
++        session->submitResponseHeader = {};
++        if (found->second->state.phase() == ConnectionPhase::Established &&
++            found->second->state.canReceive()) {
++            found->second->socketEvent->setReadable(true);
++        }
++        break;
++      }
+       case OutboundKind::MemoryAck:
+         if (record.dispatchOutputD2h) {
+             fatal_if(!completedDispatchSession ||
+diff --git a/src/dev/amdgpu/host_gpu_bridge.hh b/src/dev/amdgpu/host_gpu_bridge.hh
+index facf34492..983605762 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.hh
++++ b/src/dev/amdgpu/host_gpu_bridge.hh
+@@ -182,6 +182,8 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+         std::optional<HostGPUSignalState::Completion> signalCompletion;
+         std::optional<protocol::DispatchResponse> dispatchCompletion;
+         bool dispatchOutputD2h = false;
++        std::optional<protocol::GenericDispatchResponse>
++            genericDispatchResponse;
+     };
+ 
+     struct Client
+@@ -239,6 +241,7 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+     void processDispatchRecord(const PendingRecord &record);
+     void processCodeObjectRecord(const PendingRecord &record);
+     void processGenericDispatchRecord(const PendingRecord &record);
++    void processGenericDispatchCompletion(int fd, uint64_t generation);
+     void scheduleRecordService();
+     void scheduleQueueService();
+     void processQueueCommands();
+@@ -252,7 +255,9 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+                            OutboundKind kind);
+     void sendGenericDispatchResponse(
+         int fd, uint64_t generation, std::vector<uint8_t> record,
+-        OutboundKind kind, protocol::Status status, bool success);
++        OutboundKind kind, protocol::Status status, bool success,
++        std::optional<protocol::GenericDispatchResponse> correlation =
++            std::nullopt);
+     void enqueueOutbound(int fd, uint64_t generation,
+                          OutboundRecord record);
+     void flushClient(int fd);
+diff --git a/src/dev/amdgpu/host_gpu_connection_state.hh b/src/dev/amdgpu/host_gpu_connection_state.hh
+index 4b5480306..364f18530 100644
+--- a/src/dev/amdgpu/host_gpu_connection_state.hh
++++ b/src/dev/amdgpu/host_gpu_connection_state.hh
+@@ -194,6 +194,17 @@ class HostGPUConnectionState
+     bool sessionCommitted = false;
+ };
+ 
++inline bool
++releaseActiveClientSession(int closingFd, int &activeClientFd,
++                           bool &sessionEstablished)
++{
++    if (activeClientFd != closingFd)
++        return false;
++    activeClientFd = -1;
++    sessionEstablished = false;
++    return true;
++}
++
+ inline protocol::Status
+ preNegotiationStatus(const HostGPUConnectionState &state,
+                      bool disconnectedSession,
+diff --git a/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc b/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
+index b44be4c03..fc9d8262e 100644
+--- a/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
++++ b/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
+@@ -61,16 +61,16 @@ stageStatus(const protocol::GenericDispatchRequest &request)
+         return pageSizeSupported(request.map.pageSize) ?
+             protocol::Status::Ok : protocol::Status::UnsupportedCapability;
+       case protocol::GenericDispatchOpcode::AllocKernarg:
+-        /* The native response exposes backing alignment, so accepting the
+-         * runtime's usual logical alignment (8) would produce a protocol
+-         * mismatch after allocation. */
+-        return request.allocKernarg.alignmentBytes ==
+-                    protocol::GenericDispatchPageSize4K ||
+-                request.allocKernarg.alignmentBytes ==
+-                    protocol::GenericDispatchPageSize64K ?
+-            protocol::Status::Ok : protocol::Status::UnsupportedCapability;
++        return protocol::Status::Ok;
+       case protocol::GenericDispatchOpcode::SubmitAql:
+-        return protocol::Status::UnsupportedCapability;
++        /* The bounded control lifecycle materializes the exact 1D packet
++         * accepted by the extracted command-processor core. */
++        return request.submit.gridY == 1 && request.submit.gridZ == 1 &&
++                request.submit.workgroupY == 1 &&
++                request.submit.workgroupZ == 1 &&
++                request.submit.numCtas == 1 &&
++                request.submit.sharedMemoryBytes == 0 ?
++            protocol::Status::Ok : protocol::Status::UnsupportedCapability;
+       case protocol::GenericDispatchOpcode::UnmapObject:
+         return protocol::Status::Ok;
+     }
+diff --git a/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc b/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
+index 6c5760091..cbdb3f60c 100644
+--- a/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
++++ b/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
+@@ -209,18 +209,74 @@ run()
+     const auto allocDecoded = decodeGenericDispatchRequestRecord(
+         allocFrame.data(), allocFrame.size(), MaximumRecordBytes, selected);
+     require(allocDecoded.status == Status::Ok &&
+-                stageStatus(allocDecoded.request) ==
+-                    Status::UnsupportedCapability,
+-            "logical ALLOC alignment was not rejected");
++                stageStatus(allocDecoded.request) == Status::Ok,
++            "logical ALLOC alignment was not accepted");
+     const auto submit = submitRequest();
+     const auto submitFrame = encodeGenericDispatchRequest(
+         header(103), submit, selected);
+     const auto submitDecoded = decodeGenericDispatchRequestRecord(
+         submitFrame.data(), submitFrame.size(), MaximumRecordBytes, selected);
+     require(submitDecoded.status == Status::Ok &&
+-                stageStatus(submitDecoded.request) ==
+-                    Status::UnsupportedCapability,
+-            "SUBMIT was not rejected without queue/tick contracts");
++                stageStatus(submitDecoded.request) == Status::Ok,
++            "bounded SUBMIT shape was not accepted");
++    auto unsupported = submit;
++    unsupported.submit.gridY = 2;
++    require(stageStatus(unsupported) == Status::UnsupportedCapability,
++            "2D SUBMIT did not fail closed");
++    unsupported = submit;
++    unsupported.submit.sharedMemoryBytes = 64;
++    require(stageStatus(unsupported) == Status::UnsupportedCapability,
++            "dynamic shared memory did not fail closed");
++
++    GenericDispatchResponse submitAck;
++    submitAck.status = Status::Ok;
++    submitAck.opcode = GenericDispatchOpcode::SubmitAql;
++    submitAck.objectId = submit.objectId;
++    submitAck.objectGeneration = submit.objectGeneration;
++    submitAck.mappingId = submit.mappingId;
++    submitAck.mappingGeneration = submit.mappingGeneration;
++    submitAck.kernargAllocationId = submit.submit.kernargAllocationId;
++    submitAck.kernargGeneration = submit.submit.kernargGeneration;
++    submitAck.kernargVa = 0x200040;
++    submitAck.kernargSize = submit.submit.kernargSize;
++    submitAck.kernargAlignment = 8;
++    submitAck.ticketId = 1;
++    submitAck.traceId = 1;
++    submitAck.queueId = submit.queueId;
++    submitAck.queueGeneration = submit.queueGeneration;
++    submitAck.queueSequence = submit.queueSequence;
++    submitAck.signalId = submit.submit.signalId;
++    submitAck.signalGeneration = submit.submit.signalGeneration;
++    submitAck.signalValueBits = 1;
++    submitAck.packetVa = 0x300000;
++    submitAck.packetCrc32c = 0x12345678;
++    submitAck.simTick = 100;
++    submitAck.admissionTick = 100;
++    submitAck.imageSha256 = submit.imageSha256;
++    const auto submitAckBytes = encodeGenericDispatchAck(
++        submitDecoded.header, submitAck, selected);
++    require(submitAckBytes.size() == GenericDispatchRecordBytes,
++            "successful SUBMIT ACK did not encode");
++    auto completion = submitAck;
++    completion.simTick = 101;
++    completion.startTick = 101;
++    completion.endTick = 101;
++    completion.retireTick = 101;
++    const auto completionBytes = encodeGenericDispatchCompletion(
++        submitDecoded.header, completion, selected);
++    require(completionBytes.size() == GenericDispatchRecordBytes,
++            "successful type-20 did not encode");
++    const auto decodedCompletion = decodeGenericDispatchResponseRecord(
++        completionBytes.data(), completionBytes.size(), MaximumRecordBytes,
++        selected, submitDecoded.header.requestId,
++        MessageType::GenericDispatchCompletion);
++    require(decodedCompletion.status == Status::Ok &&
++                decodedCompletion.response.admissionTick == 100 &&
++                decodedCompletion.response.startTick == 101 &&
++                decodedCompletion.response.endTick == 101 &&
++                decodedCompletion.response.retireTick == 101 &&
++                decodedCompletion.response.packetCrc32c == 0x12345678,
++            "successful type-20 identity/ticks did not round trip");
+ 
+     require(stageStatus(map) == Status::Ok,
+             "selected MAP gate unexpectedly rejected 4K");
+@@ -244,6 +300,14 @@ main()
+                   << error.what() << '\n';
+         return EXIT_FAILURE;
+     }
+-    std::cout << "host_gpu_generic_dispatch_route_core: PASS\n";
++    std::cout
++        << "{\"schema\":\"gem5.host-gpu.generic-dispatch-route.v2\","
++           "\"unnegotiated_rejected\":true,\"bit8_selected\":true,"
++           "\"logical_alignment\":8,\"submit_subset\":true,"
++           "\"ack_type19\":true,\"completion_type20\":true,"
++           "\"ticks_ordered\":true,\"packet_crc_bound\":true,"
++           "\"gpu_execution\":false,\"output_validated\":false,"
++           "\"launcher\":false,\"compiler\":false,\"jit\":false,"
++           "\"fallback\":false}\n";
+     return EXIT_SUCCESS;
+ }
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc
+index 0da242b8a..e6c78d069 100644
+--- a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc
+@@ -453,8 +453,9 @@ HostNativeDispatchStateV2::allocateKernarg(
+             kernarg ? "ALLOC already owns kernarg" : "invalid ALLOC request");
+     }
+ 
+-    const uint64_t backingAlignment =
+-        request.allocKernarg.alignmentBytes > 4096 ? 65536 : 4096;
++    /* The wire alignment is the kernel ABI contract.  Allocation backing is
++     * independently aligned to the page policy fixed by the first MAP. */
++    const uint64_t backingAlignment = context.pageBytes();
+     protocol::MemoryRequest allocationRequest;
+     allocationRequest.opcode = protocol::MemoryOpcode::Allocate;
+     allocationRequest.byteCount = request.allocKernarg.sizeBytes;
+@@ -468,7 +469,7 @@ HostNativeDispatchStateV2::allocateKernarg(
+     }
+     const auto view = memory.allocationView(
+         boundOwner, allocation.allocationId, allocation.generation);
+-    if (!view) {
++    if (!view || view->gpuVa % request.allocKernarg.alignmentBytes != 0) {
+         protocol::MemoryRequest freeRequest;
+         freeRequest.opcode = protocol::MemoryOpcode::Free;
+         freeRequest.allocationId = allocation.allocationId;
+@@ -476,7 +477,7 @@ HostNativeDispatchStateV2::allocateKernarg(
+         memory.free(boundOwner, freeRequest, requestContext.requestId);
+         return failResponse(
+             request, response, protocol::Status::Internal, Failure::Allocation,
+-            "kernarg allocation identity disappeared");
++            "kernarg allocation identity or logical alignment mismatch");
+     }
+     const auto lease = context.map(view->gpuVa, view->size);
+     if (!lease) {
+@@ -496,6 +497,7 @@ HostNativeDispatchStateV2::allocateKernarg(
+     record.mappingId = request.mappingId;
+     record.mappingGeneration = request.mappingGeneration;
+     record.allocation = *view;
++    record.logicalAlignment = request.allocKernarg.alignmentBytes;
+     record.lease = *lease;
+     try {
+         kernarg.emplace(std::move(record));
+@@ -520,7 +522,7 @@ HostNativeDispatchStateV2::allocateKernarg(
+     response.kernargGeneration = view->generation;
+     response.kernargVa = view->gpuVa;
+     response.kernargSize = view->size;
+-    response.kernargAlignment = view->alignment;
++    response.kernargAlignment = request.allocKernarg.alignmentBytes;
+     response.imageSha256 = mapping->manifest.imageSha256;
+     lastFailure = Failure::None;
+     failureReason = "none";
+@@ -601,7 +603,6 @@ HostNativeDispatchStateV2::submit(
+         body.signalId == 0 || body.signalGeneration == 0 ||
+         body.kernargSize == 0 ||
+         body.kernargSize > HostGPUMemoryState::MaximumTransferBytes ||
+-        body.kernargOffset != 0 ||
+         body.kernargSize != mapping->manifest.kernargSegmentSize ||
+         !rangeFits(body.kernargOffset, body.kernargSize,
+                    kernarg->allocation.size) ||
+@@ -623,23 +624,18 @@ HostNativeDispatchStateV2::submit(
+             submission ? Failure::Busy : Failure::InvalidRequest,
+             submission ? "SUBMIT already admitted" : "invalid SUBMIT request");
+     }
+-    if (requestContext.requestId == 0 ||
+-        requestContext.requestId > static_cast<uint64_t>(INT_MAX)) {
+-        return failResponse(
+-            request, response, protocol::Status::Malformed, Failure::Overflow,
+-            "SUBMIT request identity cannot become a task ID");
+-    }
+-    if (nextTraceId == 0) {
++    if (nextTraceId == 0 ||
++        nextTraceId > static_cast<uint64_t>(INT_MAX)) {
+         return failResponse(
+             request, response, protocol::Status::ResourceExhausted,
+-            Failure::Overflow, "SUBMIT trace identity exhausted");
++            Failure::Overflow, "SUBMIT internal task identity exhausted");
+     }
+     const uint64_t traceId = nextTraceId++;
+-    if (request.queueId != queue.config().activeQueueId ||
+-        request.queueGeneration != queue.config().generation ||
+-        request.queueSequence - 1 != fetched.queueIndex ||
+-        fetched.activeQueueId != request.queueId ||
+-        fetched.queueGeneration != request.queueGeneration ||
++    /* The negotiated queue tuple is validated by HostGPUQueueState.  The
++     * native queue is daemon-private and intentionally has an independent ID,
++     * generation, and ring index. */
++    if (fetched.activeQueueId != queue.config().activeQueueId ||
++        fetched.queueGeneration != queue.config().generation ||
+         fetched.registeredIndex != queue.registeredIndex() ||
+         !queue.ownsPending(fetched)) {
+         return failResponse(
+@@ -700,7 +696,7 @@ HostNativeDispatchStateV2::submit(
+ 
+     if (!commandProcessor.submit(
+             fetched, queue, mapping->value, mapping->manifest, context,
+-            requestContext.requestId, result, listener,
++            traceId, result, listener,
+             requestContext.requestId)) {
+         /* The CP may reject after queue.fetch; return that slot to pending so
+          * a caller can retry or explicitly cancel without losing ownership. */
+@@ -734,7 +730,7 @@ HostNativeDispatchStateV2::submit(
+         traceId,
+         &queue, fetched.ticket, fetched.queueIndex, request.queueId,
+         request.queueGeneration, request.queueSequence, requestContext.requestId,
+-        requestContext.requestId});
++        traceId});
+     response.status = protocol::Status::Ok;
+     response.objectId = request.objectId;
+     response.objectGeneration = request.objectGeneration;
+@@ -744,7 +740,7 @@ HostNativeDispatchStateV2::submit(
+     response.kernargGeneration = kernarg->allocation.generation;
+     response.kernargVa = kernarg->allocation.gpuVa + body.kernargOffset;
+     response.kernargSize = body.kernargSize;
+-    response.kernargAlignment = kernarg->allocation.alignment;
++    response.kernargAlignment = kernarg->logicalAlignment;
+     response.ticketId = fetched.ticket;
+     response.queueId = request.queueId;
+     response.queueGeneration = request.queueGeneration;
+@@ -808,20 +804,29 @@ HostNativeDispatchStateV2::retire(
+             submission ? Failure::State : Failure::InvalidRequest,
+             submission ? "RETIRE identity mismatch" : "no admitted submission");
+     }
+-    if (!queue.retire(submission->queueIndex, requestContext.requestId))
+-        return fail(protocol::Status::ProtocolState, Failure::Queue,
+-                    queue.failure());
++    return abandonSubmission();
++}
+ 
+-    const bool kernargReleased = memory.releasePinnedDispatchAllocation(
+-        boundOwner, kernarg->allocation.allocationId,
+-        kernarg->allocation.generation, submission->dispatchId);
+-    const bool mappingReleased = memory.releasePinnedDispatchAllocation(
+-        boundOwner, mapping->value.allocation.allocationId,
+-        mapping->value.allocation.generation, submission->dispatchId);
++bool
++HostNativeDispatchStateV2::abandonSubmission()
++{
++    if (!submission)
++        return true;
++    const SubmissionRecord admitted = *submission;
++    const bool queueRetired = admitted.queue &&
++        admitted.queue->retire(admitted.queueIndex, admitted.requestId);
++    const bool kernargReleased = kernarg &&
++        memory.releasePinnedDispatchAllocation(
++            boundOwner, kernarg->allocation.allocationId,
++            kernarg->allocation.generation, admitted.requestId);
++    const bool mappingReleased = mapping &&
++        memory.releasePinnedDispatchAllocation(
++            boundOwner, mapping->value.allocation.allocationId,
++            mapping->value.allocation.generation, admitted.requestId);
+     submission.reset();
+-    if (!kernargReleased || !mappingReleased)
++    if (!queueRetired || !kernargReleased || !mappingReleased)
+         return fail(protocol::Status::Internal, Failure::State,
+-                    "retire pin release failed");
++                    "abandoned submission cleanup failed");
+     lastFailure = Failure::None;
+     failureReason = "none";
+     return true;
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.hh b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.hh
+index 3834b2953..3174911ca 100644
+--- a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.hh
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.hh
+@@ -125,6 +125,9 @@ class HostNativeDispatchStateV2
+         const RequestContext &context, const Request &request,
+         Response &response);
+ 
++    /** Retire an admitted native queue slot during owner disconnect/failure. */
++    bool abandonSubmission();
++
+     /** Release idle resources; an admitted submission must be retired first. */
+     bool clear();
+ 
+@@ -154,6 +157,7 @@ class HostNativeDispatchStateV2
+         uint64_t mappingId = 0;
+         uint64_t mappingGeneration = 0;
+         HostGPUMemoryState::AllocationView allocation;
++        uint64_t logicalAlignment = 0;
+         HostNativeMemoryContext::PageLease lease;
+         std::vector<std::pair<uint64_t, uint64_t>> publishedRanges;
+     };
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2_main.cc b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2_main.cc
+index d696141b4..19dcc2300 100644
+--- a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2_main.cc
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2_main.cc
+@@ -57,6 +57,7 @@ constexpr uint64_t QueueGeneration = 1;
+ constexpr uint32_t QueueBytes = 4096;
+ constexpr uint32_t DoorbellBytes = 8;
+ constexpr uint16_t DispatchHeader = 0x1502;
++constexpr uint64_t SubmitRequestId = (uint64_t{1} << 40) + 17;
+ 
+ void
+ require(bool condition, const char *message)
+@@ -293,7 +294,7 @@ runSelfTest(const std::vector<uint8_t> &image)
+     allocRequest.kernelName = {};
+     allocRequest.mappingId = mapResponse.mappingId;
+     allocRequest.mappingGeneration = mapResponse.mappingGeneration;
+-    allocRequest.allocKernarg.sizeBytes = staged.manifest.kernargSegmentSize;
++    allocRequest.allocKernarg.sizeBytes = 512;
+     allocRequest.allocKernarg.alignmentBytes = staged.manifest.kernargSegmentAlign;
+     HostNativeDispatchStateV2::Response wrongResponse;
+     require(!adapter.handleAlloc(
+@@ -304,14 +305,22 @@ runSelfTest(const std::vector<uint8_t> &image)
+     HostNativeDispatchStateV2::Response allocResponse;
+     require(adapter.handleAlloc(owner, 11, allocRequest, allocResponse) &&
+                 allocResponse.status == protocol::Status::Ok &&
+-                allocResponse.kernargAllocationId != 0,
++                allocResponse.kernargAllocationId != 0 &&
++                allocResponse.kernargSize == 512 &&
++                allocResponse.kernargAlignment ==
++                    staged.manifest.kernargSegmentAlign,
+             state.failure());
++    const auto kernargView = memory.allocationView(
++        owner, allocResponse.kernargAllocationId,
++        allocResponse.kernargGeneration);
++    require(kernargView && kernargView->alignment == context.pageBytes(),
++            "v2 logical/backing kernarg alignment separation");
+     require(!protocol::encodeGenericDispatchAck(wireHeader, allocResponse).empty(),
+             "v2 ALLOC response wire validation");
+     std::vector<uint8_t> kernarg(staged.manifest.kernargSegmentSize, 0);
+     HostNativeDispatchStateV2::Request writeRequest = allocRequest;
+     require(adapter.handleKernargWrite(
+-                owner, 12, writeRequest, 0, allocResponse.kernargAllocationId,
++                owner, 12, writeRequest, 64, allocResponse.kernargAllocationId,
+                 allocResponse.kernargGeneration, kernarg),
+             state.failure());
+ 
+@@ -347,8 +356,10 @@ runSelfTest(const std::vector<uint8_t> &image)
+     packet.grid_size_x = 1024;
+     packet.grid_size_y = 1;
+     packet.grid_size_z = 1;
++    packet.private_segment_size = staged.manifest.privateSegmentFixedSize;
++    packet.group_segment_size = staged.manifest.groupSegmentFixedSize;
+     packet.kernel_object = mapResponse.descriptorVa;
+-    packet.kernarg_address = allocResponse.kernargVa;
++    packet.kernarg_address = allocResponse.kernargVa + 64;
+     packet.completion_signal = signalAllocation.gpuVa;
+     std::array<uint8_t, HostNativeQueueCore::PacketBytes> packetBytes = {};
+     std::memcpy(packetBytes.data(), &packet, packetBytes.size());
+@@ -384,12 +395,12 @@ runSelfTest(const std::vector<uint8_t> &image)
+     std::copy(
+         staged.manifest.kernelName.begin(), staged.manifest.kernelName.end(),
+         submitRequest.kernelName.begin());
+-    submitRequest.queueId = QueueId;
+-    submitRequest.queueGeneration = QueueGeneration;
+-    submitRequest.queueSequence = 1;
++    submitRequest.queueId = 73;
++    submitRequest.queueGeneration = 9;
++    submitRequest.queueSequence = 23;
+     submitRequest.submit.kernargAllocationId = allocResponse.kernargAllocationId;
+     submitRequest.submit.kernargGeneration = allocResponse.kernargGeneration;
+-    submitRequest.submit.kernargOffset = 0;
++    submitRequest.submit.kernargOffset = 64;
+     submitRequest.submit.kernargSize = staged.manifest.kernargSegmentSize;
+     submitRequest.submit.signalId = 7;
+     submitRequest.submit.signalGeneration = 1;
+@@ -411,7 +422,8 @@ runSelfTest(const std::vector<uint8_t> &image)
+     HostNativeCommandProcessorCore::Result rejectedResult;
+     HostNativeDispatchStateV2::Response rejectedResponse;
+     require(!adapter.handleSubmit(
+-                owner, 17, rejectedRangeRequest, signalAllocation.gpuVa,
++                owner, SubmitRequestId, rejectedRangeRequest,
++                signalAllocation.gpuVa,
+                 queue, fetched, rejectedResult, rejectedResponse) &&
+                 rejectedResponse.status == protocol::Status::Malformed &&
+                 state.failureCode() ==
+@@ -432,7 +444,8 @@ runSelfTest(const std::vector<uint8_t> &image)
+                 sizeof(rejectedDescriptorByte)),
+             "v2 descriptor corruption");
+     require(!adapter.handleSubmit(
+-                owner, 17, submitRequest, signalAllocation.gpuVa, queue,
++                owner, SubmitRequestId, submitRequest,
++                signalAllocation.gpuVa, queue,
+                 fetched, rejectedResult, rejectedResponse) &&
+                 rejectedResponse.status == protocol::Status::ProtocolState &&
+                 state.failureCode() ==
+@@ -449,13 +462,21 @@ runSelfTest(const std::vector<uint8_t> &image)
+     HostNativeCommandProcessorCore::Result result;
+     HostNativeDispatchStateV2::Response submitResponse;
+     require(adapter.handleSubmit(
+-                owner, 17, submitRequest, signalAllocation.gpuVa, queue,
++                owner, SubmitRequestId, submitRequest,
++                signalAllocation.gpuVa, queue,
+                 fetched, result, submitResponse) &&
+                 submitResponse.status == protocol::Status::Ok &&
+                 result.taskValid && result.commandProcessorSubmitted &&
+                 !result.kernelExecuted && state.hasSubmission() &&
+-                submitResponse.traceId != 0,
++                submitResponse.traceId != 0 &&
++                submitResponse.kernargVa == allocResponse.kernargVa + 64 &&
++                submitResponse.kernargAlignment ==
++                    staged.manifest.kernargSegmentAlign,
+             state.failure());
++    submitResponse.packetCrc32c = protocol::crc32c(
++        packetBytes.data(), packetBytes.size());
++    submitResponse.simTick = 100;
++    submitResponse.admissionTick = 100;
+     require(!protocol::encodeGenericDispatchAck(wireHeader, submitResponse).empty(),
+             "v2 SUBMIT response wire validation");
+ 
+@@ -466,25 +487,59 @@ runSelfTest(const std::vector<uint8_t> &image)
+     unmapRequest.kernelName = {};
+     unmapRequest.mappingId = mapResponse.mappingId;
+     unmapRequest.mappingGeneration = mapResponse.mappingGeneration;
+-    require(!adapter.handleUnmap(owner, 17, unmapRequest, unmapResponse) &&
++    require(!adapter.handleUnmap(
++                owner, SubmitRequestId, unmapRequest, unmapResponse) &&
+                 unmapResponse.status == protocol::Status::Busy,
+             "v2 in-flight unmap rejection");
+     auto forgedRetire = submitRequest;
+     forgedRetire.objectGeneration++;
+-    require(!adapter.handleRetire(owner, 17, forgedRetire, queue) &&
++    require(!adapter.handleRetire(
++                owner, SubmitRequestId, forgedRetire, queue) &&
+                 state.hasSubmission() &&
+                 state.failureCode() ==
+                     HostNativeDispatchStateV2::Failure::State,
+             "v2 forged retire object identity rejection");
+     forgedRetire = submitRequest;
+     forgedRetire.submit.signalId++;
+-    require(!adapter.handleRetire(owner, 17, forgedRetire, queue) &&
++    require(!adapter.handleRetire(
++                owner, SubmitRequestId, forgedRetire, queue) &&
+                 state.hasSubmission() &&
+                 state.failureCode() ==
+                     HostNativeDispatchStateV2::Failure::State,
+             "v2 forged retire signal identity rejection");
+-    require(adapter.handleRetire(owner, 17, submitRequest, queue),
++    require(adapter.handleRetire(
++                owner, SubmitRequestId, submitRequest, queue),
+             state.failure());
++
++    Addr secondPacketVa = 0;
++    require(HostNativeQueueCore::packetAddress(
++                packetAllocation.gpuVa, 1,
++                QueueBytes / HostNativeQueueCore::PacketBytes,
++                secondPacketVa),
++            "v2 second packet address");
++    require(queue.publish(secondPacketVa, packetBytes.data(),
++                          packetBytes.size(), 18),
++            queue.failure());
++    require(queue.ring(2, registeredIndex) && registeredIndex == 0,
++            queue.failure());
++    mqd.read_dispatch_id = 1;
++    mqd.write_dispatch_id = 2;
++    require(context.functionalWrite(mqdAllocation.gpuVa, &mqd, sizeof(mqd)),
++            "v2 second MQD write index");
++    require(queue.fetch(fetched, nullptr, 18) && fetched.queueIndex == 1,
++            queue.failure());
++    submitRequest.queueSequence = 99;
++    HostNativeCommandProcessorCore::Result abandonedResult;
++    HostNativeDispatchStateV2::Response abandonedResponse;
++    require(adapter.handleSubmit(
++                owner, SubmitRequestId + 1, submitRequest,
++                signalAllocation.gpuVa, queue, fetched, abandonedResult,
++                abandonedResponse) && state.hasSubmission(),
++            state.failure());
++    require(state.abandonSubmission() && !state.hasSubmission() &&
++                queue.readIndex() == 2,
++            "v2 admitted disconnect cleanup");
++
+     require(adapter.handleUnmap(owner, 18, unmapRequest, unmapResponse) &&
+                 unmapResponse.status == protocol::Status::Ok &&
+                 !state.hasMapping() && !state.hasKernarg(),
+@@ -496,6 +551,8 @@ runSelfTest(const std::vector<uint8_t> &image)
+     release(memory, context, owner, mqdAllocation, 20);
+     release(memory, context, owner, signalAllocation, 21);
+     release(memory, context, owner, packetAllocation, 22);
++    require(memory.allocationCount() == 0 && context.leaseCount() == 0,
++            "v2 zero-resource cleanup");
+ }
+ 
+ } // anonymous namespace
+@@ -511,10 +568,12 @@ main(int argc, char **argv)
+             << "{\"schema\":\"gem5.host-native.dispatch-state-v2.v1\","
+                "\"map\":true,\"alloc_kernarg\":true,"
+                "\"owner_bound\":true,\"preload\":\"unsupported\","
+-               "\"submit_admitted\":true,\"retired\":true,"
++               "\"logical_alignment\":8,\"backing_page\":4096,"
++               "\"subrange_offset\":64,\"submit_admitted\":true,"
++               "\"retired\":true,\"disconnect_retired\":true,"
+                "\"unmapped\":true,\"hsa_queue_entry\":true,"
+                "\"wire_ack_valid\":true,\"identity_guards\":true,"
+-               "\"cp_failure_cancelled\":true,"
++               "\"cp_failure_cancelled\":true,\"zero_resources\":true,"
+                "\"gpu_dispatcher\":false,\"compute_unit\":false,"
+                "\"kernel_executed\":false,\"cpu_fallback\":false,"
+                "\"execution_claim\":false}\n";
+diff --git a/src/dev/amdgpu/host_gpu_native_queue_core.cc b/src/dev/amdgpu/host_gpu_native_queue_core.cc
+index 17d36bfa9..be9ff732e 100644
+--- a/src/dev/amdgpu/host_gpu_native_queue_core.cc
++++ b/src/dev/amdgpu/host_gpu_native_queue_core.cc
+@@ -115,7 +115,8 @@ HostNativeQueueCore::reset()
+ }
+ 
+ bool
+-HostNativeQueueCore::registerQueue(const Config &newConfig)
++HostNativeQueueCore::registerQueue(
++    const Config &newConfig, uint64_t requestId)
+ {
+     failureReason = "none";
+     if (registered)
+@@ -126,11 +127,11 @@ HostNativeQueueCore::registerQueue(const Config &newConfig)
+     const uint32_t depth = newConfig.queueBytes / PacketBytes;
+     std::vector<uint8_t> probe;
+     if (!context.functionalRead(
+-            newConfig.baseVa, PacketBytes, probe)) {
++            newConfig.baseVa, PacketBytes, probe, requestId)) {
+         return fail("queue base address translation");
+     }
+     if (!context.functionalRead(
+-            newConfig.hostReadIndexVa, sizeof(uint64_t), probe)) {
++            newConfig.hostReadIndexVa, sizeof(uint64_t), probe, requestId)) {
+         return fail("queue read-index address translation");
+     }
+ 
+@@ -332,5 +333,12 @@ HostNativeQueueCore::unregisterQueue()
+     return true;
+ }
+ 
++void
++HostNativeQueueCore::abandonQueue()
++{
++    reset();
++    failureReason = "none";
++}
++
+ } // namespace hostgpu
+ } // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_native_queue_core.hh b/src/dev/amdgpu/host_gpu_native_queue_core.hh
+index 3c373ff4e..feaa2d737 100644
+--- a/src/dev/amdgpu/host_gpu_native_queue_core.hh
++++ b/src/dev/amdgpu/host_gpu_native_queue_core.hh
+@@ -97,7 +97,7 @@ class HostNativeQueueCore
+     HostNativeQueueCore(const HostNativeQueueCore &) = delete;
+     HostNativeQueueCore &operator=(const HostNativeQueueCore &) = delete;
+ 
+-    bool registerQueue(const Config &newConfig);
++    bool registerQueue(const Config &newConfig, uint64_t requestId = 0);
+     bool publish(Addr packetVa, const uint8_t *bytes, size_t byteCount,
+                  uint64_t requestId = 0);
+     bool ring(uint64_t newWriteIndex, uint32_t &registeredIndex);
+@@ -108,6 +108,7 @@ class HostNativeQueueCore
+     bool retire(uint64_t queueIndex, uint64_t requestId = 0);
+     bool cancelFetch(uint64_t ticket);
+     bool unregisterQueue();
++    void abandonQueue();
+ 
+     bool isRegistered() const { return registered; }
+     const Config &config() const { return queueConfig; }
+diff --git a/src/dev/amdgpu/host_gpu_queue_state.test.cc b/src/dev/amdgpu/host_gpu_queue_state.test.cc
+index ae459a0cf..2746b86ef 100644
+--- a/src/dev/amdgpu/host_gpu_queue_state.test.cc
++++ b/src/dev/amdgpu/host_gpu_queue_state.test.cc
+@@ -380,5 +380,44 @@ TEST(HostGPUQueueState, TickOverflowIsRejectedWithoutMutation)
+     EXPECT_EQ(state.inflightCount(), 0U);
+ }
+ 
++TEST(HostGPUQueueState, GenericDispatchPinCancelsOrCommitsExternalSequence)
++{
++    HostGPUQueueState state;
++    const auto created = state.submit(owner(), header(), create(1), 0);
++    ASSERT_EQ(created.response.status, protocol::Status::Ok);
++    constexpr uint64_t FirstRequest = (uint64_t{1} << 40) + 1;
++    EXPECT_EQ(state.validatePinnedDispatch(
++                  owner(), created.response.queueId,
++                  created.response.generation, 1),
++              protocol::Status::Ok);
++    ASSERT_TRUE(state.pinPinnedDispatch(
++        owner(), created.response.queueId, created.response.generation, 1,
++        FirstRequest));
++    EXPECT_TRUE(state.pinnedDispatchOwned(
++        owner(), created.response.queueId, created.response.generation, 1,
++        FirstRequest));
++    EXPECT_EQ(state.validatePinnedDispatch(
++                  owner(), created.response.queueId,
++                  created.response.generation, 2),
++              protocol::Status::Busy);
++    ASSERT_TRUE(state.cancelPinnedDispatch(
++        owner(), created.response.queueId, created.response.generation, 1,
++        FirstRequest));
++    ASSERT_TRUE(state.pinPinnedDispatch(
++        owner(), created.response.queueId, created.response.generation, 1,
++        FirstRequest + 1));
++    ASSERT_TRUE(state.releasePinnedDispatch(
++        owner(), created.response.queueId, created.response.generation,
++        FirstRequest + 1));
++    EXPECT_EQ(state.validatePinnedDispatch(
++                  owner(), created.response.queueId,
++                  created.response.generation, 2),
++              protocol::Status::Ok);
++    EXPECT_EQ(state.validatePinnedDispatch(
++                  owner(8, 11), created.response.queueId,
++                  created.response.generation, 2),
++              protocol::Status::ProtocolState);
++}
++
+ } // anonymous namespace
+ } // namespace gem5::hostgpu
+diff --git a/src/dev/amdgpu/host_gpu_signal_state.cc b/src/dev/amdgpu/host_gpu_signal_state.cc
+index 17d9c4bcf..2110a3a77 100644
+--- a/src/dev/amdgpu/host_gpu_signal_state.cc
++++ b/src/dev/amdgpu/host_gpu_signal_state.cc
+@@ -285,6 +285,43 @@ HostGPUSignalState::pinPinnedDispatchSignal(
+     return true;
+ }
+ 
++protocol::Status
++HostGPUSignalState::validateGenericDispatchSignalIdentity(
++    const Owner &owner, uint64_t signalId, uint64_t generation) const
++{
++    const Signal *signal = resolve(owner, signalId, generation);
++    if (signal == nullptr || signal->value != 1 || signal->wait)
++        return protocol::Status::ProtocolState;
++    return protocol::Status::Ok;
++}
++
++protocol::Status
++HostGPUSignalState::validateGenericDispatchSignal(
++    const Owner &owner, uint64_t signalId, uint64_t generation) const
++{
++    const auto status = validateGenericDispatchSignalIdentity(
++        owner, signalId, generation);
++    if (status != protocol::Status::Ok)
++        return status;
++    if (pinnedDispatchSignalBusy(owner, signalId, generation))
++        return protocol::Status::Busy;
++    return protocol::Status::Ok;
++}
++
++bool
++HostGPUSignalState::pinGenericDispatchSignal(
++    const Owner &owner, uint64_t signalId, uint64_t generation,
++    uint64_t requestId)
++{
++    if (requestId == 0 ||
++        validateGenericDispatchSignal(owner, signalId, generation) !=
++            protocol::Status::Ok) {
++        return false;
++    }
++    signals[signalId - 1]->dispatchRequestId = requestId;
++    return true;
++}
++
+ bool
+ HostGPUSignalState::mirrorPinnedDispatchCompletion(
+     const Owner &owner, uint64_t signalId, uint64_t generation,
+diff --git a/src/dev/amdgpu/host_gpu_signal_state.hh b/src/dev/amdgpu/host_gpu_signal_state.hh
+index d5653ee75..5b2e44c97 100644
+--- a/src/dev/amdgpu/host_gpu_signal_state.hh
++++ b/src/dev/amdgpu/host_gpu_signal_state.hh
+@@ -98,6 +98,13 @@ class HostGPUSignalState
+     bool pinPinnedDispatchSignal(
+         const Owner &owner, uint64_t signalId, uint64_t generation,
+         uint64_t requestId);
++    protocol::Status validateGenericDispatchSignal(
++        const Owner &owner, uint64_t signalId, uint64_t generation) const;
++    protocol::Status validateGenericDispatchSignalIdentity(
++        const Owner &owner, uint64_t signalId, uint64_t generation) const;
++    bool pinGenericDispatchSignal(
++        const Owner &owner, uint64_t signalId, uint64_t generation,
++        uint64_t requestId);
+     bool mirrorPinnedDispatchCompletion(
+         const Owner &owner, uint64_t signalId, uint64_t generation,
+         uint64_t requestId, int64_t value, uint64_t now);
+diff --git a/src/dev/amdgpu/host_gpu_signal_state.test.cc b/src/dev/amdgpu/host_gpu_signal_state.test.cc
+index c099f6940..485ba19cf 100644
+--- a/src/dev/amdgpu/host_gpu_signal_state.test.cc
++++ b/src/dev/amdgpu/host_gpu_signal_state.test.cc
+@@ -460,5 +460,48 @@ TEST(HostGPUSignalState, SequenceAdvancesOnlyOnAcceptedWaitWithoutWrap)
+               protocol::Status::Ok);
+ }
+ 
++TEST(HostGPUSignalState, GenericDispatchPinsValueOneWithoutLegacyWait)
++{
++    HostGPUSignalState state;
++    const auto created = state.submit(owner(), header(), create(1), 0);
++    ASSERT_EQ(created.status, protocol::Status::Ok);
++    EXPECT_EQ(state.validateGenericDispatchSignal(
++                  owner(), created.signalId, created.generation),
++              protocol::Status::Ok);
++    EXPECT_EQ(state.validatePinnedDispatchSignal(
++                  owner(), created.signalId, created.generation, 1),
++              protocol::Status::ProtocolState);
++    constexpr uint64_t RequestId = (uint64_t{1} << 40) + 9;
++    ASSERT_TRUE(state.pinGenericDispatchSignal(
++        owner(), created.signalId, created.generation, RequestId));
++    EXPECT_TRUE(state.pinnedDispatchSignalOwned(
++        owner(), created.signalId, created.generation, RequestId));
++    EXPECT_EQ(state.validateGenericDispatchSignal(
++                  owner(), created.signalId, created.generation),
++              protocol::Status::Busy);
++    EXPECT_EQ(state.validateGenericDispatchSignal(
++                  owner(8, 11), created.signalId, created.generation),
++              protocol::Status::ProtocolState);
++    EXPECT_EQ(state.submit(owner(), header(2),
++                           operation(created, protocol::SignalOpcode::Destroy),
++                           1).status,
++              protocol::Status::Busy);
++    ASSERT_TRUE(state.releasePinnedDispatchSignal(
++        owner(), created.signalId, created.generation, RequestId));
++    EXPECT_EQ(state.value(owner(), created.signalId, created.generation), 1);
++
++    const auto zero = state.submit(owner(), header(3), create(0), 1);
++    EXPECT_EQ(state.validateGenericDispatchSignal(
++                  owner(), zero.signalId, zero.generation),
++              protocol::Status::ProtocolState);
++    auto waiting = waitFor(
++        created, 1, protocol::SignalCondition::Equal, 0);
++    ASSERT_EQ(state.submit(owner(), header(4), waiting, 2).status,
++              protocol::Status::Ok);
++    EXPECT_EQ(state.validateGenericDispatchSignal(
++                  owner(), created.signalId, created.generation),
++              protocol::Status::ProtocolState);
++}
++
+ } // anonymous namespace
+ } // namespace gem5::hostgpu
+diff --git a/src/dev/amdgpu/host_gpu_socket_utils.test.cc b/src/dev/amdgpu/host_gpu_socket_utils.test.cc
+index 1c4196dd2..749ded233 100644
+--- a/src/dev/amdgpu/host_gpu_socket_utils.test.cc
++++ b/src/dev/amdgpu/host_gpu_socket_utils.test.cc
+@@ -709,6 +709,22 @@ TEST(HostGPUConnectionState, FailureAckClosesAndStopsReading)
+     EXPECT_FALSE(state.committed());
+ }
+ 
++TEST(HostGPUConnectionState, ActiveDisconnectAllowsSequentialSession)
++{
++    int activeClientFd = 8;
++    bool sessionEstablished = true;
++
++    EXPECT_FALSE(releaseActiveClientSession(
++        9, activeClientFd, sessionEstablished));
++    EXPECT_EQ(activeClientFd, 8);
++    EXPECT_TRUE(sessionEstablished);
++
++    EXPECT_TRUE(releaseActiveClientSession(
++        8, activeClientFd, sessionEstablished));
++    EXPECT_EQ(activeClientFd, -1);
++    EXPECT_FALSE(sessionEstablished);
++}
++
+ TEST(HostGPUConnectionState, EstablishedPreservesMalformedOnly)
+ {
+     HostGPUConnectionState state;
+-- 
+2.53.0
+

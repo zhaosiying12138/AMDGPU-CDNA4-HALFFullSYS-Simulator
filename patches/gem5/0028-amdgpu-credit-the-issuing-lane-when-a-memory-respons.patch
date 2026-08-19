@@ -1,0 +1,84 @@
+From d8f467ee31f671a33164f825124ac1091d3c63f3 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 17 Aug 2026 03:35:15 +0800
+Subject: [PATCH 28/42] amdgpu: credit the issuing lane when a memory response
+ completes
+
+The per-address pending-request record can hold several lanes when they
+access the same address. completeLaneRequest consumed the newest entry, which
+is not necessarily the responding lane, so one lane was decremented twice
+while another stayed pending forever. The instruction never reached
+allLanesZero, its ordered response entry was never marked done, and the
+in-order global response buffer stalled behind it.
+
+Observed as a livelock rather than a fault: waves waited on s_waitcnt lgkmcnt
+while the local-memory pipeline was empty and the global pipeline held
+completed loads queued behind an unfinished store.
+
+Use the lane recorded in the packet's sender state and erase that lane's own
+record, retaining the previous newest-entry behavior only as a fallback for
+coalesced responses.
+
+Checkpoint-ID: CP-0032
+Goal-ID: GSIM-001
+Plan-Revision: 15
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 458368899b9122d48baf6268c84e035737cdb2e36776c5b374a26b176ed5df69
+Change-Kind: code
+Baseline-Commit: 000945a4995cf8b18e0a4d2b8b2e6b0eb47ba0dc
+---
+ src/gpu-compute/compute_unit.cc | 27 ++++++++++++++++++++++++---
+ 1 file changed, 24 insertions(+), 3 deletions(-)
+
+diff --git a/src/gpu-compute/compute_unit.cc b/src/gpu-compute/compute_unit.cc
+index 22a88eb97..ff937c34d 100644
+--- a/src/gpu-compute/compute_unit.cc
++++ b/src/gpu-compute/compute_unit.cc
+@@ -31,6 +31,7 @@
+ 
+ #include "gpu-compute/compute_unit.hh"
+ 
++#include <algorithm>
+ #include <array>
+ #include <limits>
+ 
+@@ -1883,13 +1884,33 @@ ComputeUnit::completeLaneRequest(PacketPtr pkt, bool returnToken)
+     ComputeUnit *compute_unit = this;
+     Addr paddr = pkt->req->getPaddr();
+ 
+-    // this is for read, write and atomic
+-    int index = gpuDynInst->memStatusVector[paddr].back();
++    /**
++     * Credit the lane this response actually belongs to.
++     *
++     * The per-address record can hold several lanes when they access the
++     * same address, so the newest entry is not necessarily this response's
++     * lane. Consuming the wrong entry decrements one lane twice and leaves
++     * another lane permanently pending, which stalls the in-order response
++     * buffer. The sender state carries the issuing lane, so prefer it and
++     * erase that lane's own record.
++     */
++    int index = sender_state->port_index;
++    auto status_entry = gpuDynInst->memStatusVector.find(paddr);
++    if (status_entry != gpuDynInst->memStatusVector.end()) {
++        auto &lanes = status_entry->second;
++        auto lane_record = std::find(lanes.begin(), lanes.end(), index);
++        if (lane_record != lanes.end()) {
++            lanes.erase(lane_record);
++        } else if (!lanes.empty()) {
++            /* Fall back to upstream behavior for coalesced responses. */
++            index = lanes.back();
++            lanes.pop_back();
++        }
++    }
+ 
+     DPRINTF(GPUMem, "Response for addr %#x, index %d\n",
+             pkt->req->getPaddr(), index);
+ 
+-    gpuDynInst->memStatusVector[paddr].pop_back();
+     gpuDynInst->pAddr = pkt->req->getPaddr();
+ 
+     gpuDynInst->decrementStatusVector(index);
+-- 
+2.53.0
+

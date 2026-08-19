@@ -1,0 +1,1831 @@
+From ed808f6a57b843c040ba864b9e9aad188d0eab36 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Tue, 11 Aug 2026 00:49:59 +0800
+Subject: [PATCH 22/42] CP27: admit locked OpenCL vecadd execution
+
+Checkpoint-ID: CP-0027
+Goal-ID: GSIM-001
+Plan-Revision: 2
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: b9568e60e93295a253e12812670816139141e32d14c8bb2ffacfd3bae0b2c34d
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/arch/amdgpu/vega/gpu_decoder.test.cc      |  61 +++
+ src/dev/amdgpu/host_gpu_bridge.cc             | 497 +++++++++++-------
+ src/dev/amdgpu/host_gpu_bridge.hh             |   2 +
+ src/dev/amdgpu/host_gpu_code_object_image.cc  |  29 +-
+ .../amdgpu/host_gpu_generic_dispatch_route.cc | 324 +++++++++++-
+ .../amdgpu/host_gpu_generic_dispatch_route.hh |  49 ++
+ .../host_gpu_generic_dispatch_route_main.cc   | 167 ++++++
+ .../amdgpu/host_gpu_opencl_vecadd_fixture.hh  | 142 +++++
+ 8 files changed, 1061 insertions(+), 210 deletions(-)
+ create mode 100644 src/dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh
+
+diff --git a/src/arch/amdgpu/vega/gpu_decoder.test.cc b/src/arch/amdgpu/vega/gpu_decoder.test.cc
+index 25c490c49..6ae450cce 100644
+--- a/src/arch/amdgpu/vega/gpu_decoder.test.cc
++++ b/src/arch/amdgpu/vega/gpu_decoder.test.cc
+@@ -31,12 +31,15 @@
+ 
+ #include <gtest/gtest.h>
+ 
++#include <array>
+ #include <cstdint>
++#include <cstring>
+ #include <iomanip>
+ #include <memory>
+ #include <string>
+ 
+ #include "arch/amdgpu/vega/gpu_decoder.hh"
++#include "dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh"
+ #include "gpu-compute/gpu_static_inst.hh"
+ 
+ namespace gem5
+@@ -115,6 +118,64 @@ TEST(GpuDecoderTest, GfxVersionOverrideIsolation)
+     }
+ }
+ 
++TEST(GpuDecoderTest, Cp27OpenClVecAddLockedIsa)
++{
++    struct ExpectedInstruction
++    {
++        uint32_t offset;
++        uint32_t size;
++        const char *mnemonic;
++    };
++    static constexpr std::array<ExpectedInstruction, 28> Expected = {{
++        {0, 8, "s_load_dword"},
++        {8, 4, "s_nop"},
++        {12, 8, "s_load_dword"},
++        {20, 8, "s_load_dwordx2"},
++        {28, 4, "v_mov_b32"},
++        {32, 4, "s_mov_b32"},
++        {36, 4, "s_mov_b32"},
++        {40, 4, "s_waitcnt"},
++        {44, 8, "s_and_b32"},
++        {52, 4, "s_mul_i32"},
++        {56, 4, "v_add_u32"},
++        {60, 8, "v_lshl_add_u64"},
++        {68, 4, "v_cmp_gt_u64"},
++        {72, 4, "s_and_saveexec_b64"},
++        {76, 4, "s_cbranch_execz"},
++        {80, 8, "s_load_dwordx4"},
++        {88, 8, "s_load_dwordx2"},
++        {96, 8, "v_lshlrev_b64"},
++        {104, 4, "s_waitcnt"},
++        {108, 8, "v_lshl_add_u64"},
++        {116, 8, "v_lshl_add_u64"},
++        {124, 8, "flat_load_dword"},
++        {132, 8, "flat_load_dword"},
++        {140, 8, "v_lshl_add_u64"},
++        {148, 4, "s_waitcnt"},
++        {152, 4, "v_add_f32"},
++        {156, 8, "flat_store_dword"},
++        {164, 4, "s_endpgm"},
++    }};
++
++    Decoder decoder;
++    decoder.setGfxVersion(GfxVersion::gfx950);
++    for (const auto &expected : Expected) {
++        InstFormat words[2] = {};
++        ASSERT_LE(expected.offset + expected.size,
++                  hostgpu::opencl_vecadd_fixture::KernelCode.size());
++        std::memcpy(
++            words,
++            hostgpu::opencl_vecadd_fixture::KernelCode.data() +
++                expected.offset,
++            expected.size);
++        std::unique_ptr<GPUStaticInst> inst(decoder.decode(words));
++        SCOPED_TRACE(testing::Message() << "offset=" << expected.offset);
++        ASSERT_NE(inst, nullptr);
++        EXPECT_EQ(inst->instSize(), expected.size);
++        EXPECT_EQ(inst->opcode(), expected.mnemonic);
++    }
++}
++
+ } // anonymous namespace
+ } // namespace VegaISA
+ } // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_bridge.cc b/src/dev/amdgpu/host_gpu_bridge.cc
+index fa9d584cf..70e880d46 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.cc
++++ b/src/dev/amdgpu/host_gpu_bridge.cc
+@@ -55,8 +55,8 @@
+ #include "base/socket.hh"
+ #include "cpu/thread_context.hh"
+ #include "dev/amdgpu/host_gpu_dispatch_fixture.hh"
+-#include "dev/amdgpu/host_gpu_code_object_fixture.hh"
+ #include "dev/amdgpu/host_gpu_generic_dispatch_route.hh"
++#include "dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh"
+ #include "dev/amdgpu/host_gpu_native_dispatch_state_v2.hh"
+ #include "dev/amdgpu/host_gpu_socket_utils.hh"
+ #include "dev/hsa/hsa_packet_processor.hh"
+@@ -88,13 +88,15 @@ constexpr uint32_t GenericNativeDoorbellBytes = 8;
+ constexpr uint16_t GenericDispatchHeader = 0x1502;
+ constexpr int GenericExecutionDispatchId = 31;
+ constexpr uint64_t GenericExecutionBufferBytes = 4096;
+-constexpr uint32_t GenericExecutionWorkgroups = 4;
+-constexpr uint32_t GenericExecutionWaves = 16;
+-constexpr uint32_t GenericExecutionInstructionsPerWave = 19;
++constexpr uint32_t GenericExecutionMaximumWorkgroups = 16;
++constexpr uint32_t GenericExecutionMaximumWaves = 16;
++constexpr uint32_t GpuReadWriteExecutionWorkgroups = 4;
++constexpr uint32_t GpuReadWriteExecutionWaves = 16;
++constexpr uint32_t GpuReadWriteExecutionInstructionsPerWave = 19;
+ constexpr std::array<uint32_t, 3> GenericExecutionBufferCrc32c = {
+     0x4705cdabU, 0xb28d0486U, 0x4705cdabU};
+-constexpr std::array<uint32_t, GenericExecutionInstructionsPerWave>
+-    GenericExecutionInstructionOffsets = {
++constexpr std::array<uint32_t, GpuReadWriteExecutionInstructionsPerWave>
++    GpuReadWriteExecutionInstructionOffsets = {
+         0, 8, 16, 20, 24, 32, 36, 40, 48, 52,
+         56, 64, 72, 80, 88, 96, 100, 108, 116,
+     };
+@@ -206,79 +208,6 @@ hexBytes(const Container &bytes)
+     return result;
+ }
+ 
+-template<size_t Size>
+-bool
+-fixedNameEquals(const std::array<uint8_t, Size> &value, const char *expected)
+-{
+-    const size_t length = std::strlen(expected);
+-    return length < value.size() &&
+-        std::equal(expected, expected + length, value.begin()) &&
+-        std::all_of(value.begin() + length, value.end(),
+-                    [](uint8_t byte) { return byte == 0; });
+-}
+-
+-bool
+-lockedGenericExecutionFixture(
+-    const protocol::CodeObjectManifest &manifest,
+-    const std::vector<uint8_t> &image)
+-{
+-    const auto &fixture = code_object_fixture::Images[0];
+-    const auto &kernel = fixture.kernels[0];
+-    const protocol::CodeObjectSegment expectedSegments[3] = {
+-        {1, 4, 0, 0, 0x840, 0x840, 0x1000},
+-        {1, 5, 0x900, 0x1900, 0x480, 0x480, 0x1000},
+-        {1, 6, 0xd80, 0x2d80, 0x70, 0x280, 0x1000},
+-    };
+-    if (image.size() != fixture.byteCount ||
+-        manifest.imageSize != fixture.byteCount ||
+-        hexBytes(manifest.imageSha256) != fixture.sha256 ||
+-        manifest.elfMachine != code_object_fixture::ElfMachine ||
+-        manifest.elfType != code_object_fixture::ElfTypeDyn ||
+-        manifest.elfOsabi != code_object_fixture::ElfOsabiAmdgpuHsa ||
+-        manifest.elfAbiVersion != code_object_fixture::ElfAbiVersion ||
+-        manifest.elfFlags != code_object_fixture::ElfFlags ||
+-        manifest.gfxTarget != code_object_fixture::GfxTarget ||
+-        manifest.codeObjectVersion != code_object_fixture::CodeObjectVersion ||
+-        manifest.metadataMajor != code_object_fixture::MetadataMajor ||
+-        manifest.metadataMinor != code_object_fixture::MetadataMinor ||
+-        manifest.relocationCount != 0 || manifest.segmentCount != 3 ||
+-        manifest.kernelIndex != 0 ||
+-        manifest.kernargSegmentSize != kernel.kernargBytes ||
+-        manifest.kernargSegmentAlign != kernel.kernargAlignment ||
+-        manifest.groupSegmentFixedSize != 0 ||
+-        manifest.privateSegmentFixedSize != 0 ||
+-        manifest.maxFlatWorkgroupSize != kernel.maxFlatWorkgroupSize ||
+-        manifest.wavefrontSize != kernel.wavefrontSize ||
+-        manifest.sgprCount != kernel.sgprCount ||
+-        manifest.vgprCount != kernel.vgprCount ||
+-        manifest.usesDynamicStack != 0 ||
+-        manifest.descriptorSize != protocol::CodeObjectDescriptorBytes ||
+-        manifest.kernelCodeEntryByteOffset !=
+-            static_cast<int64_t>(kernel.codeEntryByteOffset) ||
+-        manifest.codeVirtualAddress != 0x1900 ||
+-        manifest.codeFileOffset != 0x900 || manifest.codeSize != 0x78 ||
+-        manifest.descriptorVirtualAddress != 0x800 ||
+-        manifest.descriptorFileOffset != kernel.descriptorFileOffset ||
+-        !fixedNameEquals(manifest.kernelName, kernel.name) ||
+-        !fixedNameEquals(manifest.descriptorSymbol, kernel.descriptorSymbol) ||
+-        sha256Hex(manifest.descriptor.data(), manifest.descriptor.size()) !=
+-            "4d593541914997359607cb1d01d3abf44ce347d3b84104ae1e80b71274cd9003") {
+-        return false;
+-    }
+-    for (size_t index = 0; index < 3; ++index) {
+-        const auto &left = manifest.segments[index];
+-        const auto &right = expectedSegments[index];
+-        if (left.type != right.type || left.flags != right.flags ||
+-            left.fileOffset != right.fileOffset ||
+-            left.virtualAddress != right.virtualAddress ||
+-            left.fileSize != right.fileSize ||
+-            left.memorySize != right.memorySize ||
+-            left.alignment != right.alignment)
+-            return false;
+-    }
+-    return true;
+-}
+-
+ bool
+ hasWireMessageType(const std::vector<uint8_t> &record,
+                    protocol::MessageType type)
+@@ -508,7 +437,9 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+     HostGPUBridge &bridge;
+     Owner owner;
+     HostNativeExecutionAdapter *executionAdapter = nullptr;
++    const generic_dispatch_route::LockedExecutionVariant executionVariant;
+     const bool executionMode;
++    const std::bitset<3> requiredD2hMask;
+     std::unique_ptr<HostNativeMemoryContext> context;
+     std::unique_ptr<HostNativeCodeObjectMapper> mapper;
+     std::unique_ptr<HostNativeCommandProcessorCore> commandProcessor;
+@@ -546,6 +477,10 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+     Tick executionEndTick = 0;
+     Tick executionRetireTick = 0;
+     uint32_t executionOutputCrc32c = 0;
++    std::array<uint32_t, 3> executionBufferCrc32c = {};
++    uint32_t executionElementCount = 0;
++    uint32_t executionGridSize = 0;
++    uint32_t executionWorkgroupSize = 0;
+     uint64_t executionSignalBefore = 0;
+     uint64_t executionSignalAfter = 0;
+ 
+@@ -576,6 +511,8 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+     uint64_t globalReads = 0;
+     std::bitset<GenericExecutionBufferBytes / sizeof(uint32_t)>
+         inputReadCoverage;
++    std::bitset<GenericExecutionBufferBytes / sizeof(uint32_t)>
++        secondInputReadCoverage;
+     uint64_t globalWrites = 0;
+     std::bitset<GenericExecutionBufferBytes / sizeof(uint32_t)>
+         outputWriteCoverage;
+@@ -583,17 +520,21 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         resultWriteCoverage;
+     uint64_t globalStoreEventCount = 0;
+     uint64_t globalStoreLaneCount = 0;
+-    std::bitset<GenericExecutionWaves> outputStoreChunks;
+-    std::bitset<GenericExecutionWaves> resultStoreChunks;
++    std::bitset<GenericExecutionMaximumWaves> outputStoreChunks;
++    std::bitset<GenericExecutionMaximumWaves> resultStoreChunks;
+     uint64_t workgroupCompletedCount = 0;
+-    std::bitset<GenericExecutionWorkgroups> completedWorkgroups;
++    std::bitset<GenericExecutionMaximumWorkgroups> completedWorkgroups;
+ 
+     GenericDispatchSession(
+         HostGPUBridge &bridge, HostGPUMemoryState &memory,
+         const Owner &sessionOwner, uint64_t pageBytes,
+-        HostNativeExecutionAdapter *adapter, bool execute)
++        HostNativeExecutionAdapter *adapter,
++        generic_dispatch_route::LockedExecutionVariant variant)
+         : memory(memory), bridge(bridge), owner(sessionOwner),
+-          executionAdapter(adapter), executionMode(execute),
++          executionAdapter(adapter), executionVariant(variant),
++          executionMode(variant !=
++              generic_dispatch_route::LockedExecutionVariant::None),
++          requiredD2hMask(generic_dispatch_route::requiredD2hMask(variant)),
+           context(std::make_unique<HostNativeMemoryContext>(
+               memory, owner, pageBytes)),
+           mapper(std::make_unique<HostNativeCodeObjectMapper>(
+@@ -604,6 +545,41 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+     {
+     }
+ 
++    bool isOpenClVecAdd() const
++    {
++        return executionVariant ==
++            generic_dispatch_route::LockedExecutionVariant::OpenClVecAdd;
++    }
++
++    uint32_t expectedWorkgroups() const
++    {
++        return isOpenClVecAdd() ?
++            executionGridSize / executionWorkgroupSize :
++            GpuReadWriteExecutionWorkgroups;
++    }
++
++    uint32_t expectedWavesPerWorkgroup() const
++    {
++        return isOpenClVecAdd() ?
++            executionWorkgroupSize / 64 : 4;
++    }
++
++    uint32_t expectedWaves() const
++    {
++        return expectedWorkgroups() * expectedWavesPerWorkgroup();
++    }
++
++    const std::vector<uint32_t> &expectedInstructionOffsets() const
++    {
++        static const std::vector<uint32_t> GpuReadWriteOffsets(
++            GpuReadWriteExecutionInstructionOffsets.begin(),
++            GpuReadWriteExecutionInstructionOffsets.end());
++        static const std::vector<uint32_t> OpenClVecAddOffsets(
++            opencl_vecadd_fixture::InstructionOffsets.begin(),
++            opencl_vecadd_fixture::InstructionOffsets.end());
++        return isOpenClVecAdd() ? OpenClVecAddOffsets : GpuReadWriteOffsets;
++    }
++
+     ~GenericDispatchSession()
+     {
+         clear(0);
+@@ -615,27 +591,41 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         const bool packetRead = packetAllocation &&
+             address == packetAllocation->view.gpuVa + 4 &&
+             byteCount == sizeof(uint32_t);
+-        const bool kernargRead =
++        const bool kernargRead = isOpenClVecAdd() ?
++            ((address == submitResponse.kernargVa && byteCount == 16) ||
++             (address == submitResponse.kernargVa + 16 && byteCount == 8) ||
++             (address == submitResponse.kernargVa + 24 && byteCount == 4) ||
++             (address == submitResponse.kernargVa + 32 && byteCount == 8)) :
+             address == submitResponse.kernargVa && byteCount == 32;
+         const bool inputRead = executionBuffers[0] &&
+             rangeContains(executionBuffers[0]->address,
+                           GenericExecutionBufferBytes, address, byteCount);
++        const bool secondInputRead = isOpenClVecAdd() && executionBuffers[1] &&
++            rangeContains(executionBuffers[1]->address,
++                          GenericExecutionBufferBytes, address, byteCount);
+         const bool codeRead = byteCount == 64 && address % 64 == 0 &&
+-            (address == mapResponse.entryVa ||
+-             address == mapResponse.entryVa + 64);
++            address >= mapResponse.entryVa &&
++            address - mapResponse.entryVa < manifest.codeSize &&
++            (address - mapResponse.entryVa) % 64 == 0;
+         size_t inputIndex = 0;
+         if (executionActive) {
+-            panic_if(!packetRead && !kernargRead && !inputRead && !codeRead,
++            panic_if(!packetRead && !kernargRead && !inputRead &&
++                         !secondInputRead && !codeRead,
+                      "unexpected generic execution read at %#x/%llu", address,
+                      static_cast<unsigned long long>(byteCount));
+-            if (inputRead) {
++            if (inputRead || secondInputRead) {
+                 panic_if(byteCount != sizeof(uint32_t) ||
+                              address % sizeof(uint32_t) != 0,
+                          "generic execution global-read shape mismatch");
++                const Addr base = inputRead ? executionBuffers[0]->address :
++                    executionBuffers[1]->address;
+                 inputIndex = static_cast<size_t>(
+-                    (address - executionBuffers[0]->address) /
+-                    sizeof(uint32_t));
+-                panic_if(inputReadCoverage.test(inputIndex),
++                    (address - base) / sizeof(uint32_t));
++                auto &coverage = inputRead ? inputReadCoverage :
++                    secondInputReadCoverage;
++                panic_if(coverage.test(inputIndex) ||
++                             (isOpenClVecAdd() &&
++                              inputIndex >= executionElementCount),
+                          "duplicate generic execution input read");
+             }
+         }
+@@ -645,9 +635,10 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+             return success;
+         if (packetRead || kernargRead) {
+             ++const_cast<GenericDispatchSession *>(this)->scalarReads;
+-        } else if (inputRead) {
+-            const_cast<GenericDispatchSession *>(this)->inputReadCoverage.set(
+-                inputIndex);
++        } else if (inputRead || secondInputRead) {
++            auto *session = const_cast<GenericDispatchSession *>(this);
++            (inputRead ? session->inputReadCoverage :
++                         session->secondInputReadCoverage).set(inputIndex);
+             ++const_cast<GenericDispatchSession *>(this)->globalReads;
+         }
+         return true;
+@@ -666,14 +657,17 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         if (executionActive) {
+             panic_if(byteCount != sizeof(uint32_t) ||
+                          address % sizeof(uint32_t) != 0 ||
+-                         outputWrite == resultWrite,
++                         outputWrite == resultWrite ||
++                         (isOpenClVecAdd() && outputWrite),
+                      "unexpected generic execution write at %#x/%llu", address,
+                      static_cast<unsigned long long>(byteCount));
+             const Addr base = outputWrite ? executionBuffers[1]->address :
+                 executionBuffers[2]->address;
+             index = static_cast<size_t>((address - base) / sizeof(uint32_t));
+             panic_if((outputWrite ? outputWriteCoverage : resultWriteCoverage)
+-                         .test(index),
++                             .test(index) ||
++                         (isOpenClVecAdd() &&
++                          index >= executionElementCount),
+                      "duplicate generic execution output write");
+         }
+         const bool success = context && context->functionalWrite(
+@@ -709,16 +703,39 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+             return false;
+         const Addr kernargVa = allocResponse.kernargVa +
+             request.submit.kernargOffset;
++        executionGridSize = request.submit.gridX;
++        executionWorkgroupSize = request.submit.workgroupX;
+         std::vector<uint8_t> kernarg;
+-        if (request.submit.kernargSize != 280 ||
++        const uint32_t expectedKernargSize = isOpenClVecAdd() ?
++            opencl_vecadd_fixture::KernargBytes : 280;
++        if (request.submit.kernargSize != expectedKernargSize ||
+             !context->functionalRead(
+                 kernargVa, request.submit.kernargSize, kernarg, requestId) ||
+-            kernarg.size() != request.submit.kernargSize ||
+-            kernarg[88] != 1)
++            kernarg.size() != request.submit.kernargSize)
+             return false;
+-        for (size_t offset = 24; offset < kernarg.size(); ++offset) {
+-            if (offset != 88 && kernarg[offset] != 0)
++        if (isOpenClVecAdd()) {
++            std::memcpy(
++                &executionElementCount, kernarg.data() + 24,
++                sizeof(executionElementCount));
++            if (executionElementCount != request.submit.gridX ||
++                executionElementCount == 0 ||
++                executionElementCount > GenericExecutionBufferBytes /
++                    sizeof(float)) {
+                 return false;
++            }
++            for (size_t offset = 28; offset < kernarg.size(); ++offset) {
++                if (kernarg[offset] != 0)
++                    return false;
++            }
++        } else {
++            if (kernarg[88] != 1)
++                return false;
++            for (size_t offset = 24; offset < kernarg.size(); ++offset) {
++                if (offset != 88 && kernarg[offset] != 0)
++                    return false;
++            }
++            executionElementCount = GenericExecutionBufferBytes /
++                sizeof(uint32_t);
+         }
+         std::array<uint64_t, 3> pointers = {};
+         std::memcpy(pointers.data(), kernarg.data(), sizeof(pointers));
+@@ -765,21 +782,30 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+                 return false;
+             }
+         }
+-        for (uint32_t index = 0;
+-             index < GenericExecutionBufferBytes / sizeof(uint32_t); ++index) {
+-            std::array<uint32_t, 3> values = {};
+-            for (size_t buffer = 0; buffer < values.size(); ++buffer) {
+-                std::memcpy(&values[buffer],
+-                            executionBefore[buffer].data() +
+-                                index * sizeof(uint32_t),
+-                            sizeof(uint32_t));
+-            }
+-            if (values[0] != (0x51000000U ^ index) ||
+-                values[1] != (0x6b000000U ^ index) ||
+-                values[2] != (0x7c000000U ^ index)) {
++        if (isOpenClVecAdd()) {
++            if (!generic_dispatch_route::openClVecAddInputsSupported(
++                    executionBefore, executionElementCount)) {
+                 releaseExecutionBuffers(requestId);
+                 return false;
+             }
++        } else {
++            for (uint32_t index = 0;
++                 index < GenericExecutionBufferBytes / sizeof(uint32_t);
++                 ++index) {
++                std::array<uint32_t, 3> values = {};
++                for (size_t buffer = 0; buffer < values.size(); ++buffer) {
++                    std::memcpy(&values[buffer],
++                                executionBefore[buffer].data() +
++                                    index * sizeof(uint32_t),
++                                sizeof(uint32_t));
++                }
++                if (values[0] != (0x51000000U ^ index) ||
++                    values[1] != (0x6b000000U ^ index) ||
++                    values[2] != (0x7c000000U ^ index)) {
++                    releaseExecutionBuffers(requestId);
++                    return false;
++                }
++            }
+         }
+         executionRequestId = requestId;
+         if (!executionAdapter->bind(
+@@ -842,14 +868,23 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+ 
+     bool executionTaskMatches(const HSAQueueEntry &task) const
+     {
+-        return executionMode && executionBound &&
++        if (!executionMode || !executionBound ||
++            task.dispatchId() != GenericExecutionDispatchId ||
++            task.hostDispPktAddr() != submitResponse.packetVa ||
++            task.kernargAddr() != submitResponse.kernargVa ||
++            task.gridSize(1) != 1 || task.gridSize(2) != 1 ||
++            task.wgSize(1) != 1 || task.wgSize(2) != 1) {
++            return false;
++        }
++        if (isOpenClVecAdd()) {
++            return task.numWgTotal() == expectedWorkgroups() &&
++                task.gridSize(0) == executionGridSize &&
++                task.wgSize(0) == executionWorkgroupSize;
++        }
++        return
+             task.dispatchId() == GenericExecutionDispatchId &&
+-            task.hostDispPktAddr() == submitResponse.packetVa &&
+-            task.kernargAddr() == submitResponse.kernargVa &&
+-            task.numWgTotal() == 4 && task.gridSize(0) == 1024 &&
+-            task.gridSize(1) == 1 && task.gridSize(2) == 1 &&
+-            task.wgSize(0) == 256 && task.wgSize(1) == 1 &&
+-            task.wgSize(2) == 1;
++            task.numWgTotal() == GpuReadWriteExecutionWorkgroups &&
++            task.gridSize(0) == 1024 && task.wgSize(0) == 256;
+     }
+ 
+     bool validateExecutionOutput()
+@@ -858,19 +893,34 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+             !executionBuffers[0] || !executionBuffers[1] ||
+             !executionBuffers[2])
+             return false;
+-        std::vector<uint8_t> input;
+-        std::vector<uint8_t> output;
+-        std::vector<uint8_t> result;
++        std::array<std::vector<uint8_t>, 3> after;
+         if (!context->functionalRead(
+                 executionBuffers[0]->address, GenericExecutionBufferBytes,
+-                input, executionRequestId) ||
++                after[0], executionRequestId) ||
+             !context->functionalRead(
+                 executionBuffers[1]->address, GenericExecutionBufferBytes,
+-                output, executionRequestId) ||
++                after[1], executionRequestId) ||
+             !context->functionalRead(
+                 executionBuffers[2]->address, GenericExecutionBufferBytes,
+-                result, executionRequestId) ||
+-            input != executionBefore[0] || output.size() != input.size() ||
++                after[2], executionRequestId)) {
++            return false;
++        }
++        if (isOpenClVecAdd()) {
++            if (!generic_dispatch_route::validateOpenClVecAddOutput(
++                    executionBefore, after, executionElementCount,
++                    executionOutputCrc32c)) {
++                return false;
++            }
++            for (size_t index = 0; index < after.size(); ++index) {
++                executionBufferCrc32c[index] = protocol::crc32c(
++                    after[index].data(), after[index].size());
++            }
++            return executionBufferCrc32c[2] == executionOutputCrc32c;
++        }
++        const auto &input = after[0];
++        const auto &output = after[1];
++        const auto &result = after[2];
++        if (input != executionBefore[0] || output.size() != input.size() ||
+             result.size() != input.size()) {
+             return false;
+         }
+@@ -899,7 +949,12 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         }
+         executionOutputCrc32c = protocol::crc32c(
+             combined.data(), combined.size());
+-        return executionOutputCrc32c == 0x6f67026fU;
++        for (size_t index = 0; index < after.size(); ++index) {
++            executionBufferCrc32c[index] = protocol::crc32c(
++                after[index].data(), after[index].size());
++        }
++        return executionOutputCrc32c == 0x6f67026fU &&
++            executionBufferCrc32c == GenericExecutionBufferCrc32c;
+     }
+ 
+     void hsaPacketFetched(Addr hostPacketAddr, uint32_t queueId) override
+@@ -936,12 +991,16 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         uint32_t workgroupX, uint32_t workgroupY, uint32_t workgroupZ,
+         uint64_t laneMask) override
+     {
++        const uint32_t workgroups = expectedWorkgroups();
++        const uint32_t wavesPerWorkgroup = expectedWavesPerWorkgroup();
+         if (!executionTaskMatches(task) || cuId != 0 || waveId < 0 ||
+-            waveId >= 4 || workgroupX >= GenericExecutionWorkgroups ||
++            waveId >= static_cast<int>(wavesPerWorkgroup) ||
++            workgroupX >= workgroups ||
+             workgroupY != 0 || workgroupZ != 0 ||
+             laneMask != std::numeric_limits<uint64_t>::max())
+             panic("generic execution wave identity mismatch");
+-        const uint32_t identity = workgroupX * 4 + waveId;
++        const uint32_t identity =
++            workgroupX * wavesPerWorkgroup + waveId;
+         panic_if(waveStartMask & (1U << identity),
+                  "duplicate generic execution wave identity");
+         waveStartMask |= 1U << identity;
+@@ -952,21 +1011,23 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         const HSAQueueEntry &task, int cuId, int workgroupId,
+         uint64_t dynamicWaveId, Addr pc, uint64_t sequence) override
+     {
++        const auto &expectedOffsets = expectedInstructionOffsets();
+         if (!executionTaskMatches(task) || cuId != 0 || workgroupId < 0 ||
+-            workgroupId >= static_cast<int>(GenericExecutionWorkgroups) ||
+-            pc < task.codeAddr() || pc >= task.codeAddr() + 0x78)
++            workgroupId >= static_cast<int>(expectedWorkgroups()) ||
++            pc < task.codeAddr() ||
++            pc >= task.codeAddr() + manifest.codeSize)
+             panic("generic execution instruction identity mismatch");
+         auto [workgroup, inserted] =
+             workgroupPerWave.emplace(dynamicWaveId, workgroupId);
+         panic_if(inserted &&
+-                     workgroupPerWave.size() > GenericExecutionWaves,
++                     workgroupPerWave.size() > expectedWaves(),
+                  "generic execution observed too many dynamic waves");
+         panic_if(!inserted && workgroup->second != workgroupId,
+                  "generic execution dynamic wave changed workgroup");
+         auto &offsets = instructionOffsetsPerWave[dynamicWaveId];
+-        panic_if(offsets.size() >= GenericExecutionInstructionOffsets.size() ||
++        panic_if(offsets.size() >= expectedOffsets.size() ||
+                      pc - task.codeAddr() !=
+-                         GenericExecutionInstructionOffsets[offsets.size()],
++                         expectedOffsets[offsets.size()],
+                  "generic execution instruction PC sequence mismatch");
+         offsets.push_back(static_cast<uint32_t>(pc - task.codeAddr()));
+         panic_if(!instructionSequences.insert(sequence).second,
+@@ -978,7 +1039,7 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         lastSequencePerWave[dynamicWaveId] = sequence;
+         auto &perWave = instructionsPerWave[dynamicWaveId];
+         ++perWave;
+-        panic_if(perWave > GenericExecutionInstructionsPerWave,
++        panic_if(perWave > expectedOffsets.size(),
+                  "generic execution wave exceeded instruction count");
+         ++instructionStartedCount;
+     }
+@@ -989,7 +1050,7 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         uint64_t laneMask) override
+     {
+         if (!executionTaskMatches(task) || cuId != 0 || workgroupId < 0 ||
+-            workgroupId >= static_cast<int>(GenericExecutionWorkgroups) ||
++            workgroupId >= static_cast<int>(expectedWorkgroups()) ||
+             bytesPerLane != sizeof(uint32_t) || addresses.size() != 64 ||
+             laneMask != std::numeric_limits<uint64_t>::max() ||
+             !executionBuffers[1] || !executionBuffers[2])
+@@ -1000,7 +1061,8 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         const bool resultStore = rangeContains(
+             executionBuffers[2]->address, GenericExecutionBufferBytes,
+             addresses.front(), bytesPerLane);
+-        panic_if(outputStore == resultStore,
++        panic_if(outputStore == resultStore ||
++                     (isOpenClVecAdd() && outputStore),
+                  "generic execution store outside unique B/C range");
+         const Addr base = outputStore ? executionBuffers[1]->address :
+             executionBuffers[2]->address;
+@@ -1008,8 +1070,9 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         panic_if(offset % (64 * sizeof(uint32_t)) != 0,
+                  "generic execution store chunk alignment mismatch");
+         const size_t chunk = offset / (64 * sizeof(uint32_t));
+-        panic_if(chunk >= GenericExecutionWaves ||
+-                     chunk / 4 != static_cast<size_t>(workgroupId),
++        panic_if(chunk >= expectedWaves() ||
++                     chunk / expectedWavesPerWorkgroup() !=
++                         static_cast<size_t>(workgroupId),
+                  "generic execution store chunk/workgroup mismatch");
+         for (size_t lane = 0; lane < addresses.size(); ++lane) {
+             panic_if(addresses[lane] !=
+@@ -1018,7 +1081,8 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         }
+         auto &chunks = outputStore ? outputStoreChunks : resultStoreChunks;
+         panic_if(chunks.test(chunk), "duplicate generic execution store chunk");
+-        panic_if(outputStore && !resultStoreChunks.test(chunk),
++        panic_if(!isOpenClVecAdd() && outputStore &&
++                     !resultStoreChunks.test(chunk),
+                  "generic execution B store preceded matching C store");
+         chunks.set(chunk);
+         ++globalStoreEventCount;
+@@ -1029,7 +1093,7 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         const HSAQueueEntry &task, int cuId, int workgroupId) override
+     {
+         if (!executionTaskMatches(task) || cuId != 0 || workgroupId < 0 ||
+-            workgroupId >= static_cast<int>(GenericExecutionWorkgroups) ||
++            workgroupId >= static_cast<int>(expectedWorkgroups()) ||
+             completedWorkgroups.test(workgroupId))
+             panic("generic execution workgroup identity mismatch");
+         completedWorkgroups.set(workgroupId);
+@@ -1040,56 +1104,69 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         const HSAQueueEntry &task, int, int) override
+     {
+         executionActive = false;
++        const uint32_t workgroups = expectedWorkgroups();
++        const uint32_t wavesPerWorkgroup = expectedWavesPerWorkgroup();
++        const uint32_t waves = expectedWaves();
++        const auto &instructionOffsets = expectedInstructionOffsets();
++        const uint64_t expectedScalarReads = waves *
++            (isOpenClVecAdd() ? 5 : 2);
++        const uint64_t expectedGlobalReads = isOpenClVecAdd() ?
++            2 * executionElementCount : 1024;
++        const uint64_t expectedGlobalWrites = isOpenClVecAdd() ?
++            executionElementCount : 2048;
++        const uint64_t expectedStoreEvents = isOpenClVecAdd() ?
++            waves : 2 * waves;
++        const uint32_t expectedWaveMask = (1U << waves) - 1;
+         if (!executionTaskMatches(task) || !executionStarted ||
+             executionCompleted || task.numWgCompleted() != task.numWgTotal() ||
+             fetchedCount != 1 || submittedCount != 1 ||
+             dispatcherStartedCount != 1 ||
+-            waveStartedCount != GenericExecutionWaves ||
+-            waveStartMask != 0xffffU ||
+-            instructionStartedCount != GenericExecutionWaves *
+-                GenericExecutionInstructionsPerWave ||
+-            instructionsPerWave.size() != GenericExecutionWaves ||
+-            instructionOffsetsPerWave.size() != GenericExecutionWaves ||
+-            workgroupPerWave.size() != GenericExecutionWaves ||
+-            lastSequencePerWave.size() != GenericExecutionWaves ||
+-            instructionSequences.size() != GenericExecutionWaves *
+-                GenericExecutionInstructionsPerWave ||
+-            scalarReads != 32 || globalReads != 1024 ||
+-            inputReadCoverage.count() != 1024 || globalWrites != 2048 ||
+-            outputWriteCoverage.count() != 1024 ||
+-            resultWriteCoverage.count() != 1024 ||
+-            globalStoreEventCount != 32 || globalStoreLaneCount != 2048 ||
+-            outputStoreChunks.count() != GenericExecutionWaves ||
+-            resultStoreChunks.count() != GenericExecutionWaves ||
+-            workgroupCompletedCount != GenericExecutionWorkgroups ||
+-            completedWorkgroups.count() != GenericExecutionWorkgroups ||
++            waveStartedCount != waves || waveStartMask != expectedWaveMask ||
++            instructionStartedCount != waves * instructionOffsets.size() ||
++            instructionsPerWave.size() != waves ||
++            instructionOffsetsPerWave.size() != waves ||
++            workgroupPerWave.size() != waves ||
++            lastSequencePerWave.size() != waves ||
++            instructionSequences.size() != waves * instructionOffsets.size() ||
++            scalarReads != expectedScalarReads ||
++            globalReads != expectedGlobalReads ||
++            inputReadCoverage.count() != executionElementCount ||
++            secondInputReadCoverage.count() !=
++                (isOpenClVecAdd() ? executionElementCount : 0) ||
++            globalWrites != expectedGlobalWrites ||
++            outputWriteCoverage.count() !=
++                (isOpenClVecAdd() ? 0 : executionElementCount) ||
++            resultWriteCoverage.count() != executionElementCount ||
++            globalStoreEventCount != expectedStoreEvents ||
++            globalStoreLaneCount != expectedGlobalWrites ||
++            outputStoreChunks.count() !=
++                (isOpenClVecAdd() ? 0 : waves) ||
++            resultStoreChunks.count() != waves ||
++            workgroupCompletedCount != workgroups ||
++            completedWorkgroups.count() != workgroups ||
+             !validateExecutionOutput())
+             return false;
+-        std::array<uint32_t, GenericExecutionWorkgroups>
++        std::array<uint32_t, GenericExecutionMaximumWorkgroups>
+             dynamicWavesPerWorkgroup = {};
+         for (const auto &[dynamicWave, instructionCount] :
+              instructionsPerWave) {
+             const auto workgroup = workgroupPerWave.find(dynamicWave);
+             const auto offsets = instructionOffsetsPerWave.find(dynamicWave);
+-            if (instructionCount != GenericExecutionInstructionsPerWave ||
++            if (instructionCount != instructionOffsets.size() ||
+                 workgroup == workgroupPerWave.end() ||
+                 offsets == instructionOffsetsPerWave.end() ||
+-                offsets->second !=
+-                    std::vector<uint32_t>(
+-                        GenericExecutionInstructionOffsets.begin(),
+-                        GenericExecutionInstructionOffsets.end()) ||
++                offsets->second != instructionOffsets ||
+                 workgroup->second < 0 ||
+                 workgroup->second >=
+-                    static_cast<int>(GenericExecutionWorkgroups)) {
++                    static_cast<int>(workgroups)) {
+                 return false;
+             }
+             ++dynamicWavesPerWorkgroup[workgroup->second];
+         }
+-        if (!std::all_of(
+-                dynamicWavesPerWorkgroup.begin(),
+-                dynamicWavesPerWorkgroup.end(),
+-                [](uint32_t count) { return count == 4; }))
+-            return false;
++        for (uint32_t workgroup = 0; workgroup < workgroups; ++workgroup) {
++            if (dynamicWavesPerWorkgroup[workgroup] != wavesPerWorkgroup)
++                return false;
++        }
+         uint64_t signalValue = 0;
+         if (!signalAllocation || !context->functionalRead(
+                 signalAllocation->view.gpuVa, &signalValue,
+@@ -1738,21 +1815,24 @@ HostGPUBridge::makeGenericExecutionTraceRecord(
+     bool pinsReleased, bool cleanupComplete,
+     const std::bitset<3> &d2hAckSent, bool unmapAckSent) const
+ {
++    const auto &expectedOffsets = session.expectedInstructionOffsets();
+     const bool pcCoverageExact =
+-        session.instructionOffsetsPerWave.size() == GenericExecutionWaves &&
++        session.instructionOffsetsPerWave.size() == session.expectedWaves() &&
+         std::all_of(
+             session.instructionOffsetsPerWave.begin(),
+             session.instructionOffsetsPerWave.end(),
+-            [](const auto &entry) {
+-                return entry.second == std::vector<uint32_t>(
+-                    GenericExecutionInstructionOffsets.begin(),
+-                    GenericExecutionInstructionOffsets.end());
++            [&expectedOffsets](const auto &entry) {
++                return entry.second == expectedOffsets;
+             });
+     const auto &a = session.executionAllocationViews[0];
+     const auto &b = session.executionAllocationViews[1];
+     const auto &c = session.executionAllocationViews[2];
+     std::ostringstream stream;
+-    stream << "{\"schema\":\"amdgpu-sim.cp26-generic-execution-trace.v1\""
++    stream << "{\"schema\":\""
++           << (session.isOpenClVecAdd() ?
++                   "amdgpu-sim.cp27-opencl-execution-trace.v1" :
++                   "amdgpu-sim.cp26-generic-execution-trace.v1")
++           << "\""
+            << ",\"event\":\"" << event << "\""
+            << ",\"sim_tick\":" << curTick()
+            << ",\"owner_fd\":" << session.owner.fd
+@@ -1762,6 +1842,21 @@ HostGPUBridge::makeGenericExecutionTraceRecord(
+            << ",\"trace_id\":" << response.traceId
+            << ",\"ticket_id\":" << response.ticketId
+            << ",\"dispatch_id\":" << GenericExecutionDispatchId
++           << ",\"execution_variant\":\""
++           << generic_dispatch_route::executionVariantName(
++                  session.executionVariant) << "\""
++           << ",\"kernel\":\""
++           << (session.isOpenClVecAdd() ? "vecadd" : "gpuReadWrite")
++           << "\""
++           << ",\"global_size\":" << session.executionGridSize
++           << ",\"local_size\":" << session.executionWorkgroupSize
++           << ",\"element_count\":" << session.executionElementCount
++           << ",\"required_d2h_mask\":"
++           << session.requiredD2hMask.to_ulong()
++           << ",\"output_oracle\":\""
++           << (session.isOpenClVecAdd() ?
++                   "float32_c_equals_a_plus_b" :
++                   "cp26_gpu_read_write") << "\""
+            << ",\"image_sha256\":\""
+            << hexBytes(response.imageSha256) << "\""
+            << ",\"packet_va\":" << response.packetVa
+@@ -1786,7 +1881,7 @@ HostGPUBridge::makeGenericExecutionTraceRecord(
+            << ",\"pc_coverage_waves\":"
+            << session.instructionOffsetsPerWave.size()
+            << ",\"pc_offsets_per_wave\":"
+-           << GenericExecutionInstructionsPerWave
++           << expectedOffsets.size()
+            << ",\"pc_coverage_exact\":"
+            << (pcCoverageExact ? "true" : "false")
+            << ",\"scalar_reads\":" << session.scalarReads
+@@ -1813,10 +1908,16 @@ HostGPUBridge::makeGenericExecutionTraceRecord(
+            << (type20Durable ? "true" : "false")
+            << ",\"d2h_a_durable\":"
+            << (d2hAckSent.test(0) ? "true" : "false")
++           << ",\"d2h_a_required\":"
++           << (session.requiredD2hMask.test(0) ? "true" : "false")
+            << ",\"d2h_b_durable\":"
+            << (d2hAckSent.test(1) ? "true" : "false")
++           << ",\"d2h_b_required\":"
++           << (session.requiredD2hMask.test(1) ? "true" : "false")
+            << ",\"d2h_c_durable\":"
+            << (d2hAckSent.test(2) ? "true" : "false")
++           << ",\"d2h_c_required\":"
++           << (session.requiredD2hMask.test(2) ? "true" : "false")
+            << ",\"unmap_durable\":"
+            << (unmapAckSent ? "true" : "false")
+            << ",\"owner_disconnected\":"
+@@ -3446,6 +3547,7 @@ HostGPUBridge::closeClient(int fd)
+         found->second->genericDispatch.get();
+     const bool exitCompletedGenericExecution =
+         exitOnDispatchSessionDone && completedGenericExecutionSession &&
++        genericSession &&
+         completedGenericExecutionSession->owner.fd == owner.fd &&
+         completedGenericExecutionSession->owner.clientGeneration ==
+             owner.clientGeneration &&
+@@ -3454,9 +3556,11 @@ HostGPUBridge::closeClient(int fd)
+         completedGenericExecutionSession->response.opcode ==
+             protocol::GenericDispatchOpcode::SubmitAql &&
+         completedGenericExecutionSession->response.outputCrc32c ==
+-            0x6f67026fU &&
+-        completedGenericExecutionSession->d2hAckSent.all() &&
+-        completedGenericExecutionSession->unmapAckSent && genericSession &&
++            genericSession->executionOutputCrc32c &&
++        (completedGenericExecutionSession->d2hAckSent &
++             completedGenericExecutionSession->requiredD2hMask) ==
++            completedGenericExecutionSession->requiredD2hMask &&
++        completedGenericExecutionSession->unmapAckSent &&
+         genericSession->executionMode && genericSession->executionCompleted &&
+         genericSession->executionRetired && !genericSession->executionBound &&
+         !genericSession->nativeAdmitted && !genericSession->queuePinned &&
+@@ -4117,12 +4221,14 @@ HostGPUBridge::processMemoryRecord(const PendingRecord &record)
+              ++index) {
+             const auto &buffer =
+                 completedGenericExecutionSession->buffers[index];
+-            if (!completedGenericExecutionSession->d2hAckSent.test(index) &&
++            if (completedGenericExecutionSession->requiredD2hMask.test(index) &&
++                !completedGenericExecutionSession->d2hAckSent.test(index) &&
+                 decoded.request.allocationId == buffer.allocationId &&
+                 decoded.request.generation == buffer.generation &&
+                 response.allocationId == buffer.allocationId &&
+                 response.generation == buffer.generation &&
+-                response.value2 == GenericExecutionBufferCrc32c[index]) {
++                response.value2 ==
++                    completedGenericExecutionSession->bufferCrc32c[index]) {
+                 genericExecutionD2hIndex = index;
+                 break;
+             }
+@@ -4353,10 +4459,15 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+                 (client.selectedCapabilities[
+                      protocol::GenericExecutionCapabilityByte] &
+                  protocol::GenericExecutionCapabilityMask) != 0;
++            const auto executionVariant = execute ?
++                generic_dispatch_route::lockedExecutionFixture(
++                    *manifest, image) :
++                generic_dispatch_route::LockedExecutionVariant::None;
+             if (execute &&
+                 (!generic_dispatch_route::lockedExecutionMapSupported(
+                      decoded.request) ||
+-                 !lockedGenericExecutionFixture(*manifest, image))) {
++                 executionVariant ==
++                     generic_dispatch_route::LockedExecutionVariant::None)) {
+                 response.status = protocol::Status::UnsupportedCapability;
+                 break;
+             }
+@@ -4374,7 +4485,7 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+                             *this, memoryState, owner,
+                             decoded.request.map.pageSize,
+                             execute ? executionAdapter.get() : nullptr,
+-                            execute);
++                            executionVariant);
+                 } catch (const std::exception &) {
+                     response.status = protocol::Status::ResourceExhausted;
+                     break;
+@@ -4416,7 +4527,8 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+             }
+             if (client.genericDispatch->executionMode &&
+                 !generic_dispatch_route::lockedExecutionAllocSupported(
+-                    decoded.request)) {
++                    decoded.request,
++                    client.genericDispatch->executionVariant)) {
+                 response.status = protocol::Status::UnsupportedCapability;
+                 break;
+             }
+@@ -4466,7 +4578,8 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+             }
+             if (client.genericDispatch->executionMode &&
+                 !generic_dispatch_route::lockedExecutionSubmitSupported(
+-                    decoded.request)) {
++                    decoded.request,
++                    client.genericDispatch->executionVariant)) {
+                 response.status = protocol::Status::UnsupportedCapability;
+                 break;
+             }
+@@ -5506,7 +5619,9 @@ HostGPUBridge::completeOutbound(int fd, uint64_t generation,
+                 CompletedGenericExecutionSession{
+                     session->owner, session->submitRequestId,
+                     *record.genericDispatchResponse,
+-                    session->executionAllocationViews, {}, false};
++                    session->executionAllocationViews,
++                    session->executionBufferCrc32c,
++                    session->requiredD2hMask, {}, false};
+             fatal_if(writeDispatchTraceBatch({makeGenericExecutionTraceRecord(
+                          "generic_execution_type20_durable", *session,
+                          session->submitRequestId,
+diff --git a/src/dev/amdgpu/host_gpu_bridge.hh b/src/dev/amdgpu/host_gpu_bridge.hh
+index 2d97ff31c..77f688d02 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.hh
++++ b/src/dev/amdgpu/host_gpu_bridge.hh
+@@ -225,6 +225,8 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+         uint64_t requestId = 0;
+         protocol::GenericDispatchResponse response;
+         std::array<HostGPUMemoryState::AllocationView, 3> buffers = {};
++        std::array<uint32_t, 3> bufferCrc32c = {};
++        std::bitset<3> requiredD2hMask;
+         std::bitset<3> d2hAckSent;
+         bool unmapAckSent = false;
+     };
+diff --git a/src/dev/amdgpu/host_gpu_code_object_image.cc b/src/dev/amdgpu/host_gpu_code_object_image.cc
+index fe50cba18..6ef5963b2 100644
+--- a/src/dev/amdgpu/host_gpu_code_object_image.cc
++++ b/src/dev/amdgpu/host_gpu_code_object_image.cc
+@@ -27,6 +27,8 @@
+ 
+ #include "dev/amdgpu/host_gpu_code_object_image.hh"
+ 
++#include "dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh"
++
+ #include <gelf.h>
+ #include <libelf.h>
+ 
+@@ -522,11 +524,28 @@ parseMetadata(const uint8_t *data, size_t size, uint32_t selectedIndex,
+ }
+ 
+ bool
+-targetMatches(const StringView &target, uint32_t gfxTarget)
++targetMatches(const StringView &target,
++              const protocol::CodeObjectManifest &manifest)
+ {
+-    constexpr char Target[] = "amdgcn-amd-amdhsa--gfx950";
+-    return gfxTarget == 950 && target.size == sizeof(Target) - 1 &&
+-        std::memcmp(target.data, Target, sizeof(Target) - 1) == 0;
++    constexpr char LegacyTarget[] = "amdgcn-amd-amdhsa--gfx950";
++    constexpr char OpenClTarget[] = "amdgcn-amd-amdhsa-unknown-gfx950";
++    if (manifest.gfxTarget != 950)
++        return false;
++    if (target.size == sizeof(LegacyTarget) - 1 &&
++        std::memcmp(target.data, LegacyTarget,
++                    sizeof(LegacyTarget) - 1) == 0) {
++        return true;
++    }
++    /*
++     * The repository-local OpenCL compiler emits the canonical unknown-vendor
++     * target spelling.  Keep that spelling behind the exact CP27 image digest;
++     * accepting it here must not turn the generic loader into an arbitrary
++     * gfx950 admission path.
++     */
++    return manifest.imageSha256 == opencl_vecadd_fixture::ImageSha256 &&
++        target.size == sizeof(OpenClTarget) - 1 &&
++        std::memcmp(target.data, OpenClTarget,
++                    sizeof(OpenClTarget) - 1) == 0;
+ }
+ 
+ template <size_t Size>
+@@ -545,7 +564,7 @@ metadataMatches(const Metadata &metadata,
+                 const protocol::CodeObjectManifest &manifest)
+ {
+     const auto &kernel = metadata.selected;
+-    return targetMatches(metadata.target, manifest.gfxTarget) &&
++    return targetMatches(metadata.target, manifest) &&
+         metadata.major == manifest.metadataMajor &&
+         metadata.minor == manifest.metadataMinor &&
+         metadataStringMatches(kernel.name, manifest.kernelName) &&
+diff --git a/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc b/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
+index c2ac57c88..ac53e448f 100644
+--- a/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
++++ b/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
+@@ -25,8 +25,12 @@
+ #include "dev/amdgpu/host_gpu_generic_dispatch_route.hh"
+ 
+ #include <algorithm>
++#include <cmath>
+ #include <cstring>
+ 
++#include "dev/amdgpu/host_gpu_code_object_fixture.hh"
++#include "dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh"
++
+ namespace gem5::hostgpu::generic_dispatch_route
+ {
+ 
+@@ -44,6 +48,158 @@ fixedNameEquals(const std::array<uint8_t, Size> &value, const char *expected)
+                     [](uint8_t byte) { return byte == 0; });
+ }
+ 
++template<class Container>
++std::string
++hexBytes(const Container &bytes)
++{
++    static constexpr char Hex[] = "0123456789abcdef";
++    std::string result(bytes.size() * 2, '0');
++    for (size_t index = 0; index < bytes.size(); ++index) {
++        result[index * 2] = Hex[bytes[index] >> 4];
++        result[index * 2 + 1] = Hex[bytes[index] & 0xf];
++    }
++    return result;
++}
++
++bool
++lockedGpuReadWriteFixture(
++    const protocol::CodeObjectManifest &manifest,
++    const std::vector<uint8_t> &image)
++{
++    static constexpr std::array<uint8_t, 64> Descriptor = {
++        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++        0x18, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++        0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++        0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++        0x80, 0x00, 0xaf, 0x00, 0x88, 0x00, 0x00, 0x00,
++        0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    };
++    const auto &fixture = code_object_fixture::Images[0];
++    const auto &kernel = fixture.kernels[0];
++    const protocol::CodeObjectSegment expectedSegments[3] = {
++        {1, 4, 0, 0, 0x840, 0x840, 0x1000},
++        {1, 5, 0x900, 0x1900, 0x480, 0x480, 0x1000},
++        {1, 6, 0xd80, 0x2d80, 0x70, 0x280, 0x1000},
++    };
++    if (image.size() != fixture.byteCount ||
++        manifest.imageSize != fixture.byteCount ||
++        hexBytes(manifest.imageSha256) != fixture.sha256 ||
++        manifest.elfMachine != code_object_fixture::ElfMachine ||
++        manifest.elfType != code_object_fixture::ElfTypeDyn ||
++        manifest.elfOsabi != code_object_fixture::ElfOsabiAmdgpuHsa ||
++        manifest.elfAbiVersion != code_object_fixture::ElfAbiVersion ||
++        manifest.elfFlags != code_object_fixture::ElfFlags ||
++        manifest.gfxTarget != code_object_fixture::GfxTarget ||
++        manifest.codeObjectVersion != code_object_fixture::CodeObjectVersion ||
++        manifest.metadataMajor != code_object_fixture::MetadataMajor ||
++        manifest.metadataMinor != code_object_fixture::MetadataMinor ||
++        manifest.relocationCount != 0 || manifest.segmentCount != 3 ||
++        manifest.kernelIndex != 0 ||
++        manifest.kernargSegmentSize != kernel.kernargBytes ||
++        manifest.kernargSegmentAlign != kernel.kernargAlignment ||
++        manifest.groupSegmentFixedSize != 0 ||
++        manifest.privateSegmentFixedSize != 0 ||
++        manifest.maxFlatWorkgroupSize != kernel.maxFlatWorkgroupSize ||
++        manifest.wavefrontSize != kernel.wavefrontSize ||
++        manifest.sgprCount != kernel.sgprCount ||
++        manifest.vgprCount != kernel.vgprCount ||
++        manifest.usesDynamicStack != 0 ||
++        manifest.descriptorSize != protocol::CodeObjectDescriptorBytes ||
++        manifest.kernelCodeEntryByteOffset !=
++            static_cast<int64_t>(kernel.codeEntryByteOffset) ||
++        manifest.codeVirtualAddress != 0x1900 ||
++        manifest.codeFileOffset != 0x900 || manifest.codeSize != 0x78 ||
++        manifest.descriptorVirtualAddress != 0x800 ||
++        manifest.descriptorFileOffset != kernel.descriptorFileOffset ||
++        !fixedNameEquals(manifest.kernelName, kernel.name) ||
++        !fixedNameEquals(manifest.descriptorSymbol, kernel.descriptorSymbol) ||
++        manifest.descriptor != Descriptor ||
++        manifest.descriptorFileOffset > image.size() ||
++        Descriptor.size() > image.size() - manifest.descriptorFileOffset ||
++        !std::equal(
++            Descriptor.begin(), Descriptor.end(),
++            image.begin() + manifest.descriptorFileOffset)) {
++        return false;
++    }
++    for (size_t index = 0; index < 3; ++index) {
++        const auto &left = manifest.segments[index];
++        const auto &right = expectedSegments[index];
++        if (left.type != right.type || left.flags != right.flags ||
++            left.fileOffset != right.fileOffset ||
++            left.virtualAddress != right.virtualAddress ||
++            left.fileSize != right.fileSize ||
++            left.memorySize != right.memorySize ||
++            left.alignment != right.alignment) {
++            return false;
++        }
++    }
++    return true;
++}
++
++bool
++lockedOpenClVecAddFixture(
++    const protocol::CodeObjectManifest &manifest,
++    const std::vector<uint8_t> &image)
++{
++    using namespace opencl_vecadd_fixture;
++    if (image.size() != ImageBytes || manifest.imageSize != ImageBytes ||
++        manifest.imageSha256 != ImageSha256 ||
++        manifest.elfMachine != ElfMachine || manifest.elfType != ElfType ||
++        manifest.elfOsabi != ElfOsabi ||
++        manifest.elfAbiVersion != ElfAbiVersion ||
++        manifest.elfFlags != ElfFlags || manifest.gfxTarget != GfxTarget ||
++        manifest.codeObjectVersion != CodeObjectVersion ||
++        manifest.metadataMajor != MetadataMajor ||
++        manifest.metadataMinor != MetadataMinor ||
++        manifest.relocationCount != 0 || manifest.segmentCount != 3 ||
++        manifest.kernelIndex != 0 ||
++        manifest.kernargSegmentSize != KernargBytes ||
++        manifest.kernargSegmentAlign != KernargAlignment ||
++        manifest.groupSegmentFixedSize != 0 ||
++        manifest.privateSegmentFixedSize != 0 ||
++        manifest.maxFlatWorkgroupSize != MaxFlatWorkgroupSize ||
++        manifest.wavefrontSize != WavefrontSize ||
++        manifest.sgprCount != SgprCount || manifest.vgprCount != VgprCount ||
++        manifest.usesDynamicStack != 0 ||
++        manifest.descriptorSize != Descriptor.size() ||
++        manifest.kernelCodeEntryByteOffset != KernelCodeEntryByteOffset ||
++        manifest.codeVirtualAddress != CodeVirtualAddress ||
++        manifest.codeFileOffset != CodeFileOffset ||
++        manifest.codeSize != CodeBytes ||
++        manifest.descriptorVirtualAddress != DescriptorVirtualAddress ||
++        manifest.descriptorFileOffset != DescriptorFileOffset ||
++        !fixedNameEquals(manifest.kernelName, KernelName) ||
++        !fixedNameEquals(manifest.descriptorSymbol, DescriptorSymbol) ||
++        manifest.descriptor != Descriptor ||
++        DescriptorFileOffset > image.size() ||
++        Descriptor.size() > image.size() - DescriptorFileOffset ||
++        CodeFileOffset > image.size() ||
++        KernelCode.size() > image.size() - CodeFileOffset ||
++        !std::equal(
++            Descriptor.begin(), Descriptor.end(),
++            image.begin() + DescriptorFileOffset) ||
++        !std::equal(
++            KernelCode.begin(), KernelCode.end(),
++            image.begin() + CodeFileOffset)) {
++        return false;
++    }
++    for (size_t index = 0; index < LoadSegments.size(); ++index) {
++        const auto &actual = manifest.segments[index];
++        const auto &expected = LoadSegments[index];
++        if (actual.type != 1 || actual.flags != expected.flags ||
++            actual.fileOffset != expected.fileOffset ||
++            actual.virtualAddress != expected.virtualAddress ||
++            actual.fileSize != expected.fileSize ||
++            actual.memorySize != expected.memorySize ||
++            actual.alignment != 0x1000) {
++            return false;
++        }
++    }
++    return true;
++}
++
+ } // anonymous namespace
+ 
+ protocol::Status
+@@ -102,11 +258,33 @@ lockedExecutionMapSupported(
+         request.map.pageSize == protocol::GenericDispatchPageSize4K;
+ }
+ 
++LockedExecutionVariant
++lockedExecutionFixture(
++    const protocol::CodeObjectManifest &manifest,
++    const std::vector<uint8_t> &image)
++{
++    if (lockedGpuReadWriteFixture(manifest, image))
++        return LockedExecutionVariant::GpuReadWrite;
++    if (lockedOpenClVecAddFixture(manifest, image))
++        return LockedExecutionVariant::OpenClVecAdd;
++    return LockedExecutionVariant::None;
++}
++
+ bool
+ lockedExecutionAllocSupported(
+     const protocol::GenericDispatchRequest &request)
+ {
+-    return request.opcode ==
++    return lockedExecutionAllocSupported(
++        request, LockedExecutionVariant::GpuReadWrite);
++}
++
++bool
++lockedExecutionAllocSupported(
++    const protocol::GenericDispatchRequest &request,
++    LockedExecutionVariant variant)
++{
++    return variant != LockedExecutionVariant::None &&
++        request.opcode ==
+             protocol::GenericDispatchOpcode::AllocKernarg &&
+         request.allocKernarg.sizeBytes == 512 &&
+         request.allocKernarg.alignmentBytes == 8 &&
+@@ -118,19 +296,137 @@ bool
+ lockedExecutionSubmitSupported(
+     const protocol::GenericDispatchRequest &request)
+ {
+-    return request.opcode == protocol::GenericDispatchOpcode::SubmitAql &&
+-        request.kernelIndex == 0 &&
+-        fixedNameEquals(request.kernelName, "gpuReadWrite") &&
+-        request.submit.kernargOffset == 64 &&
+-        request.submit.kernargSize == 280 && request.submit.gridX == 1024 &&
+-        request.submit.gridY == 1 && request.submit.gridZ == 1 &&
+-        request.submit.workgroupX == 256 &&
+-        request.submit.workgroupY == 1 &&
+-        request.submit.workgroupZ == 1 && request.submit.numWarps == 4 &&
+-        request.submit.numCtas == 1 &&
+-        request.submit.sharedMemoryBytes == 0 &&
+-        request.submit.wavefrontSize == 64 &&
+-        request.submit.launchFlags == 0 && request.submit.reserved == 0;
++    return lockedExecutionSubmitSupported(
++        request, LockedExecutionVariant::GpuReadWrite);
++}
++
++bool
++lockedExecutionSubmitSupported(
++    const protocol::GenericDispatchRequest &request,
++    LockedExecutionVariant variant)
++{
++    if (request.opcode != protocol::GenericDispatchOpcode::SubmitAql ||
++        request.kernelIndex != 0 || request.submit.kernargOffset != 64 ||
++        request.submit.gridY != 1 || request.submit.gridZ != 1 ||
++        request.submit.workgroupY != 1 || request.submit.workgroupZ != 1 ||
++        request.submit.numCtas != 1 ||
++        request.submit.sharedMemoryBytes != 0 ||
++        request.submit.wavefrontSize != 64 ||
++        request.submit.launchFlags != 0 || request.submit.reserved != 0) {
++        return false;
++    }
++    if (variant == LockedExecutionVariant::GpuReadWrite) {
++        return fixedNameEquals(request.kernelName, "gpuReadWrite") &&
++            request.submit.kernargSize == 280 &&
++            request.submit.gridX == 1024 &&
++            request.submit.workgroupX == 256 &&
++            request.submit.numWarps == 4;
++    }
++    if (variant != LockedExecutionVariant::OpenClVecAdd ||
++        !fixedNameEquals(request.kernelName, "vecadd") ||
++        request.submit.kernargSize != opencl_vecadd_fixture::KernargBytes ||
++        request.submit.gridX < 64 || request.submit.gridX > 1024 ||
++        request.submit.workgroupX < 64 ||
++        request.submit.workgroupX >
++            opencl_vecadd_fixture::MaxFlatWorkgroupSize ||
++        request.submit.workgroupX % 64 != 0 ||
++        request.submit.gridX % request.submit.workgroupX != 0) {
++        return false;
++    }
++    return (request.submit.workgroupX == 64 ||
++            request.submit.workgroupX == 128 ||
++            request.submit.workgroupX == 256) &&
++        request.submit.numWarps == request.submit.workgroupX / 64;
++}
++
++const char *
++executionVariantName(LockedExecutionVariant variant)
++{
++    switch (variant) {
++      case LockedExecutionVariant::GpuReadWrite:
++        return "gpuReadWrite";
++      case LockedExecutionVariant::OpenClVecAdd:
++        return "opencl_vecadd";
++      case LockedExecutionVariant::None:
++        return "none";
++    }
++    return "none";
++}
++
++std::bitset<3>
++requiredD2hMask(LockedExecutionVariant variant)
++{
++    if (variant == LockedExecutionVariant::GpuReadWrite)
++        return std::bitset<3>(0x7);
++    if (variant == LockedExecutionVariant::OpenClVecAdd)
++        return std::bitset<3>(0x4);
++    return {};
++}
++
++bool
++openClVecAddInputsSupported(
++    const std::array<std::vector<uint8_t>, 3> &before,
++    uint32_t elementCount)
++{
++    constexpr size_t BufferBytes = 4096;
++    if (elementCount == 0 ||
++        elementCount > BufferBytes / sizeof(float) ||
++        std::any_of(before.begin(), before.end(), [](const auto &buffer) {
++            return buffer.size() != BufferBytes;
++        })) {
++        return false;
++    }
++    for (uint32_t index = 0; index < elementCount; ++index) {
++        float left = 0;
++        float right = 0;
++        std::memcpy(
++            &left, before[0].data() + index * sizeof(float), sizeof(left));
++        std::memcpy(
++            &right, before[1].data() + index * sizeof(float), sizeof(right));
++        const float expected = left + right;
++        if (!std::isfinite(left) || !std::isfinite(right) ||
++            !std::isfinite(expected)) {
++            return false;
++        }
++    }
++    return true;
++}
++
++bool
++validateOpenClVecAddOutput(
++    const std::array<std::vector<uint8_t>, 3> &before,
++    const std::array<std::vector<uint8_t>, 3> &after,
++    uint32_t elementCount, uint32_t &outputCrc32c)
++{
++    outputCrc32c = 0;
++    if (!openClVecAddInputsSupported(before, elementCount) ||
++        after[0] != before[0] || after[1] != before[1] ||
++        after[2].size() != before[2].size()) {
++        return false;
++    }
++    for (uint32_t index = 0; index < elementCount; ++index) {
++        float left = 0;
++        float right = 0;
++        float actual = 0;
++        std::memcpy(
++            &left, before[0].data() + index * sizeof(float), sizeof(left));
++        std::memcpy(
++            &right, before[1].data() + index * sizeof(float), sizeof(right));
++        std::memcpy(
++            &actual, after[2].data() + index * sizeof(float), sizeof(actual));
++        const float expected = left + right;
++        if (std::memcmp(&actual, &expected, sizeof(expected)) != 0)
++            return false;
++    }
++    const size_t writtenBytes = static_cast<size_t>(elementCount) *
++        sizeof(float);
++    if (!std::equal(
++            after[2].begin() + writtenBytes, after[2].end(),
++            before[2].begin() + writtenBytes)) {
++        return false;
++    }
++    outputCrc32c = protocol::crc32c(after[2].data(), after[2].size());
++    return true;
+ }
+ 
+ bool
+diff --git a/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh b/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh
+index eacda9277..ddf641df5 100644
+--- a/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh
++++ b/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh
+@@ -28,11 +28,22 @@
+ #ifndef __DEV_AMDGPU_HOST_GPU_GENERIC_DISPATCH_ROUTE_HH__
+ #define __DEV_AMDGPU_HOST_GPU_GENERIC_DISPATCH_ROUTE_HH__
+ 
++#include <array>
++#include <bitset>
++#include <vector>
++
+ #include "dev/amdgpu/host_gpu_protocol.hh"
+ 
+ namespace gem5::hostgpu::generic_dispatch_route
+ {
+ 
++enum class LockedExecutionVariant
++{
++    None,
++    GpuReadWrite,
++    OpenClVecAdd,
++};
++
+ /**
+  * Validate the immutable session tuple before a type-18 operation can touch
+  * native state.  Capability byte 1 bit 0 must be present in the negotiated
+@@ -61,14 +72,52 @@ bool
+ lockedExecutionMapSupported(
+     const protocol::GenericDispatchRequest &request);
+ 
++/**
++ * Select one explicitly audited code object.  Image identity is already
++ * checked by HostGPUCodeObjectState; this gate additionally checks the locked
++ * profile's ELF layout, metadata, descriptor resources, and ISA bytes.
++ */
++LockedExecutionVariant
++lockedExecutionFixture(
++    const protocol::CodeObjectManifest &manifest,
++    const std::vector<uint8_t> &image);
++
+ bool
+ lockedExecutionAllocSupported(
+     const protocol::GenericDispatchRequest &request);
+ 
++bool
++lockedExecutionAllocSupported(
++    const protocol::GenericDispatchRequest &request,
++    LockedExecutionVariant variant);
++
+ bool
+ lockedExecutionSubmitSupported(
+     const protocol::GenericDispatchRequest &request);
+ 
++bool
++lockedExecutionSubmitSupported(
++    const protocol::GenericDispatchRequest &request,
++    LockedExecutionVariant variant);
++
++const char *
++executionVariantName(LockedExecutionVariant variant);
++
++std::bitset<3>
++requiredD2hMask(LockedExecutionVariant variant);
++
++/** Validate the bounded CP27 input and C=A+B result contracts. */
++bool
++openClVecAddInputsSupported(
++    const std::array<std::vector<uint8_t>, 3> &before,
++    uint32_t elementCount);
++
++bool
++validateOpenClVecAddOutput(
++    const std::array<std::vector<uint8_t>, 3> &before,
++    const std::array<std::vector<uint8_t>, 3> &after,
++    uint32_t elementCount, uint32_t &outputCrc32c);
++
+ /** Bit-9 sessions deliberately admit one execution before UNMAP. */
+ bool
+ executionSessionCanSubmit(
+diff --git a/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc b/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
+index b6105f946..597ad9e09 100644
+--- a/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
++++ b/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
+@@ -26,11 +26,13 @@
+  */
+ 
+ #include <algorithm>
++#include <cstring>
+ #include <cstdlib>
+ #include <iostream>
+ #include <stdexcept>
+ 
+ #include "dev/amdgpu/host_gpu_generic_dispatch_route.hh"
++#include "dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh"
+ 
+ namespace gem5::hostgpu
+ {
+@@ -142,6 +144,68 @@ unmapRequest()
+     return result;
+ }
+ 
++CodeObjectManifest
++openClVecAddManifest()
++{
++    using namespace opencl_vecadd_fixture;
++    CodeObjectManifest result;
++    result.imageSize = ImageBytes;
++    result.chunkCount = static_cast<uint32_t>(
++        (ImageBytes + CodeObjectChunkDataBytes - 1) /
++        CodeObjectChunkDataBytes);
++    result.segmentCount = LoadSegments.size();
++    result.kernelIndex = 0;
++    result.imageSha256 = ImageSha256;
++    result.elfMachine = ElfMachine;
++    result.elfType = ElfType;
++    result.elfOsabi = ElfOsabi;
++    result.elfAbiVersion = ElfAbiVersion;
++    result.elfFlags = ElfFlags;
++    result.gfxTarget = GfxTarget;
++    result.codeObjectVersion = CodeObjectVersion;
++    result.metadataMajor = MetadataMajor;
++    result.metadataMinor = MetadataMinor;
++    result.kernargSegmentSize = KernargBytes;
++    result.kernargSegmentAlign = KernargAlignment;
++    result.maxFlatWorkgroupSize = MaxFlatWorkgroupSize;
++    result.wavefrontSize = WavefrontSize;
++    result.sgprCount = SgprCount;
++    result.vgprCount = VgprCount;
++    result.kernelCodeEntryByteOffset = KernelCodeEntryByteOffset;
++    result.codeVirtualAddress = CodeVirtualAddress;
++    result.codeFileOffset = CodeFileOffset;
++    result.codeSize = CodeBytes;
++    result.descriptorVirtualAddress = DescriptorVirtualAddress;
++    result.descriptorFileOffset = DescriptorFileOffset;
++    std::copy_n(
++        KernelName, std::strlen(KernelName), result.kernelName.begin());
++    std::copy_n(
++        DescriptorSymbol, std::strlen(DescriptorSymbol),
++        result.descriptorSymbol.begin());
++    result.descriptor = Descriptor;
++    for (size_t index = 0; index < LoadSegments.size(); ++index) {
++        const auto &source = LoadSegments[index];
++        result.segments[index] = {
++            1, source.flags, source.fileOffset, source.virtualAddress,
++            source.fileSize, source.memorySize, 0x1000};
++    }
++    return result;
++}
++
++std::vector<uint8_t>
++openClVecAddImage()
++{
++    using namespace opencl_vecadd_fixture;
++    std::vector<uint8_t> result(ImageBytes, 0);
++    std::copy(
++        Descriptor.begin(), Descriptor.end(),
++        result.begin() + DescriptorFileOffset);
++    std::copy(
++        KernelCode.begin(), KernelCode.end(),
++        result.begin() + CodeFileOffset);
++    return result;
++}
++
+ void
+ run()
+ {
+@@ -281,6 +345,106 @@ run()
+                 executionAlloc),
+             "locked execution accepted nonfixture ALLOC size");
+ 
++    using generic_dispatch_route::LockedExecutionVariant;
++    auto vecaddManifest = openClVecAddManifest();
++    auto vecaddImage = openClVecAddImage();
++    require(generic_dispatch_route::lockedExecutionFixture(
++                vecaddManifest, vecaddImage) ==
++                LockedExecutionVariant::OpenClVecAdd,
++            "locked OpenCL vecadd fixture was rejected");
++    auto badManifest = vecaddManifest;
++    ++badManifest.sgprCount;
++    require(generic_dispatch_route::lockedExecutionFixture(
++                badManifest, vecaddImage) == LockedExecutionVariant::None,
++            "vecadd resource mutation was admitted");
++    badManifest = vecaddManifest;
++    badManifest.imageSha256[0] ^= 1;
++    require(generic_dispatch_route::lockedExecutionFixture(
++                badManifest, vecaddImage) == LockedExecutionVariant::None,
++            "vecadd compiler identity mutation was admitted");
++    auto badImage = vecaddImage;
++    badImage[opencl_vecadd_fixture::CodeFileOffset + 4] ^= 1;
++    require(generic_dispatch_route::lockedExecutionFixture(
++                vecaddManifest, badImage) == LockedExecutionVariant::None,
++            "vecadd ISA mutation was admitted");
++    badManifest = vecaddManifest;
++    badManifest.descriptor[58] = 1;
++    require(generic_dispatch_route::lockedExecutionFixture(
++                badManifest, vecaddImage) == LockedExecutionVariant::None,
++            "vecadd descriptor preload mutation was admitted");
++
++    auto vecaddSubmit = submit;
++    vecaddSubmit.kernelName.fill(0);
++    std::copy_n("vecadd", 6, vecaddSubmit.kernelName.begin());
++    vecaddSubmit.submit.kernargOffset = 64;
++    vecaddSubmit.submit.kernargSize = opencl_vecadd_fixture::KernargBytes;
++    vecaddSubmit.submit.gridX = 1024;
++    vecaddSubmit.submit.workgroupX = 256;
++    vecaddSubmit.submit.numWarps = 4;
++    require(generic_dispatch_route::lockedExecutionSubmitSupported(
++                vecaddSubmit, LockedExecutionVariant::OpenClVecAdd),
++            "OpenCL vecadd 256-lane launch was rejected");
++    for (const uint32_t localSize : {64U, 128U, 256U}) {
++        vecaddSubmit.submit.workgroupX = localSize;
++        vecaddSubmit.submit.numWarps = localSize / 64;
++        require(generic_dispatch_route::lockedExecutionSubmitSupported(
++                    vecaddSubmit, LockedExecutionVariant::OpenClVecAdd),
++                "normal OpenCL 1D local size was rejected");
++    }
++    vecaddSubmit.submit.workgroupX = 32;
++    vecaddSubmit.submit.numWarps = 1;
++    require(!generic_dispatch_route::lockedExecutionSubmitSupported(
++                vecaddSubmit, LockedExecutionVariant::OpenClVecAdd),
++            "sub-wave OpenCL local size was admitted");
++    vecaddSubmit.submit.workgroupX = 128;
++    vecaddSubmit.submit.numWarps = 2;
++    vecaddSubmit.submit.gridX = 1000;
++    require(!generic_dispatch_route::lockedExecutionSubmitSupported(
++                vecaddSubmit, LockedExecutionVariant::OpenClVecAdd),
++            "nondivisible OpenCL geometry was admitted");
++    require(generic_dispatch_route::requiredD2hMask(
++                LockedExecutionVariant::GpuReadWrite).to_ulong() == 0x7 &&
++                generic_dispatch_route::requiredD2hMask(
++                    LockedExecutionVariant::OpenClVecAdd).to_ulong() == 0x4,
++            "execution D2H durability mask mismatch");
++
++    std::array<std::vector<uint8_t>, 3> before;
++    for (auto &buffer : before)
++        buffer.resize(4096);
++    for (uint32_t index = 0; index < 1024; ++index) {
++        const float left = static_cast<float>(index);
++        const float right = static_cast<float>(2 * index + 1);
++        const float sentinel = -1.0F;
++        std::memcpy(
++            before[0].data() + index * sizeof(float), &left, sizeof(left));
++        std::memcpy(
++            before[1].data() + index * sizeof(float), &right, sizeof(right));
++        std::memcpy(
++            before[2].data() + index * sizeof(float), &sentinel,
++            sizeof(sentinel));
++    }
++    auto after = before;
++    constexpr uint32_t OracleElements = 256;
++    for (uint32_t index = 0; index < OracleElements; ++index) {
++        const float expected = static_cast<float>(3 * index + 1);
++        std::memcpy(
++            after[2].data() + index * sizeof(float), &expected,
++            sizeof(expected));
++    }
++    uint32_t oracleCrc = 0;
++    require(generic_dispatch_route::validateOpenClVecAddOutput(
++                before, after, OracleElements, oracleCrc) && oracleCrc != 0,
++            "OpenCL vecadd C=A+B oracle rejected correct output");
++    after[2][7] ^= 1;
++    require(!generic_dispatch_route::validateOpenClVecAddOutput(
++                before, after, OracleElements, oracleCrc),
++            "OpenCL vecadd oracle accepted a wrong C element");
++    after = before;
++    after[0][0] ^= 1;
++    require(!generic_dispatch_route::validateOpenClVecAddOutput(
++                before, after, OracleElements, oracleCrc),
++            "OpenCL vecadd oracle accepted input mutation");
++
+     GenericDispatchResponse submitAck;
+     submitAck.status = Status::Ok;
+     submitAck.opcode = GenericDispatchOpcode::SubmitAql;
+@@ -360,6 +524,9 @@ main()
+            "\"second_submit_rejected\":true,"
+            "\"second_submit_issue_count\":0,"
+            "\"quarantine_exit_gate\":true,"
++           "\"cp27_vecadd_admission\":true,"
++           "\"cp27_vecadd_oracle\":true,"
++           "\"cp27_required_d2h_mask\":4,"
+            "\"ack_type19\":true,\"completion_type20\":true,"
+            "\"ticks_ordered\":true,\"packet_crc_bound\":true,"
+            "\"gpu_execution\":false,\"output_validated\":false,"
+diff --git a/src/dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh b/src/dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh
+new file mode 100644
+index 000000000..cecb97e45
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh
+@@ -0,0 +1,142 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_OPENCL_VECADD_FIXTURE_HH__
++#define __DEV_AMDGPU_HOST_GPU_OPENCL_VECADD_FIXTURE_HH__
++
++#include <array>
++#include <cstdint>
++
++namespace gem5::hostgpu::opencl_vecadd_fixture
++{
++
++/*
++ * This is the reproducible output of the CP27 repo-local clang/device-libs
++ * profile.  The execution route checks the digest, parsed ELF/metadata,
++ * descriptor resources, PT_LOAD layout, and these kernel bytes.  It is not a
++ * claim that arbitrary gfx950 OpenCL code is executable.
++ */
++inline constexpr const char *Id = "cp27-opencl-vecadd-gfx950-v1";
++inline constexpr const char *KernelName = "vecadd";
++inline constexpr const char *DescriptorSymbol = "vecadd.kd";
++inline constexpr const char *ImageSha256Hex =
++    "314ede16940432996c9fe190115408bf42744a8ab7d0036bf07b931e39c4cb19";
++
++inline constexpr uint64_t ImageBytes = 5160;
++inline constexpr uint16_t ElfMachine = 224;
++inline constexpr uint16_t ElfType = 3;
++inline constexpr uint8_t ElfOsabi = 64;
++inline constexpr uint8_t ElfAbiVersion = 2;
++inline constexpr uint32_t ElfFlags = 0x54f;
++inline constexpr uint32_t GfxTarget = 950;
++inline constexpr uint32_t CodeObjectVersion = 4;
++inline constexpr uint32_t MetadataMajor = 1;
++inline constexpr uint32_t MetadataMinor = 1;
++inline constexpr uint32_t KernargBytes = 88;
++inline constexpr uint32_t KernargAlignment = 8;
++inline constexpr uint32_t MaxFlatWorkgroupSize = 256;
++inline constexpr uint32_t WavefrontSize = 64;
++inline constexpr uint32_t SgprCount = 40;
++inline constexpr uint32_t VgprCount = 8;
++inline constexpr uint64_t DescriptorVirtualAddress = 0x700;
++inline constexpr uint64_t DescriptorFileOffset = 0x700;
++inline constexpr int64_t KernelCodeEntryByteOffset = 0x1100;
++inline constexpr uint64_t CodeVirtualAddress = 0x1800;
++inline constexpr uint64_t CodeFileOffset = 0x800;
++inline constexpr uint64_t CodeBytes = 0xa8;
++inline constexpr uint32_t DescriptorRsrc3 = 1;
++inline constexpr uint32_t DescriptorRsrc1 = 0x00af0100;
++inline constexpr uint32_t DescriptorRsrc2 = 0x88;
++inline constexpr uint16_t DescriptorProperties = 0x000a;
++inline constexpr uint16_t DescriptorPreload = 0;
++
++inline constexpr std::array<uint8_t, 32> ImageSha256 = {
++    0x31, 0x4e, 0xde, 0x16, 0x94, 0x04, 0x32, 0x99,
++    0x6c, 0x9f, 0xe1, 0x90, 0x11, 0x54, 0x08, 0xbf,
++    0x42, 0x74, 0x4a, 0x8a, 0xb7, 0xd0, 0x03, 0x6b,
++    0xf0, 0x7b, 0x93, 0x1e, 0x39, 0xc4, 0xcb, 0x19,
++};
++
++inline constexpr std::array<uint8_t, 64> Descriptor = {
++    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x58, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
++    0x00, 0x01, 0xaf, 0x00, 0x88, 0x00, 0x00, 0x00,
++    0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++
++inline constexpr std::array<uint8_t, CodeBytes> KernelCode = {
++    0x40, 0x01, 0x02, 0xc0, 0x04, 0x00, 0x00, 0x00,
++    0x00, 0x00, 0x80, 0xbf, 0x01, 0x00, 0x02, 0xc0,
++    0x18, 0x00, 0x00, 0x00, 0x81, 0x01, 0x06, 0xc0,
++    0x20, 0x00, 0x00, 0x00, 0x80, 0x02, 0x02, 0x7e,
++    0x80, 0x00, 0x81, 0xbe, 0x80, 0x00, 0xa1, 0xbe,
++    0x7f, 0xc0, 0x8c, 0xbf, 0x05, 0xff, 0x05, 0x86,
++    0xff, 0xff, 0x00, 0x00, 0x04, 0x05, 0x04, 0x92,
++    0x04, 0x00, 0x00, 0x68, 0x00, 0x00, 0x08, 0xd2,
++    0x06, 0x00, 0x01, 0x04, 0x00, 0x00, 0xd8, 0x7d,
++    0x6a, 0x20, 0x80, 0xbe, 0x15, 0x00, 0x88, 0xbf,
++    0x01, 0x01, 0x0a, 0xc0, 0x00, 0x00, 0x00, 0x00,
++    0x01, 0x00, 0x06, 0xc0, 0x10, 0x00, 0x00, 0x00,
++    0x00, 0x00, 0x8f, 0xd2, 0x82, 0x00, 0x02, 0x00,
++    0x7f, 0xc0, 0x8c, 0xbf, 0x02, 0x00, 0x08, 0xd2,
++    0x04, 0x00, 0x01, 0x04, 0x04, 0x00, 0x08, 0xd2,
++    0x06, 0x00, 0x01, 0x04, 0x00, 0x80, 0x50, 0xdc,
++    0x02, 0x00, 0x7f, 0x06, 0x00, 0x80, 0x50, 0xdc,
++    0x04, 0x00, 0x7f, 0x07, 0x00, 0x00, 0x08, 0xd2,
++    0x00, 0x00, 0x01, 0x04, 0x70, 0x0f, 0x8c, 0xbf,
++    0x06, 0x0f, 0x04, 0x02, 0x00, 0x80, 0x70, 0xdc,
++    0x00, 0x02, 0x7f, 0x00, 0x00, 0x00, 0x81, 0xbf,
++};
++
++struct LoadSegment
++{
++    uint32_t flags;
++    uint64_t fileOffset;
++    uint64_t virtualAddress;
++    uint64_t fileSize;
++    uint64_t memorySize;
++};
++
++inline constexpr std::array<LoadSegment, 3> LoadSegments = {{
++    {4, 0x000, 0x0000, 0x7e4, 0x7e4},
++    {5, 0x800, 0x1800, 0x580, 0x580},
++    {6, 0xd80, 0x2d80, 0x070, 0x280},
++}};
++
++inline constexpr std::array<uint32_t, 28> InstructionOffsets = {
++    0, 8, 12, 20, 28, 32, 36, 40, 44, 52, 56, 60, 68, 72,
++    76, 80, 88, 96, 104, 108, 116, 124, 132, 140, 148, 152,
++    156, 164,
++};
++
++} // namespace gem5::hostgpu::opencl_vecadd_fixture
++
++#endif // __DEV_AMDGPU_HOST_GPU_OPENCL_VECADD_FIXTURE_HH__
+-- 
+2.53.0
+

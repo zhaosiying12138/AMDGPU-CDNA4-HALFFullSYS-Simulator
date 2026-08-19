@@ -1,0 +1,367 @@
+From cd1efd9ce213489a2e8c78609c76cfc488d72293 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sun, 16 Aug 2026 21:45:47 +0800
+Subject: [PATCH 26/42] amdgpu: fix SMEM SBASE operand index and harden
+ register reservation
+
+Inst_SMEM::initOperandInfo registered the address base as the raw SBASE field
+while execute() and generateDisassembly() both scale it by two, because SBASE
+addresses an aligned SGPR pair with an implied LSB of 0. Dependency tracking
+and register reads therefore observed the wrong physical registers; the live
+gfx950 attention path faulted with a host-native scalar read at VA 0 because
+the declared base resolved to s[8:9] instead of s[16:17].
+
+Also make wave register reservation fail closed. A pool manager reports an
+unsatisfiable request by returning an invalid start index without writing the
+reserved size, which previously started a wave with a zero-length register
+region and only failed later as an out-of-range register index. Release the
+scalar region only when one was actually reserved, matching allocation.
+
+Host-native vector and scalar memory faults now report the owning kernel, PC,
+dispatch, instruction, kernarg head, and sourced scalar registers through one
+generic helper so a fault names its cause instead of a bare address.
+
+All changes are generic at the shared ISA, register-manager, and diagnostic
+boundaries. No model, operator, kernel, shape, or address special case is
+added.
+
+Checkpoint-ID: CP-0032
+Goal-ID: GSIM-001
+Plan-Revision: 15
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 458368899b9122d48baf6268c84e035737cdb2e36776c5b374a26b176ed5df69
+Change-Kind: code
+Baseline-Commit: ee05c9a3eef3771afbb370d212dee83ea4a7ecfc
+---
+ src/arch/amdgpu/vega/gpu_decoder.test.cc      | 34 ++++++++
+ src/arch/amdgpu/vega/insts/op_encodings.cc    |  9 +-
+ src/gpu-compute/compute_unit.cc               | 82 ++++++++++++++++++-
+ src/gpu-compute/compute_unit.hh               | 10 +++
+ src/gpu-compute/dispatcher.cc                 |  7 ++
+ src/gpu-compute/dispatcher.hh                 |  7 ++
+ .../static_register_manager_policy.cc         | 40 ++++++++-
+ 7 files changed, 181 insertions(+), 8 deletions(-)
+
+diff --git a/src/arch/amdgpu/vega/gpu_decoder.test.cc b/src/arch/amdgpu/vega/gpu_decoder.test.cc
+index 8cb08dcab..70e85f52b 100644
+--- a/src/arch/amdgpu/vega/gpu_decoder.test.cc
++++ b/src/arch/amdgpu/vega/gpu_decoder.test.cc
+@@ -399,6 +399,40 @@ TEST(GpuDecoderTest, Gfx950PackB32F16FromLiveQwenKernel)
+     EXPECT_EQ(inst->getOperandSize(2), 4);
+ }
+ 
++/**
++ * SMEM SBASE addresses an aligned SGPR pair, so the architectural register
++ * index is SBASE * 2. execute() and the disassembler both scale it; the
++ * registered operand info must agree, otherwise dependency tracking and
++ * register reads observe the wrong physical registers.
++ *
++ * This word is taken from a live gfx950 attention kernel:
++ * s_load_dwordx2 s[20:21], s[16:17], 0x0 encodes SBASE=8, SDATA=20.
++ */
++TEST(GpuDecoderTest, Gfx950SmemBaseOperandUsesRegisterPairIndex)
++{
++    InstFormat words[2] = {};
++    words[0].imm_u32 = 0xc0060508;
++    words[1].imm_u32 = 0x00000000;
++
++    Decoder decoder;
++    decoder.setGfxVersion(GfxVersion::gfx950);
++    std::unique_ptr<GPUStaticInst> inst(decoder.decode(words));
++    ASSERT_NE(inst, nullptr);
++    EXPECT_EQ(inst->opcode(), "s_load_dwordx2");
++    EXPECT_EQ(inst->disassemble(), "s_load_dwordx2 s[20:21], s[16:17], 0x00");
++
++    inst->initOperandInfo();
++    ASSERT_EQ(inst->numSrcRegOperands(), 2);
++    ASSERT_GE(inst->srcOperands().size(), 1UL);
++
++    /* The address base is the first source operand and is 8 bytes wide. */
++    const auto &base = inst->srcOperands()[0];
++    EXPECT_EQ(base.sizeInDWords(), 2);
++    EXPECT_TRUE(base.isScalarReg());
++    EXPECT_EQ(base.rawRegisterIndex(), 16)
++        << "SBASE=8 must resolve to architectural s[16:17], not s[8:9]";
++}
++
+ } // anonymous namespace
+ } // namespace VegaISA
+ } // namespace gem5
+diff --git a/src/arch/amdgpu/vega/insts/op_encodings.cc b/src/arch/amdgpu/vega/insts/op_encodings.cc
+index 6780b9611..5506d4458 100644
+--- a/src/arch/amdgpu/vega/insts/op_encodings.cc
++++ b/src/arch/amdgpu/vega/insts/op_encodings.cc
+@@ -529,7 +529,14 @@ namespace VegaISA
+                 opNum++;
+             }
+ 
+-            reg = instData.SBASE;
++            /**
++             * SBASE addresses an aligned SGPR pair, so it has an implied
++             * LSB of 0. execute() and the disassembler both scale it by two;
++             * the operand info must use the same architectural index or
++             * dependency tracking and register reads observe the wrong
++             * physical registers.
++             */
++            reg = instData.SBASE << 1;
+             srcOps.emplace_back(reg, getOperandSize(opNum), true,
+                                   true, false, false);
+             opNum++;
+diff --git a/src/gpu-compute/compute_unit.cc b/src/gpu-compute/compute_unit.cc
+index e0a326584..dda0c1ba4 100644
+--- a/src/gpu-compute/compute_unit.cc
++++ b/src/gpu-compute/compute_unit.cc
+@@ -31,6 +31,7 @@
+ 
+ #include "gpu-compute/compute_unit.hh"
+ 
++#include <array>
+ #include <limits>
+ 
+ #include "arch/amdgpu/common/gpu_translation_state.hh"
+@@ -1344,6 +1345,71 @@ ComputeUnit::SQCPort::MemReqEvent::process()
+     }
+ }
+ 
++std::string
++ComputeUnit::hostNativeAccessContext(GPUDynInstPtr gpuDynInst) const
++{
++    if (!gpuDynInst) {
++        return "cu=" + std::to_string(cu_id) + " inst=<none>";
++    }
++
++    std::string context = "cu=" + std::to_string(cu_id) +
++        " kernel=" + std::to_string(gpuDynInst->kern_id) +
++        " wg=" + std::to_string(gpuDynInst->wg_id) +
++        " simd=" + std::to_string(gpuDynInst->simdId) +
++        " wfSlot=" + std::to_string(gpuDynInst->wfSlotId) +
++        " wfDynId=" + std::to_string(gpuDynInst->wfDynId);
++
++    Wavefront *wf = gpuDynInst->wavefront();
++    if (wf) {
++        context += " pc=" + csprintf("%#x", wf->pc()) +
++            " dispatch=" + std::to_string(wf->dispatchId);
++
++        HSAQueueEntry *task =
++            shader->dispatcher().findHsaTask(wf->dispatchId);
++        if (task) {
++            context += " name='" + task->kernelName() + "'" +
++                " codeVa=" + csprintf("%#x", task->codeAddr()) +
++                " kernargVa=" + csprintf("%#x", task->kernargAddr()) +
++                " ldsBytes=" + std::to_string(task->ldsSize()) +
++                " preloadDwords=" + std::to_string(task->preloadLength());
++
++            /*
++             * Distinguish a zeroed argument buffer from a misread scalar
++             * register: show the first kernarg dwords the wave could have
++             * loaded. This reads only the generic argument segment.
++             */
++            GPUNativeMemory *native = shader->nativeMemory();
++            if (native && task->kernargAddr()) {
++                std::array<uint32_t, 8> head = {};
++                if (native->read(task->kernargAddr(), head.data(),
++                                 sizeof(head), gpuDynInst->kern_id)) {
++                    context += " kernargHead=[";
++                    for (size_t i = 0; i < head.size(); ++i) {
++                        context += (i ? "," : "") + csprintf("%#x", head[i]);
++                    }
++                    context += "]";
++                }
++            }
++        }
++
++        /* Report the scalar registers this instruction actually sourced. */
++        std::string srcRegs;
++        for (const auto &srcOp : gpuDynInst->srcScalarRegOperands()) {
++            for (const auto &physIdx : srcOp.physIndices()) {
++                srcRegs += (srcRegs.empty() ? "" : ",") +
++                    csprintf("s%d=%#x", physIdx,
++                             srf[gpuDynInst->simdId]->read(physIdx));
++            }
++        }
++        if (!srcRegs.empty()) {
++            context += " srcScalar=[" + srcRegs + "]";
++        }
++    }
++
++    context += " inst='" + gpuDynInst->disassemble() + "'";
++    return context;
++}
++
+ void
+ ComputeUnit::sendRequest(GPUDynInstPtr gpuDynInst, PortID index, PacketPtr pkt)
+ {
+@@ -1370,8 +1436,12 @@ ComputeUnit::sendRequest(GPUDynInstPtr gpuDynInst, PortID index, PacketPtr pkt)
+                                  pkt->getSize(), gpuDynInst->kern_id) :
+                     native->write(pkt->req->getPaddr(), pkt->getPtr<uint8_t>(),
+                                   pkt->getSize(), gpuDynInst->kern_id);
+-                panic_if(!ok, "host-native vector memory access failed at %#x",
+-                         pkt->req->getPaddr());
++                panic_if(!ok,
++                         "host-native vector memory access failed at %#x "
++                         "size=%u %s %s",
++                         pkt->req->getPaddr(), pkt->getSize(),
++                         pkt->isRead() ? "read" : "write",
++                         hostNativeAccessContext(gpuDynInst));
+                 completeLaneRequest(pkt, true);
+             }, "host-native vector response", true);
+         schedule(response_event, curTick() + delay);
+@@ -1605,8 +1675,12 @@ ComputeUnit::sendScalarRequest(GPUDynInstPtr gpuDynInst, PacketPtr pkt)
+                                  pkt->getSize(), gpuDynInst->kern_id) :
+                     native->write(pkt->req->getPaddr(), pkt->getPtr<uint8_t>(),
+                                   pkt->getSize(), gpuDynInst->kern_id);
+-                panic_if(!ok, "host-native scalar memory access failed at %#x",
+-                         pkt->req->getPaddr());
++                panic_if(!ok,
++                         "host-native scalar memory access failed at %#x "
++                         "size=%u %s %s",
++                         pkt->req->getPaddr(), pkt->getSize(),
++                         pkt->isRead() ? "read" : "write",
++                         hostNativeAccessContext(gpuDynInst));
+                 scalarDataPort.handleResponse(pkt);
+             }, "host-native scalar response", true);
+         schedule(response_event, curTick() + delay);
+diff --git a/src/gpu-compute/compute_unit.hh b/src/gpu-compute/compute_unit.hh
+index 2c47c50b6..53f34fc18 100644
+--- a/src/gpu-compute/compute_unit.hh
++++ b/src/gpu-compute/compute_unit.hh
+@@ -34,6 +34,7 @@
+ 
+ #include <deque>
+ #include <map>
++#include <string>
+ #include <unordered_set>
+ #include <vector>
+ 
+@@ -467,6 +468,15 @@ class ComputeUnit : public ClockedObject
+     void doSmReturn(GPUDynInstPtr gpuDynInst);
+ 
+     virtual void init() override;
++
++    /**
++     * Describe the wave, kernel, and instruction responsible for a
++     * host-native memory access. This is diagnostic only: it inspects
++     * generic pipeline state and never depends on a specific kernel,
++     * operator, model, or address.
++     */
++    std::string hostNativeAccessContext(GPUDynInstPtr gpuDynInst) const;
++
+     void sendRequest(GPUDynInstPtr gpuDynInst, PortID index, PacketPtr pkt);
+     void sendScalarRequest(GPUDynInstPtr gpuDynInst, PacketPtr pkt);
+     void completeLaneRequest(PacketPtr pkt, bool returnToken);
+diff --git a/src/gpu-compute/dispatcher.cc b/src/gpu-compute/dispatcher.cc
+index 54f0c1faa..efe1d3ce8 100644
+--- a/src/gpu-compute/dispatcher.cc
++++ b/src/gpu-compute/dispatcher.cc
+@@ -72,6 +72,13 @@ GPUDispatcher::hsaTask(int disp_id)
+     return hsaQueueEntries[disp_id];
+ }
+ 
++HSAQueueEntry*
++GPUDispatcher::findHsaTask(int disp_id) const
++{
++    auto entry = hsaQueueEntries.find(disp_id);
++    return entry == hsaQueueEntries.end() ? nullptr : entry->second;
++}
++
+ void
+ GPUDispatcher::setCommandProcessor(GPUCommandProcessor *gpu_cmd_proc)
+ {
+diff --git a/src/gpu-compute/dispatcher.hh b/src/gpu-compute/dispatcher.hh
+index e9e21eb00..54d5498d1 100644
+--- a/src/gpu-compute/dispatcher.hh
++++ b/src/gpu-compute/dispatcher.hh
+@@ -107,6 +107,13 @@ class GPUDispatcher : public SimObject
+     void dispatch(HSAQueueEntry *task);
+     HSAQueueEntry* hsaTask(int disp_id);
+ 
++    /**
++     * Look up a dispatch without asserting when it is absent. Diagnostic
++     * paths run while a dispatch may already be retired, so they cannot
++     * use the asserting accessor above.
++     */
++    HSAQueueEntry* findHsaTask(int disp_id) const;
++
+   private:
+     Shader *shader;
+     GPUCommandProcessor *gpuCmdProc;
+diff --git a/src/gpu-compute/static_register_manager_policy.cc b/src/gpu-compute/static_register_manager_policy.cc
+index 7f221e194..e9dca36d6 100644
+--- a/src/gpu-compute/static_register_manager_policy.cc
++++ b/src/gpu-compute/static_register_manager_policy.cc
+@@ -31,6 +31,8 @@
+ 
+ #include "gpu-compute/static_register_manager_policy.hh"
+ 
++#include <limits>
++
+ #include "config/the_gpu_isa.hh"
+ #include "debug/GPURename.hh"
+ #include "gpu-compute/compute_unit.hh"
+@@ -112,9 +114,26 @@ void
+ StaticRegisterManagerPolicy::allocateRegisters(Wavefront *w, int vectorDemand,
+                                                int scalarDemand)
+ {
++    /**
++     * A pool manager reports an unsatisfiable request by returning an
++     * invalid start index without writing the reserved size. Detect that
++     * here instead of starting a wave with a zero-length register region,
++     * which would only fail later as an out-of-range register index and
++     * hide the real cause.
++     */
++    constexpr uint32_t InvalidRegionStart =
++        std::numeric_limits<uint32_t>::max();
++
+     uint32_t allocatedSize = 0;
+     w->startVgprIndex = cu->registerManager->vrfPoolMgrs[w->simdId]->
+         allocateRegion(vectorDemand, &allocatedSize);
++    panic_if(w->startVgprIndex == InvalidRegionStart || !allocatedSize ||
++             allocatedSize < static_cast<uint32_t>(vectorDemand),
++             "VRF[%d] could not reserve %d VGPRs for WF[%d] (reserved %d, "
++             "already reserved %d of %d); admission accepted a workgroup the "
++             "register file cannot hold\n",
++             w->simdId, vectorDemand, w->wfSlotId, allocatedSize,
++             cu->vectorRegsReserved[w->simdId], cu->numVecRegsPerSimd);
+     w->reservedVectorRegs = allocatedSize;
+     cu->vectorRegsReserved[w->simdId] += w->reservedVectorRegs;
+     panic_if(cu->vectorRegsReserved[w->simdId] > cu->numVecRegsPerSimd,
+@@ -123,8 +142,16 @@ StaticRegisterManagerPolicy::allocateRegisters(Wavefront *w, int vectorDemand,
+              cu->numVecRegsPerSimd);
+ 
+     if (scalarDemand) {
++        allocatedSize = 0;
+         w->startSgprIndex = cu->registerManager->srfPoolMgrs[w->simdId]->
+             allocateRegion(scalarDemand, &allocatedSize);
++        panic_if(w->startSgprIndex == InvalidRegionStart || !allocatedSize ||
++                 allocatedSize < static_cast<uint32_t>(scalarDemand),
++                 "SRF[%d] could not reserve %d SGPRs for WF[%d] (reserved %d, "
++                 "already reserved %d of %d)\n",
++                 w->simdId, scalarDemand, w->wfSlotId, allocatedSize,
++                 cu->scalarRegsReserved[w->simdId],
++                 cu->numScalarRegsPerSimd);
+         w->reservedScalarRegs = allocatedSize;
+         cu->scalarRegsReserved[w->simdId] += w->reservedScalarRegs;
+         panic_if(cu->scalarRegsReserved[w->simdId] > cu->numScalarRegsPerSimd,
+@@ -166,9 +193,16 @@ StaticRegisterManagerPolicy::freeRegisters(Wavefront *w)
+     w->reservedVectorRegs = 0;
+     w->startVgprIndex = 0;
+ 
+-    endIndex = w->startSgprIndex + w->reservedScalarRegs;
+-    w->computeUnit->registerManager->srfPoolMgrs[w->simdId]->
+-        freeRegion(w->startSgprIndex, endIndex);
++    /*
++     * Scalar registers are reserved only when the kernel demands them, so
++     * release the region only when one was actually allocated. Returning an
++     * empty region would corrupt the pool's free list.
++     */
++    if (w->reservedScalarRegs) {
++        endIndex = w->startSgprIndex + w->reservedScalarRegs;
++        w->computeUnit->registerManager->srfPoolMgrs[w->simdId]->
++            freeRegion(w->startSgprIndex, endIndex);
++    }
+ 
+     // mark/pre-mark all registers are not busy
+     for (int i = 0; i < w->reservedScalarRegs; i++) {
+-- 
+2.53.0
+

@@ -1,0 +1,712 @@
+From 707c522475e4273ab32f543ccafcef419f795f7c Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Wed, 19 Aug 2026 23:43:43 +0800
+Subject: [PATCH 42/42] vega: preserve the destination for masked and invalid
+ DPP lanes
+
+processDPP substituted the source's own unpermuted value into every lane
+that ROW_MASK/BANK_MASK disabled or whose selected source was invalid
+under BOUND_CTRL=0. The ISA suppresses the destination write for those
+lanes instead. The compiler's canonical wave reduction depends on the
+difference: it pairs a row_shr:N with a row_shl:N into one destination
+under complementary bank masks, and the substituted values doubled a
+partial sum in 24 of every 32 lanes. A lane-exact software emulation of
+the old semantics reproduced the wrong Qwen3.5 q/k L2 norms 4096/4096
+bit-exact, and the corrected semantics match the reference identically.
+
+Express the control word as two value-level functions in vop_semantics
+-- dppLaneWriteEnabled for the row/bank write gate and dppSourceLane for
+the lane selection -- and have processDPP return the written-lane mask
+so every DPP caller merges into the destination's prior contents. The
+replayed recurrent-operator capsule moves from relative L2 0.44 against
+the NVIDIA diagnostic oracle to 0.0041, inside the operator contract.
+
+Checkpoint-ID: CP-0071
+Goal-ID: GSIM-001
+Plan-Revision: 16
+Source-Lock-SHA256: dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf
+Evidence-Manifest-SHA256: d3b4134d1bc4a2f6d4903ed7936f1d79ece48f4a7634275aad4c0687d1ae442f
+Change-Kind: fix
+Baseline-Commit: f553817f2f19dcabbb28481e02be76829ea6dc46
+---
+ src/arch/amdgpu/vega/insts/inst_util.hh       | 287 +++---------------
+ src/arch/amdgpu/vega/insts/op_encodings.hh    |  15 +-
+ src/arch/amdgpu/vega/insts/vop1.cc            |   8 +-
+ src/arch/amdgpu/vega/insts/vop2.cc            |  12 +-
+ src/arch/amdgpu/vega/insts/vop_semantics.hh   |  94 ++++++
+ .../amdgpu/vega/insts/vop_semantics.test.cc   | 109 +++++++
+ 6 files changed, 275 insertions(+), 250 deletions(-)
+
+diff --git a/src/arch/amdgpu/vega/insts/inst_util.hh b/src/arch/amdgpu/vega/insts/inst_util.hh
+index 11f82a557..087748603 100644
+--- a/src/arch/amdgpu/vega/insts/inst_util.hh
++++ b/src/arch/amdgpu/vega/insts/inst_util.hh
+@@ -61,28 +61,9 @@ enum SDWADstVals : int
+     SDWA_UNUSED_PRESERVE = 2  /* select data[31:0] */
+ };
+ 
+-// values for DPP operations
+-enum SqDPPVals : int
+-{
+-    SQ_DPP_QUAD_PERM_MAX   = 0xFF,
+-    SQ_DPP_RESERVED        = 0x100,
+-    SQ_DPP_ROW_SL1         = 0x101,
+-    SQ_DPP_ROW_SL15        = 0x10F,
+-    SQ_DPP_ROW_SR1         = 0x111,
+-    SQ_DPP_ROW_SR15        = 0x11F,
+-    SQ_DPP_ROW_RR1         = 0x121,
+-    SQ_DPP_ROW_RR15        = 0x12F,
+-    SQ_DPP_WF_SL1          = 0x130,
+-    SQ_DPP_WF_RL1          = 0x134,
+-    SQ_DPP_WF_SR1          = 0x138,
+-    SQ_DPP_WF_RR1          = 0x13C,
+-    SQ_DPP_ROW_MIRROR      = 0x140,
+-    SQ_DPP_ROW_HALF_MIRROR = 0x141,
+-    SQ_DPP_ROW_BCAST15     = 0x142,
+-    SQ_DPP_ROW_BCAST31     = 0x143
+-};
+-static const int ROW_SIZE = 16; /* 16 registers per row */
+-static const int NUM_BANKS = 4; /* 64 registers, 16/bank */
++// DPP control values and lane semantics live in vop_semantics.hh
++// (SqDPPVals, dppLaneWriteEnabled, dppSourceLane) so they can be unit
++// tested without a register file.
+ 
+ namespace VegaISA
+ {
+@@ -298,148 +279,32 @@ namespace VegaISA
+     }
+ 
+     /**
+-     * dppInstImpl is a helper function that performs the inputted operation
+-     * on the inputted vector register lane.  The returned output lane
+-     * represents the input lane given the destination lane and DPP_CTRL word.
++     * processDPP applies the DPP_CTRL lane permutation to src0 in place and
++     * returns the set of lanes whose destination the instruction may write.
+      *
+-     * Currently the values are:
+-     * 0x0 - 0xFF: full permute of four threads
+-     * 0x100: reserved
+-     * 0x101 - 0x10F: row shift left by 1-15 threads
+-     * 0x111 - 0x11F: row shift right by 1-15 threads
+-     * 0x121 - 0x12F: row rotate right by 1-15 threads
+-     * 0x130: wavefront left shift by 1 thread
+-     * 0x134: wavefront left rotate by 1 thread
+-     * 0x138: wavefront right shift by 1 thread
+-     * 0x13C: wavefront right rotate by 1 thread
+-     * 0x140: mirror threads within row
+-     * 0x141: mirror threads within 1/2 row (8 threads)
+-     * 0x142: broadcast 15th thread of each row to next row
+-     * 0x143: broadcast thread 31 to rows 2 and 3
++     * The ISA preserves the destination register's previous contents for
++     * every lane outside that set -- lanes disabled by ROW_MASK/BANK_MASK,
++     * and lanes whose selected source is invalid (out of range or EXEC=0)
++     * under BOUND_CTRL=0. The compiler's canonical wave reduction pairs a
++     * row_shr with a row_shl into the same destination under complementary
++     * bank masks and depends on the masked halves surviving, so a caller
++     * must read the destination first and write only inside this mask.
+      */
+-    inline int
+-    dppInstImpl(SqDPPVals dppCtrl, int currLane, int rowNum,
+-                    int rowOffset, bool & outOfBounds)
++    template<typename T>
++    VectorMask
++    processDPP(GPUDynInstPtr gpuDynInst, InFmt_VOP_DPP dppInst, T & src0)
+     {
+-        // local variables
+-        // newLane will be the same as the input lane unless swizzling happens
+-        int newLane = currLane;
+-        // for shift/rotate permutations; positive values are LEFT rotates
+-        // shift/rotate left means lane n -> lane n-1 (e.g., lane 1 -> lane 0)
+-        int count = 0;
+-        int localRowOffset = rowOffset;
+-
+-        if (dppCtrl <= SQ_DPP_QUAD_PERM_MAX) { // DPP_QUAD_PERM{00:FF}
+-            int quadBase = (currLane & ~(3));
+-            int quadPix = (currLane & 3);
+-            quadPix = ((dppCtrl >> (2 * quadPix)) & 3);
+-            newLane = (quadBase | quadPix);
+-        } else if (dppCtrl == SQ_DPP_RESERVED) {
+-            panic("ERROR: instruction using reserved DPP_CTRL value\n");
+-        } else if ((dppCtrl >= SQ_DPP_ROW_SL1) &&
+-                   (dppCtrl <= SQ_DPP_ROW_SL15)) { // DPP_ROW_SL{1:15}
+-            count = (dppCtrl - SQ_DPP_ROW_SL1 + 1);
+-            if ((localRowOffset + count >= 0) &&
+-                (localRowOffset + count < ROW_SIZE)) {
+-                localRowOffset += count;
+-                newLane = ((rowNum * ROW_SIZE) | localRowOffset);
+-            } else {
+-                outOfBounds = true;
+-            }
+-        } else if ((dppCtrl >= SQ_DPP_ROW_SR1) &&
+-                   (dppCtrl <= SQ_DPP_ROW_SR15)) { // DPP_ROW_SR{1:15}
+-            count = -(dppCtrl - SQ_DPP_ROW_SR1 + 1);
+-            if ((localRowOffset + count >= 0) &&
+-                (localRowOffset + count < ROW_SIZE)) {
+-                localRowOffset += count;
+-                newLane = ((rowNum * ROW_SIZE) | localRowOffset);
+-            } else {
+-                outOfBounds = true;
+-            }
+-        } else if ((dppCtrl >= SQ_DPP_ROW_RR1) &&
+-                   (dppCtrl <= SQ_DPP_ROW_RR15)) { // DPP_ROW_RR{1:15}
+-            count = -(dppCtrl - SQ_DPP_ROW_RR1 + 1);
+-            localRowOffset = (localRowOffset + count + ROW_SIZE) % ROW_SIZE;
+-            newLane = ((rowNum * ROW_SIZE) | localRowOffset);
+-        } else if (dppCtrl == SQ_DPP_WF_SL1) { // DPP_WF_SL1
+-            if ((currLane >= 0) && (currLane < NumVecElemPerVecReg)) {
+-                newLane += 1;
+-            } else {
+-                outOfBounds = true;
+-            }
+-        } else if (dppCtrl == SQ_DPP_WF_RL1) { // DPP_WF_RL1
+-            newLane = (currLane - 1 + NumVecElemPerVecReg) %
+-                      NumVecElemPerVecReg;
+-        } else if (dppCtrl == SQ_DPP_WF_SR1) { // DPP_WF_SR1
+-            int currVal = (currLane - 1);
+-            if ((currVal >= 0) && (currVal < NumVecElemPerVecReg)) {
+-                newLane -= 1;
+-            } else {
+-                outOfBounds = true;
+-            }
+-        } else if (dppCtrl == SQ_DPP_WF_RR1) { // DPP_WF_RR1
+-            newLane = (currLane - 1 + NumVecElemPerVecReg) %
+-                      NumVecElemPerVecReg;
+-        } else if (dppCtrl == SQ_DPP_ROW_MIRROR) { // DPP_ROW_MIRROR
+-            newLane = vop_semantics::dppRowMirrorLane(currLane);
+-        } else if (dppCtrl == SQ_DPP_ROW_HALF_MIRROR) { // DPP_ROW_HALF_MIRROR
+-            newLane = vop_semantics::dppRowHalfMirrorLane(currLane);
+-        } else if (dppCtrl == SQ_DPP_ROW_BCAST15) { // DPP_ROW_BCAST15
+-            count = 15;
+-            if (currLane > count) {
+-                // 0x30 selects which set of 16 lanes to use. We broadcast the
+-                // last lane of one set to all lanes of the next set (e.g.,
+-                // lane 15 is written to 16-31, 31 to 32-47, 47 to 48-63).
+-                newLane = (currLane & 0x30) - 1;
+-            } else {
+-                outOfBounds = true;
+-            }
+-        } else if (dppCtrl == SQ_DPP_ROW_BCAST31) { // DPP_ROW_BCAST31
+-            count = 31;
+-            if (currLane > count) {
+-                // 0x20 selects either the upper 32 or lower 32 lanes and
+-                // broadcasts the last lane of one set to all lanes of the
+-                // next set (e.g., lane 31 is written to 32-63).
+-                newLane = (currLane & 0x20) - 1;
+-            } else {
+-                outOfBounds = true;
+-            }
+-        } else {
+-            panic("Unimplemented DPP control operation: %d\n", dppCtrl);
+-        }
++        const unsigned dppCtrl = dppInst.DPP_CTRL;
++        // BC=1 encodes asm bound_ctrl:0 -- an invalid source reads as zero;
++        // BC=0 suppresses the write instead.
++        const bool zeroInvalid = dppInst.BC == 1;
++        VectorMask written;
++        written.reset();
+ 
+-        return newLane;
+-    }
++        panic_if(dppCtrl == vop_semantics::SQ_DPP_RESERVED,
++                 "instruction using reserved DPP_CTRL value\n");
+ 
+-    /**
+-     * processDPP is a helper function for implementing Data Parallel Primitive
+-     * instructions.  This function may be called by many different VOP1
+-     * instructions to do operations within a register.
+-     */
+-    template<typename T>
+-    void processDPP(GPUDynInstPtr gpuDynInst, InFmt_VOP_DPP dppInst,
+-                    T & src0)
+-    {
+-        // local variables
+-        SqDPPVals dppCtrl = (SqDPPVals)dppInst.DPP_CTRL;
+-        int boundCtrl = dppInst.BC;
+-        int bankMask = dppInst.BANK_MASK;
+-        int rowMask = dppInst.ROW_MASK;
+-        // row, bank info to be calculated per lane
+-        int rowNum = 0, bankNum = 0, rowOffset = 0;
+-        // outLane will be the same as the input lane unless swizzling happens
+-        int outLane = 0;
+-        bool laneDisabled = false;
+-        // flags used for determining if a lane should be written to/reset/etc.
+-        bool outOfBounds = false, zeroSrc = false;
+-        long long threadValid = 0;
+-
+-        /**
+-         * STEP 1a: check if the absolute value (ABS) or negation (NEG) tags
+-         * are set.  If so, do the appropriate action(s) on src0 and/or src1.
+-         *
+-         * NOTE: ABS takes priority over NEG.
+-         */
++        // ABS takes priority over NEG.
+         if (dppInst.SRC0_NEG) {
+             src0.negModifier();
+         }
+@@ -448,97 +313,42 @@ namespace VegaISA
+             src0.absModifier();
+         }
+ 
+-        // Need a copy of the original data since we update one lane at a time
++        // The permutation reads pre-instruction sources while updating one
++        // lane at a time, so it needs a copy.
+         T src0_copy = src0;
+ 
+-        // iterate over all register lanes, performing steps 2-4
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+-            threadValid = (0x1LL << lane);
+-            /**
+-             * STEP 2: check the row and bank mask values.  These determine
+-             * which threads are enabled for the subsequent DPP_CTRL
+-             * operations.
+-             */
+-            rowNum = (lane / ROW_SIZE);
+-            rowOffset = (lane % ROW_SIZE);
+-            bankNum = (rowOffset / NUM_BANKS);
+-
+-            if (((rowMask & (0x1 << rowNum)) == 0)   /* row mask */   ||
+-                ((bankMask & (0x1 << bankNum)) == 0) /* bank mask */) {
+-                laneDisabled = true;
++            if (!vop_semantics::dppLaneWriteEnabled(lane, dppInst.ROW_MASK,
++                                                    dppInst.BANK_MASK)) {
++                continue;
+             }
+ 
+-            /**
+-             * STEP 4: Handle the potential values of DPP_CTRL:
+-             * 0x0 - 0xFF: full permute of four threads
+-             * 0x100: reserved
+-             * 0x101 - 0x10F: row shift right by 1-15 threads
+-             * 0x111 - 0x11F: row shift right by 1-15 threads
+-             * 0x121 - 0x12F: row shift right by 1-15 threads
+-             * 0x130: wavefront left shift by 1 thread
+-             * 0x134: wavefront left rotate by 1 thread
+-             * 0x138: wavefront right shift by 1 thread
+-             * 0x13C: wavefront right rotate by 1 thread
+-             * 0x140: mirror threads within row
+-             * 0x141: mirror threads within 1/2 row (8 threads)
+-             * 0x142: broadcast 15th thread of each row to next row
+-             * 0x143: broadcast thread 31 to rows 2 and 3
+-             */
+-            if (!laneDisabled) {
+-                outLane = dppInstImpl(dppCtrl, lane, rowNum, rowOffset,
+-                                      outOfBounds);
+-            }
+-
+-            /**
+-             * STEP 4: Implement bound control for disabled threads.  If thread
+-             * is disabled but boundCtrl is set, then we need to set the source
+-             * data to 0 (i.e., set this lane to 0).
+-             */
+-            if (laneDisabled) {
+-                threadValid = 0;
+-            } else if (outOfBounds) {
+-                if (boundCtrl == 1) {
+-                    zeroSrc = true;
+-                } else {
+-                    threadValid = 0;
+-                }
+-            } else if (!gpuDynInst->wavefront()->execMask(lane)) {
+-                if (boundCtrl == 1) {
+-                    zeroSrc = true;
+-                } else {
+-                    threadValid = 0;
+-                }
+-            }
+-
+-            if (threadValid != 0 && !outOfBounds && !zeroSrc) {
+-                assert(!laneDisabled);
+-                src0[lane] = src0_copy[outLane];
+-            } else if (zeroSrc) {
++            const int srcLane =
++                vop_semantics::dppSourceLane(dppCtrl, lane);
++            // An EXEC-disabled source lane is invalid the same way an
++            // out-of-range one is; BOUND_CTRL arbitrates both.
++            if (srcLane >= 0 && gpuDynInst->wavefront()->execMask(srcLane)) {
++                src0[lane] = src0_copy[srcLane];
++                written.set(lane);
++            } else if (zeroInvalid) {
+                 src0[lane] = 0;
++                written.set(lane);
+             }
+-
+-            // reset for next iteration
+-            laneDisabled = false;
+-            outOfBounds = false;
+-            zeroSrc = false;
+         }
++
++        return written;
+     }
+ 
+     /**
+-     * processDPP is a helper function for implementing Data Parallel Primitive
+-     * instructions.  This function may be called by many different
+-     * VOP2/VOPC instructions to do operations within a register.
++     * The VOP2/VOPC form of processDPP: SRC1 differs only in its modifier
++     * bits, so apply those and share the VOP1 path for everything else.
+      */
+     template<typename T>
+-    void processDPP(GPUDynInstPtr gpuDynInst, InFmt_VOP_DPP dppInst,
+-                    T & src0, T & src1)
++    VectorMask
++    processDPP(GPUDynInstPtr gpuDynInst, InFmt_VOP_DPP dppInst,
++               T & src0, T & src1)
+     {
+-        /**
+-         * STEP 1b: check if the absolute value (ABS) or negation (NEG) tags
+-         * are set.  If so, do the appropriate action(s) on src0 and/or src1.
+-         *
+-         * NOTE: ABS takes priority over NEG.
+-         */
++        // ABS takes priority over NEG.
+         if (dppInst.SRC1_NEG) {
+             src1.negModifier();
+         }
+@@ -547,10 +357,7 @@ namespace VegaISA
+             src1.absModifier();
+         }
+ 
+-        // Since only difference for VOP1 and VOP2/VOPC instructions is SRC1,
+-        // which is only used for negation/absolute value, call other version
+-        // to do everything else.
+-        processDPP(gpuDynInst, dppInst, src0);
++        return processDPP(gpuDynInst, dppInst, src0);
+     }
+ 
+     /*
+diff --git a/src/arch/amdgpu/vega/insts/op_encodings.hh b/src/arch/amdgpu/vega/insts/op_encodings.hh
+index ea192fd30..e74d6abcf 100644
+--- a/src/arch/amdgpu/vega/insts/op_encodings.hh
++++ b/src/arch/amdgpu/vega/insts/op_encodings.hh
+@@ -379,7 +379,8 @@ namespace VegaISA
+         uint32_t varSize;
+ 
+         template<typename T>
+-        T dppHelper(GPUDynInstPtr gpuDynInst, T & src1)
++        T dppHelper(GPUDynInstPtr gpuDynInst, T & src1,
++                    VectorMask &dppWrites)
+         {
+             T src0_dpp(gpuDynInst, extData.iFmt_VOP_DPP.SRC0);
+             src0_dpp.read();
+@@ -393,7 +394,8 @@ namespace VegaISA
+                 extData.iFmt_VOP_DPP.SRC1_NEG, extData.iFmt_VOP_DPP.BC,
+                 extData.iFmt_VOP_DPP.BANK_MASK, extData.iFmt_VOP_DPP.ROW_MASK);
+ 
+-            processDPP(gpuDynInst, extData.iFmt_VOP_DPP, src0_dpp, src1);
++            dppWrites =
++                processDPP(gpuDynInst, extData.iFmt_VOP_DPP, src0_dpp, src1);
+ 
+             return src0_dpp;
+         }
+@@ -587,11 +589,16 @@ namespace VegaISA
+                                                     instData.VDST);
+                     src1.read();
+ 
++                    VectorMask dppWrites;
+                     VecOperand<Src0T, false, 1> src0_dpp =
+-                        dppHelper(gpuDynInst, src1);
++                        dppHelper(gpuDynInst, src1, dppWrites);
+ 
++                    // A lane whose DPP write is suppressed (row/bank mask,
++                    // or invalid source under BOUND_CTRL=0) keeps the old
++                    // destination value.
++                    vdst.read();
+                     for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+-                        if (wf->execMask(lane)) {
++                        if (wf->execMask(lane) && dppWrites[lane]) {
+                             vdst[lane] = fOpImpl(src0_dpp[lane], src1[lane]);
+                         }
+                     }
+diff --git a/src/arch/amdgpu/vega/insts/vop1.cc b/src/arch/amdgpu/vega/insts/vop1.cc
+index 5b1142327..f6572e930 100644
+--- a/src/arch/amdgpu/vega/insts/vop1.cc
++++ b/src/arch/amdgpu/vega/insts/vop1.cc
+@@ -110,10 +110,14 @@ namespace VegaISA
+         // to negate it or take the absolute value of it
+         assert(!extData.iFmt_VOP_DPP.SRC1_ABS);
+         assert(!extData.iFmt_VOP_DPP.SRC1_NEG);
+-        processDPP(gpuDynInst, extData.iFmt_VOP_DPP, src_dpp);
++        const VectorMask dppWrites =
++            processDPP(gpuDynInst, extData.iFmt_VOP_DPP, src_dpp);
+ 
++        // ROW_MASK/BANK_MASK and BOUND_CTRL=0 invalid sources suppress the
++        // destination write per lane; those lanes keep their old value.
++        vdst.read();
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+-            if (wf->execMask(lane)) {
++            if (wf->execMask(lane) && dppWrites[lane]) {
+                 vdst[lane] = src_dpp[lane];
+             }
+         }
+diff --git a/src/arch/amdgpu/vega/insts/vop2.cc b/src/arch/amdgpu/vega/insts/vop2.cc
+index cca646163..42f5768bd 100644
+--- a/src/arch/amdgpu/vega/insts/vop2.cc
++++ b/src/arch/amdgpu/vega/insts/vop2.cc
+@@ -642,11 +642,14 @@ namespace VegaISA
+                         "llvm-mc rejects the _sdwa form");
+ 
+         VecElemU32 src0d[NumVecElemPerVecReg];
++        VectorMask dppWrites;
++        dppWrites.set();
+         if (isDPPInst()) {
+             VecOperandU32 src0_dpp(gpuDynInst, extData.iFmt_VOP_DPP.SRC0);
+             src0_dpp.read();
+ 
+-            processDPP(gpuDynInst, extData.iFmt_VOP_DPP, src0_dpp, src1);
++            dppWrites = processDPP(gpuDynInst, extData.iFmt_VOP_DPP,
++                                   src0_dpp, src1);
+             for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+                 src0d[lane] = src0_dpp[lane];
+             }
+@@ -657,7 +660,7 @@ namespace VegaISA
+         }
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+-            if (wf->execMask(lane)) {
++            if (wf->execMask(lane) && dppWrites[lane]) {
+                 AMDGPU::mxbfloat16 a1, a2, b1, b2;
+                 a1.data = uint16_t(bits(src0d[lane], 15, 0));
+                 a2.data = uint16_t(bits(src0d[lane], 31, 16));
+@@ -720,10 +723,11 @@ namespace VegaISA
+                     extData.iFmt_VOP_DPP.BANK_MASK,
+                     extData.iFmt_VOP_DPP.ROW_MASK);
+ 
+-            processDPP(gpuDynInst, extData.iFmt_VOP_DPP, src0_dpp, src1);
++            const VectorMask dppWrites =
++                processDPP(gpuDynInst, extData.iFmt_VOP_DPP, src0_dpp, src1);
+ 
+             for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+-                if (wf->execMask(lane)) {
++                if (wf->execMask(lane) && dppWrites[lane]) {
+                     vdst[lane] = std::fma(src0_dpp[lane], src1[lane],
+                                           vdst[lane]);
+                 }
+diff --git a/src/arch/amdgpu/vega/insts/vop_semantics.hh b/src/arch/amdgpu/vega/insts/vop_semantics.hh
+index 4b33cfdb9..5397f8953 100644
+--- a/src/arch/amdgpu/vega/insts/vop_semantics.hh
++++ b/src/arch/amdgpu/vega/insts/vop_semantics.hh
+@@ -117,6 +117,100 @@ dppRowHalfMirrorLane(int lane)
+     return (lane & ~0x7) | (7 - (lane & 0x7));
+ }
+ 
++/**
++ * DPP control word values (InFmt_VOP_DPP.DPP_CTRL).
++ */
++enum SqDPPVals : unsigned
++{
++    SQ_DPP_QUAD_PERM_MAX   = 0xFF,
++    SQ_DPP_RESERVED        = 0x100,
++    SQ_DPP_ROW_SL1         = 0x101,
++    SQ_DPP_ROW_SL15        = 0x10F,
++    SQ_DPP_ROW_SR1         = 0x111,
++    SQ_DPP_ROW_SR15        = 0x11F,
++    SQ_DPP_ROW_RR1         = 0x121,
++    SQ_DPP_ROW_RR15        = 0x12F,
++    SQ_DPP_WF_SL1          = 0x130,
++    SQ_DPP_WF_RL1          = 0x134,
++    SQ_DPP_WF_SR1          = 0x138,
++    SQ_DPP_WF_RR1          = 0x13C,
++    SQ_DPP_ROW_MIRROR      = 0x140,
++    SQ_DPP_ROW_HALF_MIRROR = 0x141,
++    SQ_DPP_ROW_BCAST15     = 0x142,
++    SQ_DPP_ROW_BCAST31     = 0x143
++};
++
++constexpr int DppRowSize = 16;  /* lanes per DPP row */
++constexpr int DppBankSize = 4;  /* lanes per DPP bank */
++
++/**
++ * A DPP-encoded VALU op writes its destination under gates the plain
++ * encoding does not have. ROW_MASK and BANK_MASK disable the *write* for
++ * whole 16-lane rows and 4-lane banks: a disabled lane's destination
++ * register keeps its previous contents. The compiler's canonical wave
++ * reduction depends on exactly that -- it pairs a row_shr:N with a
++ * row_shl:N into the same destination, each masked to the banks whose
++ * shifted source stays inside the row, so between them every lane is
++ * written exactly once with its butterfly partner and the masked halves
++ * must not be disturbed.
++ */
++inline bool
++dppLaneWriteEnabled(int lane, unsigned rowMask, unsigned bankMask)
++{
++    const int row = lane / DppRowSize;
++    const int bank = (lane % DppRowSize) / DppBankSize;
++    return ((rowMask >> row) & 1) && ((bankMask >> bank) & 1);
++}
++
++/**
++ * The source lane DPP_CTRL selects for a destination lane, or -1 when the
++ * selection has no source (it leaves the row or wavefront, or names a
++ * broadcast's own input group). For a -1 source, BOUND_CTRL arbitrates:
++ * 1 reads the source as zero, 0 suppresses the write like a mask bit.
++ *
++ * Shift/rotate left moves data toward lane 0 (lane n's value reaches lane
++ * n-1), so a left shift/rotate *reads* from lane+count and a right one
++ * from lane-count. Reserved and unimplemented control values fail closed.
++ */
++inline int
++dppSourceLane(unsigned dppCtrl, int lane)
++{
++    if (dppCtrl <= SQ_DPP_QUAD_PERM_MAX) {
++        return (lane & ~3) | ((dppCtrl >> (2 * (lane & 3))) & 3);
++    } else if (dppCtrl >= SQ_DPP_ROW_SL1 && dppCtrl <= SQ_DPP_ROW_SL15) {
++        const int count = static_cast<int>(dppCtrl - SQ_DPP_ROW_SL1) + 1;
++        const int offset = lane % DppRowSize + count;
++        return offset < DppRowSize ? (lane & ~(DppRowSize - 1)) + offset : -1;
++    } else if (dppCtrl >= SQ_DPP_ROW_SR1 && dppCtrl <= SQ_DPP_ROW_SR15) {
++        const int count = static_cast<int>(dppCtrl - SQ_DPP_ROW_SR1) + 1;
++        const int offset = lane % DppRowSize - count;
++        return offset >= 0 ? (lane & ~(DppRowSize - 1)) + offset : -1;
++    } else if (dppCtrl >= SQ_DPP_ROW_RR1 && dppCtrl <= SQ_DPP_ROW_RR15) {
++        const int count = static_cast<int>(dppCtrl - SQ_DPP_ROW_RR1) + 1;
++        const int offset =
++            (lane % DppRowSize - count + DppRowSize) % DppRowSize;
++        return (lane & ~(DppRowSize - 1)) + offset;
++    } else if (dppCtrl == SQ_DPP_WF_SL1) {
++        return lane + 1 < NumVecElemPerVecReg ? lane + 1 : -1;
++    } else if (dppCtrl == SQ_DPP_WF_RL1) {
++        return (lane + 1) % NumVecElemPerVecReg;
++    } else if (dppCtrl == SQ_DPP_WF_SR1) {
++        return lane >= 1 ? lane - 1 : -1;
++    } else if (dppCtrl == SQ_DPP_WF_RR1) {
++        return (lane + NumVecElemPerVecReg - 1) % NumVecElemPerVecReg;
++    } else if (dppCtrl == SQ_DPP_ROW_MIRROR) {
++        return dppRowMirrorLane(lane);
++    } else if (dppCtrl == SQ_DPP_ROW_HALF_MIRROR) {
++        return dppRowHalfMirrorLane(lane);
++    } else if (dppCtrl == SQ_DPP_ROW_BCAST15) {
++        return lane > 15 ? (lane & 0x30) - 1 : -1;
++    } else if (dppCtrl == SQ_DPP_ROW_BCAST31) {
++        return lane > 31 ? (lane & 0x20) - 1 : -1;
++    }
++
++    std::abort();
++}
++
+ inline float
+ applyOutputModifiers(float value, unsigned omod, bool clamp)
+ {
+diff --git a/src/arch/amdgpu/vega/insts/vop_semantics.test.cc b/src/arch/amdgpu/vega/insts/vop_semantics.test.cc
+index 00691d654..db0e23ebc 100644
+--- a/src/arch/amdgpu/vega/insts/vop_semantics.test.cc
++++ b/src/arch/amdgpu/vega/insts/vop_semantics.test.cc
+@@ -93,6 +93,115 @@ TEST(VopSemanticsTest, DppMirrorMappingsPreserveRowBases)
+     EXPECT_EQ(dppRowHalfMirrorLane(58), 61);
+ }
+ 
++TEST(VopSemanticsTest, DppRowAndBankMasksGateWholeLaneGroups)
++{
++    // Full masks enable every lane; a cleared bank bit disables exactly its
++    // four lanes in every row; a cleared row bit disables its sixteen.
++    for (int lane = 0; lane < 64; ++lane) {
++        EXPECT_TRUE(dppLaneWriteEnabled(lane, 0xf, 0xf));
++        EXPECT_FALSE(dppLaneWriteEnabled(lane, 0, 0xf));
++        EXPECT_FALSE(dppLaneWriteEnabled(lane, 0xf, 0));
++
++        const int row = lane / 16;
++        const int bank = (lane % 16) / 4;
++        EXPECT_EQ(dppLaneWriteEnabled(lane, 0xf, 0xf & ~(1 << bank)), false);
++        EXPECT_EQ(dppLaneWriteEnabled(lane, 0xf & ~(1 << row), 0xf), false);
++        EXPECT_EQ(dppLaneWriteEnabled(lane, 1 << row, 1 << bank), true);
++    }
++
++    // The compiler's butterfly reduction pairing: row_shr:8 under
++    // bank_mask:0xc writes lanes 8-15 of each row, row_shl:8 under
++    // bank_mask:0x3 writes lanes 0-7. Together they cover each row once.
++    for (int lane = 0; lane < 64; ++lane) {
++        const bool upperHalf = (lane % 16) >= 8;
++        EXPECT_EQ(dppLaneWriteEnabled(lane, 0xf, 0xc), upperHalf);
++        EXPECT_EQ(dppLaneWriteEnabled(lane, 0xf, 0x3), !upperHalf);
++    }
++}
++
++TEST(VopSemanticsTest, DppSourceLanesFollowRowGeometry)
++{
++    for (int lane = 0; lane < 64; ++lane) {
++        const int rowBase = lane & ~0xf;
++        const int offset = lane & 0xf;
++
++        // quad_perm:[2,3,0,1] swaps pairs inside each quad.
++        EXPECT_EQ(dppSourceLane(0x4e, lane), (lane & ~3) | ((lane + 2) & 3));
++        // quad_perm:[1,0,3,2] swaps neighbours inside each quad.
++        EXPECT_EQ(dppSourceLane(0xb1, lane), lane ^ 1);
++
++        // row_shr:N reads lane-N inside the row and has no source before
++        // the row's first lane. row_shl:N mirrors it upward.
++        const int shr4 = dppSourceLane(SQ_DPP_ROW_SR1 + 3, lane);
++        EXPECT_EQ(shr4, offset >= 4 ? rowBase + offset - 4 : -1);
++        const int shl4 = dppSourceLane(SQ_DPP_ROW_SL1 + 3, lane);
++        EXPECT_EQ(shl4, offset + 4 < 16 ? rowBase + offset + 4 : -1);
++
++        // row rotate always has a source.
++        const int rr3 = dppSourceLane(SQ_DPP_ROW_RR1 + 2, lane);
++        EXPECT_EQ(rr3, rowBase + (offset + 16 - 3) % 16);
++
++        // Broadcasts read the previous group's last lane; the first group
++        // has no source.
++        const int bcast15 = dppSourceLane(SQ_DPP_ROW_BCAST15, lane);
++        EXPECT_EQ(bcast15, lane > 15 ? (lane & 0x30) - 1 : -1);
++        const int bcast31 = dppSourceLane(SQ_DPP_ROW_BCAST31, lane);
++        EXPECT_EQ(bcast31, lane > 31 ? (lane & 0x20) - 1 : -1);
++
++        // Wavefront shifts stop at the wave edge; rotates wrap.
++        EXPECT_EQ(dppSourceLane(SQ_DPP_WF_SL1, lane),
++                  lane < 63 ? lane + 1 : -1);
++        EXPECT_EQ(dppSourceLane(SQ_DPP_WF_SR1, lane),
++                  lane > 0 ? lane - 1 : -1);
++        EXPECT_EQ(dppSourceLane(SQ_DPP_WF_RL1, lane), (lane + 1) % 64);
++        EXPECT_EQ(dppSourceLane(SQ_DPP_WF_RR1, lane), (lane + 63) % 64);
++    }
++}
++
++/**
++ * The exact failure that produced a wrong Qwen3.5 q/k L2 norm: the
++ * compiler's wave sum pairs `v_mov_b32_dpp v5, v5 row_shr:8 bank_mask:0xc`
++ * with `v_mov_b32_dpp v5, v4 row_shl:8 bank_mask:0x3`. The second mov must
++ * not disturb the upper banks the first mov just wrote: a masked-off lane
++ * keeps the destination's old value, it does not receive the source's own
++ * unpermuted value.
++ */
++TEST(VopSemanticsTest, DppButterflyPairWritesEachLaneExactlyOnce)
++{
++    float v4[64], v5[64];
++    for (int lane = 0; lane < 64; ++lane) {
++        v4[lane] = 1000.0f + lane;
++        v5[lane] = v4[lane];
++    }
++
++    // v_mov_b32_dpp v5, v5 row_shr:8 row_mask:0xf bank_mask:0xc
++    float before[64];
++    std::copy(std::begin(v5), std::end(v5), std::begin(before));
++    for (int lane = 0; lane < 64; ++lane) {
++        if (!dppLaneWriteEnabled(lane, 0xf, 0xc))
++            continue;
++        const int src = dppSourceLane(SQ_DPP_ROW_SR1 + 7, lane);
++        ASSERT_GE(src, 0);
++        v5[lane] = before[src];
++    }
++
++    // v_mov_b32_dpp v5, v4 row_shl:8 row_mask:0xf bank_mask:0x3
++    for (int lane = 0; lane < 64; ++lane) {
++        if (!dppLaneWriteEnabled(lane, 0xf, 0x3))
++            continue;
++        const int src = dppSourceLane(SQ_DPP_ROW_SL1 + 7, lane);
++        ASSERT_GE(src, 0);
++        v5[lane] = v4[src];
++    }
++
++    // Every lane now holds its butterfly partner's value: lane ^ 8 within
++    // the row.
++    for (int lane = 0; lane < 64; ++lane) {
++        EXPECT_EQ(v5[lane], v4[(lane & ~0xf) | ((lane & 0xf) ^ 8)])
++            << "lane " << lane;
++    }
++}
++
+ TEST(VopSemanticsTest, PackedFmaUsesPerSourceNegBits)
+ {
+     EXPECT_FLOAT_EQ(packedFmaF32(2.0f, 4.0f, 3.0f, 0, false), 11.0f);
+-- 
+2.53.0
+

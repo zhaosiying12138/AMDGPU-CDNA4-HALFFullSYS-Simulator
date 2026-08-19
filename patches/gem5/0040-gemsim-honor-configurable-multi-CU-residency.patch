@@ -1,0 +1,169 @@
+From c827a521d66bd9d46d204b8754eef0e0703c0df4 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Wed, 19 Aug 2026 08:47:08 +0800
+Subject: [PATCH 40/42] gemsim: honor configurable multi-CU residency
+
+Instantiate and wire a configurable compute-unit group in the host bridge so cooperative model kernels can make forward progress. Keep one shared SQC and scalar cache for the host-native path, and validate the Ruby port layout before launch.
+
+Checkpoint-ID: CP-0066
+Goal-ID: GSIM-001
+Plan-Revision: 16
+Source-Lock-SHA256: dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf
+Evidence-Manifest-SHA256: 864fb1b36bd9b5741c00456f5253fa31d055e5e0a04eee9930105dddfa34c31c
+Change-Kind: fix
+Baseline-Commit: 4fe648f7e3e2ae4a24c65f575db872d714ffffa8
+---
+ configs/example/gemsim/host_dispatch.py | 87 ++++++++++++++++++-------
+ 1 file changed, 65 insertions(+), 22 deletions(-)
+
+diff --git a/configs/example/gemsim/host_dispatch.py b/configs/example/gemsim/host_dispatch.py
+index 71cb2023d..23d57dcb4 100644
+--- a/configs/example/gemsim/host_dispatch.py
++++ b/configs/example/gemsim/host_dispatch.py
+@@ -46,6 +46,16 @@ from ruby import Ruby
+ # no run should set it.
+ LDS_BYTES_PER_CU = int(os.environ.get("GEMSIM_LDS_BYTES_PER_CU", 160 * 1024))
+ 
++# The model topology advertises a full gfx950, but the original host bridge
++# fixture instantiated one compute unit regardless of that contract.  That is
++# a semantic mismatch, not merely a performance choice: a workgroup that
++# occupies the CU can keep every peer polling a cross-workgroup flag forever.
++# Keep the count configurable so bring-up can use the smallest occupancy that
++# the workload requires while retaining one generic configuration path.
++NUM_COMPUTE_UNITS = int(os.environ.get("GEMSIM_NUM_COMPUTE_UNITS", "4"))
++if NUM_COMPUTE_UNITS < 1:
++    raise SystemExit("GEMSIM_NUM_COMPUTE_UNITS must be >= 1")
++
+ 
+ def parse_args():
+     parser = argparse.ArgumentParser(
+@@ -122,9 +132,9 @@ def parse_args():
+     return args
+ 
+ 
+-def create_compute_unit(shader, functional_fast=False):
++def create_compute_unit(shader, cu_id, functional_fast=False):
+     cu = ComputeUnit(
+-        cu_id=0,
++        cu_id=cu_id,
+         perLaneTLB=False,
+         num_SIMDs=4,
+         wf_size=64,
+@@ -233,9 +243,9 @@ def create_system(args):
+     # LDS defect: the device claims a capability the simulator does not honour.
+     #
+     # The count is left configurable because simulation cost scales with it.
+-    args.num_compute_units = int(
+-        os.environ.get("GEMSIM_NUM_COMPUTE_UNITS", "1")
+-    )
++    args.num_compute_units = NUM_COMPUTE_UNITS
++    # Host-native instruction fetch and scalar loads are served by the native
++    # provider, so one SQC and one scalar cache are sufficient for all CUs.
+     args.cu_per_sqc = args.num_compute_units
+     args.cu_per_scalar_cache = args.num_compute_units
+     args.num_sqc = 1
+@@ -264,12 +274,14 @@ def create_system(args):
+     shader.impl_kern_launch_acq = True
+     shader.impl_kern_end_rel = False
+     shader.timing = True
+-    # One CU is built and wired below. Raising GEMSIM_NUM_COMPUTE_UNITS is
+-    # not just a matter of building more of them: the Ruby port wiring further
+-    # down binds a single VIPER coalescer, SQC port and scalar port by index,
+-    # and each of those becomes per-unit. See the fatal there.
+-    compute_unit = create_compute_unit(shader, args.functional_fast)
+-    shader.CUs = [compute_unit]
++    # Build dense CU IDs because Shader validates the mapping.  GPU_VIPER
++    # creates one vector-L1/coalescer port for each CU; those ports are wired
++    # below after Ruby has constructed the complete sequencer list.
++    compute_units = [
++        create_compute_unit(shader, cu_id, args.functional_fast)
++        for cu_id in range(args.num_compute_units)
++    ]
++    shader.CUs = compute_units
+ 
+     CpuClass, mem_mode = Simulation.getCPUClass(args.cpu_type)
+     if CpuClass != X86TimingSimpleCPU or mem_mode != "timing":
+@@ -359,7 +371,15 @@ def create_system(args):
+     host_cpu.interrupts[0].int_requestor = system.piobus.cpu_side_ports
+     host_cpu.interrupts[0].int_responder = system.piobus.mem_side_ports
+ 
+-    gpu_port_idx = len(system.ruby._cpu_ports) - 3
++    # Ruby publishes CPU ports first, then one vector coalescer per CU, then
++    # the shared SQC/scalar-cache sequencers and command-processor ports.
++    gpu_port_idx = (
++        len(system.ruby._cpu_ports)
++        - args.num_compute_units
++        - args.num_sqc
++        - args.num_scalar_cache
++        - args.num_cp * 2
++    )
+     token_ports = [
+         port
+         for port in system.ruby._cpu_ports
+@@ -368,19 +388,40 @@ def create_system(args):
+     if len(token_ports) != args.num_compute_units:
+         fatal(
+             "expected one VIPER coalescer per compute unit: %d units but %d "
+-            "coalescers. Raising GEMSIM_NUM_COMPUTE_UNITS above 1 needs the "
+-            "port wiring below to be looped over the units as well."
++            "coalescers"
+             % (args.num_compute_units, len(token_ports))
+         )
+-    compute_unit.gmTokenPort = token_ports[0].gmTokenPort
+-    for lane in range(64):
+-        compute_unit.memory_port[lane] = system.ruby._cpu_ports[
+-            gpu_port_idx
+-        ].in_ports[lane]
++    if gpu_port_idx < 0 or token_ports[0] is not (
++        system.ruby._cpu_ports[gpu_port_idx]
++    ):
++        fatal(
++            "GPU_VIPER sequencer order changed: expected the first VIPER "
++            "coalescer at index %d of %d cpu ports"
++            % (gpu_port_idx, len(system.ruby._cpu_ports))
++        )
++
++    for cu_id, compute_unit in enumerate(compute_units):
++        compute_unit.gmTokenPort = token_ports[cu_id].gmTokenPort
++        for lane in range(64):
++            compute_unit.memory_port[lane] = system.ruby._cpu_ports[
++                gpu_port_idx
++            ].in_ports[lane]
++        gpu_port_idx += 1
++
++    # The configured CU group shares one SQC and one scalar cache.  This is
++    # valid for host-native dispatch because those caches carry only launch
++    # invalidation traffic in this path.
++    for compute_unit in compute_units:
++        compute_unit.sqc_port = system.ruby._cpu_ports[gpu_port_idx].in_ports
+     gpu_port_idx += 1
+-    compute_unit.sqc_port = system.ruby._cpu_ports[gpu_port_idx].in_ports
++    for compute_unit in compute_units:
++        compute_unit.scalar_port = system.ruby._cpu_ports[gpu_port_idx].in_ports
+     gpu_port_idx += 1
+-    compute_unit.scalar_port = system.ruby._cpu_ports[gpu_port_idx].in_ports
++    if gpu_port_idx != len(system.ruby._cpu_ports) - args.num_cp * 2:
++        fatal(
++            "GPU port wiring consumed %d of %d ruby cpu ports"
++            % (gpu_port_idx, len(system.ruby._cpu_ports))
++        )
+ 
+     shader.cpu_pointer = host_cpu
+     root = Root(system=system, full_system=False)
+@@ -413,10 +454,12 @@ system = create_system(args)
+ # cited for any timing, TPOT or performance claim.
+ print(
+     "host-gpu-dispatch-mode timing_fidelity={} functional_fast={} "
+-    "lds_bytes_per_cu={}".format(
++    "lds_bytes_per_cu={} compute_units={} wave_slots_per_simd={}".format(
+         "approximate" if args.functional_fast else "cycle-accurate",
+         int(args.functional_fast),
+         LDS_BYTES_PER_CU,
++        args.num_compute_units,
++        8,
+     ),
+     flush=True,
+ )
+-- 
+2.53.0
+

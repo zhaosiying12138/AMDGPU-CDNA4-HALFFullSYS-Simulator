@@ -1,0 +1,107 @@
+From 52604663856acef6d00c33efc62bd586b7eb3dce Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Tue, 18 Aug 2026 00:57:42 +0800
+Subject: [PATCH 35/42] gpu-compute,vega: make ds_swizzle_b32 execute and read
+ its real operand
+
+Three further defects sat behind the LGKM underflow, each hidden by the one in
+front of it. A public-HIP capsule built around __builtin_amdgcn_ds_swizzle
+exposed them in about two minutes apiece, checking the permutation numerically
+rather than only checking that the dispatch completed.
+
+ScheduleStage set gpu_dyn_inst->exec_mask only for isMemRef() instructions.
+ds_swizzle_b32 deliberately omits MemoryRef because it never touches DS
+storage, so its mask stayed default all-zero, exec_mask.none() was true, and
+execute() returned before performing any swizzle. The destination register was
+left untouched with no error of any kind, so the kernel silently computed an
+identity permutation. l2norm_fwd_kernel on the Qwen3.5 path uses this
+instruction, so model numerics were being corrupted without a diagnostic.
+Snapshot the wave's EXEC for group-segment work as well.
+
+Making the body run then exposed a second imbalance: execute() ends with a bare
+rdLmReqsInPipe--, but the SIMD routing skips reserveLmResource(), which is what
+increments that counter for a load. validateRequestCounters() panicked with
+"Rd LocalMem Reqs=-1". Reserve the load at issue alongside the LGKM count, and
+only for loads, since ds_nop retires no LDS request.
+
+With the instruction finally executing, its output was a permuted pointer
+rather than permuted data. ds_swizzle_b32 is a DS_1A form whose single source
+operand is encoded in ADDR; gem5 read DATA0, which for a load/swizzle/store
+sequence holds the destination pointer. DS_PERMUTE_B32 already reads ADDR
+correctly. Read ADDR.
+
+The capsule now reports mismatches=0 for swizzle(QUAD_PERM,3,2,1,0): output
+[24,17,10,3, 52,45,38,31] against input [3,10,17,24, 31,38,45,52].
+
+Checkpoint-ID: CP-0061
+Goal-ID: GSIM-001
+Plan-Revision: 16
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 91a79649d906d0d799a0d32f64765eb726e52aff19c0c7d7d972d5563fe5ff11
+Change-Kind: bugfix
+Baseline-Commit: 9d19931df73ddf3032eaeaaad9cf92ecbd983a03
+---
+ src/arch/amdgpu/vega/insts/ds.cc  |  7 ++++++-
+ src/gpu-compute/schedule_stage.cc | 21 +++++++++++++++++++--
+ 2 files changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/src/arch/amdgpu/vega/insts/ds.cc b/src/arch/amdgpu/vega/insts/ds.cc
+index b90635beb..0ab515066 100644
+--- a/src/arch/amdgpu/vega/insts/ds.cc
++++ b/src/arch/amdgpu/vega/insts/ds.cc
+@@ -2251,7 +2251,12 @@ namespace VegaISA
+         gpuDynInst->latency.set(gpuDynInst->computeUnit()
+                                 ->cyclesToTicks(Cycles(24)));
+ 
+-        ConstVecOperandU32 data(gpuDynInst, extData.DATA0);
++        // ds_swizzle_b32 is a DS_1A form: it takes a single source operand,
++        // encoded in ADDR, and never touches DS storage. Reading DATA0 here
++        // returned whatever unrelated VGPR the compiler left in that field --
++        // for a load/swizzle/store sequence that is the destination pointer,
++        // so the swizzle silently permuted an address instead of the data.
++        ConstVecOperandU32 data(gpuDynInst, extData.ADDR);
+         VecOperandU32 vdst(gpuDynInst, extData.VDST);
+         /**
+          * The "DS pattern" is comprised of both offset fields. That is, the
+diff --git a/src/gpu-compute/schedule_stage.cc b/src/gpu-compute/schedule_stage.cc
+index 48af8936c..6758f7726 100644
+--- a/src/gpu-compute/schedule_stage.cc
++++ b/src/gpu-compute/schedule_stage.cc
+@@ -195,6 +195,16 @@ ScheduleStage::exec()
+             // destination VGPR is still in flight.
+             wf->incLGKMInstsIssued();
+             wf->trackLGKMInst(gpu_dyn_inst);
++
++            // The same routing skips Wavefront::reserveLmResource(), which is
++            // what increments rdLmReqsInPipe for a load. ds_swizzle_b32 still
++            // decrements it at the end of execute(), so without a matching
++            // reservation here the counter goes negative and
++            // validateRequestCounters() panics with "Rd LocalMem Reqs=-1".
++            // Mirror only the load case: ds_nop retires no LDS request.
++            if (gpu_dyn_inst->isLoad()) {
++                wf->rdLmReqsInPipe++;
++            }
+         }
+     }
+ 
+@@ -609,8 +619,15 @@ ScheduleStage::fillDispatchList()
+                         computeUnit.globalMemoryPipe.acqCoalescerToken(mp);
+                     }
+ 
+-                    // Set instruction's exec_mask if it's a mem operation
+-                    if (mp->isMemRef()) {
++                    // Snapshot the wave's EXEC for any instruction whose
++                    // execute() consults exec_mask. Memory references always
++                    // do. So does a group-segment instruction that
++                    // deliberately omits MemoryRef because it never touches
++                    // LDS storage -- ds_swizzle_b32 -- which would otherwise
++                    // observe a default all-zero mask, take its
++                    // exec_mask.none() early return, and silently skip the
++                    // entire swizzle while still retiring its LGKM count.
++                    if (mp->isMemRef() || mp->isGroupSeg()) {
+                         mp->exec_mask = mp->wavefront()->execMask();
+                     }
+ 
+-- 
+2.53.0
+

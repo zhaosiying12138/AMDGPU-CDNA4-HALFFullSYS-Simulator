@@ -1,0 +1,270 @@
+From 60aede62fdc6078815d10ed7a8eff09ed8d2440a Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Wed, 19 Aug 2026 03:54:22 +0800
+Subject: [PATCH 36/42] gpu-compute,vega: serve atomics natively and stop
+ aborting on a display string
+
+Two defects, each of which killed a Qwen3.5 TP1 lane after it had already
+retired hundreds of dispatches, and each repaired at the layer that owns the
+behaviour rather than at the instruction that happened to expose it.
+
+The host-native vector memory path served only ReadReq and WriteReq, so the
+first global atomic aborted the run with "unsupported host-native vector
+command SwapReq" -- a vLLM lane at dispatch 444 and an SGLang lane at 1413.
+Implement the operation the way AbstractMemory::access already does it for
+every other memory: read the current value, hand the packet its pre-operation
+copy, apply the request's AtomicOpFunctor, and store the result. The packet's
+buffer aliases the instruction's per-lane d_data slot, so that copy is exactly
+what an atomic-with-return reads back. The whole sequence runs inside one
+simulator event, so no other simulated access interleaves and the operation is
+atomic in the sense the ISA requires. This is functor-generic: it covers every
+GPU atomic, not the add that happened to fail. A swap arriving without a
+functor still fails closed.
+
+Separately, opSelectorToRegSym aborted the simulation on any operand selector
+it had no name for. Every one of its forty-odd callers writes to a disassembly
+stream; the function has no part in instruction semantics. Selector 248,
+1/(2*pi), therefore killed a vLLM lane at 444 dispatches even though
+operand.hh reads that constant correctly and vop_semantics.hh already knows its
+f16 encoding -- only the display string was missing. Complete the table with
+the eight named selectors it lacked (248-255) and downgrade the default from
+fatal to a placeholder that names the unknown selector, so a cosmetic gap
+becomes visible in a trace instead of ending a run. Adding only case REG_PI
+would have left seven more selectors able to end a run hours in.
+
+Evidence is a public-HIP capsule with a negative control: on the pre-fix binary
+it reproduces the production panic verbatim, and on the fixed binary 256 lanes
+atomically incrementing one address leave it at exactly base+256 while the
+returned values form exactly the sequence base..base+255 -- 256 distinct, no
+duplicates, no gaps, which a post-operation return or a lost update would fail.
+
+Checkpoint-ID: CP-0063
+Goal-ID: GSIM-001
+Plan-Revision: 16
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 9bd4d6debccd031a61938d74f5bd798f55e00b244a0fd1687232acca30889877
+Change-Kind: bugfix
+Baseline-Commit: 52604663856acef6d00c33efc62bd586b7eb3dce
+---
+ src/arch/amdgpu/vega/gpu_registers.cc |  40 ++++++++-
+ src/gpu-compute/compute_unit.cc       | 118 ++++++++++++++++++++++++--
+ 2 files changed, 148 insertions(+), 10 deletions(-)
+
+diff --git a/src/arch/amdgpu/vega/gpu_registers.cc b/src/arch/amdgpu/vega/gpu_registers.cc
+index c1a119de2..79f982d68 100644
+--- a/src/arch/amdgpu/vega/gpu_registers.cc
++++ b/src/arch/amdgpu/vega/gpu_registers.cc
+@@ -128,8 +128,46 @@ namespace VegaISA
+           case REG_NEG_FOUR:
+             reg_sym = "-4";
+             break;
++          case REG_PI:
++            /* Inline constant 1/(2*pi); LLVM prints its f32 value. */
++            reg_sym = "0.15915494";
++            break;
++          case REG_SRC_SWDA:
++            reg_sym = "src_sdwa";
++            break;
++          case REG_SRC_DPP:
++            reg_sym = "src_dpp";
++            break;
++          case REG_VCCZ:
++            reg_sym = "vccz";
++            break;
++          case REG_EXECZ:
++            reg_sym = "execz";
++            break;
++          case REG_SCC:
++            reg_sym = "scc";
++            break;
++          case REG_LDS_DIRECT:
++            reg_sym = "src_lds_direct";
++            break;
++          case REG_SRC_LITERAL:
++            reg_sym = "src_literal";
++            break;
+           default:
+-            fatal("VEGA ISA instruction has unknown register index %u\n", idx);
++            /*
++             * Every caller of this function feeds a disassembly stream: it
++             * produces the human-readable text of an instruction and has no
++             * part in its semantics. Aborting the simulation because a
++             * selector has no display string therefore turns a cosmetic gap
++             * into a run-killing failure -- selector 248 (1/(2*pi)) did
++             * exactly that to a vLLM lane after 444 retired dispatches, even
++             * though operand.hh reads that constant correctly. Name the
++             * unknown selector in the disassembly instead, so it is visible
++             * in traces and can be completed above, and let execution
++             * continue to be governed by the code that actually implements
++             * the operand.
++             */
++            reg_sym = "unknown_selector_" + std::to_string(idx);
+             break;
+         }
+ 
+diff --git a/src/gpu-compute/compute_unit.cc b/src/gpu-compute/compute_unit.cc
+index 609b659cf..17ea3555b 100644
+--- a/src/gpu-compute/compute_unit.cc
++++ b/src/gpu-compute/compute_unit.cc
+@@ -34,6 +34,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <limits>
++#include <vector>
+ 
+ #include "arch/amdgpu/common/gpu_translation_state.hh"
+ #include "config/use_x86_isa.hh"
+@@ -802,6 +803,35 @@ ComputeUnit::hasDispResources(HSAQueueEntry *task, int &num_wfs_in_wg)
+     int numWfs = (trueWgSizeTotal + wfSize() - 1) / wfSize();
+     num_wfs_in_wg = numWfs;
+ 
++    /**
++     * Separate "not available right now" from "larger than this compute unit
++     * will ever have". The second can never be satisfied by waiting: no
++     * completing workgroup releases more of a resource than the unit owns, so
++     * the dispatcher either retries forever or -- on an idle device -- never
++     * retries at all, and the host waits on a completion signal that cannot
++     * arrive. gem5 already fails closed on an impossible VGPR/SGPR demand
++     * just below; the group segment, the wavefront slots and the barrier
++     * slots need the same treatment, and the group segment is the one that
++     * actually bites, because a compute unit configured with less LDS than
++     * the runtime advertises silently cannot run a kernel the compiler was
++     * told it could build.
++     */
++    panic_if(task->ldsSize() > lds.getMaximumSize(),
++             "CU%d: workgroup %d of kernel %d needs %d B of group segment but "
++             "this compute unit has only %d B. The LDS size must match the "
++             "size the runtime advertises to the compiler.",
++             cu_id, task->globalWgId(), task->dispatchId(), task->ldsSize(),
++             lds.getMaximumSize());
++    panic_if(numWfs > numVectorALUs * shader->n_wf,
++             "CU%d: workgroup %d of kernel %d needs %d wavefront slots but "
++             "this compute unit has only %d.",
++             cu_id, task->globalWgId(), task->dispatchId(), numWfs,
++             numVectorALUs * shader->n_wf);
++    panic_if(numWfs > 1 && numBarrierSlots() < 1,
++             "CU%d: workgroup %d of kernel %d has %d wavefronts and so needs a "
++             "barrier, but this compute unit has no barrier slots.",
++             cu_id, task->globalWgId(), task->dispatchId(), numWfs);
++
+     bool barrier_avail = true;
+ 
+     if (numWfs > 1 && !freeBarrierIds.size()) {
+@@ -1444,11 +1474,17 @@ ComputeUnit::sendRequest(GPUDynInstPtr gpuDynInst, PortID index, PacketPtr pkt)
+     if (shader->isHostNative()) {
+         GPUNativeMemory *native = shader->nativeMemory();
+         panic_if(!native, "host-native vector request has no memory provider");
+-        panic_if(gpuDynInst->isAtomic() ||
+-                     (pkt->cmd != MemCmd::ReadReq &&
+-                      pkt->cmd != MemCmd::WriteReq),
++        // The host-native provider serves plain loads and stores, and atomics
++        // as a read-modify-write below. Anything else has no defined meaning
++        // here and must fail closed rather than silently drop the access.
++        const bool isAtomicSwap = pkt->cmd == MemCmd::SwapReq;
++        panic_if(pkt->cmd != MemCmd::ReadReq && pkt->cmd != MemCmd::WriteReq &&
++                     !isAtomicSwap,
+                  "unsupported host-native vector command %s",
+                  pkt->cmd.toString());
++        panic_if(isAtomicSwap && !pkt->isAtomicOp(),
++                 "host-native vector swap without an atomic operation at %#x",
++                 pkt->req->getVaddr());
+ 
+         const Addr address = pkt->req->getVaddr();
+         pkt->req->setPaddr(address);
+@@ -1459,16 +1495,46 @@ ComputeUnit::sendRequest(GPUDynInstPtr gpuDynInst, PortID index, PacketPtr pkt)
+         const Tick delay = resp_tick_latency ? resp_tick_latency : 1;
+         auto *response_event = new EventFunctionWrapper(
+             [native, pkt, this, gpuDynInst] {
+-                const bool ok = pkt->isRead() ?
+-                    native->read(pkt->req->getPaddr(), pkt->getPtr<uint8_t>(),
+-                                 pkt->getSize(), gpuDynInst->kern_id) :
+-                    native->write(pkt->req->getPaddr(), pkt->getPtr<uint8_t>(),
+-                                  pkt->getSize(), gpuDynInst->kern_id);
++                bool ok;
++                if (pkt->cmd == MemCmd::SwapReq) {
++                    /*
++                     * AbstractMemory performs a GPU atomic by handing the
++                     * memory image to the request's AtomicOpFunctor after
++                     * copying the pre-operation value into the packet, which
++                     * is what an atomic-with-return reads back. The host-native
++                     * provider has no directly addressable host pointer, so do
++                     * the same three steps against a staging buffer: read the
++                     * current value, hand the packet its pre-operation copy,
++                     * apply the functor, and store the result. The whole
++                     * sequence runs inside one simulator event, so no other
++                     * simulated access can interleave and the operation is
++                     * atomic in exactly the sense the ISA requires.
++                     */
++                    const unsigned size = pkt->getSize();
++                    std::vector<uint8_t> value(size);
++                    ok = native->read(pkt->req->getPaddr(), value.data(), size,
++                                      gpuDynInst->kern_id);
++                    if (ok) {
++                        pkt->setData(value.data());
++                        (*(pkt->getAtomicOp()))(value.data());
++                        ok = native->write(pkt->req->getPaddr(), value.data(),
++                                           size, gpuDynInst->kern_id);
++                    }
++                } else {
++                    ok = pkt->isRead() ?
++                        native->read(pkt->req->getPaddr(),
++                                     pkt->getPtr<uint8_t>(), pkt->getSize(),
++                                     gpuDynInst->kern_id) :
++                        native->write(pkt->req->getPaddr(),
++                                      pkt->getPtr<uint8_t>(), pkt->getSize(),
++                                      gpuDynInst->kern_id);
++                }
+                 panic_if(!ok,
+                          "host-native vector memory access failed at %#x "
+                          "size=%u %s %s",
+                          pkt->req->getPaddr(), pkt->getSize(),
+-                         pkt->isRead() ? "read" : "write",
++                         pkt->cmd == MemCmd::SwapReq ? "atomic" :
++                             pkt->isRead() ? "read" : "write",
+                          hostNativeAccessContext(gpuDynInst));
+                 completeLaneRequest(pkt, true);
+             }, "host-native vector response", true);
+@@ -2577,6 +2643,40 @@ ComputeUnit::exitCallback()
+     }
+ }
+ 
++std::string
++ComputeUnit::dispatchResourceReport(HSAQueueEntry *task)
++{
++    int trueWgSizeTotal = 1;
++    for (int d = 0; d < HSAQueueEntry::MAX_DIM; ++d) {
++        trueWgSizeTotal *= std::min(task->wgSize(d), task->gridSize(d) -
++                                    task->wgId(d) * task->wgSize(d));
++    }
++    const int numWfs = (trueWgSizeTotal + wfSize() - 1) / wfSize();
++
++    int freeWfSlots = 0;
++    for (int j = 0; j < shader->n_wf; ++j) {
++        for (int i = 0; i < numVectorALUs; ++i) {
++            if (wfList[i][j]->getStatus() == Wavefront::S_STOPPED) {
++                ++freeWfSlots;
++            }
++        }
++    }
++
++    return csprintf(
++        "CU%d: workgroup %d of kernel %d needs %d wavefront(s) of %d "
++        "work-item(s), %d B group segment, %d VGPR and %d SGPR per "
++        "work-item. This CU has %d wavefront slot(s) (%d free), %d B of "
++        "group segment (%d B held by resident workgroups), %d barrier "
++        "slot(s) (%d free), %d VGPR and %d SGPR per SIMD, and %d resident "
++        "wavefront(s)",
++        cu_id, task->globalWgId(), task->dispatchId(), numWfs,
++        trueWgSizeTotal, task->ldsSize(), task->numVectorRegs(),
++        task->numScalarRegs(), numVectorALUs * shader->n_wf, freeWfSlots,
++        lds.getMaximumSize(), lds.getBytesAllocated(), numBarrierSlots(),
++        (int)freeBarrierIds.size(), numVecRegsPerSimd, numScalarRegsPerSimd,
++        activeWaves);
++}
++
+ bool
+ ComputeUnit::isDone() const
+ {
+-- 
+2.53.0
+

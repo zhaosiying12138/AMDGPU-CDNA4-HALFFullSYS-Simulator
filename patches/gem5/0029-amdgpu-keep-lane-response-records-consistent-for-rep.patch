@@ -1,0 +1,75 @@
+From 1840a62e8a8734299d15b59f2420b14ac03c4147 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 17 Aug 2026 05:13:19 +0800
+Subject: [PATCH 29/42] amdgpu: keep lane response records consistent for
+ repeated addresses
+
+A lane can hold more than one outstanding request to the same address, for
+example when a misaligned access is split. The previous revision fell back to
+consuming the newest record for that address when the responding lane's own
+record was already gone, which credited an unrelated lane. Always credit the
+lane carried in the packet's sender state, remove at most one record for that
+lane, and drop the per-address entry once it is empty so the completion-time
+invariant check stays meaningful.
+
+Also report per-instruction lane status and pending record counts in the
+global-memory pipeline progress dump, which is what distinguished a genuine
+completion stall from a transient in-flight snapshot.
+
+Checkpoint-ID: CP-0032
+Goal-ID: GSIM-001
+Plan-Revision: 15
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 458368899b9122d48baf6268c84e035737cdb2e36776c5b374a26b176ed5df69
+Change-Kind: code
+Baseline-Commit: d8f467ee31f671a33164f825124ac1091d3c63f3
+---
+ src/gpu-compute/compute_unit.cc           | 14 ++++++++++----
+ src/gpu-compute/global_memory_pipeline.cc |  3 +++
+ 2 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/src/gpu-compute/compute_unit.cc b/src/gpu-compute/compute_unit.cc
+index ff937c34d..75d7bc33b 100644
+--- a/src/gpu-compute/compute_unit.cc
++++ b/src/gpu-compute/compute_unit.cc
+@@ -1898,13 +1898,19 @@ ComputeUnit::completeLaneRequest(PacketPtr pkt, bool returnToken)
+     auto status_entry = gpuDynInst->memStatusVector.find(paddr);
+     if (status_entry != gpuDynInst->memStatusVector.end()) {
+         auto &lanes = status_entry->second;
++        /*
++         * A lane may have more than one request outstanding to the same
++         * address, so remove one record for this lane if present and
++         * otherwise leave the remaining records for later responses. The
++         * lane credited below always comes from the sender state, never
++         * from the position of a record in this list.
++         */
+         auto lane_record = std::find(lanes.begin(), lanes.end(), index);
+         if (lane_record != lanes.end()) {
+             lanes.erase(lane_record);
+-        } else if (!lanes.empty()) {
+-            /* Fall back to upstream behavior for coalesced responses. */
+-            index = lanes.back();
+-            lanes.pop_back();
++        }
++        if (lanes.empty()) {
++            gpuDynInst->memStatusVector.erase(status_entry);
+         }
+     }
+ 
+diff --git a/src/gpu-compute/global_memory_pipeline.cc b/src/gpu-compute/global_memory_pipeline.cc
+index 38274de66..91d7c12f5 100644
+--- a/src/gpu-compute/global_memory_pipeline.cc
++++ b/src/gpu-compute/global_memory_pipeline.cc
+@@ -328,6 +328,9 @@ GlobalMemPipeline::printProgress()
+         auto &inst_pair = pair.second;
+         auto &inst = inst_pair.first;
+         std::cout << "\t" << inst->disassemble() << " -- " << inst_pair.second
++                  << " seq " << inst->seqNum()
++                  << " lanes " << inst->printStatusVector()
++                  << " pendingRecords " << inst->memStatusVector.size()
+                   << "\n";
+     }
+ }
+-- 
+2.53.0
+

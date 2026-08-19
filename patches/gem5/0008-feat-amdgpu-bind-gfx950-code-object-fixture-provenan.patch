@@ -1,0 +1,218 @@
+From 47952b0b796900e46460901fa125bbf0671382cf Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sun, 9 Aug 2026 08:27:25 +0800
+Subject: [PATCH 08/42] feat(amdgpu): bind gfx950 code object fixture
+ provenance
+
+Checkpoint-ID: CP-0011
+
+Goal-ID: GSIM-001
+
+Plan-Revision: 2
+
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+
+Evidence-Manifest-SHA256: 18ab62b0f6955550fd2ba2b2c889dbec4b97796a479751370f4dd4f600cb9055
+
+Change-Kind: code
+
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ .../amdgpu/host_gpu_code_object_fixture.hh    | 129 ++++++++++++++++++
+ .../amdgpu/host_gpu_dispatch_state.test.cc    |  37 +++++
+ 2 files changed, 166 insertions(+)
+ create mode 100644 src/dev/amdgpu/host_gpu_code_object_fixture.hh
+
+diff --git a/src/dev/amdgpu/host_gpu_code_object_fixture.hh b/src/dev/amdgpu/host_gpu_code_object_fixture.hh
+new file mode 100644
+index 000000000..c49ad6443
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_code_object_fixture.hh
+@@ -0,0 +1,129 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_CODE_OBJECT_FIXTURE_HH__
++#define __DEV_AMDGPU_HOST_GPU_CODE_OBJECT_FIXTURE_HH__
++
++#include <array>
++#include <cstdint>
++
++namespace gem5
++{
++namespace hostgpu
++{
++namespace code_object_fixture
++{
++
++/*
++ * These records are provenance, not an embedded code image or an execution
++ * promise.  The bytes remain in the locked rocm-systems checkout and are
++ * parsed by the runtime-side validator.  gem5 currently rejects execution
++ * claims because its gfx950 decoder feature proof is incomplete.
++ */
++constexpr uint16_t ElfMachine = 224;
++constexpr uint16_t ElfTypeDyn = 3;
++constexpr uint8_t ElfOsabiAmdgpuHsa = 64;
++constexpr uint8_t ElfAbiVersion = 4;
++constexpr uint32_t ElfFlags = 0x54f;
++constexpr uint32_t GfxTarget = 950;
++constexpr uint32_t CodeObjectVersion = 6;
++constexpr uint32_t MetadataMajor = 1;
++constexpr uint32_t MetadataMinor = 2;
++constexpr uint32_t DescriptorBytes = 64;
++constexpr uint32_t RelocationCount = 0;
++constexpr bool Gem5IsaSupported = false;
++
++struct KernelRecord
++{
++    const char *name;
++    const char *descriptorSymbol;
++    uint32_t kernargBytes;
++    uint32_t kernargAlignment;
++    uint32_t wavefrontSize;
++    uint32_t sgprCount;
++    uint32_t vgprCount;
++    uint32_t maxFlatWorkgroupSize;
++    uint64_t descriptorFileOffset;
++    uint64_t codeEntryByteOffset;
++    uint32_t descriptorRsrc3;
++    uint32_t descriptorRsrc1;
++    uint32_t descriptorRsrc2;
++};
++
++struct ImageRecord
++{
++    const char *id;
++    const char *sourcePath;
++    const char *sha256;
++    uint32_t byteCount;
++    uint32_t kernelCount;
++    uint32_t noteFileOffset;
++    uint32_t noteFileSize;
++    uint32_t textFileOffset;
++    uint32_t textFileSize;
++    uint32_t rodataFileOffset;
++    uint32_t rodataFileSize;
++    std::array<KernelRecord, 3> kernels;
++};
++
++inline constexpr std::array<ImageRecord, 2> Images = {{
++    {
++        "gfx950-rdc-gpuReadWrite-v1",
++        "projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/"
++        "gpuReadWrite_kernels.hsaco",
++        "7b6a4d2bb7f9c4e7466bcf69f3110ecbfab54d07abd4c70b6bd96b6a6fb9de56",
++        5528, 1, 0x200, 0x550, 0x900, 0x480, 0x800, 0x40,
++        {{
++            {"gpuReadWrite", "gpuReadWrite.kd", 280, 8, 64, 22, 6, 256,
++             0x800, 0x1100, 1, 0xaf0080, 0x88},
++            {nullptr, nullptr, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
++            {nullptr, nullptr, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
++        }},
++    },
++    {
++        "gfx950-rdc-binary-search-v1",
++        "projects/rdc/rdc_libs/rdc_modules/kernels/hsaco/gfx950/"
++        "binary_search_kernels.hsaco",
++        "cb415571319569f4cdc28872faa2155dfe12be06a8f75fe173df3486fdabc053",
++        11296, 3, 0x200, 0x1044, 0x1500, 0xa40, 0x1400, 0xc0,
++        {{
++            {"binarySearch", "binarySearch.kd", 280, 8, 64, 19, 8, 256,
++             0x1400, 0x1100, 1, 0xaf0080, 0x88},
++            {"binarySearch_mulkeys", "binarySearch_mulkeys.kd", 288, 8,
++             64, 20, 6, 256, 0x1440, 0x11c0, 1, 0xaf0080, 0x88},
++            {"binarySearch_mulkeysConcurrent",
++             "binarySearch_mulkeysConcurrent.kd", 288, 8, 64, 22, 12, 256,
++             0x1480, 0x1280, 2, 0xaf0081, 0x88},
++        }},
++    },
++}};
++
++} // namespace code_object_fixture
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_CODE_OBJECT_FIXTURE_HH__
+diff --git a/src/dev/amdgpu/host_gpu_dispatch_state.test.cc b/src/dev/amdgpu/host_gpu_dispatch_state.test.cc
+index 1779ce765..7088a139a 100644
+--- a/src/dev/amdgpu/host_gpu_dispatch_state.test.cc
++++ b/src/dev/amdgpu/host_gpu_dispatch_state.test.cc
+@@ -36,6 +36,7 @@
+ #include <vector>
+ 
+ #include "dev/amdgpu/host_gpu_dispatch_fixture.hh"
++#include "dev/amdgpu/host_gpu_code_object_fixture.hh"
+ 
+ namespace gem5
+ {
+@@ -175,6 +176,42 @@ TEST(HostGpuDispatchFixture, AuthorityBytesAndMaterializationAreExact)
+                            kernarg.begin()));
+ }
+ 
++TEST(HostGpuCodeObjectFixture, LockedGfx950MetadataIsNotExecutionProof)
++{
++    using namespace code_object_fixture;
++    ASSERT_EQ(Images.size(), 2U);
++    EXPECT_EQ(ElfMachine, 224U);
++    EXPECT_EQ(ElfTypeDyn, 3U);
++    EXPECT_EQ(ElfOsabiAmdgpuHsa, 64U);
++    EXPECT_EQ(ElfAbiVersion, 4U);
++    EXPECT_EQ(ElfFlags, 0x54fU);
++    EXPECT_EQ(GfxTarget, 950U);
++    EXPECT_EQ(CodeObjectVersion, 6U);
++    EXPECT_EQ(MetadataMajor, 1U);
++    EXPECT_EQ(MetadataMinor, 2U);
++    EXPECT_EQ(DescriptorBytes, 64U);
++    EXPECT_EQ(RelocationCount, 0U);
++    EXPECT_FALSE(Gem5IsaSupported);
++
++    const auto &readWrite = Images[0];
++    EXPECT_STREQ(readWrite.id, "gfx950-rdc-gpuReadWrite-v1");
++    EXPECT_EQ(readWrite.byteCount, 5528U);
++    EXPECT_EQ(readWrite.kernelCount, 1U);
++    EXPECT_STREQ(readWrite.kernels[0].descriptorSymbol, "gpuReadWrite.kd");
++    EXPECT_EQ(readWrite.kernels[0].kernargBytes, 280U);
++    EXPECT_EQ(readWrite.kernels[0].descriptorFileOffset, 0x800U);
++    EXPECT_EQ(readWrite.kernels[0].codeEntryByteOffset, 0x1100U);
++
++    const auto &binarySearch = Images[1];
++    EXPECT_STREQ(binarySearch.id, "gfx950-rdc-binary-search-v1");
++    EXPECT_EQ(binarySearch.byteCount, 11296U);
++    EXPECT_EQ(binarySearch.kernelCount, 3U);
++    EXPECT_EQ(binarySearch.kernels[0].kernargBytes, 280U);
++    EXPECT_EQ(binarySearch.kernels[1].kernargBytes, 288U);
++    EXPECT_EQ(binarySearch.kernels[2].descriptorRsrc3, 2U);
++    EXPECT_EQ(binarySearch.kernels[2].descriptorRsrc1, 0xaf0081U);
++}
++
+ TEST(HostGpuDispatchState, AdmissionPinsAndRealRetireMirrorsSignal)
+ {
+     FixtureState fixture;
+-- 
+2.53.0
+
