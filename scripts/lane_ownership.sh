@@ -100,8 +100,10 @@ lane_completed_wavefronts() {  # lane_completed_wavefronts <name>
     # A multi-CU config names the stats CUs0, CUs1, ...; the original one-CU
     # fixture used the unsuffixed CUs name.  Read only the last dump and sum
     # every CU so the liveness signal remains valid after raising residency.
-    value=$(awk '/CUs[0-9]*\.completedWfs([[:space:]]|$)/{v += $2} \
-            END{printf "%d", v+0}' \
+    value=$(awk '
+            /^---------- Begin Simulation Statistics/ {v = 0; in_dump = 1; next}
+            in_dump && /CUs[0-9]*\.completedWfs([[:space:]]|$)/ {v += $2}
+            END {printf "%d", v+0}' \
             "${outdir}/stats.txt" 2>/dev/null || echo 0)
     total=$((total + value))
   done

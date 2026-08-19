@@ -83,6 +83,65 @@ class LaneDispatchTotalTest(unittest.TestCase):
         self.assertEqual(call("lane_dispatch_total", "ownership-test-done"), "900")
 
 
+class LaneCompletedWavefrontsTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.workspace = Path(tempfile.mkdtemp(prefix="lane-wavefront-test."))
+        self.lane = "wavefront-test-last-dump"
+        self.root = Path(call("lane_run_root", self.lane))
+        shutil.rmtree(self.root, ignore_errors=True)
+
+        self.outdir = (
+            self.root
+            / f"self-amdgpu-opencl-run.{os.getuid()}.aaaaaa"
+            / "m5out"
+        )
+        self.outdir.mkdir(parents=True)
+        (self.outdir / "stats.txt").write_text(
+            textwrap.dedent(
+                """\
+                ---------- Begin Simulation Statistics ----------
+                system.cpu1.CUs0.completedWfs 10
+                system.cpu1.CUs1.completedWfs 20
+                ---------- End Simulation Statistics   ----------
+                ---------- Begin Simulation Statistics ----------
+                system.cpu1.CUs0.completedWfs 3
+                system.cpu1.CUs1.completedWfs 4
+                ---------- End Simulation Statistics   ----------
+                """
+            )
+        )
+
+        self.fake = self.workspace / "gem5.opt"
+        self.fake.write_text(
+            textwrap.dedent(
+                """\
+                #!/usr/bin/env bash
+                trap ':' USR1
+                while :; do sleep 1; done
+                """
+            )
+        )
+        self.fake.chmod(0o755)
+        self.process = subprocess.Popen(
+            [str(self.fake), "--outdir", str(self.outdir)]
+        )
+        time.sleep(0.2)
+
+    def tearDown(self) -> None:
+        try:
+            self.process.kill()
+            self.process.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        shutil.rmtree(self.workspace, ignore_errors=True)
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_reads_only_latest_stats_dump_and_sums_all_cus(self) -> None:
+        # gem5 appends each SIGUSR1 dump. Summing all matching lines would report
+        # 37 and make a frozen simulator look alive; only the latest 3 + 4 count.
+        self.assertEqual(call("lane_completed_wavefronts", self.lane), "7")
+
+
 class LaneReapTest(unittest.TestCase):
     """Reaping must hit this lane's simulators and nothing else."""
 
