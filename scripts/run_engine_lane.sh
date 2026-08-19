@@ -25,6 +25,12 @@ tp=""
 model=""
 dummy_weights=0
 capsule=""
+# Number of compute units to expose in the gem5 host bridge.  The managed
+# runtime deliberately scrubs arbitrary environment variables before spawning
+# gem5, so a lane-owned wrapper is generated below when this is set.  Keeping
+# the knob here makes a multi-CU model run reproducible instead of dependent on
+# an out-of-tree temporary wrapper.
+compute_units="${GEMSIM_NUM_COMPUTE_UNITS:-}"
 # Which simulator to run. The optimised build plus --functional-fast is
 # ~3x faster on the representative kernel and was shown to produce
 # byte-identical results and an identical retired-dispatch sequence, but
@@ -38,6 +44,7 @@ while (($#)); do
     --model) model=${2:?}; shift 2 ;;
     --dummy-weights) dummy_weights=1; shift ;;
     --gem5) gem5=${2:?}; shift 2 ;;
+    --compute-units) compute_units=${2:?}; shift 2 ;;
     --fast) gem5="${ROOT}/projects/gem5/build/VEGA_X86/gem5.opt.fastwrap"; shift ;;
     # Run a standalone capsule instead of an engine, under this script's exact
     # environment and NVML isolation. A capsule that rebuilds the environment
@@ -61,6 +68,12 @@ elif [[ ! -r $capsule ]]; then
 fi
 if ! [[ $tp =~ ^[0-9]+$ ]] || (( tp < 1 )); then
   printf 'tp must be a positive integer\n' >&2; exit 2
+fi
+if [[ -n $compute_units ]] && {
+  ! [[ $compute_units =~ ^[0-9]+$ ]] || (( compute_units < 1 ));
+}; then
+  printf 'compute units must be a positive integer\n' >&2
+  exit 2
 fi
 
 # The ladder pairs a model with a degree of parallelism: 0.8B carries TP1 and
@@ -175,6 +188,26 @@ export SAGR_MANAGED_REPO_ROOT="${ROOT}"
 # lane's simulators to their own directory so progress accounting and cleanup
 # can tell them apart from another lane's; see scripts/lane_ownership.sh.
 
+# managed_session.c launches gem5 with a seven-entry environment and therefore
+# cannot pass GEMSIM_NUM_COMPUTE_UNITS through as a normal export.  Generate a
+# private executable in the lane root that restores exactly this one simulator
+# setting before replacing itself with the selected gem5 binary.  The wrapper
+# is intentionally lane-owned and included in the identity record below.
+if [[ -n $compute_units ]]; then
+  wrapper_root="${SAGR_MANAGED_RUN_ROOT:-${ROOT}/artifacts/lanes}"
+  mkdir -p "$wrapper_root"
+  gem5_base="$gem5"
+  gem5_wrapper="${wrapper_root}/gem5-cu${compute_units}.sh"
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf 'export GEMSIM_NUM_COMPUTE_UNITS=%q\n' "$compute_units"
+    printf 'exec %q "$@"\n' "$gem5_base"
+  } >"$gem5_wrapper"
+  chmod 700 "$gem5_wrapper"
+  gem5="$gem5_wrapper"
+  export SAGR_MANAGED_GEM5="$gem5"
+fi
+
 export TRITON_DEFAULT_BACKEND=gemsim_hip
 export TRITON_BACKENDS_IN_TREE=0
 export GEMSIM_HIP_AUTOTUNE_MODE=correctness
@@ -239,6 +272,8 @@ fi
   echo "rocminfo_sha256=$(sha256sum "${TOOL_SHIM}/rocminfo" | cut -d' ' -f1)"
   echo "gem5=${SAGR_MANAGED_GEM5}"
   echo "gem5_sha256=$(sha256sum "${SAGR_MANAGED_GEM5}" | cut -d' ' -f1)"
+  echo "gem5_base=${gem5_base:-${SAGR_MANAGED_GEM5}}"
+  echo "compute_units=${compute_units:-default}"
   echo "fastcopy=HSA_ENABLE_DTIF_FAST_COPY=${HSA_ENABLE_DTIF_FAST_COPY} SAGR_HSAKMT_MODEL_FAST_COPY=${SAGR_HSAKMT_MODEL_FAST_COPY}"
   if [[ $engine == vllm ]]; then
     echo "# unchanged-upstream evidence"
