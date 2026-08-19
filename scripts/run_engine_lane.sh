@@ -25,6 +25,7 @@ tp=""
 model=""
 dummy_weights=0
 capsule=""
+max_new_tokens=1
 # Number of compute units to expose in the gem5 host bridge.  The managed
 # runtime deliberately scrubs arbitrary environment variables before spawning
 # gem5, so a lane-owned wrapper is generated below when this is set.  Keeping
@@ -43,6 +44,7 @@ while (($#)); do
     --tp) tp=${2:?}; shift 2 ;;
     --model) model=${2:?}; shift 2 ;;
     --dummy-weights) dummy_weights=1; shift ;;
+    --max-new-tokens) max_new_tokens=${2:?}; shift 2 ;;
     --gem5) gem5=${2:?}; shift 2 ;;
     --compute-units) compute_units=${2:?}; shift 2 ;;
     --fast) gem5="${ROOT}/projects/gem5/build/VEGA_X86/gem5.opt.fastwrap"; shift ;;
@@ -68,6 +70,10 @@ elif [[ ! -r $capsule ]]; then
 fi
 if ! [[ $tp =~ ^[0-9]+$ ]] || (( tp < 1 )); then
   printf 'tp must be a positive integer\n' >&2; exit 2
+fi
+if ! [[ $max_new_tokens =~ ^[0-9]+$ ]] || (( max_new_tokens < 1 )); then
+  printf 'max new tokens must be a positive integer\n' >&2
+  exit 2
 fi
 if [[ -n $compute_units ]] && {
   ! [[ $compute_units =~ ^[0-9]+$ ]] || (( compute_units < 1 ));
@@ -274,6 +280,7 @@ fi
   echo "gem5_sha256=$(sha256sum "${SAGR_MANAGED_GEM5}" | cut -d' ' -f1)"
   echo "gem5_base=${gem5_base:-${SAGR_MANAGED_GEM5}}"
   echo "compute_units=${compute_units:-default}"
+  echo "max_new_tokens=${max_new_tokens}"
   echo "fastcopy=HSA_ENABLE_DTIF_FAST_COPY=${HSA_ENABLE_DTIF_FAST_COPY} SAGR_HSAKMT_MODEL_FAST_COPY=${SAGR_HSAKMT_MODEL_FAST_COPY}"
   if [[ $engine == vllm ]]; then
     echo "# unchanged-upstream evidence"
@@ -311,7 +318,7 @@ elif [[ $engine == sglang ]]; then
   sglang_args=(
     --tp-size "$tp" --attention-backend aiter
     --context-length 16 --max-total-tokens 16 --max-mamba-cache-size 5
-    --max-new-tokens 1 --watchdog-timeout 86400 --model-path "$model"
+    --max-new-tokens "$max_new_tokens" --watchdog-timeout 86400 --model-path "$model"
   )
   (( dummy_weights )) && sglang_args+=(--load-format dummy)
   unshare -r -m bash -c '
@@ -322,7 +329,7 @@ elif [[ $engine == sglang ]]; then
 else
   vllm_args=(
     --tp-size "$tp" --model-path "$model"
-    --context-length 16 --max-new-tokens 1 --max-num-seqs 1
+    --context-length 16 --max-new-tokens "$max_new_tokens" --max-num-seqs 1
   )
   (( dummy_weights )) && vllm_args+=(--load-format dummy)
   # A real file, not a heredoc: with tensor_parallel_size > 1 vLLM spawns
