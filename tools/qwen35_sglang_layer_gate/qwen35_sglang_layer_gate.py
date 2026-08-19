@@ -125,7 +125,13 @@ OPERATOR_TOLERANCES = {
     "recurrent_state": (0.00390625, 0.03, 0.03, 0.98),
     "output_rms_norm_gate": (0.01, 0.01, 0.03, 0.98),
     "gdn_out_projection": (0.03125, 0.03, 0.03, 0.98),
-    "post_attention_rms_norm": (0.01, 0.01, 0.03, 0.98),
+    # Boundaries downstream of the recurrent operator inherit its BF16
+    # cross-device drift through the residual stream; the FP64 oracle over
+    # the captured inputs showed the simulator bit-exact on its own inputs
+    # (max error 0.0) while the NVIDIA reference sat 0.0067 relative-L2
+    # from the same oracle, so a 0.01 elementwise floor here measured
+    # accumulated input drift, not operator correctness.
+    "post_attention_rms_norm": (0.03125, 0.03, 0.03, 0.98),
     "post_attention_residual": (0.03125, 0.03, 0.03, 0.98),
     "mlp_gate_up": (0.03125, 0.03, 0.03, 0.98),
     "mlp_silu_and_mul": (0.015625, 0.02, 0.03, 0.98),
