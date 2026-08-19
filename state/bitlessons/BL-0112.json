@@ -1,0 +1,22 @@
+{
+    "schema": "amdgpu-sim.bitlesson.v1",
+    "id": "BL-0112",
+    "checkpoint_id": "CP-0075",
+    "status": "active",
+    "confidence": "high",
+    "supersedes": [],
+    "evidence_ids": [],
+    "applies_to": [
+        "tools/qwen35_sglang_layer_gate/qwen35_sglang_layer_gate.py",
+        "artifacts/evidence/qwen35-recurrent-state-tolerance-v1/manifest.json"
+    ],
+    "question_or_symptom": "After the DPP fix, why did recurrent_state still flag 13 of 262144 elements over atol=1e-4 while the operator output itself passed?",
+    "observation": "An FP64 oracle implementing the exact FLA recurrence over the captured BF16 inputs showed both architectures land within ~1e-3 of the true value, and the simulator was closer than the NVIDIA golden at 9 of the 13 flagged elements -- 70x closer at the worst one. The FP32 cache slot is a sum of outer products of intermediates that the kernels themselves round to BF16 (l2norm output, the inverted A matrix, u, and v are each stored BF16), so its per-element error scale is BF16 epsilon regardless of the storage dtype.",
+    "conclusion": "A comparison contract must be calibrated to the computation's intrinsic precision, not the storage dtype of the compared tensor. The diagnostic golden itself carries the same error scale; demanding tighter agreement than the oracle's own distance flags legitimate cross-device rounding as a first divergence and halts the gate on a non-defect.",
+    "decision": "Raise the recurrent_state per-element floor to 2^-8 (BF16 epsilon scale), keep the tensor-level relative-L2 and cosine contract, and adopt the FP64-oracle triangulation (target vs oracle vs diagnostic golden) as the standard adjudication before treating a small structured mismatch as a simulator defect.",
+    "invalidated_assumptions": [
+        "An FP32-stored tensor deserves an FP32-scale elementwise tolerance.",
+        "The NVIDIA diagnostic golden is strictly closer to the true value than the simulator under test.",
+        "A nonzero mismatch_count at the first divergent operator implies the simulator computed it wrong."
+    ]
+}
