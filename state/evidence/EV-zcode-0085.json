@@ -1,0 +1,20 @@
+{
+  "checkpoint_id": "CP-0085",
+  "claim": "Race-audit capsule ladder clears the core execution-machinery suspects; the aiter d256 loss localizes to wide-LDS / tile-staging paths. New minimal ISA capsules (tools/mfma_isa_test/ + tools/qwen35_{mfma_chain16,lds_race}_capsule.py) verify on the current build: (1) 16-deep chained v_mfma_f32_32x32x16_bf16 accumulation into the same AGPR range = 256.0f on all 256 lanes (the pure MFMA chain is race-free; the 'keeps only final k-block' CK symptom is NOT the register-level chain); (2) cross-wave LDS visibility: wave0 writes 64 slots, s_barrier, all 256 lanes read back every value exactly (barrier-ordered LDS visibility is race-free); (3) intra-wave ALU->global_store data RAW delivers per-lane-correct data (verified via the VEGA store trace). Combined with earlier capsules (AGPR roundtrip, v_pk_mul, v_mbcnt, in-bounds LDS atomics), every narrow-path mechanism is cleared. The dimsplit probes on the current build still show dims [0:128) fully lost (p0 exactly 0.5) for the production CK kernel, so the defect localizes to the wide paths CK uses and the capsules do not yet cover: ds_read_b128 (192x/kernel), ds_write2_b64/b32, ds_bpermute_b32, and the async global->LDS tile staging (async_copyTrue pipeline). Also recorded: two probe-kernel authoring traps -- LDS group_segment_fixed_size must be declared (out-of-range LDS atomics silently return 0) and the gfx950 assembler requires immediates in src0 position for VOP2 e32 forms.",
+  "cleared": [
+    "16-deep MFMA chain",
+    "cross-wave LDS via barrier",
+    "intra-wave RAW to store",
+    "AGPR",
+    "v_pk_mul",
+    "v_mbcnt",
+    "in-bounds LDS atomics"
+  ],
+  "remaining_suspects": [
+    "ds_read_b128",
+    "ds_write2_b64/b32",
+    "ds_bpermute_b32",
+    "global->LDS async tile staging (async_copy)"
+  ],
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1"
+}
