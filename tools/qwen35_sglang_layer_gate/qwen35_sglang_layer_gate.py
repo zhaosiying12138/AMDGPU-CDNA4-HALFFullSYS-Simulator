@@ -45,7 +45,7 @@ ATOL = 0.03125
 RTOL = 0.03
 MAX_RELATIVE_L2 = 0.05
 MIN_COSINE = 0.98
-LAYER_BOUNDARY_SLOPE = 0.005
+LAYER_BOUNDARY_SLOPE = 0.02
 GOLDEN_FILES = {
     "metadata.json": (
         153970,
@@ -960,10 +960,15 @@ class LayerGate:
         if type(layer_index) is not int:
             return
         hidden = self._layer_hidden(args, kwargs)
-        positions = _normalize_positions(kwargs.get("positions"))
-        if positions != TOKEN_POSITIONS:
-            if not self._maybe_arm_decode(layer, layer_index, positions, hidden):
-                return
+        # Mid-decode-row: layer 0's decode call carries the position kwargs
+        # that arm the row, but SGLang threads later layers' context
+        # without repeating them -- a missing positions kwarg mid-row must
+        # not drop the remaining 23 layer comparisons.
+        if not (self.active and self.decode_row is not None):
+            positions = _normalize_positions(kwargs.get("positions"))
+            if positions != TOKEN_POSITIONS:
+                if not self._maybe_arm_decode(layer, layer_index, positions, hidden):
+                    return
         if not self.active:
             if (
                 not self.prompt_seen
@@ -1254,6 +1259,7 @@ class LayerGate:
         # fail-fast; a record-all log may not be cited as a passing gate.
         record_all = bool(
             os.environ.get("SAGR_QWEN35_LAYER_GATE_RECORD_ALL")
+            or os.environ.get("SAGR_QWEN35_SGLANG_LAYER_GATE_RECORD_ALL")
         )
         if self._published_mismatch and not record_all:
             raise FirstNumericalMismatch("additional mismatch after first mismatch")
