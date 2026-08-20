@@ -71,6 +71,24 @@ ORACLE_S0 = [3.58, 3.02, 6.68, 4.22, 4.90, 5.63, 5.75, 7.48]
 ORACLE_S1 = [5.38, 5.54, 6.88, 6.35, 7.37, 9.79, 7.47, 11.76]
 DEFECT_P0 = [0.47, 0.37, 0.30, 0.38, 0.42, 0.38, 0.33, 0.28]
 
+# Controlled-input probes (diagnostics, always exit 0): every probe keeps the
+# SAME production aiter call, shapes, kv pool and indices as replay mode, and
+# uses a one-hot v so token 1's output reads the attention probabilities
+# directly: out[1,h,0] = p(attend tok0), out[1,h,1] = p(self).
+#
+#   readprobs : REAL dense layer-3 q/k (rebuilt via _compute_qkv) + one-hot v.
+#   sweep     : synthetic orthogonal k (k0=e0, k1=e1) and per-head q so the
+#               true score delta (s0-s1) spans a ladder; measures the exp/
+#               softmax transfer function independent of Q.K formation.
+#   sweeptail : the same delta ladder, but with the signal in head dims
+#               254/255 instead of 0/1 -- discriminates "exp broken" from
+#               "leading Q.K dims lost" when sweep flattens to 0.5.
+#   dimsplit  : REAL q/k with dims [128:256) zeroed (signal in first half).
+#   dimsplit2 : REAL q/k with dims [0:128) zeroed (signal in second half).
+PROBE_NAMES = ("readprobs", "sweep", "sweeptail", "dimsplit", "dimsplit2")
+# sweep: true deltas s0-s1 per head; s1 pinned at 2.0 (q[1,h,1]=32, scale 1/16)
+SWEEP_DELTAS = [-4.0, -2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0]
+
 
 def _sha(value: torch.Tensor) -> str:
     raw = value.detach().cpu().contiguous().view(torch.uint8).numpy().tobytes()
@@ -233,6 +251,233 @@ def _implied_p0(
     return [float(x) for x in (num / den)]
 
 
+def _aiter_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    device: torch.device,
+    pool_slots: int,
+    off: int,
+) -> torch.Tensor:
+    """The production aiter call, identical for replay and probe modes.
+
+    NHD KV pool, page_size=1, exactly as MHATokenToKVPool allocates it and
+    AiterAttnBackend.forward_extend consumes it.  The two prefill tokens
+    occupy consecutive slots starting at ``off`` (slot 0 reserved).
+    """
+    # Import only inside the lane: importing aiter outside the simulator
+    # environment would bind the wrong backend identity.
+    from aiter import mha_batch_prefill_func
+
+    if off < 0 or off + SEQ_LEN > pool_slots:
+        raise RuntimeError(
+            f"kv slots [{off}, {off + SEQ_LEN}) do not fit pool of {pool_slots}"
+        )
+    k_cache = torch.zeros(
+        (pool_slots, NUM_KV_HEADS, HEAD_DIM), dtype=torch.bfloat16, device=device
+    )
+    v_cache = torch.zeros_like(k_cache)
+    cache_loc = torch.arange(off, off + SEQ_LEN, device=device)
+    k_cache[cache_loc] = k.to(device)
+    v_cache[cache_loc] = v.to(device)
+
+    qo_indptr = torch.tensor([0, SEQ_LEN], dtype=torch.int32, device=device)
+    kv_indptr = torch.tensor([0, SEQ_LEN], dtype=torch.int32, device=device)
+    # AiterIndicesUpdaterPrefill allocates seq_lens_sum + 256 entries and pads
+    # the tail with kv_indices[0] (the mha_batch_prefill 128-token read WA).
+    kv_indices = torch.empty(SEQ_LEN + 256, dtype=torch.int32, device=device)
+    kv_indices[:SEQ_LEN] = cache_loc.to(torch.int32)
+    kv_indices[SEQ_LEN:] = kv_indices[0]
+
+    print(
+        "CAPSULE input",
+        json.dumps(
+            {
+                "device": str(device),
+                "q_shape": list(q.shape),
+                "k_cache_shape": list(k_cache.shape),
+                "kv_indices_len": int(kv_indices.numel()),
+                "cache_slots": [int(x) for x in cache_loc],
+                "max_q_len": SEQ_LEN,
+                "max_kv_len": SEQ_LEN,
+                "function": "aiter.mha_batch_prefill_func",
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+    # Same call as AiterAttnBackend.forward_extend (non-MLA, NHD, bf16 path):
+    # softmax_scale defaults to head_dim**-0.5 inside the wrapper, matching
+    # the backend which does not pass it either.
+    o = mha_batch_prefill_func(
+        q.to(device).contiguous().view(-1, NUM_HEADS, HEAD_DIM),
+        k_cache,
+        v_cache,
+        qo_indptr,
+        kv_indptr,
+        kv_indices,
+        SEQ_LEN,
+        SEQ_LEN,
+        causal=True,
+        logits_soft_cap=0.0,
+        alibi_slopes=None,
+        return_lse=False,
+        return_attn_probs=False,
+        window_size=(-1, -1),
+        sink_ptr=None,
+        q_descale=None,
+        k_descale=None,
+        v_descale=None,
+    )
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    return o.detach().cpu().contiguous()
+
+
+def _onehot_v(device: torch.device) -> torch.Tensor:
+    """v that turns token 1's output into a probability readout.
+
+    v[0, kv, 0] = 1 and v[1, kv, 1] = 1 (all else 0), so with causal
+    attention out[1,h,0] = p(attend tok0), out[1,h,1] = p(self), and
+    out[0,h,0] must be exactly 1.0 (token 0 attends only itself).
+    """
+    v = torch.zeros(
+        (SEQ_LEN, NUM_KV_HEADS, HEAD_DIM), dtype=torch.bfloat16, device=device
+    )
+    v[0, :, 0] = 1.0
+    v[1, :, 1] = 1.0
+    return v
+
+
+def _probe_inputs(
+    probe: str, tensors: dict, weights: dict, host: torch.device
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Construct (q, k, v) on the host for the requested probe (all bf16)."""
+    v = _onehot_v(host)
+    if probe in ("sweep", "sweeptail"):
+        # Orthogonal unit keys in two chosen dims: sweep uses dims (0, 1),
+        # sweeptail uses (254, 255).  If a hdim-tail window is the only part
+        # of the Q.K reduction that survives, sweep reads delta 0 for every
+        # head while sweeptail still exercises the full softmax transfer.
+        d0, d1 = (0, 1) if probe == "sweep" else (HEAD_DIM - 2, HEAD_DIM - 1)
+        k = torch.zeros(
+            (SEQ_LEN, NUM_KV_HEADS, HEAD_DIM), dtype=torch.bfloat16, device=host
+        )
+        k[0, :, d0] = 1.0
+        k[1, :, d1] = 1.0
+        # Token 1 scores: s0 = q[1,h,d0]*SCALE, s1 = q[1,h,d1]*SCALE.  Pin
+        # s1 = 2.0 (q=32) and choose q[1,h,d0] so the true delta s0-s1 spans
+        # SWEEP_DELTAS.  All values are exactly representable in bf16.
+        q = torch.zeros(
+            (SEQ_LEN, NUM_HEADS, HEAD_DIM), dtype=torch.bfloat16, device=host
+        )
+        q[0, :, d0] = 16.0  # token 0: s = 1.0 vs itself; output must be v0
+        for h, delta in enumerate(SWEEP_DELTAS):
+            q[1, h, d0] = (delta + 2.0) / SCALE  # x_h: s0 = delta + 2.0
+            q[1, h, d1] = 2.0 / SCALE  # y_h = 32: s1 = 2.0
+        return q, k, v
+    # All remaining probes use the REAL captured/rebuilt layer-3 q/k.
+    q, k, _v_real, _gate, _r1, _hn = _compute_qkv(tensors, weights, host)
+    q = q.clone()
+    k = k.clone()
+    if probe == "dimsplit":
+        q[..., HEAD_DIM // 2 :] = 0
+        k[..., HEAD_DIM // 2 :] = 0
+    elif probe == "dimsplit2":
+        q[..., : HEAD_DIM // 2] = 0
+        k[..., : HEAD_DIM // 2] = 0
+    elif probe != "readprobs":
+        raise RuntimeError(f"unknown probe: {probe}")
+    return q.contiguous(), k.contiguous(), v
+
+
+def _run_probe(args: argparse.Namespace, tensors: dict, device: torch.device) -> int:
+    """Controlled-input probe: same aiter call, synthetic/masked inputs.
+
+    Always exits 0 -- probes are diagnostics that localize the defect, not
+    acceptance gates.
+    """
+    host = torch.device("cpu")
+    weights = _load_layer3_weights(args.model.resolve(strict=True), host)
+    q, k, v = _probe_inputs(args.probe, tensors, weights, host)
+
+    # fp64 expectation from the exact bf16 tensors fed to the kernel.
+    ref_out, ref_probs = _reference_attention(q, k, v)
+    expected_p0 = [float(x) for x in ref_probs[:, 1, 0]]
+    rep = NUM_HEADS // NUM_KV_HEADS
+    k_e = k.double().repeat_interleave(rep, dim=1)
+    q1 = q.double()[1]
+    true_s0 = [float(x) for x in (q1 * k_e[0]).sum(-1) * SCALE]
+    true_s1 = [float(x) for x in (q1 * k_e[1]).sum(-1) * SCALE]
+    true_delta = [a - b for a, b in zip(true_s0, true_s1)]
+
+    o = _aiter_attention(q, k, v, device, args.kv_pool_slots, args.kv_slot_offset)
+
+    structural_ok = (
+        tuple(o.shape) == (SEQ_LEN, NUM_HEADS, HEAD_DIM)
+        and torch.isfinite(o.float()).all().item()
+    )
+    od = o.double()
+    measured_p0 = [float(od[1, h, 0]) for h in range(NUM_HEADS)]
+    measured_pself = [float(od[1, h, 1]) for h in range(NUM_HEADS)]
+    token0_p0 = [float(od[0, h, 0]) for h in range(NUM_HEADS)]
+    # Everything outside dims {0,1} of token 1 (and dim 0 of token 0) must be
+    # ~0 with a one-hot v; nonzero mass means the V read itself is broken.
+    stray = od.abs().clone()
+    stray[1, :, :2] = 0
+    stray[0, :, 0] = 0
+    stray_max = float(stray.max())
+
+    def _logit(p: float) -> float:
+        p = min(max(p, 1e-9), 1.0 - 1e-9)
+        return math.log(p / (1.0 - p))
+
+    measured_logit = [_logit(p) for p in measured_p0]
+    expected_logit = [_logit(p) for p in expected_p0]
+
+    result = {
+        "schema": "amdgpu-sim.qwen35-attention-capsule.probe.v1",
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "capture": str(args.capture),
+        "model": str(args.model),
+        "device": str(device),
+        "mode": "probe",
+        "probe": args.probe,
+        "kv_pool_slots": args.kv_pool_slots,
+        "kv_slot_offset": args.kv_slot_offset,
+        "structural_ok": bool(structural_ok),
+        "stray_output_max_abs": stray_max,
+        "token0_p0_measured": token0_p0,
+        "measured_p0": measured_p0,
+        "measured_p_self": measured_pself,
+        "expected_p0": expected_p0,
+        "measured_logit": measured_logit,
+        "expected_logit": expected_logit,
+        "true_scaled_s0": true_s0,
+        "true_scaled_s1": true_s1,
+        "true_delta": true_delta,
+    }
+    if args.probe == "sweep":
+        result["sweep_deltas"] = SWEEP_DELTAS
+        result["transfer_measured_logit_over_true_delta"] = [
+            (ml / d) if abs(d) > 1e-12 else None
+            for ml, d in zip(measured_logit, true_delta)
+        ]
+
+    saved = {
+        "q": q.contiguous(),
+        "k": k.contiguous(),
+        "v": v.contiguous(),
+        "reference_out": ref_out.contiguous(),
+        "reference_probs": ref_probs.contiguous(),
+        "probed_out": o,
+    }
+    _finish(args, result, saved)
+    print(f"CAPSULE PROBE {args.probe} DONE (diagnostic, exit 0)", flush=True)
+    return 0
+
+
 def _parse() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--capture", type=Path, default=DEFAULT_CAPTURE)
@@ -254,6 +499,15 @@ def _parse() -> argparse.Namespace:
         help=(
             "skip the aiter call: verify tensor plumbing + fp64 reference "
             "against the pinned oracle numbers (runs on CPU)"
+        ),
+    )
+    parser.add_argument(
+        "--probe",
+        choices=PROBE_NAMES,
+        default=None,
+        help=(
+            "run a controlled-input diagnostic probe instead of the replay "
+            "gate (same aiter call/shapes/pool; always exits 0)"
         ),
     )
     parser.add_argument(
@@ -291,6 +545,11 @@ def main() -> int:
         if str(args.device).startswith("cuda") and not torch.cuda.is_available():
             raise RuntimeError("simulated HIP torch device is unavailable")
         device = torch.device(args.device)
+
+    if args.probe is not None:
+        if args.reference_only:
+            raise RuntimeError("--probe and --reference-only are exclusive")
+        return _run_probe(args, tensors, device)
 
     # The q/k/v preamble stages were adjudicated correct on the simulator, and
     # running them as ~30 torch kernels on the simulated device once stalled a
@@ -366,80 +625,7 @@ def main() -> int:
         return 0
 
     # ---- production aiter call ------------------------------------------
-    # Import only inside the lane: importing aiter outside the simulator
-    # environment would bind the wrong backend identity.
-    from aiter import mha_batch_prefill_func
-
-    # NHD KV pool, page_size=1, exactly as MHATokenToKVPool allocates it and
-    # AiterAttnBackend.forward_extend consumes it.  The two prefill tokens
-    # occupy consecutive slots starting at kv_slot_offset (slot 0 reserved).
-    pool_slots = args.kv_pool_slots
-    off = args.kv_slot_offset
-    if off < 0 or off + SEQ_LEN > pool_slots:
-        raise RuntimeError(
-            f"kv slots [{off}, {off + SEQ_LEN}) do not fit pool of {pool_slots}"
-        )
-    k_cache = torch.zeros(
-        (pool_slots, NUM_KV_HEADS, HEAD_DIM), dtype=torch.bfloat16, device=device
-    )
-    v_cache = torch.zeros_like(k_cache)
-    cache_loc = torch.arange(off, off + SEQ_LEN, device=device)
-    k_cache[cache_loc] = k.to(device)
-    v_cache[cache_loc] = v.to(device)
-
-    qo_indptr = torch.tensor([0, SEQ_LEN], dtype=torch.int32, device=device)
-    kv_indptr = torch.tensor([0, SEQ_LEN], dtype=torch.int32, device=device)
-    # AiterIndicesUpdaterPrefill allocates seq_lens_sum + 256 entries and pads
-    # the tail with kv_indices[0] (the mha_batch_prefill 128-token read WA).
-    kv_indices = torch.empty(SEQ_LEN + 256, dtype=torch.int32, device=device)
-    kv_indices[:SEQ_LEN] = cache_loc.to(torch.int32)
-    kv_indices[SEQ_LEN:] = kv_indices[0]
-
-    print(
-        "CAPSULE input",
-        json.dumps(
-            {
-                "capture": str(capture),
-                "device": str(device),
-                "q_shape": list(q.shape),
-                "k_cache_shape": list(k_cache.shape),
-                "kv_indices_len": int(kv_indices.numel()),
-                "cache_slots": [int(x) for x in cache_loc],
-                "max_q_len": SEQ_LEN,
-                "max_kv_len": SEQ_LEN,
-                "function": "aiter.mha_batch_prefill_func",
-            },
-            sort_keys=True,
-        ),
-        flush=True,
-    )
-
-    # Same call as AiterAttnBackend.forward_extend (non-MLA, NHD, bf16 path):
-    # softmax_scale defaults to head_dim**-0.5 inside the wrapper, matching
-    # the backend which does not pass it either.
-    o = mha_batch_prefill_func(
-        q.to(device).contiguous().view(-1, NUM_HEADS, HEAD_DIM),
-        k_cache,
-        v_cache,
-        qo_indptr,
-        kv_indptr,
-        kv_indices,
-        SEQ_LEN,
-        SEQ_LEN,
-        causal=True,
-        logits_soft_cap=0.0,
-        alibi_slopes=None,
-        return_lse=False,
-        return_attn_probs=False,
-        window_size=(-1, -1),
-        sink_ptr=None,
-        q_descale=None,
-        k_descale=None,
-        v_descale=None,
-    )
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-    o = o.detach().cpu().contiguous()
+    o = _aiter_attention(q, k, v, device, args.kv_pool_slots, args.kv_slot_offset)
     saved["replayed_out"] = o
 
     structural_ok = (
