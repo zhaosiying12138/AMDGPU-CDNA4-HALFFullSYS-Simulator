@@ -1611,6 +1611,35 @@ def _install_function_wrappers() -> None:
         conv_mod, "causal_conv1d_update",
         lambda orig: decode_state_capture(orig, "conv_update"),
     )
+    pool_mod = importlib.import_module(
+        "sglang.srt.mem_cache.memory_pool"
+    )
+    pool_cls = getattr(pool_mod, "MambaPool", None)
+    if pool_cls is not None:
+        def copy_from_wrapper(original):
+            def wrapped(self_pool, src_indices, dst_indices):
+                original(self_pool, src_indices, dst_indices)
+                controller = _controller()
+                event = {
+                    "event": "pool_copy_from",
+                    "src": [int(x) for x in src_indices.reshape(-1).tolist()],
+                    "dst": [int(x) for x in dst_indices.reshape(-1).tolist()],
+                }
+                temporal = getattr(self_pool.mamba_cache, "temporal", None)
+                if temporal is not None and len(dst_indices) > 0:
+                    dst0 = int(dst_indices.reshape(-1)[0].long().item())
+                    # temporal is [layers, slots, H, K, V]; axis 1 is slots.
+                    if 0 <= dst0 < temporal.shape[1]:
+                        event["pool"] = "ssm"
+                        event.update(
+                            _slot_fingerprint(temporal[:, dst0], 0)
+                        )
+                controller._journal_event(event)
+
+            return wrapped
+
+        _patch_attribute(pool_cls, "copy_from", copy_from_wrapper)
+
     dispatcher_mod = importlib.import_module(
         "sglang.srt.layers.attention.linear.gdn_backend"
     )
