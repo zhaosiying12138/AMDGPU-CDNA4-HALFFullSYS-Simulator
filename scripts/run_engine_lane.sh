@@ -397,7 +397,7 @@ if [[ -n $capsule ]]; then
   status=$?
 elif [[ $engine == sglang ]]; then
   sglang_args=(
-    --tp-size "$tp" --attention-backend aiter
+    --tp-size "$tp" --attention-backend "${SAGR_ATTENTION_BACKEND:-aiter}"
     --context-length 16 --max-total-tokens 16 --max-mamba-cache-size 5
     --max-new-tokens "$max_new_tokens" --seed 0 --watchdog-timeout 86400
     --dist-timeout 86400 --model-path "$model"
