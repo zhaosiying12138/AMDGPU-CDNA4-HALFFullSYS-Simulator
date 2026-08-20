@@ -1,0 +1,21 @@
+{
+  "checkpoint_id": "CP-0093",
+  "claim": "GDN decode-kernel differential CLEARS both decode-only Triton kernels, moving the second-token defect out of kernel arithmetic. Two capsules ran through the normal Triton path on the simulator (lane zcode-gdn-diff-1, real gfx950 dispatches confirmed in the gem5 native-execution trace: conv grid (256,24) wg256, packed decode grids (256,16)/(256,32) wg64 num_warps=1). (1) tools/qwen35_gdn_decode_diff_capsule.py: _causal_conv1d_update_kernel and fused_recurrent_gated_delta_rule_packed_decode_kernel executed standalone in the exact layer-0 geometry (dim 6144, width 4, H=HV=16, K=V=128, real layer-0 conv1d/A_log/dt_bias weights, multi-slot pools, selected slot 1, bs=1 and bs=2) vs independent CPU fp32 references written from the kernel source. VERDICT: conv output BIT-EXACT (bitexact_fraction 1.0 vs kernel-faithful bf16 reference), conv state roll BIT-EXACT, packed-decode output BIT-EXACT, packed-decode state update rel_l2 2.5e-8 (fp32 1-ulp reduction-order noise, 91% bit-exact), untouched-slot canaries bit-exact in every probe; hypothesis tables (wrong-slot/no-decay/beta-one/no-l2norm/reversed-window/etc.) all dominated by the correct reference. Op-level probes in the same run: single-wave num_warps=1 tl.sum reductions ([32,128] axis-1 and [128]) and tl.exp/log(1+exp)/sigmoid/sqrt all exact to <=2.2e-7 -- no DPP/wave-reduction or transcendental mis-execution in the packed kernel's op mix. (2) tools/qwen35_gdn_layer0_decode_chain_capsule.py (lane zcode-gdn-chain-1): the FULL layer-0 GDN decode forward at m=1 exactly as production runs it (in_proj_qkvz/in_proj_ba m=1 torch F.linear, fused_qkvzba_split_reshape_cat_contiguous, conv update, packed decode, fla RMSNormGated Triton, out_proj m=1) with real layer-0 weights is clean end to end: worst per-stage local rel_l2 1.25e-6 (bf16 GEMM 1-ulp effects), every Triton stage locally bit-exact, ssm/conv state commits verified. CONCLUSION: the decode-step-1 layer-0 divergence (layer gate CP-0092: input bit-exact, output rel_l2 1.42, no clean scale, corr(deltas) 0.57) cannot originate in either decode kernel's arithmetic, state indexing, in-place state commit, or in any m=1 op of the layer. Since the token input is bit-exact and every op is exact, the defect must be in the other inputs to the layer: the conv_states/ssm_states POOL CONTENTS at decode entry or the mamba_cache_indices slot routing -- i.e. state written/routed between the prefill forward and the decode step (production uses uses_mamba_radix_cache=True with strategy extra_buffer, and the lane log shows ROCDTIF fast-copy rejects 'dependent-signals' falling back to blit copies), not broken kernel math. Suggested minimal repro: extend the layer gate to dump mamba_cache_indices plus the selected conv/ssm pool slots at decode step 1 and diff against the NVIDIA decode golden's states; secondarily audit the mamba radix-cache state copies (device-to-device fast-copy fallback path) that run between prefill commit and decode read.",
+  "evidence": {
+    "capsules": [
+      "tools/qwen35_gdn_decode_diff_capsule.py",
+      "tools/qwen35_gdn_layer0_decode_chain_capsule.py"
+    ],
+    "lane_diff": "artifacts/lanes/zcode-gdn-diff-1/lane.log (status=0, 2026-08-21T03:35)",
+    "lane_chain": "artifacts/lanes/zcode-gdn-chain-1/lane.log (status=0, 2026-08-21T03:5x)",
+    "result_diff": "artifacts/qwen35-gdn-decode-diff/20260821-v1/result.json sha256=22bb43f44bffa838186c53be98cd76bbb85a1b4235b69bd239d14f1b32567a23",
+    "result_chain": "artifacts/qwen35-gdn-decode-chain/20260821-v1/result.json sha256=12f9603c96f54f9f3c68aad42934f1094fccc3bb0f100d8b9b015ecd936dede0",
+    "kernel_verdicts": {
+      "causal_conv1d_update": "CLEARED (out bit-exact, state bit-exact, slots bs=1/2)",
+      "fused_recurrent_gated_delta_rule_packed_decode": "CLEARED (out bit-exact, state 2.5e-8, slots bs=1/2)",
+      "layer0_m1_chain": "CLEARED (worst stage rel_l2 1.25e-6)"
+    }
+  },
+  "next": "State-pool gate: capture mamba_cache_indices + selected conv/ssm pool slots at decode step 1 in the layer gate and diff vs NVIDIA decode golden; audit mamba radix extra_buffer state copies (fast-copy dependent-signal fallback) between prefill and decode.",
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1"
+}
