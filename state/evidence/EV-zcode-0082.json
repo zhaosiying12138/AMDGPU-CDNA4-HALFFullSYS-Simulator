@@ -1,0 +1,24 @@
+{
+  "checkpoint_id": "CP-0082",
+  "claim": "FIRST END-TO-END CORRECT TOKEN for SGLang TP1 Qwen3.5-0.8B on the gem5 simulator. Lane zcode-token-3 (Triton attention backend per GOAL.md's upstream AMD recommendation, SGLANG_USE_AITER=1 for GEMMs, dependent-fast-copy ROCr, fastwrap) completed weight load (278s), full 24-layer prefill, and greedy decode with NO simulator fatal. The frozen token gate reports actual first token 27841 == expected 27841 (exact match with the NVIDIA RTX 5090 golden trajectory for prompt [248044, 266]). The second decoded token is 3 vs expected 27841: a residual defect isolated to the second decode step (first-step attention/GEMMs/state updates are all correct, since token 1 is exact). The earlier zcode-token-1 crash (aiter 'Invalid tiling' for the m=1 n=8192 k=1024 GEMM) did not reproduce in token-3 with identical config; the m=1 tuned flydsl config passes selection_filter in the lane env per the aiter probe capsule.",
+  "lane": "zcode-token-3",
+  "next": "isolate the second-token defect: decode-step-2 numerics (triton decode attention, GDN recurrent state carry-over, or m=1 GEMM precision), using the record-all gate and the absorbed attention probes",
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1",
+  "timeline": {
+    "decode_dispatches": "~390",
+    "fatal_count": 0,
+    "prefill_dispatches": "~1240",
+    "weight_load_s": 278.0
+  },
+  "token_golden": {
+    "actual": [
+      27841,
+      3
+    ],
+    "expected": [
+      27841,
+      27841
+    ],
+    "first_token_exact": true
+  }
+}
