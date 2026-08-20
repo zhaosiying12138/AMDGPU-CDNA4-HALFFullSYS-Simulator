@@ -1,0 +1,599 @@
+From 9258d0d281bf7172b18f82367a1ee0764aa04edd Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Thu, 20 Aug 2026 03:14:04 +0800
+Subject: [PATCH] vega: honor the DS-encoding ACC bit for accumulator data
+ operands
+
+A live aiter composable-kernel GEMM on gfx950 issues the DS word
+0xda784400: ds_read_u16 (OP=0x3c) with ACC (bit 25) set and offset
+0x44. tableDecodePrimary mapped the four DS primary-encoding slots
+with ACC=1 (0x1B4-0x1B7) to decode_invalid, so the run died with
+"Invalid opcode encountered: 0xda784400" although subDecode_OP_DS
+keys on the full 8-bit OP field and decodes the word correctly.
+
+Route the four ACC=1 slots to subDecode_OP_DS and give Inst_DS a
+general ACC mechanism: dsData0Idx/dsData1Idx/dsVdstIdx add the
+wavefront's accumOffset to every DS data operand index when
+instData.ACC is set, exactly as V_ACCVGPR_READ/WRITE already map
+AGPRs into the unified file. The ADDR operand always names an
+architectural VGPR and is never redirected; the reference emulator
+types addr as OPR_VGPR while data0/data1/vdst are
+OPR_VGPR_OR_ACCVGPR and offsets only the latter by the ACC window.
+Every operand-construction site in ds.cc now goes through the
+helpers, including the CDNA4 transpose reads, whose packing is
+destination-index-agnostic, so their blanket ACC panic is dropped.
+
+Fail closed: a DS ACC operand in a kernel that allocates no AGPRs
+(accumOffset unset or beyond the VGPR allocation) is malformed, so
+the helper panics with a named reason rather than silently aliasing
+low architectural VGPRs. The decoder unit test decodes the live word
+and its ACC=0 twin to the same ds_read_u16 opcode.
+
+Checkpoint-ID: CP-0078
+Goal-ID: GSIM-001
+Plan-Revision: 16
+Source-Lock-SHA256: dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf
+Evidence-Manifest-SHA256: 916b368736f4d5cd894b7ff1e268296a946a034def1f6f06ab4e87aa75f30f46
+Change-Kind: fix
+Baseline-Commit: 707c522475e4273ab32f543ccafcef419f795f7c
+---
+ src/arch/amdgpu/vega/gpu_decoder.cc        |  11 +-
+ src/arch/amdgpu/vega/gpu_decoder.test.cc   |  30 +++++
+ src/arch/amdgpu/vega/insts/ds.cc           | 134 ++++++++++-----------
+ src/arch/amdgpu/vega/insts/op_encodings.hh |  52 ++++++++
+ 4 files changed, 156 insertions(+), 71 deletions(-)
+
+diff --git a/src/arch/amdgpu/vega/gpu_decoder.cc b/src/arch/amdgpu/vega/gpu_decoder.cc
+index b67ff50ad..e3af715b8 100644
+--- a/src/arch/amdgpu/vega/gpu_decoder.cc
++++ b/src/arch/amdgpu/vega/gpu_decoder.cc
+@@ -543,10 +543,13 @@ namespace VegaISA
+         &Decoder::subDecode_OP_DS,
+         &Decoder::subDecode_OP_DS,
+         &Decoder::subDecode_OP_DS,
+-        &Decoder::decode_invalid,
+-        &Decoder::decode_invalid,
+-        &Decoder::decode_invalid,
+-        &Decoder::decode_invalid,
++        // DS encodings with the ACC bit (bit 25) set. subDecode_OP_DS keys
++        // on the full 8-bit OP field, so these decode identically; ACC is
++        // honored per-instruction via InFmt_DS::ACC.
++        &Decoder::subDecode_OP_DS,
++        &Decoder::subDecode_OP_DS,
++        &Decoder::subDecode_OP_DS,
++        &Decoder::subDecode_OP_DS,
+         &Decoder::subDecode_OP_FLAT,
+         &Decoder::subDecode_OP_FLAT,
+         &Decoder::subDecode_OP_FLAT,
+diff --git a/src/arch/amdgpu/vega/gpu_decoder.test.cc b/src/arch/amdgpu/vega/gpu_decoder.test.cc
+index 763b75834..4503bc9ea 100644
+--- a/src/arch/amdgpu/vega/gpu_decoder.test.cc
++++ b/src/arch/amdgpu/vega/gpu_decoder.test.cc
+@@ -293,6 +293,36 @@ TEST(GpuDecoderTest, Gfx950DsWriteB16D16Hi)
+     EXPECT_EQ(inst->getOperandSize(1), 4);
+ }
+ 
++TEST(GpuDecoderTest, Gfx950DsAccBitDecodesLikeAccClearTwin)
++{
++    // Live word from an aiter composable-kernel GEMM on gfx950:
++    // DS encoding with ACC (bit 25) set, OP=0x3c (ds_read_u16),
++    // offset0=0x44. The ACC=0 twin clears bit 25 only; both must
++    // decode to the same opcode because the DS sub-decode keys on
++    // the full 8-bit OP field and ACC only redirects data operands.
++    static constexpr uint32_t AccWord = 0xda784400;
++    static constexpr uint32_t NoAccWord = AccWord & ~(1u << 25);
++
++    Decoder decoder;
++    decoder.setGfxVersion(GfxVersion::gfx950);
++    for (const uint32_t word0 : {AccWord, NoAccWord}) {
++        InstFormat words[2] = {};
++        words[0].imm_u32 = word0;
++        words[1].imm_u32 = 0x00000000;
++        SCOPED_TRACE(word0);
++        std::unique_ptr<GPUStaticInst> inst(decoder.decode(words));
++        ASSERT_NE(inst, nullptr);
++        EXPECT_EQ(inst->opcode(), "ds_read_u16");
++        EXPECT_EQ(inst->instSize(), 8);
++        EXPECT_TRUE(inst->isMemRef());
++        EXPECT_TRUE(inst->isLoad());
++        EXPECT_TRUE(inst->isGroupSeg());
++        EXPECT_EQ(inst->getNumOperands(), 2);
++        EXPECT_EQ(inst->getOperandSize(0), 4);
++        EXPECT_EQ(inst->getOperandSize(1), 2);
++    }
++}
++
+ TEST(GpuDecoderTest, Gfx950BufferCacheControl)
+ {
+     struct CacheControlEncoding
+diff --git a/src/arch/amdgpu/vega/insts/ds.cc b/src/arch/amdgpu/vega/insts/ds.cc
+index d72757a93..e73c8f8c3 100644
+--- a/src/arch/amdgpu/vega/insts/ds.cc
++++ b/src/arch/amdgpu/vega/insts/ds.cc
+@@ -50,10 +50,10 @@ namespace VegaISA
+         panic_if(instData.GDS,
+                  "%s: GDS is reserved for CDNA4 transpose reads",
+                  opcode.c_str());
+-        panic_if(instData.ACC,
+-                 "%s: accumulator destinations require generic ACC hazard "
+-                 "tracking support",
+-                 opcode.c_str());
++        // ACC destinations are honored generically via Inst_DS::dsVdstIdx:
++        // the transpose packing operates on the fetched data buffer and is
++        // destination-index-agnostic, so the alignment check below applies
++        // unchanged to the encoded index inside the AGPR window.
+         panic_if(gpuDynInst->computeUnit()->wfSize() != 64,
+                  "%s: CDNA4 transpose reads require wave64",
+                  opcode.c_str());
+@@ -104,7 +104,7 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU32 data(gpuDynInst, extData.DATA0);
++        ConstVecOperandU32 data(gpuDynInst, dsData0Idx(gpuDynInst));
+ 
+         addr.read();
+         data.read();
+@@ -359,7 +359,7 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU32 data(gpuDynInst, extData.DATA0);
++        ConstVecOperandU32 data(gpuDynInst, dsData0Idx(gpuDynInst));
+ 
+         addr.read();
+         data.read();
+@@ -467,7 +467,7 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU32 data(gpuDynInst, extData.DATA0);
++        ConstVecOperandU32 data(gpuDynInst, dsData0Idx(gpuDynInst));
+ 
+         addr.read();
+         data.read();
+@@ -532,8 +532,8 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU32 data0(gpuDynInst, extData.DATA0);
+-        ConstVecOperandU32 data1(gpuDynInst, extData.DATA1);
++        ConstVecOperandU32 data0(gpuDynInst, dsData0Idx(gpuDynInst));
++        ConstVecOperandU32 data1(gpuDynInst, dsData1Idx(gpuDynInst));
+ 
+         addr.read();
+         data0.read();
+@@ -600,8 +600,8 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU32 data0(gpuDynInst, extData.DATA0);
+-        ConstVecOperandU32 data1(gpuDynInst, extData.DATA1);
++        ConstVecOperandU32 data0(gpuDynInst, dsData0Idx(gpuDynInst));
++        ConstVecOperandU32 data1(gpuDynInst, dsData1Idx(gpuDynInst));
+ 
+         addr.read();
+         data0.read();
+@@ -795,7 +795,7 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandF32 data(gpuDynInst, extData.DATA0);
++        ConstVecOperandF32 data(gpuDynInst, dsData0Idx(gpuDynInst));
+ 
+         addr.read();
+         data.read();
+@@ -858,7 +858,7 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU8 data(gpuDynInst, extData.DATA0);
++        ConstVecOperandU8 data(gpuDynInst, dsData0Idx(gpuDynInst));
+ 
+         addr.read();
+         data.read();
+@@ -921,7 +921,7 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU8 data(gpuDynInst, extData.DATA0);
++        ConstVecOperandU8 data(gpuDynInst, dsData0Idx(gpuDynInst));
+ 
+         addr.read();
+         data.read();
+@@ -984,7 +984,7 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU16 data(gpuDynInst, extData.DATA0);
++        ConstVecOperandU16 data(gpuDynInst, dsData0Idx(gpuDynInst));
+ 
+         addr.read();
+         data.read();
+@@ -1045,7 +1045,7 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU32 data(gpuDynInst, extData.DATA0);
++        ConstVecOperandU32 data(gpuDynInst, dsData0Idx(gpuDynInst));
+ 
+         addr.read();
+         data.read();
+@@ -1109,7 +1109,7 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU32 data(gpuDynInst, extData.DATA0);
++        ConstVecOperandU32 data(gpuDynInst, dsData0Idx(gpuDynInst));
+ 
+         addr.read();
+         data.read();
+@@ -1139,7 +1139,7 @@ namespace VegaISA
+     void
+     Inst_DS__DS_ADD_RTN_U32::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU32 vdst(gpuDynInst, extData.VDST);
++        VecOperandU32 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -1503,8 +1503,8 @@ namespace VegaISA
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+ 
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU32 src(gpuDynInst, extData.DATA1);
+-        ConstVecOperandU32 cmp(gpuDynInst, extData.DATA0);
++        ConstVecOperandU32 src(gpuDynInst, dsData1Idx(gpuDynInst));
++        ConstVecOperandU32 cmp(gpuDynInst, dsData0Idx(gpuDynInst));
+ 
+         addr.read();
+         src.read();
+@@ -1538,7 +1538,7 @@ namespace VegaISA
+     void
+     Inst_DS__DS_CMPST_RTN_B32::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU32 vdst(gpuDynInst, extData.VDST);
++        VecOperandU32 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -1724,7 +1724,7 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ_B32::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU32 vdst(gpuDynInst, extData.VDST);
++        VecOperandU32 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -1788,8 +1788,8 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ2_B32::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU32 vdst0(gpuDynInst, extData.VDST);
+-        VecOperandU32 vdst1(gpuDynInst, extData.VDST + 1);
++        VecOperandU32 vdst0(gpuDynInst, dsVdstIdx(gpuDynInst));
++        VecOperandU32 vdst1(gpuDynInst, dsVdstIdx(gpuDynInst) + 1);
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -1856,8 +1856,8 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ2ST64_B32::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU32 vdst0(gpuDynInst, extData.VDST);
+-        VecOperandU32 vdst1(gpuDynInst, extData.VDST + 1);
++        VecOperandU32 vdst0(gpuDynInst, dsVdstIdx(gpuDynInst));
++        VecOperandU32 vdst1(gpuDynInst, dsVdstIdx(gpuDynInst) + 1);
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -1924,7 +1924,7 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ_I8::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU32 vdst(gpuDynInst, extData.VDST);
++        VecOperandU32 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -1988,7 +1988,7 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ_U8::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU32 vdst(gpuDynInst, extData.VDST);
++        VecOperandU32 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -2072,7 +2072,7 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ_U16::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU32 vdst(gpuDynInst, extData.VDST);
++        VecOperandU32 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -2136,7 +2136,7 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ_U16_D16::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU32 vdst(gpuDynInst, extData.VDST);
++        VecOperandU32 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -2201,7 +2201,7 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ_U16_D16_HI::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU32 vdst(gpuDynInst, extData.VDST);
++        VecOperandU32 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -2265,7 +2265,7 @@ namespace VegaISA
+         // for a load/swizzle/store sequence that is the destination pointer,
+         // so the swizzle silently permuted an address instead of the data.
+         ConstVecOperandU32 data(gpuDynInst, extData.ADDR);
+-        VecOperandU32 vdst(gpuDynInst, extData.VDST);
++        VecOperandU32 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+         /**
+          * The "DS pattern" is comprised of both offset fields. That is, the
+          * swizzle pattern between lanes. Bit 15 of the DS pattern dictates
+@@ -2396,8 +2396,8 @@ namespace VegaISA
+         gpuDynInst->latency.set(gpuDynInst->computeUnit()
+                                 ->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU32 data(gpuDynInst, extData.DATA0);
+-        VecOperandU32 vdst(gpuDynInst, extData.VDST);
++        ConstVecOperandU32 data(gpuDynInst, dsData0Idx(gpuDynInst));
++        VecOperandU32 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+ 
+         addr.read();
+         data.read();
+@@ -2485,8 +2485,8 @@ namespace VegaISA
+         gpuDynInst->latency.set(gpuDynInst->computeUnit()
+                                 ->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU32 data(gpuDynInst, extData.DATA0);
+-        VecOperandU32 vdst(gpuDynInst, extData.VDST);
++        ConstVecOperandU32 data(gpuDynInst, dsData0Idx(gpuDynInst));
++        VecOperandU32 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+ 
+         addr.read();
+         data.read();
+@@ -2573,7 +2573,7 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU64 data(gpuDynInst, extData.DATA0);
++        ConstVecOperandU64 data(gpuDynInst, dsData0Idx(gpuDynInst));
+ 
+         addr.read();
+         data.read();
+@@ -2892,7 +2892,7 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU64 data(gpuDynInst, extData.DATA0);
++        ConstVecOperandU64 data(gpuDynInst, dsData0Idx(gpuDynInst));
+ 
+         addr.read();
+         data.read();
+@@ -2957,8 +2957,8 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU64 data0(gpuDynInst, extData.DATA0);
+-        ConstVecOperandU64 data1(gpuDynInst, extData.DATA1);
++        ConstVecOperandU64 data0(gpuDynInst, dsData0Idx(gpuDynInst));
++        ConstVecOperandU64 data1(gpuDynInst, dsData1Idx(gpuDynInst));
+ 
+         addr.read();
+         data0.read();
+@@ -3025,8 +3025,8 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU64 data0(gpuDynInst, extData.DATA0);
+-        ConstVecOperandU64 data1(gpuDynInst, extData.DATA1);
++        ConstVecOperandU64 data0(gpuDynInst, dsData0Idx(gpuDynInst));
++        ConstVecOperandU64 data1(gpuDynInst, dsData1Idx(gpuDynInst));
+ 
+         addr.read();
+         data0.read();
+@@ -3656,7 +3656,7 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ_B64::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU64 vdst(gpuDynInst, extData.VDST);
++        VecOperandU64 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -3720,8 +3720,8 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ2_B64::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU64 vdst0(gpuDynInst, extData.VDST);
+-        VecOperandU64 vdst1(gpuDynInst, extData.VDST + 2);
++        VecOperandU64 vdst0(gpuDynInst, dsVdstIdx(gpuDynInst));
++        VecOperandU64 vdst1(gpuDynInst, dsVdstIdx(gpuDynInst) + 2);
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -3788,8 +3788,8 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ2ST64_B64::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU64 vdst0(gpuDynInst, extData.VDST);
+-        VecOperandU64 vdst1(gpuDynInst, extData.VDST + 2);
++        VecOperandU64 vdst0(gpuDynInst, dsVdstIdx(gpuDynInst));
++        VecOperandU64 vdst1(gpuDynInst, dsVdstIdx(gpuDynInst) + 2);
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -4788,9 +4788,9 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU32 data0(gpuDynInst, extData.DATA0);
+-        ConstVecOperandU32 data1(gpuDynInst, extData.DATA0 + 1);
+-        ConstVecOperandU32 data2(gpuDynInst, extData.DATA0 + 2);
++        ConstVecOperandU32 data0(gpuDynInst, dsData0Idx(gpuDynInst));
++        ConstVecOperandU32 data1(gpuDynInst, dsData0Idx(gpuDynInst) + 1);
++        ConstVecOperandU32 data2(gpuDynInst, dsData0Idx(gpuDynInst) + 2);
+ 
+         addr.read();
+         data0.read();
+@@ -4852,10 +4852,10 @@ namespace VegaISA
+         gpuDynInst->latency.set(
+                 gpuDynInst->computeUnit()->cyclesToTicks(Cycles(24)));
+         ConstVecOperandU32 addr(gpuDynInst, extData.ADDR);
+-        ConstVecOperandU32 data0(gpuDynInst, extData.DATA0);
+-        ConstVecOperandU32 data1(gpuDynInst, extData.DATA0 + 1);
+-        ConstVecOperandU32 data2(gpuDynInst, extData.DATA0 + 2);
+-        ConstVecOperandU32 data3(gpuDynInst, extData.DATA0 + 3);
++        ConstVecOperandU32 data0(gpuDynInst, dsData0Idx(gpuDynInst));
++        ConstVecOperandU32 data1(gpuDynInst, dsData0Idx(gpuDynInst) + 1);
++        ConstVecOperandU32 data2(gpuDynInst, dsData0Idx(gpuDynInst) + 2);
++        ConstVecOperandU32 data3(gpuDynInst, dsData0Idx(gpuDynInst) + 3);
+ 
+         addr.read();
+         data0.read();
+@@ -4940,9 +4940,9 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ_B96::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU32 vdst0(gpuDynInst, extData.VDST);
+-        VecOperandU32 vdst1(gpuDynInst, extData.VDST + 1);
+-        VecOperandU32 vdst2(gpuDynInst, extData.VDST + 2);
++        VecOperandU32 vdst0(gpuDynInst, dsVdstIdx(gpuDynInst));
++        VecOperandU32 vdst1(gpuDynInst, dsVdstIdx(gpuDynInst) + 1);
++        VecOperandU32 vdst2(gpuDynInst, dsVdstIdx(gpuDynInst) + 2);
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -5004,10 +5004,10 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ_B128::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU32 vdst0(gpuDynInst, extData.VDST);
+-        VecOperandU32 vdst1(gpuDynInst, extData.VDST + 1);
+-        VecOperandU32 vdst2(gpuDynInst, extData.VDST + 2);
+-        VecOperandU32 vdst3(gpuDynInst, extData.VDST + 3);
++        VecOperandU32 vdst0(gpuDynInst, dsVdstIdx(gpuDynInst));
++        VecOperandU32 vdst1(gpuDynInst, dsVdstIdx(gpuDynInst) + 1);
++        VecOperandU32 vdst2(gpuDynInst, dsVdstIdx(gpuDynInst) + 2);
++        VecOperandU32 vdst3(gpuDynInst, dsVdstIdx(gpuDynInst) + 3);
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (gpuDynInst->exec_mask[lane]) {
+@@ -5080,7 +5080,7 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ_B64_TR_B4::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU64 vdst(gpuDynInst, extData.VDST);
++        VecOperandU64 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+ 
+         const auto output = ds_transpose::transposeCdna4(
+             reinterpret_cast<const uint8_t*>(gpuDynInst->d_data),
+@@ -5149,9 +5149,9 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ_B96_TR_B6::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU32 vdst0(gpuDynInst, extData.VDST + 0);
+-        VecOperandU32 vdst1(gpuDynInst, extData.VDST + 1);
+-        VecOperandU32 vdst2(gpuDynInst, extData.VDST + 2);
++        VecOperandU32 vdst0(gpuDynInst, dsVdstIdx(gpuDynInst) + 0);
++        VecOperandU32 vdst1(gpuDynInst, dsVdstIdx(gpuDynInst) + 1);
++        VecOperandU32 vdst2(gpuDynInst, dsVdstIdx(gpuDynInst) + 2);
+ 
+         const auto output = ds_transpose::transposeCdna4(
+             reinterpret_cast<const uint8_t*>(gpuDynInst->d_data),
+@@ -5223,7 +5223,7 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ_B64_TR_B8::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU64 vdst(gpuDynInst, extData.VDST);
++        VecOperandU64 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+ 
+         const auto output = ds_transpose::transposeCdna4(
+             reinterpret_cast<const uint8_t*>(gpuDynInst->d_data),
+@@ -5292,7 +5292,7 @@ namespace VegaISA
+     void
+     Inst_DS__DS_READ_B64_TR_B16::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+-        VecOperandU64 vdst(gpuDynInst, extData.VDST);
++        VecOperandU64 vdst(gpuDynInst, dsVdstIdx(gpuDynInst));
+ 
+         const auto output = ds_transpose::transposeCdna4(
+             reinterpret_cast<const uint8_t*>(gpuDynInst->d_data),
+diff --git a/src/arch/amdgpu/vega/insts/op_encodings.hh b/src/arch/amdgpu/vega/insts/op_encodings.hh
+index e74d6abcf..85c031e2d 100644
+--- a/src/arch/amdgpu/vega/insts/op_encodings.hh
++++ b/src/arch/amdgpu/vega/insts/op_encodings.hh
+@@ -1641,6 +1641,58 @@ namespace VegaISA
+             }
+         }
+ 
++        /**
++         * DS data operands (DATA0, DATA1, VDST) name accumulation
++         * registers (AGPRs) when the ACC encoding bit is set. gem5
++         * models AGPRs as VGPRs starting at the wavefront's
++         * accumOffset, so redirect data operand indices by that
++         * offset, exactly as V_ACCVGPR_READ/WRITE do. The ADDR
++         * operand always names an architectural VGPR and is never
++         * redirected (the reference emulator types addr as OPR_VGPR
++         * while data0/data1/vdst are OPR_VGPR_OR_ACCVGPR).
++         *
++         * Fail closed: a kernel that allocates no AGPRs cannot
++         * legally issue a DS operation with ACC set. accumOffset is
++         * derived from the kernel descriptor as
++         * (accum_offset + 1) * 4, so it is at least 4 for any
++         * initialized wavefront; 0 means the wavefront was never
++         * initialized, and accumOffset >= maxVgprs means the VGPR
++         * allocation contains no AGPR window. Panicking here avoids
++         * silently aliasing low architectural VGPRs.
++         */
++        unsigned
++        dsAccOffset(GPUDynInstPtr gpuDynInst) const
++        {
++            if (!instData.ACC) {
++                return 0;
++            }
++
++            Wavefront *wf = gpuDynInst->wavefront();
++            panic_if(!wf->accumOffset || wf->accumOffset >= wf->maxVgprs,
++                     "%s: DS ACC data operand without an AGPR allocation "
++                     "(accumOffset=%u maxVgprs=%u)",
++                     _opcode.c_str(), wf->accumOffset, wf->maxVgprs);
++            return wf->accumOffset;
++        }
++
++        unsigned
++        dsData0Idx(GPUDynInstPtr gpuDynInst) const
++        {
++            return extData.DATA0 + dsAccOffset(gpuDynInst);
++        }
++
++        unsigned
++        dsData1Idx(GPUDynInstPtr gpuDynInst) const
++        {
++            return extData.DATA1 + dsAccOffset(gpuDynInst);
++        }
++
++        unsigned
++        dsVdstIdx(GPUDynInstPtr gpuDynInst) const
++        {
++            return extData.VDST + dsAccOffset(gpuDynInst);
++        }
++
+         // first instruction DWORD
+         InFmt_DS instData;
+         // second instruction DWORD
+-- 
+2.53.0
+
