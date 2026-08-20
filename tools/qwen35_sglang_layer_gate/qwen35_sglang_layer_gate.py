@@ -603,11 +603,16 @@ class LayerGate:
             id(module): (name or "<layer>")
             for name, module in layer.named_modules()
         }
-        if len(_patched_functions) != 5:
+        installed_names = {name for (_owner, name) in _patched_functions}
+        needed = set(_REQUIRED_FUNCTION_WRAPPERS)
+        if not needed.issubset(installed_names):
             _install_function_wrappers()
-        if len(_patched_functions) != 5:
+        installed_names = {name for (_owner, name) in _patched_functions}
+        still_missing = needed - installed_names
+        if still_missing:
             raise LayerGateError(
-                "SGLang operator gate could not install all five function wrappers"
+                "SGLang operator gate could not install function wrappers: "
+                f"{sorted(still_missing)}"
             )
         # SGLang invokes Qwen3.5 decoder layers with keyword arguments.  The
         # pinned PyTorch process-global pre-hook intentionally receives only
@@ -825,6 +830,74 @@ class LayerGate:
                 },
             )
 
+    def _capture_decode_states(
+        self, label: str, kwargs: dict, output: object
+    ) -> None:
+        """Dump the decode-entry GDN state pools for the active decode row.
+
+        The decode kernels are verified exact standalone; the layer-0
+        decode divergence must therefore come from WHAT the pools hold
+        (or which slot the indices select) when the real engine enters
+        decode.  Capture conv_states/ssm_states pools, cache_indices and
+        the kernel inputs once per (decode_row, label) at layer 0.
+        """
+        if self.decode_row is None or self.next_layer != 0:
+            return
+        key = f"decode{self.decode_row}_{label}"
+        if getattr(self, "_state_captured", None) == key:
+            return
+        self._state_captured = key
+        try:
+            conv_states = kwargs.get("conv_states")
+            ssm_states = kwargs.get("ssm_states")
+            cache_indices = kwargs.get("cache_indices") or kwargs.get(
+                "conv_state_indices"
+            )
+            tensors: dict[str, torch.Tensor] = {}
+            if cache_indices is not None:
+                tensors["cache_indices"] = (
+                    cache_indices.detach().cpu().contiguous()
+                )
+                idx = (
+                    cache_indices.detach().reshape(-1)[0].long().item()
+                )
+                if conv_states is not None:
+                    tensors["conv_states_selected"] = (
+                        conv_states[idx].detach().cpu().contiguous()
+                    )
+                    tensors["conv_states_pool_shape"] = torch.tensor(
+                        list(conv_states.shape), dtype=torch.int64
+                    )
+                if ssm_states is not None:
+                    tensors["ssm_states_selected"] = (
+                        ssm_states[idx].detach().cpu().contiguous()
+                    )
+                    tensors["ssm_states_pool_shape"] = torch.tensor(
+                        list(ssm_states.shape), dtype=torch.int64
+                    )
+            first_input = None
+            for value in list(kwargs.values()):
+                if isinstance(value, torch.Tensor):
+                    first_input = value
+                    break
+            if first_input is not None:
+                tensors["first_kernel_input"] = (
+                    first_input.detach().cpu().contiguous()
+                )
+            if tensors:
+                payload = save_safetensors(
+                    {
+                        k: (v.to(torch.float32) if v.is_floating_point() else v)
+                        for k, v in tensors.items()
+                    }
+                )
+                _atomic_write(self.output / f"{key}_states.safetensors", payload)
+        except Exception as error:  # noqa: BLE001 - diagnostics must not kill the lane
+            _atomic_write(
+                self.output / f"{key}_capture_error.txt",
+                f"{type(error).__name__}: {error}".encode("ascii"),
+            )
+
     def observe_function(
         self,
         name: str,
@@ -964,6 +1037,10 @@ class LayerGate:
         # that arm the row, but SGLang threads later layers' context
         # without repeating them -- a missing positions kwarg mid-row must
         # not drop the remaining 23 layer comparisons.
+        if self.decode_wait and not self.active and not _patched_functions:
+            # Decode-entry state capture needs the kernel wrappers before the
+            # decode forward; prefill-only arming would install them too late.
+            _install_function_wrappers()
         if not (self.active and self.decode_row is not None):
             positions = _normalize_positions(kwargs.get("positions"))
             if positions != TOKEN_POSITIONS:
@@ -1309,6 +1386,18 @@ class LayerGate:
 
 _thread = threading.local()
 _handles: list[object] = []
+# Attribute names the prefill operator gate depends on; the decode-state
+# capture patches (causal_conv1d_update, packed_decode, decode) are optional
+# additions and must not affect this requirement.
+_REQUIRED_FUNCTION_WRAPPERS = {
+    "causal_conv1d_fn",
+    "fused_qkv_split_gdn_prefill",
+    "fused_gdn_gating",
+    "chunk_gated_delta_rule",
+    "fused_qkvzba_split_reshape_cat_contiguous",
+}
+
+
 _patched_functions: dict[tuple[object, str], object] = {}
 
 
@@ -1402,6 +1491,39 @@ def _install_function_wrappers() -> None:
     gdn_kernel = importlib.import_module(
         "sglang.srt.layers.attention.linear.kernels.gdn_triton"
     )
+
+    def decode_state_capture(original, label):
+        def wrapped(*args, **kwargs):
+            output = original(*args, **kwargs)
+            controller = _controller()
+            controller._capture_decode_states(label, kwargs or {}, output)
+            return output
+
+        return wrapped
+
+    # The decode-entry state pools: gdn_backend imports causal_conv1d_update
+    # at module level and reaches the recurrent kernel through the
+    # dispatcher's decode_kernel object; capture both feeding tensors.
+    conv_mod = importlib.import_module(
+        "sglang.srt.layers.attention.linear.gdn_backend"
+    )
+    _patch_attribute(
+        conv_mod, "causal_conv1d_update",
+        lambda orig: decode_state_capture(orig, "conv_update"),
+    )
+    dispatcher_mod = importlib.import_module(
+        "sglang.srt.layers.attention.linear.gdn_backend"
+    )
+    dispatcher_cls = getattr(dispatcher_mod, "GDNKernelDispatcher", None)
+    if dispatcher_cls is not None:
+        _patch_attribute(
+            dispatcher_cls, "packed_decode",
+            lambda orig: decode_state_capture(orig, "packed_decode"),
+        )
+        _patch_attribute(
+            dispatcher_cls, "decode",
+            lambda orig: decode_state_capture(orig, "decode"),
+        )
 
     def split_wrapper(original):
         def wrapped(mixed_qkvz, mixed_ba, *args, **kwargs):
