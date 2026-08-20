@@ -1,0 +1,17 @@
+{
+  "acceptance": {
+    "atomic_decline": "ea8a8838... byte-identical, declined (fence)",
+    "barrier_lds": "ad7facb2... byte-identical, admitted",
+    "independent_verify": "main agent reran plain_dp hybrid: MATCH vs accurate reference",
+    "plain_dp": "deebc5e9... byte-identical, admitted"
+  },
+  "checkpoint_id": "CP-0090",
+  "claim": "Hybrid CTA execution (PLAN 0.0.2 item 5) implemented and accepted on the dual-mode capsule ladder. Implementation: gem5 branch zcode/gem5-hybrid-cta (tip c6b974751, worktree /home/zhaosiying/zcode-gem5-hybrid; mirrored as zcode/gem5-hybrid-cta-ref in the lane's gem5). WG0 runs the full timing pipeline; workgroups 1..N-1 execute functionally at dispatch time under a fail-closed static screen (worklist CFG walk declining global/flat atomics, ds_gws, fences, indirect control flow, unreadable branch targets; s_barrier never declined; predicate strictly globalWgId>0). Two implementation defects were found and fixed by instrumented token traces: (1) the functional synchronous memory path returned one token PER LANE (recvTokens fired inside the per-lane issue loop) causing token_pool panic availableTokens>maxTokens on the first admitted dispatch; fixed by splitting the native access (inline) from response completion (deferred to a post-initiateAcc drain so allLanesZero fires exactly once); (2) a mark-before-dispatch reorder advanced globalWgId before startWavefront stamped wave identity, shifting every functional WG's index by one. ACCEPTANCE (hybrid vs accurate, identical capsule, byte-identical output_sha256): plain_dp deebc5e9... (admitted, WG0 timing + WG1-3 functional, independently re-verified by the main agent), barrier_lds ad7facb2... (admitted, barriers honoured in functional WGs, no hang), atomic_decline ea8a8838... (DECLINED on the buffer_wbl2 fence, ran entirely through timing). All six gem5 GPU unit suites still pass (21/6/19/27/6/6). The mode stays opt-in via --hybrid-cta (independent of --functional-fast) and is NOT yet wired into any model lane; performance measurement on the 99.5%-concentrated launch geometry is the next step.",
+  "commits": [
+    "af9181b96",
+    "535d6dad9",
+    "c6b974751"
+  ],
+  "operational_notes": "--hybrid-cta is a script-level option (append after managed argv like --functional-fast); the managed session must be pointed at the hybrid worktree's host_dispatch.py via a pre-set SAGR_MANAGED_GEM5_CONFIG (runner now honors it).",
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1"
+}
