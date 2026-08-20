@@ -1,0 +1,15 @@
+{
+  "checkpoint_id": "CP-0087",
+  "claim": "RETRACTION of CP-0086 plus probe-suite discrimination of the CK attention defect. (1) The 'wide-destination scoreboard hazard' was the capsule author's own bug: gem5's v_cndmask_b32 semantics are dst = vcc ? src1 : src0 (vop3.cc:59+, matches AMD ISA); the reproducer kernel wrote the operands in the opposite order, and the observed [63,63,63,62] is the CORRECT execution of the inverted chain. ds_read_b128 was bit-perfect all along (raw v[0:3] dump), and v_and_b32 in all three encodings (e64 reg&reg, e64 imm, e32) is correct per the isolation probe. The RFC eviction added during the hunt is retained as cheap hardening (the race audit's R3: any config raising rfc cache_size re-arms the busy-bypass; eviction at mark-time closes it). (2) The absorbed probe suite completes the discrimination on the current build: sweeptail (signal in head dims 254/255) reproduces the expected logits EXACTLY (-4.002,-1.996,-1.007,-0.503,0.0,0.494,0.997,1.982 vs -4,-2,-1,-0.5,0,0.5,1,2) so exp/softmax and the MFMA epilogue are correct; sweep (dims 0/1) measures identically-zero logits; readprobs (real layer-3 q/k) is wrong. The CK defect is therefore the staging of EARLY k-block fragments: the Q.K contribution of dims [0:~240) vanishes while the final k-block(s) are exact. All register-level machinery (MFMA chains incl. 16-deep, AGPR, b128 reads, LDS barrier visibility, atomics) is verified correct, so the remaining suspect is the global dwordx4/buffer-load -> vmcnt -> consume staging path for earlier tiles (double-buffered pipeline), which no minimal capsule covers yet.",
+  "probe_results": {
+    "dimsplit": "p0 exactly 0.5 (first 128 dims lost)",
+    "readprobs": "wrong (real q/k)",
+    "sweep": "all-zero logits -> early-dim fragments lost",
+    "sweeptail": "exact expected logits -> softmax/exp/epilogue correct"
+  },
+  "remaining_suspect": "global dwordx4/buffer-load -> waitcnt -> consumer staging for early k-block tiles (double-buffered); next capsule: dwordx4 global load feeding a per-k-block sum with vmcnt waits",
+  "retractions": [
+    "EV-zcode-0086"
+  ],
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1"
+}

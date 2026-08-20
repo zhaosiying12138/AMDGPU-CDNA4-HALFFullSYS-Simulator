@@ -50,6 +50,9 @@ def main() -> int:
     vals = [words[t*8] for t in range(256)]
     import struct as _s
     u = lambda f: _s.unpack("<I", _s.pack("<f", f))[0]
+    # and_e64 probe: every lane stores at FIXED offsets (v31=0,4,8): only
+    # the first three dwords are written (by lanes' own stores racing to the
+    # same offsets); instead read lanes 0..3 pattern from out[0..2] vs expectation.
     exps = [u(words[t*8+1]) for t in range(256)]
     raws = [[u(words[t*8+2+j]) for j in range(4)] for t in range(256)]
     uvals = [u(v) for v in vals]
@@ -63,6 +66,9 @@ def main() -> int:
         "sample_read": uvals[:8],
         "sample_expected": exps[:8],
         "raw_v0123_ticket0_4": raws[:4],
+        "v28_ticket0_7": [int(words[t*8+6]) for t in range(7)],
+        "v26_ticket0_7": [int(words[t*8+7]) for t in range(7)],
+        "slots0123_t0_7": [[u(words[t*8+s]) for s in range(4)] for t in range(8)],
     }
     args.output_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
     (args.output_dir / "result.json").write_text(
