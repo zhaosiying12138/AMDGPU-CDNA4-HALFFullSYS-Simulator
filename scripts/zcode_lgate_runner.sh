@@ -18,6 +18,7 @@ exec env -i HOME=/home/zhaosiying TERM=dumb \
   SAGR_MANAGED_RUN_ROOT="/tmp/sagr-lane-${LANE_NAME}" \
   SAGR_ROCR_LIBRARY_DIR=/home/zhaosiying/zcode-lane/build/rocr-stage-zcode/lib \
   SAGR_ATTENTION_BACKEND="${ATTN}" \
+  SAGR_QWEN35_DECODE_GATE_GOLDEN="${DECODE_GOLDEN:-}" \
   "${RECORD_ALL_ENV[@]}" \
   bash /home/zhaosiying/zcode-lane/scripts/run_engine_lane.sh \
   --engine sglang --tp 1 --debug-layer-gate --fast \
