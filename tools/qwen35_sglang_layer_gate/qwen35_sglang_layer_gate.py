@@ -70,6 +70,47 @@ LAYER_CLASSES = {
 }
 
 
+def _slot_fingerprint(tensor: torch.Tensor, index: int) -> dict:
+    """Cheap per-call identity of one pool slot (no full-tensor copy)."""
+    import hashlib as _hashlib
+
+    try:
+        slot = tensor.detach()[index]
+        raw = (
+            slot.to(torch.float32).contiguous()
+            .view(torch.uint8 if slot.dtype == torch.bfloat16 else torch.uint8)
+            if False
+            else slot.detach().cpu().contiguous()
+        )
+        import struct as _struct
+
+        floats = raw.to(torch.float32).flatten()
+        digest = _hashlib.sha256(
+            _struct.pack("<%df" % floats.numel(), *floats.tolist())
+        ).hexdigest()[:16]
+        return {
+            "slot_sha256_16": digest,
+            "slot_mean_abs": round(floats.abs().mean().item(), 8),
+        }
+    except Exception:  # noqa: BLE001 - journaling must never break the lane
+        return {}
+
+
+_state_journal_path: list = []
+
+
+def _journal_state(event: dict) -> None:
+    if not _state_journal_path:
+        return
+    try:
+        import json as _json
+
+        with open(_state_journal_path[0], "a", encoding="utf-8") as handle:
+            handle.write(_json.dumps(event, sort_keys=True) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class LayerGateError(RuntimeError):
     """The diagnostic contract or a numerical comparison failed."""
 
@@ -832,6 +873,18 @@ class LayerGate:
                 },
             )
 
+    def _journal_event(self, event: dict) -> None:
+        """Append one slot-fingerprint record to the gate's output journal."""
+        try:
+            import json as _json
+
+            with open(
+                self.output / "state-journal.jsonl", "a", encoding="utf-8"
+            ) as handle:
+                handle.write(_json.dumps(event, sort_keys=True) + "\n")
+        except Exception:  # noqa: BLE001 - journaling must never break the lane
+            pass
+
     def _capture_decode_states(
         self, label: str, kwargs: dict, output: object,
         args: tuple = (),
@@ -844,6 +897,13 @@ class LayerGate:
         decode.  Capture conv_states/ssm_states pools, cache_indices and
         the kernel inputs once per (decode_row, label) at layer 0.
         """
+        conv_states = kwargs.get("conv_states")
+        if conv_states is None and len(args) > 1:
+            conv_states = args[1]
+        ssm_states = kwargs.get("ssm_states")
+        cache_indices = kwargs.get("cache_indices") or kwargs.get(
+            "conv_state_indices"
+        )
         # The kernels of layer 0 run BEFORE the layer post-hook that arms
         # the decode row, so arming cannot gate the capture: capture on the
         # first kernel of each decode forward while the row is still pending
@@ -858,18 +918,36 @@ class LayerGate:
         if row < 0:
             return
         key = f"decode{row}_{label}"
-        if self._state_captured == key:
+        first_of_key = self._state_captured != key
+        if first_of_key:
+            self._state_captured = key
+        self._decode_kernel_calls = getattr(self, "_decode_kernel_calls", 0) + 1
+        event = {
+            "event": "decode_kernel",
+            "seq": self._decode_kernel_calls,
+            "label": label,
+            "row": row,
+        }
+        cache_indices_j = kwargs.get("cache_indices") or kwargs.get(
+            "conv_state_indices"
+        )
+        if cache_indices_j is not None:
+            event["cache_indices"] = [
+                int(x) for x in cache_indices_j.detach().reshape(-1).tolist()
+            ]
+        pool = ssm_states if ssm_states is not None else conv_states
+        idx_j = (
+            int(cache_indices_j.detach().reshape(-1)[0].long().item())
+            if cache_indices_j is not None
+            else -1
+        )
+        if pool is not None and idx_j >= 0:
+            event["pool"] = "ssm" if ssm_states is not None else "conv"
+            event.update(_slot_fingerprint(pool, idx_j))
+        self._journal_event(event)
+        if not first_of_key:
             return
-        self._state_captured = key
         try:
-            conv_states = kwargs.get("conv_states")
-            if conv_states is None and len(args) > 1:
-                # causal_conv1d_update receives the state pool positionally.
-                conv_states = args[1]
-            ssm_states = kwargs.get("ssm_states")
-            cache_indices = kwargs.get("cache_indices") or kwargs.get(
-                "conv_state_indices"
-            )
             tensors: dict[str, torch.Tensor] = {}
             if cache_indices is not None:
                 tensors["cache_indices"] = (
@@ -1701,6 +1779,21 @@ def _install_function_wrappers() -> None:
                 ).clone()
             output = original(*args, **kwargs)
             controller = _controller()
+            # Post-call slot journal: fingerprints the pool slot right after
+            # the chunk kernel commits its state, bracketing any later
+            # rewrite between the prefill commit and the decode read.
+            if isinstance(initial, torch.Tensor) and isinstance(indices, torch.Tensor):
+                idx_p = int(indices.detach().reshape(-1)[0].long().item())
+                if 0 <= idx_p < initial.shape[0]:
+                    event = {
+                        "event": "prefill_chunk_post",
+                        "pool": "ssm",
+                        "cache_indices": [
+                            int(x) for x in indices.detach().reshape(-1).tolist()
+                        ],
+                    }
+                    event.update(_slot_fingerprint(initial, idx_p))
+                    controller._journal_event(event)
             replay_inputs = (
                 kwargs.get("q"),
                 kwargs.get("k"),
