@@ -1,0 +1,3520 @@
+From 67bf805d8c01fe9848b0c9fb5c663d5fbfe2a055 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 10 Aug 2026 08:06:39 +0800
+Subject: [PATCH 18/42] feat(amdgpu): add owner-bound generic dispatch v2
+ admission
+
+Add a bridge-facing owner-bound MAP/ALLOC/publish/SUBMIT/RETIRE/UNMAP state adapter for the generic dispatch-v2 contract. Validate committed code-object metadata, descriptor preload fail-closed behavior, queue identity, full-manifest kernarg shape, CP rejection cancellation, wire-valid responses, and admission-only lifecycle without advertising or invoking a daemon MessageType 18 route.
+
+Checkpoint-ID: CP-0023
+Goal-ID: GSIM-001
+Plan-Revision: 2
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 67846fdd4d51e64831ae0f4b9ce8139d990f37fbeaaa829e1da0aa638e2a172b
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/dev/amdgpu/SConscript                     |  17 +
+ .../host_gpu_native_dispatch_state_v2.cc      | 969 +++++++++++++++++
+ .../host_gpu_native_dispatch_state_v2.hh      | 275 +++++
+ .../host_gpu_native_dispatch_state_v2_main.cc | 527 ++++++++++
+ src/dev/amdgpu/host_gpu_protocol.cc           | 970 ++++++++++++++++++
+ src/dev/amdgpu/host_gpu_protocol.hh           | 218 ++++
+ src/dev/amdgpu/host_gpu_protocol.test.cc      | 374 +++++++
+ 7 files changed, 3350 insertions(+)
+ create mode 100644 src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_native_dispatch_state_v2.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_native_dispatch_state_v2_main.cc
+
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index 51bea204a..f18bbff03 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -49,6 +49,7 @@ if not env['CONF']['USE_X86_ISA']:
+         'host_gpu_native_dispatch_admission.cc',
+         'host_gpu_native_queue_core.cc',
+         'host_gpu_native_command_processor_core.cc',
++        'host_gpu_native_dispatch_state_v2.cc',
+         'host_native_gpu_executor.cc',
+     ):
+         native_gem5_sources[source_name] = Source(source_name)
+@@ -125,6 +126,22 @@ Executable('host_gpu_native_b1_core',
+            native_source('host_gpu_protocol.cc'),
+            native_source('host_gpu_memory_state.cc'))
+ 
++# CP23 owner-bound generic-dispatch-v2 bridge adapter.  This target exercises
++# MAP/ALLOC/publish/SUBMIT admission and retirement only; it deliberately has
++# no GPUDispatcher, Shader, ComputeUnit, or execution path.
++Executable('host_gpu_native_dispatch_state_v2_core',
++           Source('host_gpu_native_dispatch_state_v2_main.cc',
++                  tag_gem5_lib=False),
++           native_source('host_gpu_native_dispatch_state_v2.cc'),
++           native_source('host_gpu_native_queue_core.cc'),
++           native_source('host_gpu_native_command_processor_core.cc'),
++           native_source('host_native_code_object_mapper.cc'),
++           native_source('host_native_memory_context.cc'),
++           native_source('host_gpu_code_object_image.cc'),
++           native_source('host_gpu_code_object_state.cc'),
++           native_source('host_gpu_protocol.cc'),
++           native_source('host_gpu_memory_state.cc'))
++
+ if not env['CONF']['USE_X86_ISA']:
+     Return()
+ 
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc
+new file mode 100644
+index 000000000..0da242b8a
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc
+@@ -0,0 +1,969 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of their contributors may be used to endorse or promote
++ * products derived from this software without specific prior written
++ * permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_native_dispatch_state_v2.hh"
++
++#include <algorithm>
++#include <climits>
++#include <cstring>
++#include <limits>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++namespace
++{
++
++constexpr uint64_t MinimumKernargAlignment = 8;
++constexpr uint64_t MaximumKernargAlignment = 65536;
++
++void
++resetResponse(
++    const HostNativeDispatchStateV2::Request &request,
++    HostNativeDispatchStateV2::Response &response)
++{
++    response = {};
++    response.major = protocol::GenericDispatchMajor;
++    response.minor = protocol::GenericDispatchMinor;
++    response.opcode = request.opcode;
++}
++
++bool
++requestVersionValid(const HostNativeDispatchStateV2::Request &request)
++{
++    return request.major == protocol::GenericDispatchMajor &&
++        request.minor == protocol::GenericDispatchMinor && request.flags == 0 &&
++        request.reserved == 0;
++}
++
++bool
++opcodeIs(
++    const HostNativeDispatchStateV2::Request &request,
++    protocol::GenericDispatchOpcode opcode)
++{
++    return request.opcode == opcode;
++}
++
++template <size_t N>
++bool
++bytesZero(const std::array<uint8_t, N> &value)
++{
++    return std::all_of(value.begin(), value.end(),
++                       [](uint8_t byte) { return byte == 0; });
++}
++
++bool
++kernelNameMatches(
++    const std::array<uint8_t, protocol::GenericDispatchKernelNameBytes> &name,
++    const protocol::CodeObjectManifest &manifest)
++{
++    return std::equal(
++               manifest.kernelName.begin(), manifest.kernelName.end(),
++               name.begin()) &&
++        std::all_of(
++            name.begin() + manifest.kernelName.size(), name.end(),
++            [](uint8_t byte) { return byte == 0; });
++}
++
++} // anonymous namespace
++
++HostNativeDispatchStateV2::HostNativeDispatchStateV2(
++    HostGPUMemoryState &memoryState, HostNativeMemoryContext &memoryContext,
++    HostNativeCodeObjectMapper &codeMapper,
++    HostNativeCommandProcessorCore &cpCore, const Owner &owner)
++    : memory(memoryState), context(memoryContext), mapper(codeMapper),
++      commandProcessor(cpCore), boundOwner(owner)
++{
++}
++
++HostNativeDispatchStateV2::~HostNativeDispatchStateV2()
++{
++    /* A submitted task must be retired by its bridge owner first. */
++    if (!submission)
++        clear();
++}
++
++const char *
++HostNativeDispatchStateV2::failureName(Failure failure)
++{
++    switch (failure) {
++      case Failure::None:
++        return "none";
++      case Failure::InvalidOwner:
++        return "invalid_owner";
++      case Failure::InvalidRequest:
++        return "invalid_request";
++      case Failure::Busy:
++        return "busy";
++      case Failure::UnsupportedPreload:
++        return "unsupported_preload";
++      case Failure::Mapping:
++        return "mapping";
++      case Failure::Allocation:
++        return "allocation";
++      case Failure::PageMap:
++        return "page_map";
++      case Failure::Publication:
++        return "publication";
++      case Failure::Queue:
++        return "queue";
++      case Failure::CommandProcessor:
++        return "command_processor";
++      case Failure::State:
++        return "state";
++      case Failure::Overflow:
++        return "overflow";
++    }
++    return "unknown";
++}
++
++bool
++HostNativeDispatchStateV2::fail(
++    protocol::Status status, Failure failure, const char *reason)
++{
++    lastFailure = failure;
++    failureReason = reason;
++    (void)status;
++    return false;
++}
++
++bool
++HostNativeDispatchStateV2::failResponse(
++    const Request &request, Response &response, protocol::Status status,
++    Failure failure, const char *reason)
++{
++    resetResponse(request, response);
++    response.status = status;
++    response.errorCode = static_cast<uint32_t>(failure);
++    return fail(status, failure, reason);
++}
++
++bool
++HostNativeDispatchStateV2::validateContext(
++    const RequestContext &requestContext) const
++{
++    return requestContext.owner == boundOwner && requestContext.requestId != 0;
++}
++
++bool
++HostNativeDispatchStateV2::validateObject(
++    uint64_t objectId, uint64_t objectGeneration) const
++{
++    return mapping && objectId != 0 && objectGeneration != 0 &&
++        mapping->objectId == objectId &&
++        mapping->objectGeneration == objectGeneration;
++}
++
++bool
++HostNativeDispatchStateV2::validateMapping(const Request &request) const
++{
++    return validateObject(request.objectId, request.objectGeneration) &&
++        request.mappingId != 0 && request.mappingGeneration != 0 &&
++        mapping->mappingId == request.mappingId &&
++        mapping->mappingGeneration == request.mappingGeneration;
++}
++
++bool
++HostNativeDispatchStateV2::validateKernarg(
++    const Request &request, uint64_t allocationId,
++    uint64_t allocationGeneration) const
++{
++    return validateMapping(request) && kernarg &&
++        allocationId != 0 && allocationGeneration != 0 &&
++        kernarg->allocation.allocationId == allocationId &&
++        kernarg->allocation.generation == allocationGeneration;
++}
++
++bool
++HostNativeDispatchStateV2::powerOfTwo(uint64_t value)
++{
++    return value != 0 && (value & (value - 1)) == 0;
++}
++
++bool
++HostNativeDispatchStateV2::rangeFits(
++    uint64_t offset, uint64_t bytes, uint64_t size)
++{
++    return offset <= size && bytes <= size - offset;
++}
++
++bool
++HostNativeDispatchStateV2::descriptorPreload(
++    const HostNativeCodeObjectMapper::Mapping &value,
++    uint32_t &length, uint32_t &offset) const
++{
++    length = 0;
++    offset = 0;
++    AMDKernelCode descriptor = {};
++    if (!context.functionalRead(
++            value.descriptorGpuVa, &descriptor,
++            sizeof(descriptor))) {
++        return false;
++    }
++    length = descriptor.kernarg_preload_spec_length;
++    offset = descriptor.kernarg_preload_spec_offset;
++    return true;
++}
++
++bool
++HostNativeDispatchStateV2::rangePublished(uint64_t offset, uint64_t bytes) const
++{
++    if (!kernarg || bytes == 0 || !rangeFits(
++            offset, bytes, kernarg->allocation.size)) {
++        return false;
++    }
++    for (const auto &range : kernarg->publishedRanges) {
++        if (offset >= range.first && bytes <= range.second - offset)
++            return true;
++    }
++    return false;
++}
++
++void
++HostNativeDispatchStateV2::rememberPublishedRange(
++    uint64_t offset, uint64_t bytes)
++{
++    if (bytes == 0)
++        return;
++    uint64_t start = offset;
++    uint64_t end = offset + bytes;
++    std::vector<std::pair<uint64_t, uint64_t>> merged;
++    merged.reserve(kernarg->publishedRanges.size() + 1);
++    bool inserted = false;
++    for (const auto &range : kernarg->publishedRanges) {
++        const uint64_t rangeStart = range.first;
++        const uint64_t rangeEnd = range.second;
++        if (rangeEnd < start) {
++            merged.push_back(range);
++        } else if (end < rangeStart) {
++            if (!inserted) {
++                merged.emplace_back(start, end);
++                inserted = true;
++            }
++            merged.push_back(range);
++        } else {
++            start = std::min(start, rangeStart);
++            end = std::max(end, rangeEnd);
++        }
++    }
++    if (!inserted)
++        merged.emplace_back(start, end);
++    kernarg->publishedRanges = std::move(merged);
++}
++
++bool
++HostNativeDispatchStateV2::map(
++    const RequestContext &requestContext, const Request &request,
++    const std::vector<uint8_t> &image,
++    const protocol::CodeObjectManifest &manifest, Response &response)
++{
++    resetResponse(request, response);
++    if (!validateContext(requestContext)) {
++        return failResponse(
++            request, response, requestContext.owner == boundOwner ?
++                protocol::Status::Malformed : protocol::Status::Unauthorized,
++            requestContext.owner == boundOwner ? Failure::InvalidRequest :
++                Failure::InvalidOwner,
++            requestContext.owner == boundOwner ?
++                "invalid MAP request context" : "MAP owner mismatch");
++    }
++    if (!requestVersionValid(request) ||
++        !opcodeIs(request, protocol::GenericDispatchOpcode::MapObject) ||
++        request.objectId == 0 || request.objectGeneration == 0 ||
++        request.mappingId != 0 || request.mappingGeneration != 0 ||
++        request.queueId != 0 || request.queueGeneration != 0 ||
++        request.queueSequence != 0 || request.kernelIndex >=
++            protocol::GenericDispatchMaximumKernels || image.empty() ||
++        request.map.gfxTarget != protocol::GenericDispatchGfxTarget ||
++        request.map.relocationCount != 0 ||
++        request.map.pageSize != context.pageBytes() || mapping ||
++        bytesZero(request.imageSha256) ||
++        bytesZero(manifest.imageSha256) ||
++        bytesZero(manifest.kernelName) ||
++        !kernelNameMatches(request.kernelName, manifest)) {
++        return failResponse(
++            request, response, mapping ? protocol::Status::Busy :
++                protocol::Status::Malformed,
++            mapping ? Failure::Busy : Failure::InvalidRequest,
++            mapping ? "MAP already owns a mapping" : "invalid MAP request");
++    }
++    if (request.map.descriptorPreloadDwords != 0) {
++        return failResponse(
++            request, response, protocol::Status::UnsupportedCapability,
++            Failure::UnsupportedPreload,
++            "descriptor preload is unsupported by native v2 admission");
++    }
++    if (request.imageSha256 != manifest.imageSha256) {
++        return failResponse(
++            request, response, protocol::Status::ProtocolState,
++            Failure::InvalidRequest, "MAP image digest mismatch");
++    }
++    if (request.kernelIndex != manifest.kernelIndex ||
++        request.map.kernargSegmentSize != manifest.kernargSegmentSize ||
++        request.map.kernargSegmentAlign != manifest.kernargSegmentAlign) {
++        return failResponse(
++            request, response, protocol::Status::ProtocolState,
++            Failure::InvalidRequest, "MAP manifest metadata mismatch");
++    }
++
++    auto mapped = mapper.map(image, manifest);
++    if (!mapped || !mapped->valid()) {
++        return failResponse(
++            request, response, protocol::Status::Internal, Failure::Mapping,
++            "code-object mapping failed");
++    }
++    const auto ownerAllocation = memory.allocationView(
++        boundOwner, mapped->allocation.allocationId,
++        mapped->allocation.generation);
++    if (!ownerAllocation || ownerAllocation->gpuVa != mapped->allocation.gpuVa ||
++        ownerAllocation->size != mapped->allocation.size) {
++        mapper.unmap(*mapped);
++        return failResponse(
++            request, response, protocol::Status::Unauthorized,
++            Failure::InvalidOwner, "mapped allocation owner mismatch");
++    }
++
++    uint32_t preloadLength = 0;
++    uint32_t preloadOffset = 0;
++    if (!descriptorPreload(*mapped, preloadLength, preloadOffset)) {
++        mapper.unmap(*mapped);
++        return failResponse(
++            request, response, protocol::Status::Internal, Failure::Mapping,
++            "mapped descriptor read failed");
++    }
++    if (preloadLength != 0 || preloadOffset != 0) {
++        mapper.unmap(*mapped);
++        return failResponse(
++            request, response, protocol::Status::UnsupportedCapability,
++            Failure::UnsupportedPreload,
++            "kernarg preload is unsupported by native v2 admission");
++    }
++    if (nextMappingId == 0 || mapped->lease.generation == 0) {
++        mapper.unmap(*mapped);
++        return failResponse(
++            request, response, protocol::Status::ResourceExhausted,
++            Failure::Overflow, "mapping identity exhausted");
++    }
++
++    const uint64_t mappingId = nextMappingId++;
++    const uint64_t mappingGeneration = mapped->lease.generation;
++    MappingRecord record;
++    record.objectId = request.objectId;
++    record.objectGeneration = request.objectGeneration;
++    record.mappingId = mappingId;
++    record.mappingGeneration = mappingGeneration;
++    record.value = *mapped;
++    record.manifest = manifest;
++    try {
++        mapping.emplace(std::move(record));
++    } catch (const std::bad_alloc &) {
++        mapper.unmap(*mapped);
++        return failResponse(
++            request, response, protocol::Status::ResourceExhausted,
++            Failure::Mapping, "mapping state allocation failed");
++    }
++
++    response.status = protocol::Status::Ok;
++    response.objectId = request.objectId;
++    response.objectGeneration = request.objectGeneration;
++    response.mappingId = mappingId;
++    response.mappingGeneration = mappingGeneration;
++    response.mappedBaseVa = mapping->value.allocation.gpuVa;
++    if (mapping->value.mappedBytes >
++        std::numeric_limits<Addr>::max() - response.mappedBaseVa) {
++        mapping.reset();
++        mapper.unmap(*mapped);
++        return failResponse(
++            request, response, protocol::Status::ResourceExhausted,
++            Failure::Overflow, "mapped range overflows GPU VA");
++    }
++    response.mappedEndVa = response.mappedBaseVa + mapping->value.mappedBytes;
++    response.descriptorVa = mapping->value.descriptorGpuVa;
++    response.codeVa = mapping->value.codeGpuVa;
++    response.entryVa = mapping->value.entryGpuVa;
++    response.mappedBytes = mapping->value.mappedBytes;
++    response.kernelIndex = request.kernelIndex;
++    response.segmentCount = mapping->value.segmentCount;
++    response.descriptorPreloadDwords = 0;
++    response.imageSha256 = request.imageSha256;
++    lastFailure = Failure::None;
++    failureReason = "none";
++    return true;
++}
++
++bool
++HostNativeDispatchStateV2::allocateKernarg(
++    const RequestContext &requestContext, const Request &request,
++    Response &response)
++{
++    resetResponse(request, response);
++    if (!validateContext(requestContext)) {
++        return failResponse(
++            request, response, requestContext.owner == boundOwner ?
++                protocol::Status::Malformed : protocol::Status::Unauthorized,
++            requestContext.owner == boundOwner ? Failure::InvalidRequest :
++                Failure::InvalidOwner,
++            requestContext.owner == boundOwner ?
++                "invalid ALLOC request context" : "ALLOC owner mismatch");
++    }
++    if (!requestVersionValid(request) ||
++        !opcodeIs(request, protocol::GenericDispatchOpcode::AllocKernarg) ||
++        !validateMapping(request) || kernarg ||
++        request.queueId != 0 || request.queueGeneration != 0 ||
++        request.queueSequence != 0 || request.kernelIndex != 0 ||
++        request.allocKernarg.sizeBytes == 0 ||
++        request.allocKernarg.sizeBytes > HostGPUMemoryState::MaximumTransferBytes ||
++        !powerOfTwo(request.allocKernarg.alignmentBytes) ||
++        request.allocKernarg.alignmentBytes < MinimumKernargAlignment ||
++        request.allocKernarg.alignmentBytes > MaximumKernargAlignment ||
++        request.allocKernarg.allocationFlags != 0 ||
++        request.allocKernarg.reserved != 0 ||
++        !bytesZero(request.imageSha256) || !bytesZero(request.kernelName)) {
++        return failResponse(
++            request, response, kernarg ? protocol::Status::Busy :
++                protocol::Status::Malformed,
++            kernarg ? Failure::Busy : Failure::InvalidRequest,
++            kernarg ? "ALLOC already owns kernarg" : "invalid ALLOC request");
++    }
++
++    const uint64_t backingAlignment =
++        request.allocKernarg.alignmentBytes > 4096 ? 65536 : 4096;
++    protocol::MemoryRequest allocationRequest;
++    allocationRequest.opcode = protocol::MemoryOpcode::Allocate;
++    allocationRequest.byteCount = request.allocKernarg.sizeBytes;
++    allocationRequest.argument = backingAlignment;
++    const auto allocation = memory.allocate(
++        boundOwner, allocationRequest, requestContext.requestId);
++    if (allocation.status != protocol::Status::Ok) {
++        return failResponse(
++            request, response, allocation.status, Failure::Allocation,
++            "kernarg allocation failed");
++    }
++    const auto view = memory.allocationView(
++        boundOwner, allocation.allocationId, allocation.generation);
++    if (!view) {
++        protocol::MemoryRequest freeRequest;
++        freeRequest.opcode = protocol::MemoryOpcode::Free;
++        freeRequest.allocationId = allocation.allocationId;
++        freeRequest.generation = allocation.generation;
++        memory.free(boundOwner, freeRequest, requestContext.requestId);
++        return failResponse(
++            request, response, protocol::Status::Internal, Failure::Allocation,
++            "kernarg allocation identity disappeared");
++    }
++    const auto lease = context.map(view->gpuVa, view->size);
++    if (!lease) {
++        protocol::MemoryRequest freeRequest;
++        freeRequest.opcode = protocol::MemoryOpcode::Free;
++        freeRequest.allocationId = allocation.allocationId;
++        freeRequest.generation = allocation.generation;
++        memory.free(boundOwner, freeRequest, requestContext.requestId);
++        return failResponse(
++            request, response, protocol::Status::Internal, Failure::PageMap,
++            "kernarg page lease failed");
++    }
++
++    KernargRecord record;
++    record.objectId = request.objectId;
++    record.objectGeneration = request.objectGeneration;
++    record.mappingId = request.mappingId;
++    record.mappingGeneration = request.mappingGeneration;
++    record.allocation = *view;
++    record.lease = *lease;
++    try {
++        kernarg.emplace(std::move(record));
++    } catch (const std::bad_alloc &) {
++        context.unmap(*lease);
++        protocol::MemoryRequest freeRequest;
++        freeRequest.opcode = protocol::MemoryOpcode::Free;
++        freeRequest.allocationId = allocation.allocationId;
++        freeRequest.generation = allocation.generation;
++        memory.free(boundOwner, freeRequest, requestContext.requestId);
++        return failResponse(
++            request, response, protocol::Status::ResourceExhausted,
++            Failure::Allocation, "kernarg state allocation failed");
++    }
++
++    response.status = protocol::Status::Ok;
++    response.objectId = request.objectId;
++    response.objectGeneration = request.objectGeneration;
++    response.mappingId = request.mappingId;
++    response.mappingGeneration = request.mappingGeneration;
++    response.kernargAllocationId = view->allocationId;
++    response.kernargGeneration = view->generation;
++    response.kernargVa = view->gpuVa;
++    response.kernargSize = view->size;
++    response.kernargAlignment = view->alignment;
++    response.imageSha256 = mapping->manifest.imageSha256;
++    lastFailure = Failure::None;
++    failureReason = "none";
++    return true;
++}
++
++bool
++HostNativeDispatchStateV2::publishKernarg(
++    const RequestContext &requestContext, const Request &request,
++    uint64_t offset, uint64_t allocationId, uint64_t allocationGeneration,
++    const std::vector<uint8_t> &bytes)
++{
++    if (!validateContext(requestContext)) {
++        return fail(
++            requestContext.owner == boundOwner ? protocol::Status::Malformed :
++                protocol::Status::Unauthorized,
++            requestContext.owner == boundOwner ? Failure::InvalidRequest :
++                Failure::InvalidOwner,
++            requestContext.owner == boundOwner ?
++                "invalid kernarg publication context" :
++                "kernarg publication owner mismatch");
++    }
++    if (!requestVersionValid(request) ||
++        !opcodeIs(request, protocol::GenericDispatchOpcode::AllocKernarg) ||
++        !validateKernarg(request, allocationId, allocationGeneration) ||
++        bytes.empty() ||
++        bytes.size() > HostGPUMemoryState::MaximumTransferBytes ||
++        !rangeFits(offset, bytes.size(), kernarg->allocation.size) ||
++        submission || !bytesZero(request.imageSha256) ||
++        !bytesZero(request.kernelName)) {
++        return fail(
++            submission ? protocol::Status::Busy : protocol::Status::Malformed,
++            submission ? Failure::Busy : Failure::Publication,
++            submission ? "kernarg is pinned by a submission" :
++                "invalid kernarg publication");
++    }
++    if (offset > std::numeric_limits<Addr>::max() - kernarg->allocation.gpuVa)
++        return fail(protocol::Status::Malformed, Failure::Overflow,
++                    "kernarg publication address overflow");
++    if (!context.functionalWrite(
++            kernarg->allocation.gpuVa + offset, bytes.data(), bytes.size(),
++            requestContext.requestId)) {
++        return fail(protocol::Status::Internal, Failure::Publication,
++                    "kernarg functional publication failed");
++    }
++    rememberPublishedRange(offset, bytes.size());
++    lastFailure = Failure::None;
++    failureReason = "none";
++    return true;
++}
++
++bool
++HostNativeDispatchStateV2::submit(
++    const RequestContext &requestContext, const Request &request,
++    Addr completionSignalVa, HostNativeQueueCore &queue,
++    const HostNativeQueueCore::FetchedPacket &fetched,
++    HostNativeCommandProcessorCore::Result &result, Response &response,
++    GPUDispatchLifecycleListener *listener)
++{
++    resetResponse(request, response);
++    if (!validateContext(requestContext)) {
++        return failResponse(
++            request, response, requestContext.owner == boundOwner ?
++                protocol::Status::Malformed : protocol::Status::Unauthorized,
++            requestContext.owner == boundOwner ? Failure::InvalidRequest :
++                Failure::InvalidOwner,
++            requestContext.owner == boundOwner ?
++                "invalid SUBMIT request context" : "SUBMIT owner mismatch");
++    }
++    const auto &body = request.submit;
++    if (!requestVersionValid(request) ||
++        !opcodeIs(request, protocol::GenericDispatchOpcode::SubmitAql) ||
++        !validateKernarg(
++            request, body.kernargAllocationId, body.kernargGeneration) ||
++        submission || !fetched.valid() ||
++        !queue.isRegistered() || requestContext.requestId == 0 ||
++        body.expectedSignalValueBits != 1 || completionSignalVa == 0 ||
++        body.signalId == 0 || body.signalGeneration == 0 ||
++        body.kernargSize == 0 ||
++        body.kernargSize > HostGPUMemoryState::MaximumTransferBytes ||
++        body.kernargOffset != 0 ||
++        body.kernargSize != mapping->manifest.kernargSegmentSize ||
++        !rangeFits(body.kernargOffset, body.kernargSize,
++                   kernarg->allocation.size) ||
++        !rangePublished(body.kernargOffset, body.kernargSize) ||
++        request.kernelIndex >= protocol::GenericDispatchMaximumKernels ||
++        request.queueId == 0 || request.queueGeneration == 0 ||
++        request.queueSequence == 0 ||
++        body.gridX == 0 || body.gridY == 0 || body.gridZ == 0 ||
++        body.workgroupX == 0 || body.workgroupY == 0 || body.workgroupZ == 0 ||
++        body.numWarps == 0 || body.numCtas == 0 ||
++        body.wavefrontSize != 64 || body.launchFlags != 0 || body.reserved != 0 ||
++        request.kernelIndex != mapping->manifest.kernelIndex ||
++        request.imageSha256 != mapping->manifest.imageSha256 ||
++        !kernelNameMatches(request.kernelName, mapping->manifest)) {
++        /* Generic request carries the dispatch identity in the envelope. */
++        return failResponse(
++            request, response, submission ? protocol::Status::Busy :
++                protocol::Status::Malformed,
++            submission ? Failure::Busy : Failure::InvalidRequest,
++            submission ? "SUBMIT already admitted" : "invalid SUBMIT request");
++    }
++    if (requestContext.requestId == 0 ||
++        requestContext.requestId > static_cast<uint64_t>(INT_MAX)) {
++        return failResponse(
++            request, response, protocol::Status::Malformed, Failure::Overflow,
++            "SUBMIT request identity cannot become a task ID");
++    }
++    if (nextTraceId == 0) {
++        return failResponse(
++            request, response, protocol::Status::ResourceExhausted,
++            Failure::Overflow, "SUBMIT trace identity exhausted");
++    }
++    const uint64_t traceId = nextTraceId++;
++    if (request.queueId != queue.config().activeQueueId ||
++        request.queueGeneration != queue.config().generation ||
++        request.queueSequence - 1 != fetched.queueIndex ||
++        fetched.activeQueueId != request.queueId ||
++        fetched.queueGeneration != request.queueGeneration ||
++        fetched.registeredIndex != queue.registeredIndex() ||
++        !queue.ownsPending(fetched)) {
++        return failResponse(
++            request, response, protocol::Status::ProtocolState, Failure::Queue,
++            "SUBMIT queue identity mismatch");
++    }
++
++    _hsa_dispatch_packet_t packet = {};
++    std::memcpy(&packet, fetched.bytes.data(), sizeof(packet));
++    if (packet.completion_signal != completionSignalVa ||
++        packet.kernarg_address > std::numeric_limits<Addr>::max() -
++            body.kernargOffset ||
++        packet.kernarg_address !=
++            kernarg->allocation.gpuVa + body.kernargOffset ||
++        body.workgroupX > protocol::GenericDispatchMaximumWorkgroupDimension ||
++        body.workgroupY > protocol::GenericDispatchMaximumWorkgroupDimension ||
++        body.workgroupZ > protocol::GenericDispatchMaximumWorkgroupDimension ||
++        body.sharedMemoryBytes > protocol::GenericDispatchMaximumSharedBytes ||
++        static_cast<uint64_t>(body.workgroupX) * body.workgroupY * body.workgroupZ !=
++            static_cast<uint64_t>(body.numWarps) * body.wavefrontSize) {
++        return failResponse(
++            request, response, protocol::Status::ProtocolState, Failure::Queue,
++            "SUBMIT AQL geometry or kernarg identity mismatch");
++    }
++
++    uint32_t preloadLength = 0;
++    uint32_t preloadOffset = 0;
++    if (!descriptorPreload(mapping->value, preloadLength, preloadOffset)) {
++        return failResponse(
++            request, response, protocol::Status::Internal, Failure::Mapping,
++            "SUBMIT descriptor read failed");
++    }
++    if (preloadLength != 0 || preloadOffset != 0) {
++        return failResponse(
++            request, response, protocol::Status::UnsupportedCapability,
++            Failure::UnsupportedPreload,
++            "kernarg preload is unsupported by native v2 admission");
++    }
++
++    /* Pin before CP reads; requestId is the dispatch owner for all reads. */
++    if (!memory.pinPinnedDispatchAllocation(
++            boundOwner, mapping->value.allocation.allocationId,
++            mapping->value.allocation.generation, requestContext.requestId)) {
++        return failResponse(
++            request, response, protocol::Status::Busy, Failure::Busy,
++            "code mapping is already pinned");
++    }
++    if (!memory.pinPinnedDispatchAllocation(
++            boundOwner, kernarg->allocation.allocationId,
++            kernarg->allocation.generation, requestContext.requestId)) {
++        memory.releasePinnedDispatchAllocation(
++            boundOwner, mapping->value.allocation.allocationId,
++            mapping->value.allocation.generation, requestContext.requestId);
++        return failResponse(
++            request, response, protocol::Status::Busy, Failure::Busy,
++            "kernarg allocation is already pinned");
++    }
++
++    if (!commandProcessor.submit(
++            fetched, queue, mapping->value, mapping->manifest, context,
++            requestContext.requestId, result, listener,
++            requestContext.requestId)) {
++        /* The CP may reject after queue.fetch; return that slot to pending so
++         * a caller can retry or explicitly cancel without losing ownership. */
++        if (!queue.cancelFetch(fetched.ticket)) {
++            memory.releasePinnedDispatchAllocation(
++                boundOwner, kernarg->allocation.allocationId,
++                kernarg->allocation.generation, requestContext.requestId);
++            memory.releasePinnedDispatchAllocation(
++                boundOwner, mapping->value.allocation.allocationId,
++                mapping->value.allocation.generation, requestContext.requestId);
++            return failResponse(
++                request, response, protocol::Status::ProtocolState,
++                Failure::Queue, "CP failure left queue fetch pending");
++        }
++        memory.releasePinnedDispatchAllocation(
++            boundOwner, kernarg->allocation.allocationId,
++            kernarg->allocation.generation, requestContext.requestId);
++        memory.releasePinnedDispatchAllocation(
++            boundOwner, mapping->value.allocation.allocationId,
++            mapping->value.allocation.generation, requestContext.requestId);
++        return failResponse(
++            request, response, protocol::Status::ProtocolState,
++            Failure::CommandProcessor, commandProcessor.failure());
++    }
++
++    submission.emplace(SubmissionRecord{
++        request.objectId, request.objectGeneration, request.mappingId,
++        request.mappingGeneration, body.kernargAllocationId,
++        body.kernargGeneration, body.kernargOffset, body.kernargSize,
++        body.signalId, body.signalGeneration, body.expectedSignalValueBits,
++        traceId,
++        &queue, fetched.ticket, fetched.queueIndex, request.queueId,
++        request.queueGeneration, request.queueSequence, requestContext.requestId,
++        requestContext.requestId});
++    response.status = protocol::Status::Ok;
++    response.objectId = request.objectId;
++    response.objectGeneration = request.objectGeneration;
++    response.mappingId = request.mappingId;
++    response.mappingGeneration = request.mappingGeneration;
++    response.kernargAllocationId = kernarg->allocation.allocationId;
++    response.kernargGeneration = kernarg->allocation.generation;
++    response.kernargVa = kernarg->allocation.gpuVa + body.kernargOffset;
++    response.kernargSize = body.kernargSize;
++    response.kernargAlignment = kernarg->allocation.alignment;
++    response.ticketId = fetched.ticket;
++    response.queueId = request.queueId;
++    response.queueGeneration = request.queueGeneration;
++    response.queueSequence = request.queueSequence;
++    response.signalId = body.signalId;
++    response.signalGeneration = body.signalGeneration;
++    response.signalValueBits = body.expectedSignalValueBits;
++    response.traceId = traceId;
++    response.packetVa = fetched.hostPacketVa;
++    response.kernelIndex = request.kernelIndex;
++    response.descriptorPreloadDwords = 0;
++    response.imageSha256 = request.imageSha256;
++    lastFailure = Failure::None;
++    failureReason = "none";
++    return true;
++}
++
++bool
++HostNativeDispatchStateV2::retire(
++    const RequestContext &requestContext, const Request &request,
++    HostNativeQueueCore &queue)
++{
++    if (!validateContext(requestContext))
++        return fail(
++            requestContext.owner == boundOwner ? protocol::Status::Malformed :
++                protocol::Status::Unauthorized,
++            requestContext.owner == boundOwner ? Failure::InvalidRequest :
++                Failure::InvalidOwner,
++            requestContext.owner == boundOwner ?
++                "invalid RETIRE request context" : "RETIRE owner mismatch");
++    if (!requestVersionValid(request) ||
++        !opcodeIs(request, protocol::GenericDispatchOpcode::SubmitAql) ||
++        !submission || !mapping || !kernarg || submission->queue != &queue ||
++        request.objectId != submission->objectId ||
++        request.objectGeneration != submission->objectGeneration ||
++        request.mappingId != submission->mappingId ||
++        request.mappingGeneration != submission->mappingGeneration ||
++        request.queueId != submission->queueId ||
++        request.queueGeneration != submission->queueGeneration ||
++        request.queueSequence != submission->queueSequence ||
++        request.submit.kernargAllocationId !=
++            submission->kernargAllocationId ||
++        request.submit.kernargGeneration != submission->kernargGeneration ||
++        request.submit.kernargOffset != submission->kernargOffset ||
++        request.submit.kernargSize != submission->kernargSize ||
++        request.submit.signalId != submission->signalId ||
++        request.submit.signalGeneration != submission->signalGeneration ||
++        request.submit.expectedSignalValueBits !=
++            submission->expectedSignalValueBits ||
++        submission->traceId == 0 ||
++        !validateKernarg(
++            request, submission->kernargAllocationId,
++            submission->kernargGeneration) ||
++        request.kernelIndex != mapping->manifest.kernelIndex ||
++        request.imageSha256 != mapping->manifest.imageSha256 ||
++        !kernelNameMatches(request.kernelName, mapping->manifest) ||
++        requestContext.requestId != submission->requestId) {
++        return fail(
++            submission ? protocol::Status::ProtocolState :
++                protocol::Status::Malformed,
++            submission ? Failure::State : Failure::InvalidRequest,
++            submission ? "RETIRE identity mismatch" : "no admitted submission");
++    }
++    if (!queue.retire(submission->queueIndex, requestContext.requestId))
++        return fail(protocol::Status::ProtocolState, Failure::Queue,
++                    queue.failure());
++
++    const bool kernargReleased = memory.releasePinnedDispatchAllocation(
++        boundOwner, kernarg->allocation.allocationId,
++        kernarg->allocation.generation, submission->dispatchId);
++    const bool mappingReleased = memory.releasePinnedDispatchAllocation(
++        boundOwner, mapping->value.allocation.allocationId,
++        mapping->value.allocation.generation, submission->dispatchId);
++    submission.reset();
++    if (!kernargReleased || !mappingReleased)
++        return fail(protocol::Status::Internal, Failure::State,
++                    "retire pin release failed");
++    lastFailure = Failure::None;
++    failureReason = "none";
++    return true;
++}
++
++bool
++HostNativeDispatchStateV2::releaseKernarg()
++{
++    if (!kernarg)
++        return true;
++    if (!context.unmap(kernarg->lease)) {
++        fail(protocol::Status::Busy, Failure::PageMap,
++             "kernarg page lease release failed");
++        return false;
++    }
++    protocol::MemoryRequest freeRequest;
++    freeRequest.opcode = protocol::MemoryOpcode::Free;
++    freeRequest.allocationId = kernarg->allocation.allocationId;
++    freeRequest.generation = kernarg->allocation.generation;
++    const auto response = memory.free(boundOwner, freeRequest, 0);
++    if (response.status != protocol::Status::Ok) {
++        fail(response.status, Failure::Allocation,
++             "kernarg allocation release failed");
++        return false;
++    }
++    kernarg.reset();
++    return true;
++}
++
++bool
++HostNativeDispatchStateV2::releaseMapping()
++{
++    if (!mapping)
++        return true;
++    if (!mapper.unmap(mapping->value)) {
++        fail(protocol::Status::Busy, Failure::Mapping,
++             "code mapping release failed");
++        return false;
++    }
++    mapping.reset();
++    return true;
++}
++
++bool
++HostNativeDispatchStateV2::unmap(
++    const RequestContext &requestContext, const Request &request,
++    Response &response)
++{
++    resetResponse(request, response);
++    if (!validateContext(requestContext)) {
++        return failResponse(
++            request, response, requestContext.owner == boundOwner ?
++                protocol::Status::Malformed : protocol::Status::Unauthorized,
++            requestContext.owner == boundOwner ? Failure::InvalidRequest :
++                Failure::InvalidOwner,
++            requestContext.owner == boundOwner ?
++                "invalid UNMAP request context" : "UNMAP owner mismatch");
++    }
++    if (!requestVersionValid(request) ||
++        !opcodeIs(request, protocol::GenericDispatchOpcode::UnmapObject) ||
++        !validateMapping(request) || request.queueId != 0 ||
++        request.queueGeneration != 0 || request.queueSequence != 0 ||
++        request.kernelIndex != 0 || submission ||
++        !bytesZero(request.imageSha256) || !bytesZero(request.kernelName)) {
++        return failResponse(
++            request, response, submission ? protocol::Status::Busy :
++                protocol::Status::ProtocolState,
++            submission ? Failure::Busy : Failure::State,
++            submission ? "UNMAP has an admitted submission" :
++                "invalid UNMAP identity");
++    }
++    response.objectId = request.objectId;
++    response.objectGeneration = request.objectGeneration;
++    response.mappingId = request.mappingId;
++    response.mappingGeneration = request.mappingGeneration;
++    response.imageSha256 = mapping->manifest.imageSha256;
++    if (kernarg && !releaseKernarg()) {
++        response.status = protocol::Status::Busy;
++        response.errorCode = static_cast<uint32_t>(lastFailure);
++        response.opcode = request.opcode;
++        return false;
++    }
++    if (!releaseMapping()) {
++        response.status = protocol::Status::Busy;
++        response.errorCode = static_cast<uint32_t>(lastFailure);
++        response.opcode = request.opcode;
++        return false;
++    }
++    response.status = protocol::Status::Ok;
++    lastFailure = Failure::None;
++    failureReason = "none";
++    return true;
++}
++
++bool
++HostNativeDispatchStateV2::clear()
++{
++    if (submission)
++        return fail(protocol::Status::Busy, Failure::Busy,
++                    "cannot clear an admitted submission");
++    if (!releaseKernarg() || !releaseMapping())
++        return false;
++    lastFailure = Failure::None;
++    failureReason = "none";
++    return true;
++}
++
++bool
++HostNativeDispatchBridgeAdapter::handleMap(
++    const Owner &owner, uint64_t requestId, const State::Request &request,
++    const std::vector<uint8_t> &image,
++    const protocol::CodeObjectManifest &manifest, State::Response &response)
++{
++    return state.map({owner, requestId}, request, image, manifest, response);
++}
++
++bool
++HostNativeDispatchBridgeAdapter::handleAlloc(
++    const Owner &owner, uint64_t requestId, const State::Request &request,
++    State::Response &response)
++{
++    return state.allocateKernarg({owner, requestId}, request, response);
++}
++
++bool
++HostNativeDispatchBridgeAdapter::handleKernargWrite(
++    const Owner &owner, uint64_t requestId, const State::Request &request,
++    uint64_t offset, uint64_t allocationId, uint64_t allocationGeneration,
++    const std::vector<uint8_t> &bytes)
++{
++    return state.publishKernarg(
++        {owner, requestId}, request, offset, allocationId,
++        allocationGeneration, bytes);
++}
++
++bool
++HostNativeDispatchBridgeAdapter::handleUnmap(
++    const Owner &owner, uint64_t requestId, const State::Request &request,
++    State::Response &response)
++{
++    return state.unmap({owner, requestId}, request, response);
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.hh b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.hh
+new file mode 100644
+index 000000000..3834b2953
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.hh
+@@ -0,0 +1,275 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of their contributors may be used to endorse or promote
++ * products derived from this software without specific prior written
++ * permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_NATIVE_DISPATCH_STATE_V2_HH__
++#define __DEV_AMDGPU_HOST_GPU_NATIVE_DISPATCH_STATE_V2_HH__
++
++#include <cstdint>
++#include <memory>
++#include <optional>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "dev/amdgpu/host_gpu_memory_state.hh"
++#include "dev/amdgpu/host_gpu_native_command_processor_core.hh"
++#include "dev/amdgpu/host_gpu_native_queue_core.hh"
++#include "dev/amdgpu/host_gpu_protocol.hh"
++#include "dev/amdgpu/host_native_code_object_mapper.hh"
++#include "dev/amdgpu/host_native_memory_context.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++/**
++ * Owner-bound control state for the generic dispatch-v2 bridge boundary.
++ *
++ * The state owns one mapped object and one kernarg allocation.  Every public
++ * operation carries the connection owner and a non-zero envelope request ID;
++ * both are checked before state or memory mutation.  SUBMIT performs queue /
++ * descriptor / kernarg admission and pins the two resources, but deliberately
++ * stops before GPUDispatcher, Shader, CU, or execution.  Descriptor preload
++ * is an explicit unsupported boundary until the +256-byte entry semantics are
++ * implemented by a matching mapper and CP path.
++ */
++class HostNativeDispatchStateV2
++{
++  public:
++    using Owner = HostGPUMemoryState::Owner;
++
++    enum class Failure
++    {
++        None,
++        InvalidOwner,
++        InvalidRequest,
++        Busy,
++        UnsupportedPreload,
++        Mapping,
++        Allocation,
++        PageMap,
++        Publication,
++        Queue,
++        CommandProcessor,
++        State,
++        Overflow,
++    };
++
++    struct RequestContext
++    {
++        Owner owner;
++        uint64_t requestId = 0;
++    };
++
++    using Request = protocol::GenericDispatchRequest;
++    using Response = protocol::GenericDispatchResponse;
++
++    HostNativeDispatchStateV2(
++        HostGPUMemoryState &memoryState, HostNativeMemoryContext &memoryContext,
++        HostNativeCodeObjectMapper &codeMapper,
++        HostNativeCommandProcessorCore &cpCore, const Owner &owner);
++    ~HostNativeDispatchStateV2();
++
++    HostNativeDispatchStateV2(const HostNativeDispatchStateV2 &) = delete;
++    HostNativeDispatchStateV2 &operator=(const HostNativeDispatchStateV2 &) =
++        delete;
++
++    bool map(
++        const RequestContext &context, const Request &request,
++        const std::vector<uint8_t> &image, const protocol::CodeObjectManifest &manifest,
++        Response &response);
++    bool allocateKernarg(
++        const RequestContext &context, const Request &request,
++        Response &response);
++    bool publishKernarg(
++        const RequestContext &context, const Request &request, uint64_t offset,
++        uint64_t allocationId, uint64_t allocationGeneration,
++        const std::vector<uint8_t> &bytes);
++    bool submit(
++        const RequestContext &context, const Request &request,
++        Addr completionSignalVa, HostNativeQueueCore &queue,
++        const HostNativeQueueCore::FetchedPacket &fetched,
++        HostNativeCommandProcessorCore::Result &result,
++        Response &response,
++        GPUDispatchLifecycleListener *listener = nullptr);
++    bool retire(
++        const RequestContext &context, const Request &request,
++        HostNativeQueueCore &queue);
++    bool unmap(
++        const RequestContext &context, const Request &request,
++        Response &response);
++
++    /** Release idle resources; an admitted submission must be retired first. */
++    bool clear();
++
++    const Owner &owner() const { return boundOwner; }
++    bool hasMapping() const { return mapping.has_value(); }
++    bool hasKernarg() const { return kernarg.has_value(); }
++    bool hasSubmission() const { return submission.has_value(); }
++    const char *failure() const { return failureReason.c_str(); }
++    Failure failureCode() const { return lastFailure; }
++    static const char *failureName(Failure failure);
++
++  private:
++    struct MappingRecord
++    {
++        uint64_t objectId = 0;
++        uint64_t objectGeneration = 0;
++        uint64_t mappingId = 0;
++        uint64_t mappingGeneration = 0;
++        HostNativeCodeObjectMapper::Mapping value;
++        protocol::CodeObjectManifest manifest;
++    };
++
++    struct KernargRecord
++    {
++        uint64_t objectId = 0;
++        uint64_t objectGeneration = 0;
++        uint64_t mappingId = 0;
++        uint64_t mappingGeneration = 0;
++        HostGPUMemoryState::AllocationView allocation;
++        HostNativeMemoryContext::PageLease lease;
++        std::vector<std::pair<uint64_t, uint64_t>> publishedRanges;
++    };
++
++    struct SubmissionRecord
++    {
++        uint64_t objectId = 0;
++        uint64_t objectGeneration = 0;
++        uint64_t mappingId = 0;
++        uint64_t mappingGeneration = 0;
++        uint64_t kernargAllocationId = 0;
++        uint64_t kernargGeneration = 0;
++        uint64_t kernargOffset = 0;
++        uint64_t kernargSize = 0;
++        uint64_t signalId = 0;
++        uint64_t signalGeneration = 0;
++        uint64_t expectedSignalValueBits = 0;
++        uint64_t traceId = 0;
++        HostNativeQueueCore *queue = nullptr;
++        uint64_t ticket = 0;
++        uint64_t queueIndex = 0;
++        uint64_t queueId = 0;
++        uint64_t queueGeneration = 0;
++        uint64_t queueSequence = 0;
++        uint64_t requestId = 0;
++        uint64_t dispatchId = 0;
++    };
++
++    bool validateContext(const RequestContext &context) const;
++    bool validateObject(uint64_t objectId, uint64_t objectGeneration) const;
++    bool validateMapping(const Request &request) const;
++    bool validateKernarg(
++        const Request &request, uint64_t allocationId,
++        uint64_t allocationGeneration) const;
++    bool descriptorPreload(
++        const HostNativeCodeObjectMapper::Mapping &value, uint32_t &length,
++        uint32_t &offset) const;
++    bool rangePublished(uint64_t offset, uint64_t bytes) const;
++    void rememberPublishedRange(uint64_t offset, uint64_t bytes);
++    bool releaseKernarg();
++    bool releaseMapping();
++    bool fail(protocol::Status status, Failure failure, const char *reason);
++    bool failResponse(
++        const Request &request, Response &response, protocol::Status status,
++        Failure failure, const char *reason);
++    static bool powerOfTwo(uint64_t value);
++    static bool rangeFits(uint64_t offset, uint64_t bytes, uint64_t size);
++
++    HostGPUMemoryState &memory;
++    HostNativeMemoryContext &context;
++    HostNativeCodeObjectMapper &mapper;
++    HostNativeCommandProcessorCore &commandProcessor;
++    const Owner boundOwner;
++    std::optional<MappingRecord> mapping;
++    std::optional<KernargRecord> kernarg;
++    std::optional<SubmissionRecord> submission;
++    uint64_t nextMappingId = 1;
++    uint64_t nextTraceId = 1;
++    Failure lastFailure = Failure::None;
++    std::string failureReason = "none";
++};
++
++/** Thin bridge-facing facade; wire codecs can translate into these calls. */
++class HostNativeDispatchBridgeAdapter
++{
++  public:
++    using State = HostNativeDispatchStateV2;
++    using Owner = State::Owner;
++
++    explicit HostNativeDispatchBridgeAdapter(State &dispatchState)
++        : state(dispatchState)
++    {}
++
++    bool handleMap(
++        const Owner &owner, uint64_t requestId,
++        const State::Request &request, const std::vector<uint8_t> &image,
++        const protocol::CodeObjectManifest &manifest,
++        State::Response &response);
++    bool handleAlloc(
++        const Owner &owner, uint64_t requestId,
++        const State::Request &request, State::Response &response);
++    bool handleKernargWrite(
++        const Owner &owner, uint64_t requestId,
++        const State::Request &request, uint64_t offset,
++        uint64_t allocationId, uint64_t allocationGeneration,
++        const std::vector<uint8_t> &bytes);
++    bool handleSubmit(
++        const Owner &owner, uint64_t requestId,
++        const State::Request &request, Addr completionSignalVa,
++        HostNativeQueueCore &queue,
++        const HostNativeQueueCore::FetchedPacket &fetched,
++        HostNativeCommandProcessorCore::Result &result,
++        State::Response &response,
++        GPUDispatchLifecycleListener *listener = nullptr)
++    {
++        return state.submit({owner, requestId}, request, completionSignalVa,
++                            queue, fetched, result, response, listener);
++    }
++    bool handleRetire(
++        const Owner &owner, uint64_t requestId,
++        const State::Request &request, HostNativeQueueCore &queue)
++    {
++        return state.retire({owner, requestId}, request, queue);
++    }
++    bool handleUnmap(
++        const Owner &owner, uint64_t requestId,
++        const State::Request &request, State::Response &response);
++
++    State &stateRef() { return state; }
++    const State &stateRef() const { return state; }
++
++  private:
++    State &state;
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_NATIVE_DISPATCH_STATE_V2_HH__
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2_main.cc b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2_main.cc
+new file mode 100644
+index 000000000..d696141b4
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2_main.cc
+@@ -0,0 +1,527 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of their contributors may be used to endorse or promote
++ * products derived from this software without specific prior written
++ * permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <algorithm>
++#include <array>
++#include <cstdint>
++#include <cstring>
++#include <fstream>
++#include <iostream>
++#include <iterator>
++#include <stdexcept>
++#include <string>
++#include <vector>
++
++#include "dev/amdgpu/host_gpu_code_object_fixture.hh"
++#include "dev/amdgpu/host_gpu_code_object_state.hh"
++#include "dev/amdgpu/host_gpu_native_command_processor_core.hh"
++#include "dev/amdgpu/host_gpu_native_dispatch_state_v2.hh"
++#include "dev/amdgpu/host_gpu_native_queue_core.hh"
++#include "dev/hsa/hsa_queue.hh"
++
++namespace gem5::hostgpu
++{
++namespace
++{
++
++constexpr const char *FixtureRelativePath =
++    "projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/"
++    "hsaco/gfx950/gpuReadWrite_kernels.hsaco";
++constexpr uint64_t QueueId = 511;
++constexpr uint64_t QueueGeneration = 1;
++constexpr uint32_t QueueBytes = 4096;
++constexpr uint32_t DoorbellBytes = 8;
++constexpr uint16_t DispatchHeader = 0x1502;
++
++void
++require(bool condition, const char *message)
++{
++    if (!condition)
++        throw std::runtime_error(message);
++}
++
++std::vector<uint8_t>
++readFixture(int argc, char **argv)
++{
++    std::vector<std::string> candidates;
++    if (argc > 1)
++        candidates.emplace_back(argv[1]);
++    candidates.emplace_back(FixtureRelativePath);
++    candidates.emplace_back(
++        std::string("../") + std::string(FixtureRelativePath).substr(9));
++    candidates.emplace_back(std::string("../../") + FixtureRelativePath);
++    candidates.emplace_back(std::string("../../../") + FixtureRelativePath);
++    for (const auto &candidate : candidates) {
++        std::ifstream input(candidate, std::ios::binary);
++        if (!input)
++            continue;
++        return {std::istreambuf_iterator<char>(input),
++                std::istreambuf_iterator<char>()};
++    }
++    throw std::runtime_error("locked gpuReadWrite HSACO fixture is unavailable");
++}
++
++protocol::CodeObjectManifest
++fixtureManifest(const std::vector<uint8_t> &image)
++{
++    protocol::CodeObjectManifest manifest;
++    manifest.imageSize = image.size();
++    manifest.chunkCount = 2;
++    manifest.segmentCount = 3;
++    manifest.kernelIndex = 0;
++    manifest.imageSha256 = {
++        0x7b, 0x6a, 0x4d, 0x2b, 0xb7, 0xf9, 0xc4, 0xe7,
++        0x46, 0x6b, 0xcf, 0x69, 0xf3, 0x11, 0x0e, 0xcb,
++        0xfa, 0xb5, 0x4d, 0x07, 0xab, 0xd4, 0xc7, 0x0b,
++        0x6b, 0xd9, 0x6b, 0x6a, 0x6f, 0xb9, 0xde, 0x56,
++    };
++    manifest.elfMachine = code_object_fixture::ElfMachine;
++    manifest.elfType = code_object_fixture::ElfTypeDyn;
++    manifest.elfOsabi = code_object_fixture::ElfOsabiAmdgpuHsa;
++    manifest.elfAbiVersion = code_object_fixture::ElfAbiVersion;
++    manifest.elfFlags = code_object_fixture::ElfFlags;
++    manifest.gfxTarget = code_object_fixture::GfxTarget;
++    manifest.codeObjectVersion = code_object_fixture::CodeObjectVersion;
++    manifest.metadataMajor = code_object_fixture::MetadataMajor;
++    manifest.metadataMinor = code_object_fixture::MetadataMinor;
++    manifest.relocationCount = code_object_fixture::RelocationCount;
++    manifest.kernargSegmentSize = 280;
++    manifest.kernargSegmentAlign = 8;
++    manifest.maxFlatWorkgroupSize = 256;
++    manifest.wavefrontSize = 64;
++    manifest.sgprCount = 22;
++    manifest.vgprCount = 6;
++    manifest.descriptorSize = code_object_fixture::DescriptorBytes;
++    manifest.kernelCodeEntryByteOffset = 0x1100;
++    manifest.codeVirtualAddress = 0x1900;
++    manifest.codeFileOffset = 0x900;
++    manifest.codeSize = 0x78;
++    manifest.descriptorVirtualAddress = 0x800;
++    manifest.descriptorFileOffset = 0x800;
++    std::copy_n("gpuReadWrite", 12, manifest.kernelName.begin());
++    std::copy_n("gpuReadWrite.kd", 15, manifest.descriptorSymbol.begin());
++    require(image.size() == 5528, "gpuReadWrite fixture size");
++    std::copy_n(image.begin() + manifest.descriptorFileOffset,
++                protocol::CodeObjectDescriptorBytes,
++                manifest.descriptor.begin());
++    manifest.segments[0] = {1, 4, 0, 0, 0x840, 0x840, 0x1000};
++    manifest.segments[1] = {1, 5, 0x900, 0x1900, 0x480, 0x480, 0x1000};
++    manifest.segments[2] = {1, 6, 0xd80, 0x2d80, 0x70, 0x280, 0x1000};
++    return manifest;
++}
++
++struct StagedImage
++{
++    std::vector<uint8_t> image;
++    protocol::CodeObjectManifest manifest;
++};
++
++StagedImage
++stageImage(const std::vector<uint8_t> &image,
++           const protocol::CodeObjectManifest &manifest)
++{
++    HostGPUCodeObjectState state;
++    const HostGPUCodeObjectState::Owner owner{37, 1};
++    protocol::CodeObjectRequest begin;
++    begin.opcode = protocol::CodeObjectOpcode::Begin;
++    begin.manifest = manifest;
++    const auto beginResult = state.submit(owner, begin, 1);
++    require(beginResult.accepted, "v2 code-object begin");
++
++    uint64_t offset = 0;
++    for (uint32_t index = 0; index < manifest.chunkCount; ++index) {
++        protocol::CodeObjectRequest chunk;
++        chunk.opcode = protocol::CodeObjectOpcode::Chunk;
++        chunk.objectId = beginResult.response.objectId;
++        chunk.generation = beginResult.response.generation;
++        chunk.imageOffset = offset;
++        chunk.chunkIndex = index;
++        const auto count = static_cast<uint32_t>(std::min<uint64_t>(
++            manifest.imageSize - offset, protocol::CodeObjectChunkDataBytes));
++        chunk.byteCount = count;
++        std::copy_n(image.begin() + offset, count, chunk.chunkData.begin());
++        chunk.chunkCrc32c = protocol::crc32c(chunk.chunkData.data(), count);
++        require(state.submit(owner, chunk, 2 + index).accepted,
++                "v2 code-object chunk");
++        offset += count;
++    }
++
++    protocol::CodeObjectRequest commit;
++    commit.opcode = protocol::CodeObjectOpcode::Commit;
++    commit.objectId = beginResult.response.objectId;
++    commit.generation = beginResult.response.generation;
++    commit.byteCount = manifest.imageSize;
++    commit.chunkIndex = manifest.chunkCount;
++    commit.commitSha256 = manifest.imageSha256;
++    const auto commitResult = state.submit(owner, commit, 4);
++    require(commitResult.committed, "v2 code-object commit");
++
++    StagedImage staged;
++    require(state.readCommittedImage(owner, beginResult.response.objectId,
++                                     beginResult.response.generation,
++                                     staged.image),
++            "v2 committed image");
++    const auto committedManifest = state.committedManifest(
++        owner, beginResult.response.objectId, beginResult.response.generation);
++    require(committedManifest.has_value(), "v2 committed manifest");
++    staged.manifest = *committedManifest;
++    return staged;
++}
++
++struct AllocationLease
++{
++    uint64_t id = 0;
++    uint64_t generation = 0;
++    Addr gpuVa = 0;
++    HostNativeMemoryContext::PageLease lease;
++};
++
++AllocationLease
++allocate(HostGPUMemoryState &memory, HostNativeMemoryContext &context,
++         const HostGPUMemoryState::Owner &owner, uint64_t bytes, uint64_t now)
++{
++    protocol::MemoryRequest request;
++    request.opcode = protocol::MemoryOpcode::Allocate;
++    request.byteCount = bytes;
++    request.argument = 4096;
++    const auto response = memory.allocate(owner, request, now);
++    require(response.status == protocol::Status::Ok, "v2 allocation");
++    const auto lease = context.map(response.value0, bytes);
++    require(lease.has_value(), "v2 page map");
++    return {response.allocationId, response.generation, response.value0,
++            *lease};
++}
++
++void
++release(HostGPUMemoryState &memory, HostNativeMemoryContext &context,
++        const HostGPUMemoryState::Owner &owner, const AllocationLease &value,
++        uint64_t now)
++{
++    require(context.unmap(value.lease), "v2 page unmap");
++    protocol::MemoryRequest request;
++    request.opcode = protocol::MemoryOpcode::Free;
++    request.allocationId = value.id;
++    request.generation = value.generation;
++    require(memory.free(owner, request, now).status == protocol::Status::Ok,
++            "v2 allocation free");
++}
++
++void
++runSelfTest(const std::vector<uint8_t> &image)
++{
++    const auto manifest = fixtureManifest(image);
++    require(HostGPUCodeObjectState::imageSha256(image) == manifest.imageSha256,
++            "v2 fixture SHA");
++    const auto staged = stageImage(image, manifest);
++
++    HostGPUMemoryState memory;
++    const HostGPUMemoryState::Owner owner{37, 1};
++    const HostGPUMemoryState::Owner wrongOwner{38, 1};
++    HostNativeMemoryContext context(memory, owner);
++    HostNativeCodeObjectMapper mapper(memory, context, owner);
++    HostNativeCommandProcessorCore commandProcessor;
++    HostNativeDispatchStateV2 state(
++        memory, context, mapper, commandProcessor, owner);
++    HostNativeDispatchBridgeAdapter adapter(state);
++    protocol::Header wireHeader;
++    wireHeader.requestId = 10;
++    wireHeader.connectionId = 37;
++    wireHeader.jobEpoch = owner.clientGeneration;
++
++    HostNativeDispatchStateV2::Request mapRequest;
++    mapRequest.opcode = protocol::GenericDispatchOpcode::MapObject;
++    mapRequest.objectId = 1;
++    mapRequest.objectGeneration = 1;
++    mapRequest.imageSha256 = staged.manifest.imageSha256;
++    mapRequest.map.gfxTarget = protocol::GenericDispatchGfxTarget;
++    mapRequest.map.kernargSegmentSize = staged.manifest.kernargSegmentSize;
++    mapRequest.map.kernargSegmentAlign = staged.manifest.kernargSegmentAlign;
++    mapRequest.map.pageSize = context.pageBytes();
++    std::copy(
++        staged.manifest.kernelName.begin(), staged.manifest.kernelName.end(),
++        mapRequest.kernelName.begin());
++
++    auto preloadRequest = mapRequest;
++    preloadRequest.map.descriptorPreloadDwords = 1;
++    HostNativeDispatchStateV2::Response preloadResponse;
++    require(!adapter.handleMap(
++                owner, 10, preloadRequest, staged.image, staged.manifest,
++                preloadResponse) &&
++                preloadResponse.status == protocol::Status::UnsupportedCapability &&
++                state.failureCode() ==
++                    HostNativeDispatchStateV2::Failure::UnsupportedPreload,
++            "v2 preload fail-closed");
++
++    HostNativeDispatchStateV2::Response mapResponse;
++    require(adapter.handleMap(
++                owner, 10, mapRequest, staged.image, staged.manifest,
++                mapResponse) &&
++                mapResponse.status == protocol::Status::Ok &&
++                mapResponse.mappingId != 0 && mapResponse.descriptorVa != 0,
++            state.failure());
++    require(!protocol::encodeGenericDispatchAck(wireHeader, mapResponse).empty(),
++            "v2 MAP response wire validation");
++
++    HostNativeDispatchStateV2::Request allocRequest = mapRequest;
++    allocRequest.opcode = protocol::GenericDispatchOpcode::AllocKernarg;
++    allocRequest.imageSha256 = {};
++    allocRequest.kernelName = {};
++    allocRequest.mappingId = mapResponse.mappingId;
++    allocRequest.mappingGeneration = mapResponse.mappingGeneration;
++    allocRequest.allocKernarg.sizeBytes = staged.manifest.kernargSegmentSize;
++    allocRequest.allocKernarg.alignmentBytes = staged.manifest.kernargSegmentAlign;
++    HostNativeDispatchStateV2::Response wrongResponse;
++    require(!adapter.handleAlloc(
++                wrongOwner, 11, allocRequest, wrongResponse) &&
++                wrongResponse.status == protocol::Status::Unauthorized,
++            "v2 owner-bound allocation rejection");
++
++    HostNativeDispatchStateV2::Response allocResponse;
++    require(adapter.handleAlloc(owner, 11, allocRequest, allocResponse) &&
++                allocResponse.status == protocol::Status::Ok &&
++                allocResponse.kernargAllocationId != 0,
++            state.failure());
++    require(!protocol::encodeGenericDispatchAck(wireHeader, allocResponse).empty(),
++            "v2 ALLOC response wire validation");
++    std::vector<uint8_t> kernarg(staged.manifest.kernargSegmentSize, 0);
++    HostNativeDispatchStateV2::Request writeRequest = allocRequest;
++    require(adapter.handleKernargWrite(
++                owner, 12, writeRequest, 0, allocResponse.kernargAllocationId,
++                allocResponse.kernargGeneration, kernarg),
++            state.failure());
++
++    const auto packetAllocation = allocate(memory, context, owner, QueueBytes, 13);
++    const auto signalAllocation = allocate(memory, context, owner, 4096, 14);
++    const auto mqdAllocation = allocate(memory, context, owner, 4096, 15);
++    const auto dataAllocation = allocate(memory, context, owner, 4096, 16);
++
++    uint64_t signalValue = 1;
++    require(context.functionalWrite(signalAllocation.gpuVa, &signalValue,
++                                    sizeof(signalValue)),
++            "v2 signal initialize");
++
++    _amd_queue_t mqd = {};
++    mqd.hsa_queue.base_address =
++        reinterpret_cast<void *>(packetAllocation.gpuVa);
++    mqd.hsa_queue.size = QueueBytes / HostNativeQueueCore::PacketBytes;
++    mqd.hsa_queue.id = QueueId;
++    mqd.read_dispatch_id = 0;
++    mqd.write_dispatch_id = 0;
++    mqd.read_dispatch_id_field_base_byte_offset =
++        offsetof(_amd_queue_t, read_dispatch_id);
++    static_assert(sizeof(mqd) == 256);
++    require(context.functionalWrite(mqdAllocation.gpuVa, &mqd, sizeof(mqd)),
++            "v2 MQD initialize");
++
++    _hsa_dispatch_packet_t packet = {};
++    packet.header = DispatchHeader;
++    packet.setup = 1;
++    packet.workgroup_size_x = 256;
++    packet.workgroup_size_y = 1;
++    packet.workgroup_size_z = 1;
++    packet.grid_size_x = 1024;
++    packet.grid_size_y = 1;
++    packet.grid_size_z = 1;
++    packet.kernel_object = mapResponse.descriptorVa;
++    packet.kernarg_address = allocResponse.kernargVa;
++    packet.completion_signal = signalAllocation.gpuVa;
++    std::array<uint8_t, HostNativeQueueCore::PacketBytes> packetBytes = {};
++    std::memcpy(packetBytes.data(), &packet, packetBytes.size());
++
++    HostNativeQueueCore queue(context);
++    HostNativeQueueCore::Config queueConfig;
++    queueConfig.baseVa = packetAllocation.gpuVa;
++    queueConfig.hostReadIndexVa =
++        mqdAllocation.gpuVa + offsetof(_amd_queue_t, read_dispatch_id);
++    queueConfig.activeQueueId = QueueId;
++    queueConfig.generation = QueueGeneration;
++    queueConfig.registeredIndex = 0;
++    queueConfig.queueBytes = QueueBytes;
++    queueConfig.doorbellBytes = DoorbellBytes;
++    require(queue.registerQueue(queueConfig), queue.failure());
++    require(queue.publish(packetAllocation.gpuVa, packetBytes.data(),
++                          packetBytes.size(), 17),
++            queue.failure());
++    uint32_t registeredIndex = 0;
++    require(queue.ring(1, registeredIndex) && registeredIndex == 0,
++            queue.failure());
++    mqd.write_dispatch_id = 1;
++    require(context.functionalWrite(mqdAllocation.gpuVa, &mqd, sizeof(mqd)),
++            "v2 MQD write index");
++
++    HostNativeQueueCore::FetchedPacket fetched;
++    require(queue.fetch(fetched, nullptr, 17) && fetched.valid(),
++            queue.failure());
++
++    HostNativeDispatchStateV2::Request submitRequest = allocRequest;
++    submitRequest.opcode = protocol::GenericDispatchOpcode::SubmitAql;
++    submitRequest.imageSha256 = staged.manifest.imageSha256;
++    std::copy(
++        staged.manifest.kernelName.begin(), staged.manifest.kernelName.end(),
++        submitRequest.kernelName.begin());
++    submitRequest.queueId = QueueId;
++    submitRequest.queueGeneration = QueueGeneration;
++    submitRequest.queueSequence = 1;
++    submitRequest.submit.kernargAllocationId = allocResponse.kernargAllocationId;
++    submitRequest.submit.kernargGeneration = allocResponse.kernargGeneration;
++    submitRequest.submit.kernargOffset = 0;
++    submitRequest.submit.kernargSize = staged.manifest.kernargSegmentSize;
++    submitRequest.submit.signalId = 7;
++    submitRequest.submit.signalGeneration = 1;
++    submitRequest.submit.expectedSignalValueBits = 1;
++    submitRequest.submit.gridX = 1024;
++    submitRequest.submit.gridY = 1;
++    submitRequest.submit.gridZ = 1;
++    submitRequest.submit.workgroupX = 256;
++    submitRequest.submit.workgroupY = 1;
++    submitRequest.submit.workgroupZ = 1;
++    submitRequest.submit.numWarps = 4;
++    submitRequest.submit.numCtas = 1;
++    submitRequest.submit.wavefrontSize = 64;
++
++    /* The adapter owns the locked CP read shape: no sub-range kernarg
++     * dispatch can reach a CP that reads the full manifest segment. */
++    auto rejectedRangeRequest = submitRequest;
++    rejectedRangeRequest.submit.kernargSize--;
++    HostNativeCommandProcessorCore::Result rejectedResult;
++    HostNativeDispatchStateV2::Response rejectedResponse;
++    require(!adapter.handleSubmit(
++                owner, 17, rejectedRangeRequest, signalAllocation.gpuVa,
++                queue, fetched, rejectedResult, rejectedResponse) &&
++                rejectedResponse.status == protocol::Status::Malformed &&
++                state.failureCode() ==
++                    HostNativeDispatchStateV2::Failure::InvalidRequest &&
++                queue.ownsPending(fetched),
++            "v2 kernarg sub-range rejected");
++
++    /* A CP rejection after queue admission must return the fetched slot to
++     * the queue owner.  Corrupting the mapped descriptor leaves the fetched
++     * packet identity intact, so the failure occurs inside the CP verifier. */
++    uint8_t descriptorByte = 0;
++    require(context.functionalRead(
++                mapResponse.descriptorVa, &descriptorByte, sizeof(descriptorByte)),
++            "v2 descriptor read before CP rejection");
++    const uint8_t rejectedDescriptorByte = descriptorByte ^ 1;
++    require(context.functionalWrite(
++                mapResponse.descriptorVa, &rejectedDescriptorByte,
++                sizeof(rejectedDescriptorByte)),
++            "v2 descriptor corruption");
++    require(!adapter.handleSubmit(
++                owner, 17, submitRequest, signalAllocation.gpuVa, queue,
++                fetched, rejectedResult, rejectedResponse) &&
++                rejectedResponse.status == protocol::Status::ProtocolState &&
++                state.failureCode() ==
++                    HostNativeDispatchStateV2::Failure::CommandProcessor &&
++                !queue.ownsPending(fetched),
++            "v2 malformed CP request rejected");
++    require(context.functionalWrite(
++                mapResponse.descriptorVa, &descriptorByte,
++                sizeof(descriptorByte)),
++            "v2 descriptor restore");
++    require(queue.fetch(fetched, nullptr, 17) && fetched.valid(),
++            queue.failure());
++
++    HostNativeCommandProcessorCore::Result result;
++    HostNativeDispatchStateV2::Response submitResponse;
++    require(adapter.handleSubmit(
++                owner, 17, submitRequest, signalAllocation.gpuVa, queue,
++                fetched, result, submitResponse) &&
++                submitResponse.status == protocol::Status::Ok &&
++                result.taskValid && result.commandProcessorSubmitted &&
++                !result.kernelExecuted && state.hasSubmission() &&
++                submitResponse.traceId != 0,
++            state.failure());
++    require(!protocol::encodeGenericDispatchAck(wireHeader, submitResponse).empty(),
++            "v2 SUBMIT response wire validation");
++
++    HostNativeDispatchStateV2::Response unmapResponse;
++    auto unmapRequest = mapRequest;
++    unmapRequest.opcode = protocol::GenericDispatchOpcode::UnmapObject;
++    unmapRequest.imageSha256 = {};
++    unmapRequest.kernelName = {};
++    unmapRequest.mappingId = mapResponse.mappingId;
++    unmapRequest.mappingGeneration = mapResponse.mappingGeneration;
++    require(!adapter.handleUnmap(owner, 17, unmapRequest, unmapResponse) &&
++                unmapResponse.status == protocol::Status::Busy,
++            "v2 in-flight unmap rejection");
++    auto forgedRetire = submitRequest;
++    forgedRetire.objectGeneration++;
++    require(!adapter.handleRetire(owner, 17, forgedRetire, queue) &&
++                state.hasSubmission() &&
++                state.failureCode() ==
++                    HostNativeDispatchStateV2::Failure::State,
++            "v2 forged retire object identity rejection");
++    forgedRetire = submitRequest;
++    forgedRetire.submit.signalId++;
++    require(!adapter.handleRetire(owner, 17, forgedRetire, queue) &&
++                state.hasSubmission() &&
++                state.failureCode() ==
++                    HostNativeDispatchStateV2::Failure::State,
++            "v2 forged retire signal identity rejection");
++    require(adapter.handleRetire(owner, 17, submitRequest, queue),
++            state.failure());
++    require(adapter.handleUnmap(owner, 18, unmapRequest, unmapResponse) &&
++                unmapResponse.status == protocol::Status::Ok &&
++                !state.hasMapping() && !state.hasKernarg(),
++            state.failure());
++    require(!protocol::encodeGenericDispatchAck(wireHeader, unmapResponse).empty(),
++            "v2 UNMAP response wire validation");
++
++    release(memory, context, owner, dataAllocation, 19);
++    release(memory, context, owner, mqdAllocation, 20);
++    release(memory, context, owner, signalAllocation, 21);
++    release(memory, context, owner, packetAllocation, 22);
++}
++
++} // anonymous namespace
++} // namespace gem5::hostgpu
++
++int
++main(int argc, char **argv)
++{
++    try {
++        const auto image = gem5::hostgpu::readFixture(argc, argv);
++        gem5::hostgpu::runSelfTest(image);
++        std::cout
++            << "{\"schema\":\"gem5.host-native.dispatch-state-v2.v1\","
++               "\"map\":true,\"alloc_kernarg\":true,"
++               "\"owner_bound\":true,\"preload\":\"unsupported\","
++               "\"submit_admitted\":true,\"retired\":true,"
++               "\"unmapped\":true,\"hsa_queue_entry\":true,"
++               "\"wire_ack_valid\":true,\"identity_guards\":true,"
++               "\"cp_failure_cancelled\":true,"
++               "\"gpu_dispatcher\":false,\"compute_unit\":false,"
++               "\"kernel_executed\":false,\"cpu_fallback\":false,"
++               "\"execution_claim\":false}\n";
++    } catch (const std::exception &error) {
++        std::cerr << "host-native dispatch state v2 self-test failed: "
++                  << error.what() << '\n';
++        return 1;
++    }
++    return 0;
++}
+diff --git a/src/dev/amdgpu/host_gpu_protocol.cc b/src/dev/amdgpu/host_gpu_protocol.cc
+index 5b98490bc..85459c67f 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.cc
++++ b/src/dev/amdgpu/host_gpu_protocol.cc
+@@ -559,6 +559,32 @@ codeObjectTransferCapability()
+     return capabilities;
+ }
+ 
++Capabilities
++genericDispatchCapability()
++{
++    Capabilities capabilities = {};
++    /* Runtime capability word 0 bit 8 is byte 1 bit 0 on the wire. */
++    capabilities[GenericDispatchCapabilityByte] =
++        GenericDispatchCapabilityMask;
++    return capabilities;
++}
++
++bool
++genericDispatchCapabilitySelected(const Capabilities &selected)
++{
++    return (selected[GenericDispatchCapabilityByte] &
++            GenericDispatchCapabilityMask) != 0 &&
++        (selected[0] & 0x01) != 0 &&
++        (selected[QueueControlCapabilityByte] &
++         QueueControlCapabilityMask) != 0 &&
++        (selected[MemoryControlCapabilityByte] &
++         MemoryControlCapabilityMask) != 0 &&
++        (selected[SignalEventCapabilityByte] &
++         SignalEventCapabilityMask) != 0 &&
++        (selected[CodeObjectTransferCapabilityByte] &
++         CodeObjectTransferCapabilityMask) != 0;
++}
++
+ CodeObjectManifestValidation
+ validateCodeObjectManifest(const CodeObjectManifest &manifest)
+ {
+@@ -819,6 +845,11 @@ negotiate(const Header &header, const Hello &hello,
+         result.selected[CodeObjectTransferCapabilityByte] &=
+             ~CodeObjectTransferCapabilityMask;
+     }
++    if ((hello.required[GenericDispatchCapabilityByte] &
++         GenericDispatchCapabilityMask) == 0) {
++        result.selected[GenericDispatchCapabilityByte] &=
++            ~GenericDispatchCapabilityMask;
++    }
+     if (hello.unknownCriticalTlv ||
+         !capabilitySubset(hello.required, result.selected) ||
+         (hello.offered[0] & 1) == 0 ||
+@@ -828,6 +859,16 @@ negotiate(const Header &header, const Hello &hello,
+         result.status = Status::UnsupportedCapability;
+         return result;
+     }
++    /* Generic dispatch is intentionally stronger than the independent v1
++     * options: a selected bit is meaningful only with every resource and
++     * code-object dependency selected in the same session. */
++    if ((result.selected[GenericDispatchCapabilityByte] &
++         GenericDispatchCapabilityMask) != 0 &&
++        !genericDispatchCapabilitySelected(result.selected)) {
++        result.selected.fill(0);
++        result.status = Status::UnsupportedCapability;
++        return result;
++    }
+     if (!isZero(header.daemonUuid) && header.daemonUuid != server.daemonUuid) {
+         result.selected.fill(0);
+         result.status = Status::InstanceMismatch;
+@@ -2038,6 +2079,935 @@ encodeCodeObjectAck(const Header &request, const CodeObjectResponse &response)
+     return encodeFrame(encoded, payload);
+ }
+ 
++namespace
++{
++
++constexpr size_t GenericRequestMajorOffset = 0;
++constexpr size_t GenericRequestMinorOffset = 2;
++constexpr size_t GenericRequestOpcodeOffset = 4;
++constexpr size_t GenericRequestFlagsOffset = 6;
++constexpr size_t GenericRequestObjectOffset = 8;
++constexpr size_t GenericRequestObjectGenerationOffset = 16;
++constexpr size_t GenericRequestMappingOffset = 24;
++constexpr size_t GenericRequestMappingGenerationOffset = 32;
++constexpr size_t GenericRequestQueueOffset = 40;
++constexpr size_t GenericRequestQueueGenerationOffset = 48;
++constexpr size_t GenericRequestQueueSequenceOffset = 56;
++constexpr size_t GenericRequestKernelIndexOffset = 64;
++constexpr size_t GenericRequestReservedOffset = 68;
++constexpr size_t GenericRequestImageShaOffset = 72;
++constexpr size_t GenericRequestKernelNameOffset = 104;
++constexpr size_t GenericRequestBodyOffset = 232;
++
++constexpr size_t GenericResponseMajorOffset = 0;
++constexpr size_t GenericResponseMinorOffset = 2;
++constexpr size_t GenericResponseStatusOffset = 4;
++constexpr size_t GenericResponseOpcodeOffset = 8;
++constexpr size_t GenericResponseFlagsOffset = 10;
++constexpr size_t GenericResponseErrorOffset = 12;
++constexpr size_t GenericResponseObjectOffset = 16;
++constexpr size_t GenericResponseObjectGenerationOffset = 24;
++constexpr size_t GenericResponseMappingOffset = 32;
++constexpr size_t GenericResponseMappingGenerationOffset = 40;
++constexpr size_t GenericResponseMappedBaseOffset = 48;
++constexpr size_t GenericResponseMappedEndOffset = 56;
++constexpr size_t GenericResponseDescriptorOffset = 64;
++constexpr size_t GenericResponseCodeOffset = 72;
++constexpr size_t GenericResponseEntryOffset = 80;
++constexpr size_t GenericResponseMappedBytesOffset = 88;
++constexpr size_t GenericResponseKernargOffset = 96;
++constexpr size_t GenericResponseKernargGenerationOffset = 104;
++constexpr size_t GenericResponseKernargVaOffset = 112;
++constexpr size_t GenericResponseKernargSizeOffset = 120;
++constexpr size_t GenericResponseKernargAlignOffset = 128;
++constexpr size_t GenericResponseKernelIndexOffset = 136;
++constexpr size_t GenericResponseSegmentsOffset = 140;
++constexpr size_t GenericResponsePreloadOffset = 144;
++constexpr size_t GenericResponseReservedOffset = 148;
++constexpr size_t GenericResponseTicketOffset = 152;
++constexpr size_t GenericResponseTraceOffset = 160;
++constexpr size_t GenericResponseQueueOffset = 168;
++constexpr size_t GenericResponseQueueGenerationOffset = 176;
++constexpr size_t GenericResponseQueueSequenceOffset = 184;
++constexpr size_t GenericResponseSignalOffset = 192;
++constexpr size_t GenericResponseSignalGenerationOffset = 200;
++constexpr size_t GenericResponseSignalValueOffset = 208;
++constexpr size_t GenericResponsePacketVaOffset = 216;
++constexpr size_t GenericResponsePacketCrcOffset = 224;
++constexpr size_t GenericResponseOutputCrcOffset = 228;
++constexpr size_t GenericResponseSimTickOffset = 232;
++constexpr size_t GenericResponseAdmissionTickOffset = 240;
++constexpr size_t GenericResponseStartTickOffset = 248;
++constexpr size_t GenericResponseEndTickOffset = 256;
++constexpr size_t GenericResponseRetireTickOffset = 264;
++constexpr size_t GenericResponseImageShaOffset = 272;
++constexpr size_t GenericResponseActiveEnd = 304;
++
++bool
++validGenericOpcode(uint16_t raw)
++{
++    return raw >= static_cast<uint16_t>(GenericDispatchOpcode::MapObject) &&
++           raw <= static_cast<uint16_t>(GenericDispatchOpcode::UnmapObject);
++}
++
++bool
++genericPowerOfTwo(uint64_t value)
++{
++    return value != 0 && (value & (value - 1)) == 0;
++}
++
++template <size_t N>
++bool
++genericBytesZero(const std::array<uint8_t, N> &value)
++{
++    return std::all_of(value.begin(), value.end(),
++                       [](uint8_t byte) { return byte == 0; });
++}
++
++template <size_t N>
++bool
++genericNulPaddedAscii(const std::array<uint8_t, N> &value)
++{
++    const auto nul = std::find(value.begin(), value.end(), uint8_t(0));
++    if (nul == value.begin() || nul == value.end())
++        return false;
++    if (!std::all_of(value.begin(), nul,
++                     [](uint8_t byte) { return byte < 0x80; }))
++        return false;
++    return std::all_of(nul + 1, value.end(),
++                       [](uint8_t byte) { return byte == 0; });
++}
++
++bool
++genericHeaderType(MessageType type)
++{
++    return type == MessageType::GenericDispatchAck ||
++           type == MessageType::GenericDispatchCompletion;
++}
++
++bool
++genericResponseFieldsZero(const GenericDispatchResponse &response)
++{
++    return response.objectId == 0 && response.objectGeneration == 0 &&
++        response.mappingId == 0 && response.mappingGeneration == 0 &&
++        response.mappedBaseVa == 0 && response.mappedEndVa == 0 &&
++        response.descriptorVa == 0 && response.codeVa == 0 &&
++        response.entryVa == 0 && response.mappedBytes == 0 &&
++        response.kernargAllocationId == 0 && response.kernargGeneration == 0 &&
++        response.kernargVa == 0 && response.kernargSize == 0 &&
++        response.kernargAlignment == 0 && response.kernelIndex == 0 &&
++        response.segmentCount == 0 && response.descriptorPreloadDwords == 0 &&
++        response.reserved == 0 && response.ticketId == 0 &&
++        response.traceId == 0 && response.queueId == 0 &&
++        response.queueGeneration == 0 && response.queueSequence == 0 &&
++        response.signalId == 0 && response.signalGeneration == 0 &&
++        response.signalValueBits == 0 && response.packetVa == 0 &&
++        response.packetCrc32c == 0 && response.outputCrc32c == 0 &&
++        response.simTick == 0 && response.admissionTick == 0 &&
++        response.startTick == 0 && response.endTick == 0 &&
++        response.retireTick == 0 && genericBytesZero(response.imageSha256);
++}
++
++Status
++validateGenericRequest(const GenericDispatchRequest &request,
++                       std::string &reason)
++{
++    if (request.major != GenericDispatchMajor ||
++        request.minor != GenericDispatchMinor) {
++        reason = "generic payload version";
++        return Status::UnsupportedVersion;
++    }
++    const uint16_t rawOpcode = static_cast<uint16_t>(request.opcode);
++    if (request.flags != 0 || request.reserved != 0 ||
++        !validGenericOpcode(rawOpcode)) {
++        reason = "generic request common fields";
++        return Status::Malformed;
++    }
++
++    const bool hashPresent = !genericBytesZero(request.imageSha256);
++    const bool namePresent = genericNulPaddedAscii(request.kernelName);
++    const bool hashAbsent = genericBytesZero(request.imageSha256);
++    const bool nameAbsent = genericBytesZero(request.kernelName);
++
++    switch (request.opcode) {
++      case GenericDispatchOpcode::MapObject:
++        if (request.objectId == 0 || request.objectGeneration == 0 ||
++            request.mappingId != 0 || request.mappingGeneration != 0 ||
++            request.queueId != 0 || request.queueGeneration != 0 ||
++            request.queueSequence != 0 ||
++            request.kernelIndex >= GenericDispatchMaximumKernels ||
++            !hashPresent || !namePresent ||
++            request.map.kernargSegmentSize == 0 ||
++            request.map.kernargSegmentSize > GenericDispatchMaximumKernargBytes ||
++            request.map.kernargSegmentAlign < 8 ||
++            request.map.kernargSegmentAlign > 65536 ||
++            !genericPowerOfTwo(request.map.kernargSegmentAlign) ||
++            (request.map.pageSize != GenericDispatchPageSize4K &&
++             request.map.pageSize != GenericDispatchPageSize64K)) {
++            reason = "invalid MAP_OBJECT fields";
++            return Status::Malformed;
++        }
++        if (request.map.gfxTarget != GenericDispatchGfxTarget) {
++            reason = "generic gfx target";
++            return Status::TopologyMismatch;
++        }
++        if (request.map.relocationCount != 0) {
++            reason = "generic relocations are unsupported";
++            return Status::UnsupportedCapability;
++        }
++        if (request.map.descriptorPreloadDwords != 0) {
++            reason = "generic descriptor preload is unsupported";
++            return Status::UnsupportedCapability;
++        }
++        return Status::Ok;
++
++      case GenericDispatchOpcode::AllocKernarg:
++        if (request.objectId == 0 || request.objectGeneration == 0 ||
++            request.mappingId == 0 || request.mappingGeneration == 0 ||
++            request.queueId != 0 || request.queueGeneration != 0 ||
++            request.queueSequence != 0 || request.kernelIndex != 0 ||
++            !hashAbsent || !nameAbsent ||
++            request.allocKernarg.sizeBytes == 0 ||
++            request.allocKernarg.sizeBytes > GenericDispatchMaximumKernargBytes ||
++            request.allocKernarg.alignmentBytes < 8 ||
++            request.allocKernarg.alignmentBytes > 65536 ||
++            !genericPowerOfTwo(request.allocKernarg.alignmentBytes) ||
++            request.allocKernarg.allocationFlags != 0 ||
++            request.allocKernarg.reserved != 0) {
++            reason = "invalid ALLOC_KERNARG fields";
++            return Status::Malformed;
++        }
++        return Status::Ok;
++
++      case GenericDispatchOpcode::SubmitAql: {
++        const auto &body = request.submit;
++        const uint64_t workgroupSize =
++            static_cast<uint64_t>(body.workgroupX) * body.workgroupY *
++            body.workgroupZ;
++        const uint64_t expectedWorkgroupSize =
++            static_cast<uint64_t>(body.numWarps) * body.wavefrontSize;
++        if (request.objectId == 0 || request.objectGeneration == 0 ||
++            request.mappingId == 0 || request.mappingGeneration == 0 ||
++            request.queueId == 0 || request.queueGeneration == 0 ||
++            request.queueSequence == 0 ||
++            request.kernelIndex >= GenericDispatchMaximumKernels ||
++            !hashPresent || !namePresent ||
++            body.kernargAllocationId == 0 || body.kernargGeneration == 0 ||
++            body.kernargSize == 0 ||
++            body.kernargSize > GenericDispatchMaximumKernargBytes ||
++            body.kernargOffset >
++                GenericDispatchMaximumKernargBytes - body.kernargSize ||
++            body.signalId == 0 || body.signalGeneration == 0 ||
++            body.expectedSignalValueBits != 1 || body.gridX == 0 ||
++            body.gridY == 0 || body.gridZ == 0 || body.workgroupX == 0 ||
++            body.workgroupY == 0 || body.workgroupZ == 0 ||
++            body.workgroupX > GenericDispatchMaximumWorkgroupDimension ||
++            body.workgroupY > GenericDispatchMaximumWorkgroupDimension ||
++            body.workgroupZ > GenericDispatchMaximumWorkgroupDimension ||
++            workgroupSize > GenericDispatchMaximumWorkgroupDimension ||
++            body.gridX < body.workgroupX || body.gridY < body.workgroupY ||
++            body.gridZ < body.workgroupZ || body.numWarps == 0 ||
++            body.numWarps > GenericDispatchMaximumWarps || body.numCtas == 0 ||
++            body.numCtas > GenericDispatchMaximumCtas ||
++            body.sharedMemoryBytes > GenericDispatchMaximumSharedBytes ||
++            body.wavefrontSize != 64 || expectedWorkgroupSize != workgroupSize ||
++            body.launchFlags != 0 || body.reserved != 0) {
++            reason = "invalid SUBMIT_AQL fields";
++            return Status::Malformed;
++        }
++        return Status::Ok;
++      }
++
++      case GenericDispatchOpcode::UnmapObject:
++        if (request.objectId == 0 || request.objectGeneration == 0 ||
++            request.mappingId == 0 || request.mappingGeneration == 0 ||
++            request.queueId != 0 || request.queueGeneration != 0 ||
++            request.queueSequence != 0 || request.kernelIndex != 0 ||
++            !hashAbsent || !nameAbsent) {
++            reason = "invalid UNMAP_OBJECT fields";
++            return Status::Malformed;
++        }
++        /* The active body is empty; decode-side zero-tail validation covers it. */
++        return Status::Ok;
++    }
++    reason = "unknown generic opcode";
++    return Status::Malformed;
++}
++
++bool
++genericResponseSuccessValid(const GenericDispatchResponse &response,
++                             MessageType type)
++{
++    if (response.status != Status::Ok || response.errorCode != 0 ||
++        response.flags != 0 || response.reserved != 0 ||
++        response.objectId == 0 || response.objectGeneration == 0 ||
++        response.mappingId == 0 || response.mappingGeneration == 0 ||
++        response.kernelIndex >= GenericDispatchMaximumKernels ||
++        (response.opcode != GenericDispatchOpcode::UnmapObject &&
++         genericBytesZero(response.imageSha256))) {
++        return false;
++    }
++
++    switch (response.opcode) {
++      case GenericDispatchOpcode::MapObject:
++        return type == MessageType::GenericDispatchAck &&
++            response.mappedBaseVa != 0 &&
++            response.mappedEndVa > response.mappedBaseVa &&
++            response.mappedBytes != 0 &&
++            response.mappedEndVa - response.mappedBaseVa >=
++                response.mappedBytes &&
++            response.descriptorVa != 0 && response.codeVa != 0 &&
++            response.entryVa != 0 && response.segmentCount != 0 &&
++            response.segmentCount <= CodeObjectMaximumSegments &&
++            response.kernargAllocationId == 0 &&
++            response.kernargGeneration == 0 && response.kernargVa == 0 &&
++            response.kernargSize == 0 && response.kernargAlignment == 0 &&
++            response.ticketId == 0 && response.traceId == 0 &&
++            response.queueId == 0 && response.queueGeneration == 0 &&
++            response.queueSequence == 0 && response.signalId == 0 &&
++            response.signalGeneration == 0 && response.signalValueBits == 0 &&
++            response.packetVa == 0 && response.packetCrc32c == 0 &&
++            response.outputCrc32c == 0 && response.simTick == 0 &&
++            response.admissionTick == 0 && response.startTick == 0 &&
++            response.endTick == 0 && response.retireTick == 0;
++
++      case GenericDispatchOpcode::AllocKernarg:
++        return type == MessageType::GenericDispatchAck &&
++            response.mappedBaseVa == 0 && response.mappedEndVa == 0 &&
++            response.descriptorVa == 0 && response.codeVa == 0 &&
++            response.entryVa == 0 && response.mappedBytes == 0 &&
++            response.kernargAllocationId != 0 &&
++            response.kernargGeneration != 0 && response.kernargVa != 0 &&
++            response.kernargSize != 0 &&
++            response.kernargSize <= GenericDispatchMaximumKernargBytes &&
++            response.kernargAlignment >= 8 &&
++            response.kernargAlignment <= 65536 &&
++            genericPowerOfTwo(response.kernargAlignment) &&
++            response.kernelIndex == 0 && response.segmentCount == 0 &&
++            response.descriptorPreloadDwords == 0 && response.ticketId == 0 &&
++            response.traceId == 0 && response.queueId == 0 &&
++            response.queueGeneration == 0 && response.queueSequence == 0 &&
++            response.signalId == 0 && response.signalGeneration == 0 &&
++            response.signalValueBits == 0 && response.packetVa == 0 &&
++            response.packetCrc32c == 0 && response.outputCrc32c == 0 &&
++            response.simTick == 0 && response.admissionTick == 0 &&
++            response.startTick == 0 && response.endTick == 0 &&
++            response.retireTick == 0;
++
++      case GenericDispatchOpcode::SubmitAql:
++        return (type == MessageType::GenericDispatchAck ||
++                type == MessageType::GenericDispatchCompletion) &&
++            response.queueId != 0 && response.queueGeneration != 0 &&
++            response.queueSequence != 0 && response.signalId != 0 &&
++            response.signalGeneration != 0 && response.signalValueBits == 1 &&
++            response.ticketId != 0 && response.traceId != 0 &&
++            response.packetVa != 0 && response.kernargAllocationId != 0 &&
++            response.kernargGeneration != 0 && response.kernargVa != 0 &&
++            response.kernargSize != 0 &&
++            response.kernargSize <= GenericDispatchMaximumKernargBytes &&
++            response.kernargAlignment >= 8 &&
++            response.kernargAlignment <= 65536 &&
++            genericPowerOfTwo(response.kernargAlignment);
++
++      case GenericDispatchOpcode::UnmapObject:
++        return type == MessageType::GenericDispatchAck &&
++            response.mappedBaseVa == 0 && response.mappedEndVa == 0 &&
++            response.descriptorVa == 0 && response.codeVa == 0 &&
++            response.entryVa == 0 && response.mappedBytes == 0 &&
++            response.kernargAllocationId == 0 &&
++            response.kernargGeneration == 0 && response.kernargVa == 0 &&
++            response.kernargSize == 0 && response.kernargAlignment == 0 &&
++            response.ticketId == 0 && response.traceId == 0 &&
++            response.queueId == 0 && response.queueGeneration == 0 &&
++            response.queueSequence == 0 && response.signalId == 0 &&
++            response.signalGeneration == 0 && response.signalValueBits == 0 &&
++            response.packetVa == 0 && response.packetCrc32c == 0 &&
++            response.outputCrc32c == 0 && response.simTick == 0 &&
++            response.admissionTick == 0 && response.startTick == 0 &&
++            response.endTick == 0 && response.retireTick == 0 &&
++            response.kernelIndex == 0 && response.segmentCount == 0 &&
++            response.descriptorPreloadDwords == 0;
++    }
++    return false;
++}
++
++GenericDispatchDecodeResult
++genericRequestDrop(const std::string &reason, bool closeConnection = true)
++{
++    GenericDispatchDecodeResult result;
++    result.action = DecodeAction::Drop;
++    result.closeConnection = closeConnection;
++    result.reason = reason;
++    return result;
++}
++
++GenericDispatchDecodeResult
++genericRequestAck(Status status, const std::string &reason,
++                  const Header &header,
++                  const GenericDispatchRequest &request)
++{
++    GenericDispatchDecodeResult result;
++    result.action = DecodeAction::Acknowledge;
++    result.closeConnection = false;
++    result.status = status;
++    result.reason = reason;
++    result.header = header;
++    result.request = request;
++    return result;
++}
++
++GenericDispatchResponseDecodeResult
++genericResponseDrop(const std::string &reason, bool closeConnection = true)
++{
++    GenericDispatchResponseDecodeResult result;
++    result.action = DecodeAction::Drop;
++    result.closeConnection = closeConnection;
++    result.reason = reason;
++    return result;
++}
++
++GenericDispatchResponseDecodeResult
++genericResponseAck(Status status, const std::string &reason,
++                   const Header &header,
++                   const GenericDispatchResponse &response)
++{
++    GenericDispatchResponseDecodeResult result;
++    result.action = DecodeAction::Acknowledge;
++    result.closeConnection = false;
++    result.status = status;
++    result.reason = reason;
++    result.header = header;
++    result.response = response;
++    return result;
++}
++
++GenericDispatchDecodeResult
++decodeGenericRequestInternal(const uint8_t *record, size_t size,
++                             uint32_t configuredMaximum,
++                             const Capabilities *selected)
++{
++    Header header;
++    const uint8_t *payload = nullptr;
++    std::string reason;
++    if (!decodeEstablishedEnvelope(record, size, configuredMaximum, header,
++                                   payload, reason))
++        return genericRequestDrop(reason);
++    if (size != GenericDispatchRecordBytes)
++        return genericRequestDrop("generic record size");
++    if (header.messageType != MessageType::GenericDispatchRequest)
++        return genericRequestAck(Status::Malformed,
++                                 "expected generic dispatch request", header,
++                                 {});
++    if (selected != nullptr && !genericDispatchCapabilitySelected(*selected))
++        return genericRequestAck(Status::UnsupportedCapability,
++                                 "generic dispatch capability was not negotiated",
++                                 header, {});
++
++    GenericDispatchRequest request;
++    request.major = load16(payload + GenericRequestMajorOffset);
++    request.minor = load16(payload + GenericRequestMinorOffset);
++    const uint16_t rawOpcode = load16(payload + GenericRequestOpcodeOffset);
++    if (validGenericOpcode(rawOpcode))
++        request.opcode = static_cast<GenericDispatchOpcode>(rawOpcode);
++    else
++        request.opcode = static_cast<GenericDispatchOpcode>(rawOpcode);
++    request.flags = load16(payload + GenericRequestFlagsOffset);
++    request.objectId = load64(payload + GenericRequestObjectOffset);
++    request.objectGeneration =
++        load64(payload + GenericRequestObjectGenerationOffset);
++    request.mappingId = load64(payload + GenericRequestMappingOffset);
++    request.mappingGeneration =
++        load64(payload + GenericRequestMappingGenerationOffset);
++    request.queueId = load64(payload + GenericRequestQueueOffset);
++    request.queueGeneration = load64(payload + GenericRequestQueueGenerationOffset);
++    request.queueSequence = load64(payload + GenericRequestQueueSequenceOffset);
++    request.kernelIndex = load32(payload + GenericRequestKernelIndexOffset);
++    request.reserved = load32(payload + GenericRequestReservedOffset);
++    request.imageSha256 = loadBytes<Sha256Bytes>(
++        payload + GenericRequestImageShaOffset);
++    request.kernelName = loadBytes<GenericDispatchKernelNameBytes>(
++        payload + GenericRequestKernelNameOffset);
++
++    size_t activeEnd = GenericDispatchCommonBytes;
++    if (request.opcode == GenericDispatchOpcode::MapObject) {
++        request.map.gfxTarget = load32(payload + GenericRequestBodyOffset);
++        request.map.relocationCount = load32(payload + GenericRequestBodyOffset + 4);
++        request.map.kernargSegmentSize =
++            load32(payload + GenericRequestBodyOffset + 8);
++        request.map.kernargSegmentAlign =
++            load32(payload + GenericRequestBodyOffset + 12);
++        request.map.descriptorPreloadDwords =
++            load32(payload + GenericRequestBodyOffset + 16);
++        request.map.pageSize = load32(payload + GenericRequestBodyOffset + 20);
++        activeEnd = 256;
++    } else if (request.opcode == GenericDispatchOpcode::AllocKernarg) {
++        request.allocKernarg.sizeBytes =
++            load64(payload + GenericRequestBodyOffset);
++        request.allocKernarg.alignmentBytes =
++            load64(payload + GenericRequestBodyOffset + 8);
++        request.allocKernarg.allocationFlags =
++            load32(payload + GenericRequestBodyOffset + 16);
++        request.allocKernarg.reserved =
++            load32(payload + GenericRequestBodyOffset + 20);
++        activeEnd = 256;
++    } else if (request.opcode == GenericDispatchOpcode::SubmitAql) {
++        request.submit.kernargAllocationId =
++            load64(payload + GenericRequestBodyOffset);
++        request.submit.kernargGeneration =
++            load64(payload + GenericRequestBodyOffset + 8);
++        request.submit.kernargOffset =
++            load64(payload + GenericRequestBodyOffset + 16);
++        request.submit.kernargSize =
++            load64(payload + GenericRequestBodyOffset + 24);
++        request.submit.signalId =
++            load64(payload + GenericRequestBodyOffset + 32);
++        request.submit.signalGeneration =
++            load64(payload + GenericRequestBodyOffset + 40);
++        request.submit.expectedSignalValueBits =
++            load64(payload + GenericRequestBodyOffset + 48);
++        request.submit.gridX = load32(payload + GenericRequestBodyOffset + 56);
++        request.submit.gridY = load32(payload + GenericRequestBodyOffset + 60);
++        request.submit.gridZ = load32(payload + GenericRequestBodyOffset + 64);
++        request.submit.workgroupX =
++            load32(payload + GenericRequestBodyOffset + 68);
++        request.submit.workgroupY =
++            load32(payload + GenericRequestBodyOffset + 72);
++        request.submit.workgroupZ =
++            load32(payload + GenericRequestBodyOffset + 76);
++        request.submit.numWarps =
++            load32(payload + GenericRequestBodyOffset + 80);
++        request.submit.numCtas =
++            load32(payload + GenericRequestBodyOffset + 84);
++        request.submit.sharedMemoryBytes =
++            load32(payload + GenericRequestBodyOffset + 88);
++        request.submit.wavefrontSize =
++            load32(payload + GenericRequestBodyOffset + 92);
++        request.submit.launchFlags =
++            load32(payload + GenericRequestBodyOffset + 96);
++        request.submit.reserved =
++            load32(payload + GenericRequestBodyOffset + 100);
++        activeEnd = 336;
++    } else if (!validGenericOpcode(rawOpcode)) {
++        return genericRequestAck(Status::Malformed,
++                                 "unknown generic dispatch opcode", header,
++                                 request);
++    }
++
++    if (std::any_of(payload + activeEnd,
++                    payload + GenericDispatchPayloadBytes,
++                    [](uint8_t byte) { return byte != 0; })) {
++        return genericRequestAck(Status::Malformed,
++                                 "noncanonical generic request padding", header,
++                                 request);
++    }
++    const Status status = validateGenericRequest(request, reason);
++    return genericRequestAck(status, reason, header, request);
++}
++
++GenericDispatchResponseDecodeResult
++decodeGenericResponseInternal(const uint8_t *record, size_t size,
++                              uint32_t configuredMaximum,
++                              const Capabilities *selected,
++                              uint64_t expectedRequestId,
++                              MessageType expectedMessageType)
++{
++    Header header;
++    const uint8_t *payload = nullptr;
++    std::string reason;
++    if (!decodeEstablishedEnvelope(record, size, configuredMaximum, header,
++                                   payload, reason))
++        return genericResponseDrop(reason);
++    if (size != GenericDispatchRecordBytes)
++        return genericResponseDrop("generic response size");
++    if (!genericHeaderType(expectedMessageType) ||
++        header.messageType != expectedMessageType)
++        return genericResponseDrop("generic response message type");
++    if (expectedRequestId != 0 && header.requestId != expectedRequestId)
++        return genericResponseDrop("generic response request ID");
++    if (selected != nullptr && !genericDispatchCapabilitySelected(*selected))
++        return genericResponseAck(Status::UnsupportedCapability,
++                                  "generic dispatch capability was not negotiated",
++                                  header, {});
++
++    GenericDispatchResponse response;
++    response.major = load16(payload + GenericResponseMajorOffset);
++    response.minor = load16(payload + GenericResponseMinorOffset);
++    const uint32_t rawStatus = load32(payload + GenericResponseStatusOffset);
++    response.status = static_cast<Status>(rawStatus);
++    response.opcode = static_cast<GenericDispatchOpcode>(
++        load16(payload + GenericResponseOpcodeOffset));
++    response.flags = load16(payload + GenericResponseFlagsOffset);
++    response.errorCode = load32(payload + GenericResponseErrorOffset);
++    response.objectId = load64(payload + GenericResponseObjectOffset);
++    response.objectGeneration =
++        load64(payload + GenericResponseObjectGenerationOffset);
++    response.mappingId = load64(payload + GenericResponseMappingOffset);
++    response.mappingGeneration =
++        load64(payload + GenericResponseMappingGenerationOffset);
++    response.mappedBaseVa = load64(payload + GenericResponseMappedBaseOffset);
++    response.mappedEndVa = load64(payload + GenericResponseMappedEndOffset);
++    response.descriptorVa = load64(payload + GenericResponseDescriptorOffset);
++    response.codeVa = load64(payload + GenericResponseCodeOffset);
++    response.entryVa = load64(payload + GenericResponseEntryOffset);
++    response.mappedBytes = load64(payload + GenericResponseMappedBytesOffset);
++    response.kernargAllocationId = load64(payload + GenericResponseKernargOffset);
++    response.kernargGeneration =
++        load64(payload + GenericResponseKernargGenerationOffset);
++    response.kernargVa = load64(payload + GenericResponseKernargVaOffset);
++    response.kernargSize = load64(payload + GenericResponseKernargSizeOffset);
++    response.kernargAlignment =
++        load64(payload + GenericResponseKernargAlignOffset);
++    response.kernelIndex = load32(payload + GenericResponseKernelIndexOffset);
++    response.segmentCount = load32(payload + GenericResponseSegmentsOffset);
++    response.descriptorPreloadDwords =
++        load32(payload + GenericResponsePreloadOffset);
++    response.reserved = load32(payload + GenericResponseReservedOffset);
++    response.ticketId = load64(payload + GenericResponseTicketOffset);
++    response.traceId = load64(payload + GenericResponseTraceOffset);
++    response.queueId = load64(payload + GenericResponseQueueOffset);
++    response.queueGeneration =
++        load64(payload + GenericResponseQueueGenerationOffset);
++    response.queueSequence = load64(payload + GenericResponseQueueSequenceOffset);
++    response.signalId = load64(payload + GenericResponseSignalOffset);
++    response.signalGeneration =
++        load64(payload + GenericResponseSignalGenerationOffset);
++    response.signalValueBits = load64(payload + GenericResponseSignalValueOffset);
++    response.packetVa = load64(payload + GenericResponsePacketVaOffset);
++    response.packetCrc32c = load32(payload + GenericResponsePacketCrcOffset);
++    response.outputCrc32c = load32(payload + GenericResponseOutputCrcOffset);
++    response.simTick = load64(payload + GenericResponseSimTickOffset);
++    response.admissionTick = load64(payload + GenericResponseAdmissionTickOffset);
++    response.startTick = load64(payload + GenericResponseStartTickOffset);
++    response.endTick = load64(payload + GenericResponseEndTickOffset);
++    response.retireTick = load64(payload + GenericResponseRetireTickOffset);
++    response.imageSha256 =
++        loadBytes<Sha256Bytes>(payload + GenericResponseImageShaOffset);
++
++    if (response.major != GenericDispatchMajor ||
++        response.minor != GenericDispatchMinor)
++        return genericResponseAck(Status::UnsupportedVersion,
++                                  "generic response payload version", header,
++                                  response);
++    if (response.flags != 0 || !validGenericOpcode(
++            static_cast<uint16_t>(response.opcode)) ||
++        rawStatus > static_cast<uint32_t>(Status::Internal) ||
++        response.reserved != 0 ||
++        std::any_of(payload + GenericResponseActiveEnd,
++                    payload + GenericDispatchPayloadBytes,
++                    [](uint8_t byte) { return byte != 0; })) {
++        return genericResponseAck(Status::Malformed,
++                                  "invalid generic response fields", header,
++                                  response);
++    }
++    if (response.status == Status::Ok) {
++        if (!genericResponseSuccessValid(response, expectedMessageType))
++            return genericResponseAck(Status::Malformed,
++                                      "invalid successful generic response",
++                                      header, response);
++        return genericResponseAck(Status::Ok, "generic response decoded",
++                                  header, response);
++    }
++    if (response.errorCode == 0 || !genericResponseFieldsZero(response))
++        return genericResponseAck(Status::Malformed,
++                                  "noncanonical failed generic response", header,
++                                  response);
++    return genericResponseAck(response.status, "generic stage rejected", header,
++                              response);
++}
++
++void
++storeGenericRequestPayload(std::vector<uint8_t> &payload,
++                           const GenericDispatchRequest &request)
++{
++    store16(payload, GenericRequestMajorOffset, request.major);
++    store16(payload, GenericRequestMinorOffset, request.minor);
++    store16(payload, GenericRequestOpcodeOffset,
++            static_cast<uint16_t>(request.opcode));
++    store16(payload, GenericRequestFlagsOffset, request.flags);
++    store64(payload, GenericRequestObjectOffset, request.objectId);
++    store64(payload, GenericRequestObjectGenerationOffset,
++            request.objectGeneration);
++    store64(payload, GenericRequestMappingOffset, request.mappingId);
++    store64(payload, GenericRequestMappingGenerationOffset,
++            request.mappingGeneration);
++    store64(payload, GenericRequestQueueOffset, request.queueId);
++    store64(payload, GenericRequestQueueGenerationOffset,
++            request.queueGeneration);
++    store64(payload, GenericRequestQueueSequenceOffset, request.queueSequence);
++    store32(payload, GenericRequestKernelIndexOffset, request.kernelIndex);
++    store32(payload, GenericRequestReservedOffset, request.reserved);
++    storeBytes(payload, GenericRequestImageShaOffset, request.imageSha256);
++    std::copy(request.kernelName.begin(), request.kernelName.end(),
++              payload.begin() + GenericRequestKernelNameOffset);
++
++    switch (request.opcode) {
++      case GenericDispatchOpcode::MapObject:
++        store32(payload, GenericRequestBodyOffset, request.map.gfxTarget);
++        store32(payload, GenericRequestBodyOffset + 4,
++                request.map.relocationCount);
++        store32(payload, GenericRequestBodyOffset + 8,
++                request.map.kernargSegmentSize);
++        store32(payload, GenericRequestBodyOffset + 12,
++                request.map.kernargSegmentAlign);
++        store32(payload, GenericRequestBodyOffset + 16,
++                request.map.descriptorPreloadDwords);
++        store32(payload, GenericRequestBodyOffset + 20, request.map.pageSize);
++        break;
++      case GenericDispatchOpcode::AllocKernarg:
++        store64(payload, GenericRequestBodyOffset,
++                request.allocKernarg.sizeBytes);
++        store64(payload, GenericRequestBodyOffset + 8,
++                request.allocKernarg.alignmentBytes);
++        store32(payload, GenericRequestBodyOffset + 16,
++                request.allocKernarg.allocationFlags);
++        store32(payload, GenericRequestBodyOffset + 20,
++                request.allocKernarg.reserved);
++        break;
++      case GenericDispatchOpcode::SubmitAql:
++        store64(payload, GenericRequestBodyOffset,
++                request.submit.kernargAllocationId);
++        store64(payload, GenericRequestBodyOffset + 8,
++                request.submit.kernargGeneration);
++        store64(payload, GenericRequestBodyOffset + 16,
++                request.submit.kernargOffset);
++        store64(payload, GenericRequestBodyOffset + 24,
++                request.submit.kernargSize);
++        store64(payload, GenericRequestBodyOffset + 32, request.submit.signalId);
++        store64(payload, GenericRequestBodyOffset + 40,
++                request.submit.signalGeneration);
++        store64(payload, GenericRequestBodyOffset + 48,
++                request.submit.expectedSignalValueBits);
++        store32(payload, GenericRequestBodyOffset + 56, request.submit.gridX);
++        store32(payload, GenericRequestBodyOffset + 60, request.submit.gridY);
++        store32(payload, GenericRequestBodyOffset + 64, request.submit.gridZ);
++        store32(payload, GenericRequestBodyOffset + 68,
++                request.submit.workgroupX);
++        store32(payload, GenericRequestBodyOffset + 72,
++                request.submit.workgroupY);
++        store32(payload, GenericRequestBodyOffset + 76,
++                request.submit.workgroupZ);
++        store32(payload, GenericRequestBodyOffset + 80, request.submit.numWarps);
++        store32(payload, GenericRequestBodyOffset + 84, request.submit.numCtas);
++        store32(payload, GenericRequestBodyOffset + 88,
++                request.submit.sharedMemoryBytes);
++        store32(payload, GenericRequestBodyOffset + 92,
++                request.submit.wavefrontSize);
++        store32(payload, GenericRequestBodyOffset + 96,
++                request.submit.launchFlags);
++        store32(payload, GenericRequestBodyOffset + 100,
++                request.submit.reserved);
++        break;
++      case GenericDispatchOpcode::UnmapObject:
++        break;
++    }
++}
++
++void
++storeGenericResponsePayload(std::vector<uint8_t> &payload,
++                            const GenericDispatchResponse &response)
++{
++    store16(payload, GenericResponseMajorOffset, response.major);
++    store16(payload, GenericResponseMinorOffset, response.minor);
++    store32(payload, GenericResponseStatusOffset,
++            static_cast<uint32_t>(response.status));
++    store16(payload, GenericResponseOpcodeOffset,
++            static_cast<uint16_t>(response.opcode));
++    store16(payload, GenericResponseFlagsOffset, response.flags);
++    store32(payload, GenericResponseErrorOffset, response.errorCode);
++    store64(payload, GenericResponseObjectOffset, response.objectId);
++    store64(payload, GenericResponseObjectGenerationOffset,
++            response.objectGeneration);
++    store64(payload, GenericResponseMappingOffset, response.mappingId);
++    store64(payload, GenericResponseMappingGenerationOffset,
++            response.mappingGeneration);
++    store64(payload, GenericResponseMappedBaseOffset, response.mappedBaseVa);
++    store64(payload, GenericResponseMappedEndOffset, response.mappedEndVa);
++    store64(payload, GenericResponseDescriptorOffset, response.descriptorVa);
++    store64(payload, GenericResponseCodeOffset, response.codeVa);
++    store64(payload, GenericResponseEntryOffset, response.entryVa);
++    store64(payload, GenericResponseMappedBytesOffset, response.mappedBytes);
++    store64(payload, GenericResponseKernargOffset,
++            response.kernargAllocationId);
++    store64(payload, GenericResponseKernargGenerationOffset,
++            response.kernargGeneration);
++    store64(payload, GenericResponseKernargVaOffset, response.kernargVa);
++    store64(payload, GenericResponseKernargSizeOffset, response.kernargSize);
++    store64(payload, GenericResponseKernargAlignOffset,
++            response.kernargAlignment);
++    store32(payload, GenericResponseKernelIndexOffset, response.kernelIndex);
++    store32(payload, GenericResponseSegmentsOffset, response.segmentCount);
++    store32(payload, GenericResponsePreloadOffset,
++            response.descriptorPreloadDwords);
++    store32(payload, GenericResponseReservedOffset, response.reserved);
++    store64(payload, GenericResponseTicketOffset, response.ticketId);
++    store64(payload, GenericResponseTraceOffset, response.traceId);
++    store64(payload, GenericResponseQueueOffset, response.queueId);
++    store64(payload, GenericResponseQueueGenerationOffset,
++            response.queueGeneration);
++    store64(payload, GenericResponseQueueSequenceOffset,
++            response.queueSequence);
++    store64(payload, GenericResponseSignalOffset, response.signalId);
++    store64(payload, GenericResponseSignalGenerationOffset,
++            response.signalGeneration);
++    store64(payload, GenericResponseSignalValueOffset,
++            response.signalValueBits);
++    store64(payload, GenericResponsePacketVaOffset, response.packetVa);
++    store32(payload, GenericResponsePacketCrcOffset, response.packetCrc32c);
++    store32(payload, GenericResponseOutputCrcOffset, response.outputCrc32c);
++    store64(payload, GenericResponseSimTickOffset, response.simTick);
++    store64(payload, GenericResponseAdmissionTickOffset, response.admissionTick);
++    store64(payload, GenericResponseStartTickOffset, response.startTick);
++    store64(payload, GenericResponseEndTickOffset, response.endTick);
++    store64(payload, GenericResponseRetireTickOffset, response.retireTick);
++    storeBytes(payload, GenericResponseImageShaOffset, response.imageSha256);
++}
++
++GenericDispatchResponse
++canonicalGenericFailure(const GenericDispatchResponse &response)
++{
++    GenericDispatchResponse canonical;
++    canonical.major = GenericDispatchMajor;
++    canonical.minor = GenericDispatchMinor;
++    canonical.status = response.status;
++    canonical.opcode = response.opcode;
++    canonical.flags = 0;
++    canonical.errorCode = response.errorCode != 0
++        ? response.errorCode : static_cast<uint32_t>(response.status);
++    return canonical;
++}
++
++} // anonymous namespace
++
++GenericDispatchDecodeResult
++decodeGenericDispatchRequestRecord(const uint8_t *record, size_t size,
++                                   uint32_t configuredMaximum)
++{
++    return decodeGenericRequestInternal(record, size, configuredMaximum, nullptr);
++}
++
++GenericDispatchDecodeResult
++decodeGenericDispatchRequestRecord(const uint8_t *record, size_t size,
++                                   uint32_t configuredMaximum,
++                                   const Capabilities &selected)
++{
++    return decodeGenericRequestInternal(record, size, configuredMaximum,
++                                         &selected);
++}
++
++GenericDispatchResponseDecodeResult
++decodeGenericDispatchResponseRecord(const uint8_t *record, size_t size,
++                                    uint32_t configuredMaximum,
++                                    uint64_t expectedRequestId,
++                                    MessageType expectedMessageType)
++{
++    return decodeGenericResponseInternal(record, size, configuredMaximum,
++                                         nullptr, expectedRequestId,
++                                         expectedMessageType);
++}
++
++GenericDispatchResponseDecodeResult
++decodeGenericDispatchResponseRecord(const uint8_t *record, size_t size,
++                                    uint32_t configuredMaximum,
++                                    const Capabilities &selected,
++                                    uint64_t expectedRequestId,
++                                    MessageType expectedMessageType)
++{
++    return decodeGenericResponseInternal(record, size, configuredMaximum,
++                                         &selected, expectedRequestId,
++                                         expectedMessageType);
++}
++
++std::vector<uint8_t>
++encodeGenericDispatchRequest(const Header &header,
++                            const GenericDispatchRequest &request)
++{
++    std::string reason;
++    if (validateGenericRequest(request, reason) != Status::Ok)
++        return {};
++    std::vector<uint8_t> payload(GenericDispatchPayloadBytes, 0);
++    storeGenericRequestPayload(payload, request);
++    Header encoded = header;
++    encoded.messageType = MessageType::GenericDispatchRequest;
++    return encodeFrame(encoded, payload);
++}
++
++std::vector<uint8_t>
++encodeGenericDispatchRequest(const Header &header,
++                            const GenericDispatchRequest &request,
++                            const Capabilities &selected)
++{
++    if (!genericDispatchCapabilitySelected(selected))
++        return {};
++    return encodeGenericDispatchRequest(header, request);
++}
++
++std::vector<uint8_t>
++encodeGenericDispatchResponse(MessageType type, const Header &request,
++                              const GenericDispatchResponse &response)
++{
++    if (!genericHeaderType(type) ||
++        static_cast<uint32_t>(response.status) >
++            static_cast<uint32_t>(Status::Internal) ||
++        !validGenericOpcode(static_cast<uint16_t>(response.opcode)))
++        return {};
++    GenericDispatchResponse encodedResponse = response;
++    if (response.status == Status::Ok) {
++        if (!genericResponseSuccessValid(response, type))
++            return {};
++    } else {
++        encodedResponse = canonicalGenericFailure(response);
++    }
++    std::vector<uint8_t> payload(GenericDispatchPayloadBytes, 0);
++    storeGenericResponsePayload(payload, encodedResponse);
++    Header encoded = request;
++    encoded.messageType = type;
++    return encodeFrame(encoded, payload);
++}
++
++std::vector<uint8_t>
++encodeGenericDispatchResponse(MessageType type, const Header &request,
++                              const GenericDispatchResponse &response,
++                              const Capabilities &selected)
++{
++    if (!genericDispatchCapabilitySelected(selected))
++        return {};
++    return encodeGenericDispatchResponse(type, request, response);
++}
++
++std::vector<uint8_t>
++encodeGenericDispatchAck(const Header &request,
++                         const GenericDispatchResponse &response)
++{
++    return encodeGenericDispatchResponse(MessageType::GenericDispatchAck,
++                                         request, response);
++}
++
++std::vector<uint8_t>
++encodeGenericDispatchAck(const Header &request,
++                         const GenericDispatchResponse &response,
++                         const Capabilities &selected)
++{
++    return encodeGenericDispatchResponse(MessageType::GenericDispatchAck,
++                                         request, response, selected);
++}
++
++std::vector<uint8_t>
++encodeGenericDispatchCompletion(const Header &request,
++                                const GenericDispatchResponse &response)
++{
++    return encodeGenericDispatchResponse(
++        MessageType::GenericDispatchCompletion, request, response);
++}
++
++std::vector<uint8_t>
++encodeGenericDispatchCompletion(const Header &request,
++                                const GenericDispatchResponse &response,
++                                const Capabilities &selected)
++{
++    return encodeGenericDispatchResponse(
++        MessageType::GenericDispatchCompletion, request, response, selected);
++}
++
+ const char *
+ statusName(Status status)
+ {
+diff --git a/src/dev/amdgpu/host_gpu_protocol.hh b/src/dev/amdgpu/host_gpu_protocol.hh
+index 979027598..1e19b7ad7 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.hh
++++ b/src/dev/amdgpu/host_gpu_protocol.hh
+@@ -64,6 +64,19 @@ constexpr size_t CodeObjectNameBytes = 128;
+ constexpr size_t CodeObjectDescriptorBytes = 64;
+ constexpr size_t CodeObjectMaximumSegments = 16;
+ constexpr uint32_t CodeObjectMaximumImageBytes = 64U << 20;
++/* GENERIC_DISPATCH_V2 keeps the v1 envelope but owns an independent payload
++ * version and fixed-width record family. */
++constexpr size_t GenericDispatchPayloadBytes = 4016;
++constexpr size_t GenericDispatchRecordBytes =
++    HeaderBytes + GenericDispatchPayloadBytes;
++constexpr size_t GenericDispatchCommonBytes = 232;
++constexpr size_t GenericDispatchKernelNameBytes = 128;
++constexpr uint32_t GenericDispatchMaximumKernargBytes = 16U << 20;
++constexpr uint32_t GenericDispatchMaximumSharedBytes = 65536;
++constexpr uint32_t GenericDispatchMaximumWorkgroupDimension = 1024;
++constexpr uint32_t GenericDispatchMaximumWarps = 32;
++constexpr uint32_t GenericDispatchMaximumCtas = 8;
++constexpr uint32_t GenericDispatchMaximumKernels = 16;
+ constexpr uint32_t MinimumRecordBytes = 4096;
+ constexpr uint32_t MaximumRecordBytes = 65536;
+ constexpr uint32_t MaximumHandshakeBytes = 4096;
+@@ -95,6 +108,21 @@ constexpr uint16_t CodeObjectTransferMajor = 1;
+ constexpr uint16_t CodeObjectTransferMinor = 0;
+ constexpr uint8_t CodeObjectTransferCapabilityByte = 0;
+ constexpr uint8_t CodeObjectTransferCapabilityMask = 0x80;
++/* Runtime capability word 0 bit 8 is serialized as wire capability byte 1,
++ * bit 0.  Capabilities is a byte array on this side of the protocol. */
++constexpr uint16_t GenericDispatchMajor = 2;
++constexpr uint16_t GenericDispatchMinor = 0;
++constexpr uint16_t GenericDispatchProtocolMajor = GenericDispatchMajor;
++constexpr uint16_t GenericDispatchProtocolMinor = GenericDispatchMinor;
++constexpr uint8_t GenericDispatchCapabilityByte = 1;
++constexpr uint8_t GenericDispatchCapabilityMask = 0x01;
++constexpr uint8_t GenericDispatchV2CapabilityByte =
++    GenericDispatchCapabilityByte;
++constexpr uint8_t GenericDispatchV2CapabilityMask =
++    GenericDispatchCapabilityMask;
++constexpr uint32_t GenericDispatchGfxTarget = 950;
++constexpr uint32_t GenericDispatchPageSize4K = 4096;
++constexpr uint32_t GenericDispatchPageSize64K = 65536;
+ constexpr uint64_t PinnedDispatchFixtureId = 1;
+ constexpr size_t Sha256Bytes = 32;
+ 
+@@ -124,6 +152,9 @@ enum class MessageType : uint16_t
+     KmtAck = 15,
+     CodeObjectRequest = 16,
+     CodeObjectAck = 17,
++    GenericDispatchRequest = 18,
++    GenericDispatchAck = 19,
++    GenericDispatchCompletion = 20,
+ };
+ 
+ enum class KmtOperation : uint16_t
+@@ -178,6 +209,16 @@ enum class DispatchOpcode : uint16_t
+     SubmitPinned = 1,
+ };
+ 
++enum class GenericDispatchOpcode : uint16_t
++{
++    MapObject = 1,
++    AllocKernarg = 2,
++    SubmitAql = 3,
++    UnmapObject = 4,
++};
++
++using GenericOpcode = GenericDispatchOpcode;
++
+ enum class SignalOpcode : uint16_t
+ {
+     Create = 1,
+@@ -502,6 +543,143 @@ struct DispatchDecodeResult
+     DispatchRequest request;
+ };
+ 
++/** MAP_OBJECT stage body for GENERIC_DISPATCH_V2. */
++struct GenericDispatchMapBody
++{
++    uint32_t gfxTarget = GenericDispatchGfxTarget;
++    uint32_t relocationCount = 0;
++    uint32_t kernargSegmentSize = 0;
++    uint32_t kernargSegmentAlign = 0;
++    uint32_t descriptorPreloadDwords = 0;
++    uint32_t pageSize = GenericDispatchPageSize4K;
++};
++
++/** ALLOC_KERNARG stage body for GENERIC_DISPATCH_V2. */
++struct GenericDispatchAllocKernargBody
++{
++    uint64_t sizeBytes = 0;
++    uint64_t alignmentBytes = 0;
++    uint32_t allocationFlags = 0;
++    uint32_t reserved = 0;
++};
++
++/** SUBMIT_AQL stage body.  The daemon constructs the AQL packet. */
++struct GenericDispatchSubmitBody
++{
++    uint64_t kernargAllocationId = 0;
++    uint64_t kernargGeneration = 0;
++    uint64_t kernargOffset = 0;
++    uint64_t kernargSize = 0;
++    uint64_t signalId = 0;
++    uint64_t signalGeneration = 0;
++    uint64_t expectedSignalValueBits = 0;
++    uint32_t gridX = 0;
++    uint32_t gridY = 0;
++    uint32_t gridZ = 0;
++    uint32_t workgroupX = 0;
++    uint32_t workgroupY = 0;
++    uint32_t workgroupZ = 0;
++    uint32_t numWarps = 0;
++    uint32_t numCtas = 0;
++    uint32_t sharedMemoryBytes = 0;
++    uint32_t wavefrontSize = 0;
++    uint32_t launchFlags = 0;
++    uint32_t reserved = 0;
++};
++
++/**
++ * Generic payload-v2 request.  This is a host-neutral description: it has no
++ * pointers, descriptors, file descriptors, or client-owned packet bytes.
++ */
++struct GenericDispatchRequest
++{
++    uint16_t major = GenericDispatchMajor;
++    uint16_t minor = GenericDispatchMinor;
++    GenericDispatchOpcode opcode = GenericDispatchOpcode::MapObject;
++    uint16_t flags = 0;
++    uint64_t objectId = 0;
++    uint64_t objectGeneration = 0;
++    uint64_t mappingId = 0;
++    uint64_t mappingGeneration = 0;
++    uint64_t queueId = 0;
++    uint64_t queueGeneration = 0;
++    uint64_t queueSequence = 0;
++    uint32_t kernelIndex = 0;
++    uint32_t reserved = 0;
++    Sha256 imageSha256 = {};
++    std::array<uint8_t, GenericDispatchKernelNameBytes> kernelName = {};
++    GenericDispatchMapBody map;
++    GenericDispatchAllocKernargBody allocKernarg;
++    GenericDispatchSubmitBody submit;
++};
++
++/** Fixed-width generic ACK/completion result. */
++struct GenericDispatchResponse
++{
++    uint16_t major = GenericDispatchMajor;
++    uint16_t minor = GenericDispatchMinor;
++    Status status = Status::Internal;
++    GenericDispatchOpcode opcode = GenericDispatchOpcode::MapObject;
++    uint16_t flags = 0;
++    uint32_t errorCode = 0;
++    uint64_t objectId = 0;
++    uint64_t objectGeneration = 0;
++    uint64_t mappingId = 0;
++    uint64_t mappingGeneration = 0;
++    uint64_t mappedBaseVa = 0;
++    uint64_t mappedEndVa = 0;
++    uint64_t descriptorVa = 0;
++    uint64_t codeVa = 0;
++    uint64_t entryVa = 0;
++    uint64_t mappedBytes = 0;
++    uint64_t kernargAllocationId = 0;
++    uint64_t kernargGeneration = 0;
++    uint64_t kernargVa = 0;
++    uint64_t kernargSize = 0;
++    uint64_t kernargAlignment = 0;
++    uint32_t kernelIndex = 0;
++    uint32_t segmentCount = 0;
++    uint32_t descriptorPreloadDwords = 0;
++    uint32_t reserved = 0;
++    uint64_t ticketId = 0;
++    uint64_t traceId = 0;
++    uint64_t queueId = 0;
++    uint64_t queueGeneration = 0;
++    uint64_t queueSequence = 0;
++    uint64_t signalId = 0;
++    uint64_t signalGeneration = 0;
++    uint64_t signalValueBits = 0;
++    uint64_t packetVa = 0;
++    uint32_t packetCrc32c = 0;
++    uint32_t outputCrc32c = 0;
++    uint64_t simTick = 0;
++    uint64_t admissionTick = 0;
++    uint64_t startTick = 0;
++    uint64_t endTick = 0;
++    uint64_t retireTick = 0;
++    Sha256 imageSha256 = {};
++};
++
++struct GenericDispatchDecodeResult
++{
++    DecodeAction action = DecodeAction::Drop;
++    bool closeConnection = true;
++    Status status = Status::Malformed;
++    std::string reason;
++    Header header;
++    GenericDispatchRequest request;
++};
++
++struct GenericDispatchResponseDecodeResult
++{
++    DecodeAction action = DecodeAction::Drop;
++    bool closeConnection = true;
++    Status status = Status::Malformed;
++    std::string reason;
++    Header header;
++    GenericDispatchResponse response;
++};
++
+ enum class CodeObjectOpcode : uint16_t
+ {
+     Begin = 1,
+@@ -689,6 +867,8 @@ Capabilities signalEventCapability();
+ Capabilities pinnedDispatchCapability();
+ Capabilities kmtOperationCapability();
+ Capabilities codeObjectTransferCapability();
++Capabilities genericDispatchCapability();
++bool genericDispatchCapabilitySelected(const Capabilities &selected);
+ bool capabilitySubset(const Capabilities &subset,
+                       const Capabilities &superset);
+ CodeObjectManifestValidation validateCodeObjectManifest(
+@@ -710,6 +890,21 @@ KmtDecodeResult decodeKmtRequestRecord(
+     const uint8_t *record, size_t size, uint32_t configuredMaximum);
+ CodeObjectDecodeResult decodeCodeObjectRequestRecord(
+     const uint8_t *record, size_t size, uint32_t configuredMaximum);
++GenericDispatchDecodeResult decodeGenericDispatchRequestRecord(
++    const uint8_t *record, size_t size, uint32_t configuredMaximum);
++/* Serialization-only overloads.  A bridge/session must use the overload
++ * carrying negotiated Capabilities below. */
++GenericDispatchDecodeResult decodeGenericDispatchRequestRecord(
++    const uint8_t *record, size_t size, uint32_t configuredMaximum,
++    const Capabilities &selected);
++GenericDispatchResponseDecodeResult decodeGenericDispatchResponseRecord(
++    const uint8_t *record, size_t size, uint32_t configuredMaximum,
++    uint64_t expectedRequestId = 0,
++    MessageType expectedMessageType = MessageType::GenericDispatchAck);
++GenericDispatchResponseDecodeResult decodeGenericDispatchResponseRecord(
++    const uint8_t *record, size_t size, uint32_t configuredMaximum,
++    const Capabilities &selected, uint64_t expectedRequestId = 0,
++    MessageType expectedMessageType = MessageType::GenericDispatchAck);
+ NegotiationResult negotiate(const Header &header, const Hello &hello,
+                             const ServerIdentity &server,
+                             const NegotiationContext &context = {});
+@@ -754,6 +949,29 @@ std::vector<uint8_t> encodeCodeObjectRequest(
+     const Header &header, const CodeObjectRequest &request);
+ std::vector<uint8_t> encodeCodeObjectAck(
+     const Header &request, const CodeObjectResponse &response);
++std::vector<uint8_t> encodeGenericDispatchRequest(
++    const Header &header, const GenericDispatchRequest &request);
++/* Serialization-only overload; bridge/session code must pass negotiated
++ * Capabilities to the overload below. */
++std::vector<uint8_t> encodeGenericDispatchRequest(
++    const Header &header, const GenericDispatchRequest &request,
++    const Capabilities &selected);
++std::vector<uint8_t> encodeGenericDispatchResponse(
++    MessageType type, const Header &request,
++    const GenericDispatchResponse &response);
++std::vector<uint8_t> encodeGenericDispatchResponse(
++    MessageType type, const Header &request,
++    const GenericDispatchResponse &response, const Capabilities &selected);
++std::vector<uint8_t> encodeGenericDispatchAck(
++    const Header &request, const GenericDispatchResponse &response);
++std::vector<uint8_t> encodeGenericDispatchAck(
++    const Header &request, const GenericDispatchResponse &response,
++    const Capabilities &selected);
++std::vector<uint8_t> encodeGenericDispatchCompletion(
++    const Header &request, const GenericDispatchResponse &response);
++std::vector<uint8_t> encodeGenericDispatchCompletion(
++    const Header &request, const GenericDispatchResponse &response,
++    const Capabilities &selected);
+ 
+ const char *statusName(Status status);
+ 
+diff --git a/src/dev/amdgpu/host_gpu_protocol.test.cc b/src/dev/amdgpu/host_gpu_protocol.test.cc
+index 197aea890..26be62ec5 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.test.cc
++++ b/src/dev/amdgpu/host_gpu_protocol.test.cc
+@@ -2006,6 +2006,380 @@ TEST(HostGpuProtocol, CodeObjectChunkPaddingAndAckAddressesAreStrict)
+               static_cast<uint32_t>(Status::Malformed));
+ }
+ 
++Capabilities
++genericSelectedCapabilities()
++{
++    Capabilities capabilities = topologyCapability();
++    capabilities[QueueControlCapabilityByte] |= QueueControlCapabilityMask;
++    capabilities[MemoryControlCapabilityByte] |= MemoryControlCapabilityMask;
++    capabilities[SignalEventCapabilityByte] |= SignalEventCapabilityMask;
++    capabilities[CodeObjectTransferCapabilityByte] |=
++        CodeObjectTransferCapabilityMask;
++    capabilities[GenericDispatchCapabilityByte] |=
++        GenericDispatchCapabilityMask;
++    return capabilities;
++}
++
++GenericDispatchRequest
++goldenGenericMapRequest()
++{
++    GenericDispatchRequest request;
++    request.opcode = GenericDispatchOpcode::MapObject;
++    request.objectId = 7;
++    request.objectGeneration = 9;
++    request.map.kernargSegmentSize = 48;
++    request.map.kernargSegmentAlign = 8;
++    request.map.pageSize = GenericDispatchPageSize4K;
++    for (size_t index = 0; index < request.imageSha256.size(); ++index)
++        request.imageSha256[index] = static_cast<uint8_t>(index + 1);
++    request.kernelName[0] = 'v';
++    request.kernelName[1] = 'e';
++    request.kernelName[2] = 'c';
++    request.kernelName[3] = 'a';
++    request.kernelName[4] = 'd';
++    request.kernelName[5] = 'd';
++    return request;
++}
++
++TEST(HostGpuProtocol, GenericDispatchCapabilityUsesWireByteOne)
++{
++    const auto capability = genericDispatchCapability();
++    EXPECT_EQ(capability[0], 0U);
++    EXPECT_EQ(capability[GenericDispatchCapabilityByte],
++              GenericDispatchCapabilityMask);
++
++    auto server = goldenServer();
++    auto hello = goldenHello();
++    const auto selected = genericSelectedCapabilities();
++    server.supported = selected;
++    hello.offered = selected;
++    hello.required = selected;
++    auto negotiated = negotiate(goldenHeader(), hello, server);
++    ASSERT_EQ(negotiated.status, Status::Ok);
++    EXPECT_TRUE(genericDispatchCapabilitySelected(negotiated.selected));
++    EXPECT_EQ(negotiated.selected[GenericDispatchCapabilityByte], 0x01U);
++
++    hello = goldenHello();
++    hello.offered = selected;
++    hello.required = genericDispatchCapability();
++    server.supported = hello.offered;
++    negotiated = negotiate(goldenHeader(), hello, server);
++    EXPECT_EQ(negotiated.status, Status::UnsupportedCapability);
++}
++
++TEST(HostGpuProtocol, GenericDispatchRequestsUseFixedV2Payload)
++{
++    const auto capabilities = genericSelectedCapabilities();
++    const Header header = goldenMemoryHeader(401);
++    auto request = goldenGenericMapRequest();
++    auto frame = encodeGenericDispatchRequest(header, request, capabilities);
++    ASSERT_EQ(frame.size(), GenericDispatchRecordBytes);
++    EXPECT_EQ(frame[HeaderBytes], 0U);
++    EXPECT_EQ(frame[HeaderBytes + 1], GenericDispatchMajor);
++    EXPECT_EQ(load16(frame.data() + 14),
++              static_cast<uint16_t>(MessageType::GenericDispatchRequest));
++
++    auto decoded = decodeGenericDispatchRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities);
++    EXPECT_EQ(decoded.action, DecodeAction::Acknowledge);
++    EXPECT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(decoded.request.objectId, request.objectId);
++    EXPECT_EQ(decoded.request.map.kernargSegmentSize, 48U);
++
++    Capabilities absent = {};
++    decoded = decodeGenericDispatchRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, absent);
++    EXPECT_EQ(decoded.status, Status::UnsupportedCapability);
++    EXPECT_FALSE(decoded.closeConnection);
++    Capabilities foreign = genericDispatchCapability();
++    decoded = decodeGenericDispatchRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, foreign);
++    EXPECT_EQ(decoded.status, Status::UnsupportedCapability);
++    EXPECT_FALSE(decoded.closeConnection);
++
++    request.map.descriptorPreloadDwords = 12;
++    frame = encodeGenericDispatchRequest(header, request);
++    EXPECT_TRUE(frame.empty());
++
++    request = goldenGenericMapRequest();
++    frame = encodeGenericDispatchRequest(header, request, capabilities);
++    ASSERT_EQ(frame.size(), GenericDispatchRecordBytes);
++    store32(frame, HeaderBytes + GenericDispatchCommonBytes + 16, 12);
++    recomputeCrc(frame);
++    decoded = decodeGenericDispatchRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities);
++    EXPECT_EQ(decoded.status, Status::UnsupportedCapability);
++    EXPECT_NE(decoded.reason.find("preload"), std::string::npos);
++
++    request = goldenGenericMapRequest();
++    request.opcode = GenericDispatchOpcode::AllocKernarg;
++    request.mappingId = 11;
++    request.mappingGeneration = 13;
++    request.imageSha256.fill(0);
++    request.kernelName.fill(0);
++    request.allocKernarg.sizeBytes = 48;
++    request.allocKernarg.alignmentBytes = 8;
++    frame = encodeGenericDispatchRequest(header, request, capabilities);
++    decoded = decodeGenericDispatchRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities);
++    EXPECT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(decoded.request.allocKernarg.sizeBytes, 48U);
++
++    request = goldenGenericMapRequest();
++    request.opcode = GenericDispatchOpcode::SubmitAql;
++    request.mappingId = 11;
++    request.mappingGeneration = 13;
++    request.queueId = 17;
++    request.queueGeneration = 19;
++    request.queueSequence = 23;
++    request.submit.kernargAllocationId = 29;
++    request.submit.kernargGeneration = 31;
++    request.submit.kernargSize = 48;
++    request.submit.signalId = 37;
++    request.submit.signalGeneration = 41;
++    request.submit.expectedSignalValueBits = 1;
++    request.submit.gridX = 24832;
++    request.submit.gridY = 1;
++    request.submit.gridZ = 1;
++    request.submit.workgroupX = 256;
++    request.submit.workgroupY = 1;
++    request.submit.workgroupZ = 1;
++    request.submit.numWarps = 4;
++    request.submit.numCtas = 1;
++    request.submit.wavefrontSize = 64;
++    frame = encodeGenericDispatchRequest(header, request, capabilities);
++    decoded = decodeGenericDispatchRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities);
++    EXPECT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(decoded.request.submit.gridX, 24832U);
++
++    request = goldenGenericMapRequest();
++    request.opcode = GenericDispatchOpcode::UnmapObject;
++    request.mappingId = 11;
++    request.mappingGeneration = 13;
++    request.imageSha256.fill(0);
++    request.kernelName.fill(0);
++    frame = encodeGenericDispatchRequest(header, request, capabilities);
++    decoded = decodeGenericDispatchRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities);
++    EXPECT_EQ(decoded.status, Status::Ok);
++
++    frame[HeaderBytes + GenericDispatchPayloadBytes - 1] = 0xa5;
++    recomputeCrc(frame);
++    decoded = decodeGenericDispatchRequestRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities);
++    EXPECT_EQ(decoded.status, Status::Malformed);
++}
++
++TEST(HostGpuProtocol, GenericDispatchResponsesCanonicalizeFailures)
++{
++    const auto capabilities = genericSelectedCapabilities();
++    const Header header = goldenMemoryHeader(402);
++    GenericDispatchResponse response;
++    response.status = Status::Ok;
++    response.opcode = GenericDispatchOpcode::MapObject;
++    response.objectId = 7;
++    response.objectGeneration = 9;
++    response.mappingId = 11;
++    response.mappingGeneration = 13;
++    response.mappedBaseVa = 0x100000000000ULL;
++    response.mappedEndVa = 0x100000003000ULL;
++    response.descriptorVa = 0x1000000005c0ULL;
++    response.codeVa = 0x100000001600ULL;
++    response.entryVa = 0x100000001600ULL;
++    response.mappedBytes = 0x3000;
++    response.segmentCount = 3;
++    response.descriptorPreloadDwords = 12;
++    for (size_t index = 0; index < response.imageSha256.size(); ++index)
++        response.imageSha256[index] = static_cast<uint8_t>(index + 1);
++    auto frame = encodeGenericDispatchAck(header, response, capabilities);
++    ASSERT_EQ(frame.size(), GenericDispatchRecordBytes);
++    auto decoded = decodeGenericDispatchResponseRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities,
++        header.requestId, MessageType::GenericDispatchAck);
++    EXPECT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(decoded.response.descriptorPreloadDwords, 12U);
++
++    response = {};
++    response.status = Status::Ok;
++    response.opcode = GenericDispatchOpcode::SubmitAql;
++    response.objectId = 7;
++    response.objectGeneration = 9;
++    response.mappingId = 11;
++    response.mappingGeneration = 13;
++    response.queueId = 17;
++    response.queueGeneration = 19;
++    response.queueSequence = 23;
++    response.signalId = 37;
++    response.signalGeneration = 41;
++    response.signalValueBits = 1;
++    response.kernargAllocationId = 29;
++    response.kernargGeneration = 31;
++    response.kernargVa = 0x100000004000ULL;
++    response.kernargSize = 48;
++    response.kernargAlignment = 8;
++    response.ticketId = 59;
++    response.traceId = 67;
++    response.packetVa = 0x100000005000ULL;
++    for (size_t index = 0; index < response.imageSha256.size(); ++index)
++        response.imageSha256[index] = static_cast<uint8_t>(index + 1);
++    frame = encodeGenericDispatchCompletion(header, response, capabilities);
++    decoded = decodeGenericDispatchResponseRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities,
++        header.requestId, MessageType::GenericDispatchCompletion);
++    EXPECT_EQ(decoded.status, Status::Ok);
++    EXPECT_EQ(decoded.response.packetVa, response.packetVa);
++
++    response = {};
++    response.status = Status::Ok;
++    response.opcode = GenericDispatchOpcode::UnmapObject;
++    response.objectId = 7;
++    response.objectGeneration = 9;
++    response.mappingId = 11;
++    response.mappingGeneration = 13;
++    /* UNMAP identity is sufficient; runtime permits an omitted digest. */
++    frame = encodeGenericDispatchAck(header, response, capabilities);
++    ASSERT_EQ(frame.size(), GenericDispatchRecordBytes);
++    decoded = decodeGenericDispatchResponseRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities,
++        header.requestId, MessageType::GenericDispatchAck);
++    EXPECT_EQ(decoded.status, Status::Ok);
++    EXPECT_TRUE(std::all_of(decoded.response.imageSha256.begin(),
++                            decoded.response.imageSha256.end(),
++                            [](uint8_t byte) { return byte == 0; }));
++
++    response.status = Status::Malformed;
++    response.major = 99;
++    response.minor = 99;
++    response.flags = 0xffff;
++    response.errorCode = 0;
++    response.mappedBaseVa = 0xdeadbeef;
++    response.imageSha256.fill(0xa5);
++    frame = encodeGenericDispatchAck(header, response, capabilities);
++    const uint8_t *payload = frame.data() + HeaderBytes;
++    EXPECT_EQ(load16(payload), GenericDispatchMajor);
++    EXPECT_EQ(load16(payload + 2), GenericDispatchMinor);
++    EXPECT_EQ(load16(payload + 10), 0U);
++    EXPECT_EQ(load64(payload + 48), 0U);
++    EXPECT_TRUE(std::all_of(payload + 272, payload + 272 + Sha256Bytes,
++                            [](uint8_t byte) { return byte == 0; }));
++    decoded = decodeGenericDispatchResponseRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities,
++        header.requestId, MessageType::GenericDispatchAck);
++    EXPECT_EQ(decoded.status, Status::Malformed);
++    EXPECT_FALSE(decoded.closeConnection);
++
++    /* A failure written on the wire must remain canonical; a stale VA is
++     * rejected even when the frame CRC is recomputed. */
++    store64(frame, HeaderBytes + 48, 0xdeadbeefULL);
++    recomputeCrc(frame);
++    decoded = decodeGenericDispatchResponseRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities,
++        header.requestId, MessageType::GenericDispatchAck);
++    EXPECT_EQ(decoded.status, Status::Malformed);
++
++    response = {};
++    response.status = Status::Ok;
++    response.opcode = GenericDispatchOpcode::MapObject;
++    response.objectId = 7;
++    response.objectGeneration = 9;
++    response.mappingId = 11;
++    response.mappingGeneration = 13;
++    EXPECT_TRUE(encodeGenericDispatchAck(header, response, capabilities)
++                    .empty());
++}
++
++TEST(HostGpuProtocol, GenericDispatchSuccessIdentityFieldsAreRequired)
++{
++    const auto capabilities = genericSelectedCapabilities();
++    const Header header = goldenMemoryHeader(403);
++
++    GenericDispatchResponse submit;
++    submit.status = Status::Ok;
++    submit.opcode = GenericDispatchOpcode::SubmitAql;
++    submit.objectId = 7;
++    submit.objectGeneration = 9;
++    submit.mappingId = 11;
++    submit.mappingGeneration = 13;
++    submit.queueId = 17;
++    submit.queueGeneration = 19;
++    submit.queueSequence = 23;
++    submit.signalId = 37;
++    submit.signalGeneration = 41;
++    submit.signalValueBits = 1;
++    submit.kernargAllocationId = 29;
++    submit.kernargGeneration = 31;
++    submit.kernargVa = 0x100000004000ULL;
++    submit.kernargSize = 48;
++    submit.kernargAlignment = 8;
++    submit.ticketId = 59;
++    submit.traceId = 67;
++    submit.packetVa = 0x100000005000ULL;
++    submit.imageSha256.fill(0xa5);
++
++    auto frame = encodeGenericDispatchAck(header, submit, capabilities);
++    ASSERT_EQ(frame.size(), GenericDispatchRecordBytes);
++    auto decoded = decodeGenericDispatchResponseRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities,
++        header.requestId, MessageType::GenericDispatchAck);
++    EXPECT_EQ(decoded.status, Status::Ok);
++
++    /* A successful SUBMIT ACK carries the trace identity used by WAIT. */
++    submit.traceId = 0;
++    EXPECT_TRUE(encodeGenericDispatchAck(header, submit, capabilities).empty());
++    submit.traceId = 67;
++    frame = encodeGenericDispatchAck(header, submit, capabilities);
++    ASSERT_EQ(frame.size(), GenericDispatchRecordBytes);
++    store64(frame, HeaderBytes + 96, 0);
++    recomputeCrc(frame);
++    decoded = decodeGenericDispatchResponseRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities,
++        header.requestId, MessageType::GenericDispatchAck);
++    EXPECT_EQ(decoded.status, Status::Malformed);
++
++    GenericDispatchResponse unmap;
++    unmap.status = Status::Ok;
++    unmap.opcode = GenericDispatchOpcode::UnmapObject;
++    unmap.objectId = 7;
++    unmap.objectGeneration = 9;
++    unmap.mappingId = 11;
++    unmap.mappingGeneration = 13;
++
++    frame = encodeGenericDispatchAck(header, unmap, capabilities);
++    ASSERT_EQ(frame.size(), GenericDispatchRecordBytes);
++    decoded = decodeGenericDispatchResponseRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities,
++        header.requestId, MessageType::GenericDispatchAck);
++    EXPECT_EQ(decoded.status, Status::Ok);
++
++    /* UNMAP is identity-only, but both object and mapping identities remain
++     * mandatory even when its digest is omitted. */
++    unmap.objectId = 0;
++    EXPECT_TRUE(encodeGenericDispatchAck(header, unmap, capabilities).empty());
++    unmap.objectId = 7;
++    unmap.mappingId = 0;
++    EXPECT_TRUE(encodeGenericDispatchAck(header, unmap, capabilities).empty());
++
++    unmap.mappingId = 11;
++    frame = encodeGenericDispatchAck(header, unmap, capabilities);
++    ASSERT_EQ(frame.size(), GenericDispatchRecordBytes);
++    store64(frame, HeaderBytes + 16, 0);
++    recomputeCrc(frame);
++    decoded = decodeGenericDispatchResponseRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities,
++        header.requestId, MessageType::GenericDispatchAck);
++    EXPECT_EQ(decoded.status, Status::Malformed);
++
++    frame = encodeGenericDispatchAck(header, unmap, capabilities);
++    ASSERT_EQ(frame.size(), GenericDispatchRecordBytes);
++    store64(frame, HeaderBytes + 32, 0);
++    recomputeCrc(frame);
++    decoded = decodeGenericDispatchResponseRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, capabilities,
++        header.requestId, MessageType::GenericDispatchAck);
++    EXPECT_EQ(decoded.status, Status::Malformed);
++}
++
+ } // anonymous namespace
+ } // namespace protocol
+ } // namespace hostgpu
+-- 
+2.53.0
+

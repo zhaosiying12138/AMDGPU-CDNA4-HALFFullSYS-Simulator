@@ -1,0 +1,847 @@
+From f553817f2ae453ab16d749138d7032cc7dd3894a Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Wed, 19 Aug 2026 23:43:19 +0800
+Subject: [PATCH 41/42] vega,amdgpu: adopt cache-control MUBUFs, VOP3 i32 ops,
+ and bridge re-pass
+
+Decode and execute buffer_wbl2 and buffer_inv as no-op cache control in
+the coherent host-native model, wire the VOP3-only v_add_i32/v_sub_i32
+pair through shared clamp-aware value semantics, account wavefront
+progress in s_sleep, and re-pass the AQL control queue when a packet
+retires so a dependent dispatch is served in the same service window.
+
+Inherited from the previous bring-up session and adopted after an
+independent adversarial review confirmed the semantics against the ISA
+and found only cosmetic conventions shared with existing siblings.
+
+Checkpoint-ID: CP-0070
+Goal-ID: GSIM-001
+Plan-Revision: 16
+Source-Lock-SHA256: dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf
+Evidence-Manifest-SHA256: 4a9757a0dcb54d767cca6acebe22ca30037d7ec180a0b816d044aa60d6bf904b
+Change-Kind: fix
+Baseline-Commit: c827a521d6f65e1d29eb0ba899e1b537717b7a0f
+---
+ src/arch/amdgpu/vega/gpu_decoder.cc           |  33 +++-
+ src/arch/amdgpu/vega/gpu_decoder.hh           |   2 +
+ src/arch/amdgpu/vega/gpu_decoder.test.cc      |  81 ++++++++
+ src/arch/amdgpu/vega/insts/instructions.hh    | 118 ++++++++++++
+ src/arch/amdgpu/vega/insts/mubuf.cc           | 101 ++++++++++
+ src/arch/amdgpu/vega/insts/sopp.cc            |   4 +-
+ src/arch/amdgpu/vega/insts/vop3.cc            |  68 +++++++
+ src/arch/amdgpu/vega/insts/vop_semantics.hh   |  47 +++++
+ .../amdgpu/vega/insts/vop_semantics.test.cc   |  19 ++
+ src/dev/amdgpu/host_gpu_bridge.cc             | 176 +++++++++---------
+ 10 files changed, 560 insertions(+), 89 deletions(-)
+
+diff --git a/src/arch/amdgpu/vega/gpu_decoder.cc b/src/arch/amdgpu/vega/gpu_decoder.cc
+index 51fab1521..b67ff50ad 100644
+--- a/src/arch/amdgpu/vega/gpu_decoder.cc
++++ b/src/arch/amdgpu/vega/gpu_decoder.cc
+@@ -3893,6 +3893,21 @@ namespace VegaISA
+     Decoder::subDecode_OP_MUBUF(MachInst iFmt)
+     {
+         InFmt_MUBUF *enc = &iFmt->iFmt_MUBUF;
++
++        // CDNA recycles these MUBUF slots for cache control. Keep the newer
++        // meanings local to the architectures on which LLVM emits them.
++        if (enc->OP == 0x28 &&
++            (gfxVersion == GfxVersion::gfx90a ||
++             gfxVersion == GfxVersion::gfx942 ||
++             gfxVersion == GfxVersion::gfx950)) {
++            return decode_OP_MUBUF__BUFFER_WBL2(iFmt);
++        }
++        if (enc->OP == 0x29 &&
++            (gfxVersion == GfxVersion::gfx942 ||
++             gfxVersion == GfxVersion::gfx950)) {
++            return decode_OP_MUBUF__BUFFER_INV(iFmt);
++        }
++
+         IsaDecodeMethod method = tableSubDecode_OP_MUBUF[enc->OP];
+         return (this->*method)(iFmt);
+     } // subDecode_OP_MUBUF
+@@ -7732,15 +7747,13 @@ namespace VegaISA
+     GPUStaticInst*
+     Decoder::decode_OPU_VOP3__V_ADD_I32(MachInst iFmt)
+     {
+-        fatal("Trying to decode instruction without a class\n");
+-        return nullptr;
++        return new Inst_VOP3__V_ADD_I32(&iFmt->iFmt_VOP3A);
+     }
+ 
+     GPUStaticInst*
+     Decoder::decode_OPU_VOP3__V_SUB_I32(MachInst iFmt)
+     {
+-        fatal("Trying to decode instruction without a class\n");
+-        return nullptr;
++        return new Inst_VOP3__V_SUB_I32(&iFmt->iFmt_VOP3A);
+     }
+ 
+     GPUStaticInst*
+@@ -10295,6 +10308,18 @@ namespace VegaISA
+         return new Inst_MUBUF__BUFFER_STORE_DWORDX4(&iFmt->iFmt_MUBUF);
+     } // decode_OP_MUBUF__BUFFER_STORE_DWORDX4
+ 
++    GPUStaticInst*
++    Decoder::decode_OP_MUBUF__BUFFER_WBL2(MachInst iFmt)
++    {
++        return new Inst_MUBUF__BUFFER_WBL2(&iFmt->iFmt_MUBUF);
++    } // decode_OP_MUBUF__BUFFER_WBL2
++
++    GPUStaticInst*
++    Decoder::decode_OP_MUBUF__BUFFER_INV(MachInst iFmt)
++    {
++        return new Inst_MUBUF__BUFFER_INV(&iFmt->iFmt_MUBUF);
++    } // decode_OP_MUBUF__BUFFER_INV
++
+     GPUStaticInst*
+     Decoder::decode_OP_MUBUF__BUFFER_STORE_LDS_DWORD(MachInst iFmt)
+     {
+diff --git a/src/arch/amdgpu/vega/gpu_decoder.hh b/src/arch/amdgpu/vega/gpu_decoder.hh
+index e641bb1bf..60ee5744d 100644
+--- a/src/arch/amdgpu/vega/gpu_decoder.hh
++++ b/src/arch/amdgpu/vega/gpu_decoder.hh
+@@ -1008,6 +1008,8 @@ namespace VegaISA
+         GPUStaticInst* decode_OP_MUBUF__BUFFER_LOAD_SHORT_D16_HI(MachInst);
+         GPUStaticInst* decode_OP_MUBUF__BUFFER_LOAD_FORMAT_D16_HI_X(MachInst);
+         GPUStaticInst* decode_OP_MUBUF__BUFFER_STORE_FORMAT_D16_HI_X(MachInst);
++        GPUStaticInst* decode_OP_MUBUF__BUFFER_WBL2(MachInst);
++        GPUStaticInst* decode_OP_MUBUF__BUFFER_INV(MachInst);
+         GPUStaticInst* decode_OP_MUBUF__BUFFER_STORE_LDS_DWORD(MachInst);
+         GPUStaticInst* decode_OP_MUBUF__BUFFER_WBINVL1(MachInst);
+         GPUStaticInst* decode_OP_MUBUF__BUFFER_WBINVL1_VOL(MachInst);
+diff --git a/src/arch/amdgpu/vega/gpu_decoder.test.cc b/src/arch/amdgpu/vega/gpu_decoder.test.cc
+index c261a8608..763b75834 100644
+--- a/src/arch/amdgpu/vega/gpu_decoder.test.cc
++++ b/src/arch/amdgpu/vega/gpu_decoder.test.cc
+@@ -293,6 +293,87 @@ TEST(GpuDecoderTest, Gfx950DsWriteB16D16Hi)
+     EXPECT_EQ(inst->getOperandSize(1), 4);
+ }
+ 
++TEST(GpuDecoderTest, Gfx950BufferCacheControl)
++{
++    struct CacheControlEncoding
++    {
++        uint32_t word0;
++        const char *mnemonic;
++    };
++    // Golden gfx950 encodings from llvm-mc. GLC/SLC encode SC0/SC1.
++    static constexpr std::array<CacheControlEncoding, 2> Encodings = {{
++        {0xe0a0c000, "buffer_wbl2"},
++        {0xe0a4c000, "buffer_inv"},
++    }};
++
++    Decoder decoder;
++    decoder.setGfxVersion(GfxVersion::gfx950);
++    for (const auto &encoding : Encodings) {
++        InstFormat words[2] = {};
++        words[0].imm_u32 = encoding.word0;
++        std::unique_ptr<GPUStaticInst> inst(decoder.decode(words));
++        SCOPED_TRACE(encoding.mnemonic);
++        ASSERT_NE(inst, nullptr);
++        EXPECT_EQ(inst->opcode(), encoding.mnemonic);
++        EXPECT_EQ(inst->instSize(), 8);
++        EXPECT_EQ(inst->getNumOperands(), 0);
++        EXPECT_TRUE(inst->isMemRef());
++        EXPECT_TRUE(inst->isMemSync());
++        EXPECT_TRUE(inst->isGlobalMem());
++        EXPECT_EQ(inst->disassemble().rfind(encoding.mnemonic, 0), 0);
++    }
++}
++
++TEST(GpuDecoderTest, Gfx950WakeupIsFunctionalNop)
++{
++    InstFormat words[2] = {};
++    words[0].imm_u32 = 0xbf830000;
++
++    Decoder decoder;
++    decoder.setGfxVersion(GfxVersion::gfx950);
++    std::unique_ptr<GPUStaticInst> inst(decoder.decode(words));
++    ASSERT_NE(inst, nullptr);
++    EXPECT_EQ(inst->opcode(), "s_wakeup");
++    EXPECT_EQ(inst->instSize(), 4);
++    EXPECT_EQ(inst->getNumOperands(), 0);
++    EXPECT_TRUE(inst->isScalar());
++    EXPECT_TRUE(inst->isNop());
++    EXPECT_EQ(inst->disassemble(), "s_wakeup");
++}
++
++TEST(GpuDecoderTest, Gfx950Vop3SignedAddSub)
++{
++    struct Encoding
++    {
++        uint32_t word0;
++        const char *mnemonic;
++    };
++    // LLVM gfx9/CDNA VOP3 encodings; gfx950 retains opcodes 0x29c/0x29d.
++    static constexpr std::array<Encoding, 2> Encodings = {{
++        {0xd29c0001, "v_add_i32"},
++        {0xd29d0001, "v_sub_i32"},
++    }};
++
++    Decoder decoder;
++    decoder.setGfxVersion(GfxVersion::gfx950);
++    for (const auto &encoding : Encodings) {
++        InstFormat words[2] = {};
++        words[0].imm_u32 = encoding.word0;
++        words[1].imm_u32 = 0x00020702;
++        std::unique_ptr<GPUStaticInst> inst(decoder.decode(words));
++        SCOPED_TRACE(encoding.mnemonic);
++        ASSERT_NE(inst, nullptr);
++        EXPECT_EQ(inst->opcode(), encoding.mnemonic);
++        EXPECT_EQ(inst->instSize(), 8);
++        EXPECT_TRUE(inst->isALU());
++        EXPECT_EQ(inst->getNumOperands(), 3);
++        EXPECT_EQ(inst->getOperandSize(0), 4);
++        EXPECT_EQ(inst->getOperandSize(1), 4);
++        EXPECT_EQ(inst->getOperandSize(2), 4);
++        EXPECT_EQ(inst->disassemble().rfind(encoding.mnemonic, 0), 0);
++    }
++}
++
+ TEST(GpuDecoderTest, Gfx950DsTransposeReadsUseLocalMemoryResource)
+ {
+     struct DsReadEncoding
+diff --git a/src/arch/amdgpu/vega/insts/instructions.hh b/src/arch/amdgpu/vega/insts/instructions.hh
+index f3cd6be6f..7543b0110 100644
+--- a/src/arch/amdgpu/vega/insts/instructions.hh
++++ b/src/arch/amdgpu/vega/insts/instructions.hh
+@@ -32158,6 +32158,70 @@ namespace VegaISA
+         void execute(GPUDynInstPtr) override;
+     }; // Inst_VOP3__V_CVT_PK_I16_I32
+ 
++    class Inst_VOP3__V_ADD_I32 : public Inst_VOP3A
++    {
++      public:
++        Inst_VOP3__V_ADD_I32(InFmt_VOP3A*);
++        ~Inst_VOP3__V_ADD_I32();
++
++        int
++        getNumOperands() override
++        {
++            return numDstRegOperands() + numSrcRegOperands();
++        }
++
++        int numDstRegOperands() override { return 1; }
++        int numSrcRegOperands() override { return 2; }
++
++        int
++        getOperandSize(int opIdx) override
++        {
++            switch (opIdx) {
++              case 0: // src0
++              case 1: // src1
++              case 2: // vdst
++                return 4;
++              default:
++                fatal("op idx %i out of bounds\n", opIdx);
++                return -1;
++            }
++        }
++
++        void execute(GPUDynInstPtr) override;
++    }; // Inst_VOP3__V_ADD_I32
++
++    class Inst_VOP3__V_SUB_I32 : public Inst_VOP3A
++    {
++      public:
++        Inst_VOP3__V_SUB_I32(InFmt_VOP3A*);
++        ~Inst_VOP3__V_SUB_I32();
++
++        int
++        getNumOperands() override
++        {
++            return numDstRegOperands() + numSrcRegOperands();
++        }
++
++        int numDstRegOperands() override { return 1; }
++        int numSrcRegOperands() override { return 2; }
++
++        int
++        getOperandSize(int opIdx) override
++        {
++            switch (opIdx) {
++              case 0: // src0
++              case 1: // src1
++              case 2: // vdst
++                return 4;
++              default:
++                fatal("op idx %i out of bounds\n", opIdx);
++                return -1;
++            }
++        }
++
++        void execute(GPUDynInstPtr) override;
++    }; // Inst_VOP3__V_SUB_I32
++
+     class Inst_VOP3__V_PACK_B32_F16 : public Inst_VOP3A
+     {
+       public:
+@@ -38602,6 +38666,60 @@ namespace VegaISA
+         void completeAcc(GPUDynInstPtr) override;
+     }; // Inst_MUBUF__BUFFER_STORE_DWORDX4
+ 
++    class Inst_MUBUF__BUFFER_WBL2 : public Inst_MUBUF
++    {
++      public:
++        Inst_MUBUF__BUFFER_WBL2(InFmt_MUBUF*);
++        ~Inst_MUBUF__BUFFER_WBL2();
++
++        int
++        getNumOperands() override
++        {
++            return numDstRegOperands() + numSrcRegOperands();
++        } // getNumOperands
++
++        int numDstRegOperands() override { return 0; }
++        int numSrcRegOperands() override { return 0; }
++
++        int
++        getOperandSize(int opIdx) override
++        {
++            fatal("op idx %i out of bounds\n", opIdx);
++            return -1;
++        } // getOperandSize
++
++        void execute(GPUDynInstPtr) override;
++        void initiateAcc(GPUDynInstPtr) override;
++        void completeAcc(GPUDynInstPtr) override;
++    }; // Inst_MUBUF__BUFFER_WBL2
++
++    class Inst_MUBUF__BUFFER_INV : public Inst_MUBUF
++    {
++      public:
++        Inst_MUBUF__BUFFER_INV(InFmt_MUBUF*);
++        ~Inst_MUBUF__BUFFER_INV();
++
++        int
++        getNumOperands() override
++        {
++            return numDstRegOperands() + numSrcRegOperands();
++        } // getNumOperands
++
++        int numDstRegOperands() override { return 0; }
++        int numSrcRegOperands() override { return 0; }
++
++        int
++        getOperandSize(int opIdx) override
++        {
++            fatal("op idx %i out of bounds\n", opIdx);
++            return -1;
++        } // getOperandSize
++
++        void execute(GPUDynInstPtr) override;
++        void initiateAcc(GPUDynInstPtr) override;
++        void completeAcc(GPUDynInstPtr) override;
++    }; // Inst_MUBUF__BUFFER_INV
++
+     class Inst_MUBUF__BUFFER_STORE_LDS_DWORD : public Inst_MUBUF
+     {
+       public:
+diff --git a/src/arch/amdgpu/vega/insts/mubuf.cc b/src/arch/amdgpu/vega/insts/mubuf.cc
+index 828fb9ef5..2a8bef954 100644
+--- a/src/arch/amdgpu/vega/insts/mubuf.cc
++++ b/src/arch/amdgpu/vega/insts/mubuf.cc
+@@ -2043,6 +2043,107 @@ namespace VegaISA
+     Inst_MUBUF__BUFFER_STORE_DWORDX4::completeAcc(GPUDynInstPtr gpuDynInst)
+     {
+     } // completeAcc
++
++    // --- CDNA cache-control instructions ---
++
++    Inst_MUBUF__BUFFER_WBL2::Inst_MUBUF__BUFFER_WBL2(InFmt_MUBUF *iFmt)
++        : Inst_MUBUF(iFmt, "buffer_wbl2")
++    {
++        setFlag(MemoryRef);
++        setFlag(GPUStaticInst::MemSync);
++        setFlag(GlobalSegment);
++        setFlag(MemSync);
++    }
++
++    Inst_MUBUF__BUFFER_WBL2::~Inst_MUBUF__BUFFER_WBL2()
++    {
++    }
++
++    void
++    Inst_MUBUF__BUFFER_WBL2::execute(GPUDynInstPtr gpuDynInst)
++    {
++        Wavefront *wf = gpuDynInst->wavefront();
++
++        if (gpuDynInst->exec_mask.none()) {
++            wf->decVMemInstsIssued();
++            wf->untrackVMemInst(gpuDynInst);
++            return;
++        }
++
++        gpuDynInst->execUnitId = wf->execUnitId;
++        gpuDynInst->latency.init(gpuDynInst->computeUnit());
++        gpuDynInst->latency.set(gpuDynInst->computeUnit()->clockPeriod());
++
++        if (gpuDynInst->executedAs() == enums::SC_GLOBAL) {
++            gpuDynInst->computeUnit()->globalMemoryPipe.
++                issueRequest(gpuDynInst);
++        } else {
++            fatal("Unsupported scope for buffer instruction.\n");
++        }
++    }
++
++    void
++    Inst_MUBUF__BUFFER_WBL2::initiateAcc(GPUDynInstPtr gpuDynInst)
++    {
++        // Host-native memory is coherent and has no modeled GL cache. The
++        // existing global fence supplies the required functional ordering.
++        injectGlobalMemFence(gpuDynInst);
++    }
++
++    void
++    Inst_MUBUF__BUFFER_WBL2::completeAcc(GPUDynInstPtr gpuDynInst)
++    {
++    }
++
++    Inst_MUBUF__BUFFER_INV::Inst_MUBUF__BUFFER_INV(InFmt_MUBUF *iFmt)
++        : Inst_MUBUF(iFmt, "buffer_inv")
++    {
++        setFlag(MemoryRef);
++        setFlag(GPUStaticInst::MemSync);
++        setFlag(GlobalSegment);
++        setFlag(MemSync);
++    }
++
++    Inst_MUBUF__BUFFER_INV::~Inst_MUBUF__BUFFER_INV()
++    {
++    }
++
++    void
++    Inst_MUBUF__BUFFER_INV::execute(GPUDynInstPtr gpuDynInst)
++    {
++        Wavefront *wf = gpuDynInst->wavefront();
++
++        if (gpuDynInst->exec_mask.none()) {
++            wf->decVMemInstsIssued();
++            wf->untrackVMemInst(gpuDynInst);
++            return;
++        }
++
++        gpuDynInst->execUnitId = wf->execUnitId;
++        gpuDynInst->latency.init(gpuDynInst->computeUnit());
++        gpuDynInst->latency.set(gpuDynInst->computeUnit()->clockPeriod());
++
++        if (gpuDynInst->executedAs() == enums::SC_GLOBAL) {
++            gpuDynInst->computeUnit()->globalMemoryPipe.
++                issueRequest(gpuDynInst);
++        } else {
++            fatal("Unsupported scope for buffer instruction.\n");
++        }
++    }
++
++    void
++    Inst_MUBUF__BUFFER_INV::initiateAcc(GPUDynInstPtr gpuDynInst)
++    {
++        // SC0/SC1 select the hardware cache domain. In the coherent
++        // host-native model every supported domain reduces to this fence.
++        injectGlobalMemFence(gpuDynInst);
++    }
++
++    void
++    Inst_MUBUF__BUFFER_INV::completeAcc(GPUDynInstPtr gpuDynInst)
++    {
++    }
++
+     // --- Inst_MUBUF__BUFFER_STORE_LDS_DWORD class methods ---
+ 
+     Inst_MUBUF__BUFFER_STORE_LDS_DWORD
+diff --git a/src/arch/amdgpu/vega/insts/sopp.cc b/src/arch/amdgpu/vega/insts/sopp.cc
+index 6c0339ccd..34e18c8ac 100644
+--- a/src/arch/amdgpu/vega/insts/sopp.cc
++++ b/src/arch/amdgpu/vega/insts/sopp.cc
+@@ -239,6 +239,7 @@ namespace VegaISA
+     Inst_SOPP__S_WAKEUP::Inst_SOPP__S_WAKEUP(InFmt_SOPP *iFmt)
+         : Inst_SOPP(iFmt, "s_wakeup")
+     {
++        setFlag(Nop);
+     } // Inst_SOPP__S_WAKEUP
+ 
+     Inst_SOPP__S_WAKEUP::~Inst_SOPP__S_WAKEUP()
+@@ -260,7 +261,8 @@ namespace VegaISA
+     void
+     Inst_SOPP__S_WAKEUP::execute(GPUDynInstPtr gpuDynInst)
+     {
+-        panicUnimplemented();
++        // Sleeping waves resume when their bounded S_SLEEP timer expires, so
++        // omitting this early-wakeup timing hint cannot change correctness.
+     } // execute
+     // --- Inst_SOPP__S_CBRANCH_SCC0 class methods ---
+ 
+diff --git a/src/arch/amdgpu/vega/insts/vop3.cc b/src/arch/amdgpu/vega/insts/vop3.cc
+index a92f41c3f..93ee89441 100644
+--- a/src/arch/amdgpu/vega/insts/vop3.cc
++++ b/src/arch/amdgpu/vega/insts/vop3.cc
+@@ -9531,6 +9531,74 @@ namespace VegaISA
+     {
+         panicUnimplemented();
+     } // execute
++    // --- Inst_VOP3__V_ADD_I32 class methods ---
++
++    Inst_VOP3__V_ADD_I32::Inst_VOP3__V_ADD_I32(InFmt_VOP3A *iFmt)
++        : Inst_VOP3A(iFmt, "v_add_i32", false)
++    {
++        setFlag(ALU);
++    }
++
++    Inst_VOP3__V_ADD_I32::~Inst_VOP3__V_ADD_I32()
++    {
++    }
++
++    void
++    Inst_VOP3__V_ADD_I32::execute(GPUDynInstPtr gpuDynInst)
++    {
++        Wavefront *wf = gpuDynInst->wavefront();
++        ConstVecOperandU32 src0(gpuDynInst, extData.SRC0);
++        ConstVecOperandU32 src1(gpuDynInst, extData.SRC1);
++        VecOperandU32 vdst(gpuDynInst, instData.VDST);
++
++        src0.readSrc();
++        src1.readSrc();
++
++        panic_if(instData.ABS || extData.NEG || extData.OMOD,
++                 "Input/output modifiers not supported for %s", _opcode);
++        for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
++            if (wf->execMask(lane)) {
++                vdst[lane] = vop_semantics::vop3AddI32(
++                    src0[lane], src1[lane], instData.CLAMP);
++            }
++        }
++
++        vdst.write();
++    }
++    // --- Inst_VOP3__V_SUB_I32 class methods ---
++
++    Inst_VOP3__V_SUB_I32::Inst_VOP3__V_SUB_I32(InFmt_VOP3A *iFmt)
++        : Inst_VOP3A(iFmt, "v_sub_i32", false)
++    {
++        setFlag(ALU);
++    }
++
++    Inst_VOP3__V_SUB_I32::~Inst_VOP3__V_SUB_I32()
++    {
++    }
++
++    void
++    Inst_VOP3__V_SUB_I32::execute(GPUDynInstPtr gpuDynInst)
++    {
++        Wavefront *wf = gpuDynInst->wavefront();
++        ConstVecOperandU32 src0(gpuDynInst, extData.SRC0);
++        ConstVecOperandU32 src1(gpuDynInst, extData.SRC1);
++        VecOperandU32 vdst(gpuDynInst, instData.VDST);
++
++        src0.readSrc();
++        src1.readSrc();
++
++        panic_if(instData.ABS || extData.NEG || extData.OMOD,
++                 "Input/output modifiers not supported for %s", _opcode);
++        for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
++            if (wf->execMask(lane)) {
++                vdst[lane] = vop_semantics::vop3SubI32(
++                    src0[lane], src1[lane], instData.CLAMP);
++            }
++        }
++
++        vdst.write();
++    }
+     // --- Inst_VOP3__V_PACK_B32_F16 class methods ---
+ 
+     Inst_VOP3__V_PACK_B32_F16::Inst_VOP3__V_PACK_B32_F16(
+diff --git a/src/arch/amdgpu/vega/insts/vop_semantics.hh b/src/arch/amdgpu/vega/insts/vop_semantics.hh
+index 7ac652163..4b33cfdb9 100644
+--- a/src/arch/amdgpu/vega/insts/vop_semantics.hh
++++ b/src/arch/amdgpu/vega/insts/vop_semantics.hh
+@@ -37,6 +37,7 @@
+ #include <cstdint>
+ #include <cstdlib>
+ #include <cstring>
++#include <limits>
+ 
+ #include "arch/amdgpu/common/dtype/mxfp_types.hh"
+ #include "arch/amdgpu/vega/gpu_registers.hh"
+@@ -50,6 +51,52 @@ namespace VegaISA
+ namespace vop_semantics
+ {
+ 
++inline int32_t
++i32FromBits(uint32_t value)
++{
++    int32_t result;
++    std::memcpy(&result, &value, sizeof(result));
++    return result;
++}
++
++inline uint32_t
++i32Bits(int32_t value)
++{
++    uint32_t result;
++    std::memcpy(&result, &value, sizeof(result));
++    return result;
++}
++
++inline uint32_t
++vop3AddI32(uint32_t lhs, uint32_t rhs, bool clamp)
++{
++    if (!clamp)
++        return lhs + rhs;
++
++    const int64_t sum = static_cast<int64_t>(i32FromBits(lhs)) +
++                        static_cast<int64_t>(i32FromBits(rhs));
++    const int64_t saturated = std::clamp(
++        sum,
++        static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
++        static_cast<int64_t>(std::numeric_limits<int32_t>::max()));
++    return i32Bits(static_cast<int32_t>(saturated));
++}
++
++inline uint32_t
++vop3SubI32(uint32_t lhs, uint32_t rhs, bool clamp)
++{
++    if (!clamp)
++        return lhs - rhs;
++
++    const int64_t difference = static_cast<int64_t>(i32FromBits(lhs)) -
++                               static_cast<int64_t>(i32FromBits(rhs));
++    const int64_t saturated = std::clamp(
++        difference,
++        static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
++        static_cast<int64_t>(std::numeric_limits<int32_t>::max()));
++    return i32Bits(static_cast<int32_t>(saturated));
++}
++
+ inline int
+ writableVectorSourceIndex(unsigned selector)
+ {
+diff --git a/src/arch/amdgpu/vega/insts/vop_semantics.test.cc b/src/arch/amdgpu/vega/insts/vop_semantics.test.cc
+index 4cc97c876..00691d654 100644
+--- a/src/arch/amdgpu/vega/insts/vop_semantics.test.cc
++++ b/src/arch/amdgpu/vega/insts/vop_semantics.test.cc
+@@ -48,6 +48,25 @@ namespace
+ 
+ using namespace vop_semantics;
+ 
++TEST(VopSemanticsTest, Vop3SignedAddSubWrapOrSaturate)
++{
++    constexpr uint32_t I32Min = 0x80000000u;
++    constexpr uint32_t I32Max = 0x7fffffffu;
++    constexpr uint32_t MinusOne = 0xffffffffu;
++
++    EXPECT_EQ(vop3AddI32(I32Max, 1, false), I32Min);
++    EXPECT_EQ(vop3AddI32(MinusOne, 1, false), 0u);
++    EXPECT_EQ(vop3SubI32(I32Min, 1, false), I32Max);
++    EXPECT_EQ(vop3SubI32(0, 1, false), MinusOne);
++
++    EXPECT_EQ(vop3AddI32(I32Max, 1, true), I32Max);
++    EXPECT_EQ(vop3AddI32(I32Min, MinusOne, true), I32Min);
++    EXPECT_EQ(vop3SubI32(I32Min, 1, true), I32Min);
++    EXPECT_EQ(vop3SubI32(I32Max, MinusOne, true), I32Max);
++    EXPECT_EQ(vop3AddI32(12, 30, true), 42u);
++    EXPECT_EQ(vop3SubI32(30, 12, true), 18u);
++}
++
+ TEST(VopSemanticsTest, WritableVectorSourcesUseRegisterFileIndices)
+ {
+     EXPECT_EQ(writableVectorSourceIndex(REG_VGPR_MIN), 0);
+diff --git a/src/dev/amdgpu/host_gpu_bridge.cc b/src/dev/amdgpu/host_gpu_bridge.cc
+index 543a006e2..530016f96 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.cc
++++ b/src/dev/amdgpu/host_gpu_bridge.cc
+@@ -3613,99 +3613,107 @@ HostGPUBridge::serviceKmtDispatches()
+     if (activeKmtDispatch || !executionAdapter || executionAdapter->active()) {
+         return;
+     }
+-    for (auto &[fd, client] : clients) {
+-        if (!client)
+-            continue;
+-        for (auto &queue : client->kmtQueues) {
+-            if (!queue || !queue->observer || !queue->control ||
+-                !queue->dispatch || !client->kmtMemory) {
++    bool retiredControlPacket = false;
++    do {
++        // A later queue can satisfy a barrier seen earlier in this pass.
++        // Retire controls to a fixed point before declaring the bridge idle.
++        retiredControlPacket = false;
++        for (auto &[fd, client] : clients) {
++            if (!client)
+                 continue;
+-            }
+-            while (!queue->durableBatches.empty() &&
+-                   queue->durableBatches.front().writeIndex <=
+-                       queue->observer->queue().dispatchIndex()) {
+-                queue->durableBatches.pop_front();
+-            }
+-            if (queue->durableBatches.empty())
+-                continue;
+-
+-            bool controlBlocked = false;
+-            while (!queue->durableBatches.empty() &&
+-                   queue->durableBatches.front().writeIndex >
+-                       queue->observer->queue().dispatchIndex()) {
+-                const auto result = queue->control->process(
+-                    queue->observer->queue(), *client->kmtMemory,
+-                    queue->durableBatches.front().requestId);
+-                if (result.status ==
+-                        HostNativeAqlControl::Status::Completed) {
+-                    while (!queue->durableBatches.empty() &&
+-                           queue->durableBatches.front().writeIndex <=
+-                               queue->observer->queue().dispatchIndex()) {
+-                        queue->durableBatches.pop_front();
+-                    }
++            for (auto &queue : client->kmtQueues) {
++                if (!queue || !queue->observer || !queue->control ||
++                    !queue->dispatch || !client->kmtMemory) {
+                     continue;
+                 }
+-                if (result.status == HostNativeAqlControl::Status::Blocked) {
+-                    controlBlocked = true;
+-                    break;
+-                }
+-                if (result.status ==
+-                        HostNativeAqlControl::Status::NotControl) {
+-                    break;
++                while (!queue->durableBatches.empty() &&
++                       queue->durableBatches.front().writeIndex <=
++                           queue->observer->queue().dispatchIndex()) {
++                    queue->durableBatches.pop_front();
+                 }
++                if (queue->durableBatches.empty())
++                    continue;
+ 
+-                warn("%s: standard KMT AQL control admission failed: "
+-                     "packet_type=%u queue_index=%llu control=%s",
+-                     name(), static_cast<unsigned>(result.packetType),
+-                     static_cast<unsigned long long>(result.queueIndex),
+-                     queue->control->failure());
+-                const uint64_t generation = client->generation;
+-                const int clientFd = fd;
+-                auto *event = new EventFunctionWrapper(
+-                    [this, clientFd, generation]() {
+-                        auto found = clients.find(clientFd);
+-                        if (found != clients.end() &&
+-                            found->second->generation == generation) {
+-                            closeClient(clientFd);
++                bool controlBlocked = false;
++                while (!queue->durableBatches.empty() &&
++                       queue->durableBatches.front().writeIndex >
++                           queue->observer->queue().dispatchIndex()) {
++                    const auto result = queue->control->process(
++                        queue->observer->queue(), *client->kmtMemory,
++                        queue->durableBatches.front().requestId);
++                    if (result.status ==
++                            HostNativeAqlControl::Status::Completed) {
++                        retiredControlPacket = true;
++                        while (!queue->durableBatches.empty() &&
++                               queue->durableBatches.front().writeIndex <=
++                                   queue->observer->queue().dispatchIndex()) {
++                            queue->durableBatches.pop_front();
+                         }
+-                    }, name() + ".host_gpu_kmt_control_failure", true);
+-                schedule(event, curTick());
+-                return;
+-            }
+-            if (controlBlocked || queue->durableBatches.empty())
+-                continue;
+-            const auto start = startKmtDispatch(*client, *queue);
+-            if (start == KmtDispatchStart::DeferredForScratch) {
+-                if (!kmtScratchRetryEvent.scheduled()) {
+-                    fatal_if(curTick() > MaxTick - ScratchRetryDelay,
+-                             "%s: KMT scratch retry tick overflow", name());
+-                    schedule(
+-                        kmtScratchRetryEvent, curTick() + ScratchRetryDelay);
++                        continue;
++                    }
++                    if (result.status ==
++                            HostNativeAqlControl::Status::Blocked) {
++                        controlBlocked = true;
++                        break;
++                    }
++                    if (result.status ==
++                            HostNativeAqlControl::Status::NotControl) {
++                        break;
++                    }
++
++                    warn("%s: standard KMT AQL control admission failed: "
++                         "packet_type=%u queue_index=%llu control=%s",
++                         name(), static_cast<unsigned>(result.packetType),
++                         static_cast<unsigned long long>(result.queueIndex),
++                         queue->control->failure());
++                    const uint64_t generation = client->generation;
++                    const int clientFd = fd;
++                    auto *event = new EventFunctionWrapper(
++                        [this, clientFd, generation]() {
++                            auto found = clients.find(clientFd);
++                            if (found != clients.end() &&
++                                found->second->generation == generation) {
++                                closeClient(clientFd);
++                            }
++                        }, name() + ".host_gpu_kmt_control_failure", true);
++                    schedule(event, curTick());
++                    return;
+                 }
+-                continue;
+-            }
+-            if (start == KmtDispatchStart::Failed) {
+-                warn("%s: standard KMT AQL dispatch admission failed: "
+-                     "observer=%s dispatch=%s adapter=%s",
+-                     name(), queue->observer->failure(),
+-                     queue->dispatch->failure(),
+-                     executionAdapter ?
+-                         executionAdapter->failureReason() : "unavailable");
+-                const uint64_t generation = client->generation;
+-                const int clientFd = fd;
+-                auto *event = new EventFunctionWrapper(
+-                    [this, clientFd, generation]() {
+-                        auto found = clients.find(clientFd);
+-                        if (found != clients.end() &&
+-                            found->second->generation == generation) {
+-                            closeClient(clientFd);
+-                        }
+-                    }, name() + ".host_gpu_kmt_dispatch_failure", true);
+-                schedule(event, curTick());
++                if (controlBlocked || queue->durableBatches.empty())
++                    continue;
++                const auto start = startKmtDispatch(*client, *queue);
++                if (start == KmtDispatchStart::DeferredForScratch) {
++                    if (!kmtScratchRetryEvent.scheduled()) {
++                        fatal_if(curTick() > MaxTick - ScratchRetryDelay,
++                                 "%s: KMT scratch retry tick overflow", name());
++                        schedule(kmtScratchRetryEvent,
++                                 curTick() + ScratchRetryDelay);
++                    }
++                    continue;
++                }
++                if (start == KmtDispatchStart::Failed) {
++                    warn("%s: standard KMT AQL dispatch admission failed: "
++                         "observer=%s dispatch=%s adapter=%s",
++                         name(), queue->observer->failure(),
++                         queue->dispatch->failure(),
++                         executionAdapter ?
++                             executionAdapter->failureReason() : "unavailable");
++                    const uint64_t generation = client->generation;
++                    const int clientFd = fd;
++                    auto *event = new EventFunctionWrapper(
++                        [this, clientFd, generation]() {
++                            auto found = clients.find(clientFd);
++                            if (found != clients.end() &&
++                                found->second->generation == generation) {
++                                closeClient(clientFd);
++                            }
++                        }, name() + ".host_gpu_kmt_dispatch_failure", true);
++                    schedule(event, curTick());
++                }
++                return;
+             }
+-            return;
+         }
+-    }
++    } while (retiredControlPacket);
+ }
+ 
+ void
+-- 
+2.53.0
+

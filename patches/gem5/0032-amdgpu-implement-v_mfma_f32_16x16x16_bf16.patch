@@ -1,0 +1,103 @@
+From d9c1aa6e5a7ee0df0819c99301cd091d0d48f331 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 17 Aug 2026 09:25:03 +0800
+Subject: [PATCH 32/42] amdgpu: implement v_mfma_f32_16x16x16_bf16
+
+The decoder entry for this opcode was a stub that aborted with "Trying to
+decode instruction without a class", while every neighbouring BF16 MFMA
+opcode was implemented. A real Qwen3.5 attention dispatch reaches it, so the
+simulator exited mid-model.
+
+The pinned gfx950 assembler encodes it as VOP3P opcode 0xe1 with two-register
+A and B operands and a four-register accumulator, which matches the existing
+parameterized MFMA execution class at M=N=16, K=16, B=1 over bf16. No new
+execution path or timing key is required.
+
+Checkpoint-ID: CP-0032
+Goal-ID: GSIM-001
+Plan-Revision: 15
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 458368899b9122d48baf6268c84e035737cdb2e36776c5b374a26b176ed5df69
+Change-Kind: code
+Baseline-Commit: 768972909e9843a32cbae0105fff459e0ef276ed
+---
+ src/arch/amdgpu/vega/gpu_decoder.cc        |  4 +--
+ src/arch/amdgpu/vega/gpu_decoder.test.cc   | 29 ++++++++++++++++++++++
+ src/arch/amdgpu/vega/insts/instructions.hh |  6 +++++
+ 3 files changed, 37 insertions(+), 2 deletions(-)
+
+diff --git a/src/arch/amdgpu/vega/gpu_decoder.cc b/src/arch/amdgpu/vega/gpu_decoder.cc
+index 6d7402c5a..51fab1521 100644
+--- a/src/arch/amdgpu/vega/gpu_decoder.cc
++++ b/src/arch/amdgpu/vega/gpu_decoder.cc
+@@ -13977,8 +13977,8 @@ namespace VegaISA
+     GPUStaticInst*
+     Decoder::decode_OP_VOP3P__V_MFMA_F32_16X16X16_BF16(MachInst iFmt)
+     {
+-        fatal("Trying to decode instruction without a class\n");
+-        return nullptr;
++        return new Inst_VOP3P_MAI__V_MFMA_F32_16X16X16_BF16(
++                &iFmt->iFmt_VOP3P_MAI);
+     }
+ 
+     GPUStaticInst*
+diff --git a/src/arch/amdgpu/vega/gpu_decoder.test.cc b/src/arch/amdgpu/vega/gpu_decoder.test.cc
+index 70e85f52b..50d63cbab 100644
+--- a/src/arch/amdgpu/vega/gpu_decoder.test.cc
++++ b/src/arch/amdgpu/vega/gpu_decoder.test.cc
+@@ -433,6 +433,35 @@ TEST(GpuDecoderTest, Gfx950SmemBaseOperandUsesRegisterPairIndex)
+         << "SBASE=8 must resolve to architectural s[16:17], not s[8:9]";
+ }
+ 
++/**
++ * v_mfma_f32_16x16x16_bf16 was a decoder stub that aborted with
++ * "Trying to decode instruction without a class" while every neighbouring
++ * BF16 MFMA opcode was implemented. The pinned gfx950 assembler encodes it
++ * as opcode 0xe1 with two-register A/B operands and a four-register
++ * accumulator, so it reuses the existing parameterized MFMA class.
++ */
++TEST(GpuDecoderTest, Gfx950MfmaF32_16x16x16Bf16)
++{
++    InstFormat words[2] = {};
++    words[0].imm_u32 = 0xd3e10000;
++    words[1].imm_u32 = 0x04020d04;
++
++    Decoder decoder;
++    decoder.setGfxVersion(GfxVersion::gfx950);
++    std::unique_ptr<GPUStaticInst> inst(decoder.decode(words));
++    ASSERT_NE(inst, nullptr);
++    EXPECT_EQ(inst->opcode(), "v_mfma_f32_16x16x16_bf16");
++    EXPECT_TRUE(inst->isALU());
++    EXPECT_TRUE(inst->isMFMA());
++    EXPECT_EQ(inst->numSrcRegOperands(), 3);
++    EXPECT_EQ(inst->numDstRegOperands(), 1);
++    /* A and B are two dwords each; C/D are four dwords. */
++    EXPECT_EQ(inst->getOperandSize(0), 8);
++    EXPECT_EQ(inst->getOperandSize(1), 8);
++    EXPECT_EQ(inst->getOperandSize(2), 16);
++    EXPECT_EQ(inst->getOperandSize(3), 16);
++}
++
+ } // anonymous namespace
+ } // namespace VegaISA
+ } // namespace gem5
+diff --git a/src/arch/amdgpu/vega/insts/instructions.hh b/src/arch/amdgpu/vega/insts/instructions.hh
+index 2aa3dc6c8..f3cd6be6f 100644
+--- a/src/arch/amdgpu/vega/insts/instructions.hh
++++ b/src/arch/amdgpu/vega/insts/instructions.hh
+@@ -46146,6 +46146,12 @@ namespace VegaISA
+         Inst_VOP3P_MAI__V_MFMA_MXFP<32, 32, 8, 1, AMDGPU::mxbfloat16,
+                                     &MNEM__V_MFMA_F32_32X32X8_BF16>;
+ 
++    static const char *MNEM__V_MFMA_F32_16X16X16_BF16 =
++        "v_mfma_f32_16x16x16_bf16";
++    using Inst_VOP3P_MAI__V_MFMA_F32_16X16X16_BF16 =
++        Inst_VOP3P_MAI__V_MFMA_MXFP<16, 16, 16, 1, AMDGPU::mxbfloat16,
++                                    &MNEM__V_MFMA_F32_16X16X16_BF16>;
++
+     static const char *MNEM__V_MFMA_F32_16X16X32_BF16 =
+         "v_mfma_f32_16x16x32_bf16";
+     using Inst_VOP3P_MAI__V_MFMA_F32_16X16X32_BF16 =
+-- 
+2.53.0
+

@@ -1,0 +1,2206 @@
+From 8bf4f3eeec45c5f63e7529dfeff37383b3e3a998 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Tue, 11 Aug 2026 17:36:22 +0800
+Subject: [PATCH 24/42] amdgpu: execute BF16 Triton SiluAndMul
+
+Admit the exact gfx950 BF16 SiluAndMul image for decode and masked-prefill
+shapes, execute its missing packed and divide semantics, and retain exact
+numeric, PC, memory, and reusable-session lifecycle evidence. Preserve the
+accepted CP26 generic, CP27 OpenCL, and CP29 Triton vecadd paths.
+
+Checkpoint-ID: CP-0030
+Goal-ID: GSIM-001
+Plan-Revision: 2
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 639da0f779591f506d17fd400a9b37e7fd152407073606662ae59cff48dd77a4
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/arch/amdgpu/common/dtype/mxfp.test.cc     |  11 +
+ src/arch/amdgpu/vega/SConscript               |   1 +
+ src/arch/amdgpu/vega/gpu_decoder.test.cc      |  39 +++
+ src/arch/amdgpu/vega/insts/instructions.hh    |   2 +-
+ src/arch/amdgpu/vega/insts/vop3.cc            |  46 +---
+ src/arch/amdgpu/vega/insts/vop3p.cc           | 229 +++++++++-------
+ src/arch/amdgpu/vega/insts/vop_semantics.hh   | 170 ++++++++++++
+ .../amdgpu/vega/insts/vop_semantics.test.cc   | 105 ++++++++
+ src/dev/amdgpu/host_gpu_bridge.cc             | 251 ++++++++++++++----
+ src/dev/amdgpu/host_gpu_code_object_image.cc  |   9 +-
+ .../amdgpu/host_gpu_generic_dispatch_route.cc | 198 +++++++++++++-
+ .../amdgpu/host_gpu_generic_dispatch_route.hh |  18 +-
+ .../host_gpu_generic_dispatch_route_main.cc   | 238 ++++++++++++++++-
+ .../host_gpu_triton_code_object_main.cc       |  66 ++++-
+ .../host_gpu_triton_silu_and_mul_fixture.hh   | 122 +++++++++
+ 15 files changed, 1309 insertions(+), 196 deletions(-)
+ create mode 100644 src/arch/amdgpu/vega/insts/vop_semantics.hh
+ create mode 100644 src/arch/amdgpu/vega/insts/vop_semantics.test.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_triton_silu_and_mul_fixture.hh
+
+diff --git a/src/arch/amdgpu/common/dtype/mxfp.test.cc b/src/arch/amdgpu/common/dtype/mxfp.test.cc
+index 5a9b7a0a7..12904fb22 100644
+--- a/src/arch/amdgpu/common/dtype/mxfp.test.cc
++++ b/src/arch/amdgpu/common/dtype/mxfp.test.cc
+@@ -76,6 +76,17 @@ TEST(MxfpTest, MxBf16Test)
+     EXPECT_EQ(errors, 0);
+ }
+ 
++TEST(MxfpTest, MxBf16PackedStorageOrder)
++{
++    using T = gem5::AMDGPU::mxbfloat16;
++
++    const T lower(1.0f);
++    const T upper(-2.0f);
++    EXPECT_EQ(lower.data, 0x3f800000u);
++    EXPECT_EQ(upper.data, 0xc0000000u);
++    EXPECT_EQ(upper.data | (lower.data >> 16), 0xc0003f80u);
++}
++
+ TEST(MxfpTest, MxFp16Test)
+ {
+     using T = gem5::AMDGPU::mxfloat16;
+diff --git a/src/arch/amdgpu/vega/SConscript b/src/arch/amdgpu/vega/SConscript
+index 2995ad2a8..9d7310a33 100644
+--- a/src/arch/amdgpu/vega/SConscript
++++ b/src/arch/amdgpu/vega/SConscript
+@@ -82,5 +82,6 @@ if env['CONF']['TARGET_GPU_ISA'] == 'vega':
+     GTest('gpu_decoder.test', 'gpu_decoder.test.cc',
+           '../../../base/date.cc',
+           with_tag('gem5 lib') & without_tag('main'), skip_lib=True)
++    GTest('insts/vop_semantics.test', 'insts/vop_semantics.test.cc')
+ 
+     DebugFlag('VEGA', 'Debug flag for VEGA GPU ISA')
+diff --git a/src/arch/amdgpu/vega/gpu_decoder.test.cc b/src/arch/amdgpu/vega/gpu_decoder.test.cc
+index 6ae450cce..abe48a85b 100644
+--- a/src/arch/amdgpu/vega/gpu_decoder.test.cc
++++ b/src/arch/amdgpu/vega/gpu_decoder.test.cc
+@@ -176,6 +176,45 @@ TEST(GpuDecoderTest, Cp27OpenClVecAddLockedIsa)
+     }
+ }
+ 
++TEST(GpuDecoderTest, Cp30PackedBf16OperandLayout)
++{
++    InstFormat words[2] = {};
++    words[0].imm_u32 = 0xd2680000;
++    words[1].imm_u32 = 0x00020300;
++
++    Decoder decoder;
++    decoder.setGfxVersion(GfxVersion::gfx950);
++    std::unique_ptr<GPUStaticInst> inst(decoder.decode(words));
++    ASSERT_NE(inst, nullptr);
++    EXPECT_EQ(inst->opcode(), "v_cvt_pk_bf16_f32");
++    EXPECT_EQ(inst->getNumOperands(), 3);
++    EXPECT_EQ(inst->numSrcRegOperands(), 2);
++    EXPECT_EQ(inst->numDstRegOperands(), 1);
++    for (int operand = 0; operand < 3; ++operand)
++        EXPECT_EQ(inst->getOperandSize(operand), 4);
++}
++
++TEST(GpuDecoderTest, Cp30DivideFmasF32OperandLayout)
++{
++    InstFormat words[2] = {};
++    words[0].imm_u32 = 0xd1e20002;
++    words[1].imm_u32 = 0x04763311;
++
++    Decoder decoder;
++    decoder.setGfxVersion(GfxVersion::gfx950);
++    std::unique_ptr<GPUStaticInst> inst(decoder.decode(words));
++    ASSERT_NE(inst, nullptr);
++    EXPECT_EQ(inst->opcode(), "v_div_fmas_f32");
++    EXPECT_TRUE(inst->isF32());
++    EXPECT_TRUE(inst->isFMA());
++    EXPECT_EQ(inst->getNumOperands(), 5);
++    EXPECT_EQ(inst->getOperandSize(0), 4);
++    EXPECT_EQ(inst->getOperandSize(1), 4);
++    EXPECT_EQ(inst->getOperandSize(2), 4);
++    EXPECT_EQ(inst->getOperandSize(3), 8);
++    EXPECT_EQ(inst->getOperandSize(4), 4);
++}
++
+ } // anonymous namespace
+ } // namespace VegaISA
+ } // namespace gem5
+diff --git a/src/arch/amdgpu/vega/insts/instructions.hh b/src/arch/amdgpu/vega/insts/instructions.hh
+index a2797b20a..d2f4908c5 100644
+--- a/src/arch/amdgpu/vega/insts/instructions.hh
++++ b/src/arch/amdgpu/vega/insts/instructions.hh
+@@ -31044,7 +31044,7 @@ namespace VegaISA
+                 return 4;
+               case 1: //src_1
+                 return 4;
+-              case 3: //vdst
++              case 2: //vdst
+                 return 4;
+               default:
+                 fatal("op idx %i out of bounds\n", opIdx);
+diff --git a/src/arch/amdgpu/vega/insts/vop3.cc b/src/arch/amdgpu/vega/insts/vop3.cc
+index 4834eae30..f7d699507 100644
+--- a/src/arch/amdgpu/vega/insts/vop3.cc
++++ b/src/arch/amdgpu/vega/insts/vop3.cc
+@@ -32,6 +32,7 @@
+ #include "arch/amdgpu/common/dtype/mxfp_types.hh"
+ #include "arch/amdgpu/vega/insts/inst_util.hh"
+ #include "arch/amdgpu/vega/insts/instructions.hh"
++#include "arch/amdgpu/vega/insts/vop_semantics.hh"
+ 
+ namespace gem5
+ {
+@@ -7092,11 +7093,13 @@ namespace VegaISA
+         ConstVecOperandF32 src0(gpuDynInst, extData.SRC0);
+         ConstVecOperandF32 src1(gpuDynInst, extData.SRC1);
+         ConstVecOperandF32 src2(gpuDynInst, extData.SRC2);
+-        VecOperandF64 vdst(gpuDynInst, instData.VDST);
++        VecOperandF32 vdst(gpuDynInst, instData.VDST);
++        ConstScalarOperandU64 vcc(gpuDynInst, REG_VCC_LO);
+ 
+         src0.readSrc();
+         src1.readSrc();
+         src2.readSrc();
++        vcc.read();
+ 
+         if (instData.ABS & 0x1) {
+             src0.absModifier();
+@@ -7124,11 +7127,14 @@ namespace VegaISA
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (wf->execMask(lane)) {
+-                vdst[lane] = std::fma(src0[lane], src1[lane], src2[lane]);
++                vdst[lane] = vop_semantics::divFmasF32(
++                    src0[lane], src1[lane], src2[lane],
++                    bits(vcc.rawData(), lane), extData.OMOD,
++                    instData.CLAMP);
+             }
+         }
+ 
+-        //vdst.write();
++        vdst.write();
+     } // execute
+     // --- Inst_VOP3__V_DIV_FMAS_F64 class methods ---
+ 
+@@ -8249,21 +8255,8 @@ namespace VegaISA
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (wf->execMask(lane)) {
+-                AMDGPU::mxfloat16 tmp0(src0[lane]), tmp1(src1[lane]);
+-
+-                if (abs & 1) tmp0.fabs();
+-                if (abs & 2) tmp1.fabs();
+-                if (neg & 1) tmp0.neg();
+-                if (neg & 2) tmp1.neg();
+-                tmp0.omodModifier(omod);
+-                tmp1.omodModifier(omod);
+-                tmp0.clamp(clamp);
+-                tmp1.clamp(clamp);
+-
+-                uint32_t lower_word = tmp0.data;
+-                uint32_t upper_word = tmp1.data;
+-
+-                vdst[lane] = (upper_word << 16) | lower_word;
++                vdst[lane] = vop_semantics::packF16F32(
++                    src0[lane], src1[lane], abs, neg, omod, clamp);
+             }
+         }
+ 
+@@ -8308,21 +8301,8 @@ namespace VegaISA
+ 
+         for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+             if (wf->execMask(lane)) {
+-                AMDGPU::mxbfloat16 tmp0(src0[lane]), tmp1(src1[lane]);
+-
+-                if (abs & 1) tmp0.fabs();
+-                if (abs & 2) tmp1.fabs();
+-                if (neg & 1) tmp0.neg();
+-                if (neg & 2) tmp1.neg();
+-                tmp0.omodModifier(omod);
+-                tmp1.omodModifier(omod);
+-                tmp0.clamp(clamp);
+-                tmp1.clamp(clamp);
+-
+-                uint32_t lower_word = tmp0.data;
+-                uint32_t upper_word = tmp1.data;
+-
+-                vdst[lane] = (upper_word << 16) | lower_word;
++                vdst[lane] = vop_semantics::packBf16F32(
++                    src0[lane], src1[lane], abs, neg, omod, clamp);
+             }
+         }
+ 
+diff --git a/src/arch/amdgpu/vega/insts/vop3p.cc b/src/arch/amdgpu/vega/insts/vop3p.cc
+index be05e4801..db02e6d7b 100644
+--- a/src/arch/amdgpu/vega/insts/vop3p.cc
++++ b/src/arch/amdgpu/vega/insts/vop3p.cc
+@@ -31,7 +31,11 @@
+ 
+ #include "arch/amdgpu/vega/insts/vop3p.hh"
+ 
++#include <cstring>
++#include <optional>
++
+ #include "arch/amdgpu/vega/insts/instructions.hh"
++#include "arch/amdgpu/vega/insts/vop_semantics.hh"
+ #include "arch/arm/insts/fplib.hh"
+ 
+ namespace gem5
+@@ -43,6 +47,20 @@ namespace VegaISA
+ using half = uint16_t;
+ 
+ // Helper functions
++std::optional<uint64_t>
++packedF32InlineConstant(GPUDynInstPtr gpuDynInst, int selector)
++{
++    if (selector < REG_POS_HALF || selector > REG_PI)
++        return std::nullopt;
++
++    ConstScalarOperandF32 operand(gpuDynInst, selector);
++    operand.read();
++    const float value = operand.rawData();
++    uint32_t bits = 0;
++    std::memcpy(&bits, &value, sizeof(bits));
++    return static_cast<uint64_t>(bits) << 32 | bits;
++}
++
+ template<int N>
+ int32_t
+ dotClampI(int32_t value, bool clamp)
+@@ -697,9 +715,18 @@ Inst_VOP3P__V_PK_FMA_F32::execute(GPUDynInstPtr gpuDynInst)
+     ConstVecOperandU64 src2(gpuDynInst, extData.SRC2);
+     VecOperandU64 vdst(gpuDynInst, instData.VDST);
+ 
+-    src0.readSrc();
+-    src1.readSrc();
+-    src2.readSrc();
++    const auto src0Inline = packedF32InlineConstant(
++        gpuDynInst, extData.SRC0);
++    const auto src1Inline = packedF32InlineConstant(
++        gpuDynInst, extData.SRC1);
++    const auto src2Inline = packedF32InlineConstant(
++        gpuDynInst, extData.SRC2);
++    if (!src0Inline)
++        src0.readSrc();
++    if (!src1Inline)
++        src1.readSrc();
++    if (!src2Inline)
++        src2.readSrc();
+ 
+     int opsel = instData.OPSEL;
+     int opsel_hi = extData.OPSEL_HI | (instData.OPSEL_HI2 << 2);
+@@ -709,42 +736,38 @@ Inst_VOP3P__V_PK_FMA_F32::execute(GPUDynInstPtr gpuDynInst)
+ 
+     for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+         if (wf->execMask(lane)) {
+-            uint32_t s0l = (opsel & 1) ? bits(src0[lane], 63, 32)
+-                                       : bits(src0[lane], 31, 0);
+-            uint32_t s1l = (opsel & 2) ? bits(src1[lane], 63, 32)
+-                                       : bits(src1[lane], 31, 0);
+-            uint32_t s2l = (opsel & 4) ? bits(src2[lane], 63, 32)
+-                                       : bits(src2[lane], 31, 0);
+-
+-            float s0lf = *reinterpret_cast<float*>(&s0l);
+-            float s1lf = *reinterpret_cast<float*>(&s1l);
+-            float s2lf = *reinterpret_cast<float*>(&s2l);
+-
+-            if (neg & 1) s0lf = -s0lf;
+-            if (neg & 1) s1lf = -s1lf;
+-            if (neg & 1) s2lf = -s2lf;
+-
+-            float dword1 = std::fma(s0lf, s1lf, s2lf);
+-
+-            uint32_t s0h = (opsel_hi & 1) ? bits(src0[lane], 63, 32)
+-                                          : bits(src0[lane], 31, 0);
+-            uint32_t s1h = (opsel_hi & 2) ? bits(src1[lane], 63, 32)
+-                                          : bits(src1[lane], 31, 0);
+-            uint32_t s2h = (opsel_hi & 4) ? bits(src2[lane], 63, 32)
+-                                          : bits(src2[lane], 31, 0);
+-
+-            float s0hf = *reinterpret_cast<float*>(&s0h);
+-            float s1hf = *reinterpret_cast<float*>(&s1h);
+-            float s2hf = *reinterpret_cast<float*>(&s2h);
+-
+-            if (neg_hi & 1) s0hf = -s0hf;
+-            if (neg_hi & 1) s1hf = -s1hf;
+-            if (neg_hi & 1) s2hf = -s2hf;
+-
+-            float dword2 = std::fma(s0hf, s1hf, s2hf);
+-
+-            uint32_t result1 = *reinterpret_cast<uint32_t*>(&dword1);
+-            uint32_t result2 = *reinterpret_cast<uint32_t*>(&dword2);
++            const uint64_t src0Value = src0Inline ?
++                *src0Inline : src0[lane];
++            const uint64_t src1Value = src1Inline ?
++                *src1Inline : src1[lane];
++            const uint64_t src2Value = src2Inline ?
++                *src2Inline : src2[lane];
++            uint32_t s0l = (opsel & 1) ? bits(src0Value, 63, 32)
++                                       : bits(src0Value, 31, 0);
++            uint32_t s1l = (opsel & 2) ? bits(src1Value, 63, 32)
++                                       : bits(src1Value, 31, 0);
++            uint32_t s2l = (opsel & 4) ? bits(src2Value, 63, 32)
++                                       : bits(src2Value, 31, 0);
++
++            float dword1 = vop_semantics::packedFmaF32(
++                vop_semantics::floatFromBits(s0l),
++                vop_semantics::floatFromBits(s1l),
++                vop_semantics::floatFromBits(s2l), neg, instData.CLMP);
++
++            uint32_t s0h = (opsel_hi & 1) ? bits(src0Value, 63, 32)
++                                          : bits(src0Value, 31, 0);
++            uint32_t s1h = (opsel_hi & 2) ? bits(src1Value, 63, 32)
++                                          : bits(src1Value, 31, 0);
++            uint32_t s2h = (opsel_hi & 4) ? bits(src2Value, 63, 32)
++                                          : bits(src2Value, 31, 0);
++
++            float dword2 = vop_semantics::packedFmaF32(
++                vop_semantics::floatFromBits(s0h),
++                vop_semantics::floatFromBits(s1h),
++                vop_semantics::floatFromBits(s2h), neg_hi, instData.CLMP);
++
++            uint32_t result1 = vop_semantics::floatToBits(dword1);
++            uint32_t result2 = vop_semantics::floatToBits(dword2);
+ 
+             vdst[lane] = (static_cast<uint64_t>(result2) << 32) | result1;
+         }
+@@ -778,8 +801,14 @@ Inst_VOP3P__V_PK_MUL_F32::execute(GPUDynInstPtr gpuDynInst)
+     ConstVecOperandU64 src1(gpuDynInst, extData.SRC1);
+     VecOperandU64 vdst(gpuDynInst, instData.VDST);
+ 
+-    src0.readSrc();
+-    src1.readSrc();
++    const auto src0Inline = packedF32InlineConstant(
++        gpuDynInst, extData.SRC0);
++    const auto src1Inline = packedF32InlineConstant(
++        gpuDynInst, extData.SRC1);
++    if (!src0Inline)
++        src0.readSrc();
++    if (!src1Inline)
++        src1.readSrc();
+ 
+     int opsel = instData.OPSEL;
+     int opsel_hi = extData.OPSEL_HI;
+@@ -789,34 +818,32 @@ Inst_VOP3P__V_PK_MUL_F32::execute(GPUDynInstPtr gpuDynInst)
+ 
+     for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+         if (wf->execMask(lane)) {
+-            uint32_t lower_dword = (opsel & 1) ? bits(src0[lane], 63, 32)
+-                                               : bits(src0[lane], 31, 0);
+-            uint32_t upper_dword = (opsel & 2) ? bits(src1[lane], 63, 32)
+-                                               : bits(src1[lane], 31, 0);
+-
+-            float ldwordf = *reinterpret_cast<float*>(&lower_dword);
+-            float udwordf = *reinterpret_cast<float*>(&upper_dword);
+-
+-            if (neg & 1) ldwordf = -ldwordf;
+-            if (neg & 2) udwordf = -udwordf;
+-
+-            float dword1 = ldwordf * udwordf;
+-
+-            lower_dword = (opsel_hi & 1) ? bits(src0[lane], 63, 32)
+-                                         : bits(src0[lane], 31, 0);
+-            upper_dword = (opsel_hi & 2) ? bits(src1[lane], 63, 32)
+-                                         : bits(src1[lane], 31, 0);
+-
+-            ldwordf = *reinterpret_cast<float*>(&lower_dword);
+-            udwordf = *reinterpret_cast<float*>(&upper_dword);
+-
+-            if (neg_hi & 1) ldwordf = -ldwordf;
+-            if (neg_hi & 2) udwordf = -udwordf;
+-
+-            float dword2 = ldwordf * udwordf;
+-
+-            uint32_t result1 = *reinterpret_cast<uint32_t*>(&dword1);
+-            uint32_t result2 = *reinterpret_cast<uint32_t*>(&dword2);
++            const uint64_t src0Value = src0Inline ?
++                *src0Inline : src0[lane];
++            const uint64_t src1Value = src1Inline ?
++                *src1Inline : src1[lane];
++            uint32_t lower_dword = (opsel & 1) ?
++                bits(src0Value, 63, 32) : bits(src0Value, 31, 0);
++            uint32_t upper_dword = (opsel & 2) ?
++                bits(src1Value, 63, 32) : bits(src1Value, 31, 0);
++
++            float dword1 = vop_semantics::packedMulF32(
++                vop_semantics::floatFromBits(lower_dword),
++                vop_semantics::floatFromBits(upper_dword), neg,
++                instData.CLMP);
++
++            lower_dword = (opsel_hi & 1) ? bits(src0Value, 63, 32)
++                                         : bits(src0Value, 31, 0);
++            upper_dword = (opsel_hi & 2) ? bits(src1Value, 63, 32)
++                                         : bits(src1Value, 31, 0);
++
++            float dword2 = vop_semantics::packedMulF32(
++                vop_semantics::floatFromBits(lower_dword),
++                vop_semantics::floatFromBits(upper_dword), neg_hi,
++                instData.CLMP);
++
++            uint32_t result1 = vop_semantics::floatToBits(dword1);
++            uint32_t result2 = vop_semantics::floatToBits(dword2);
+ 
+             vdst[lane] = (static_cast<uint64_t>(result2) << 32) | result1;
+         }
+@@ -850,8 +877,14 @@ Inst_VOP3P__V_PK_ADD_F32::execute(GPUDynInstPtr gpuDynInst)
+     ConstVecOperandU64 src1(gpuDynInst, extData.SRC1);
+     VecOperandU64 vdst(gpuDynInst, instData.VDST);
+ 
+-    src0.readSrc();
+-    src1.readSrc();
++    const auto src0Inline = packedF32InlineConstant(
++        gpuDynInst, extData.SRC0);
++    const auto src1Inline = packedF32InlineConstant(
++        gpuDynInst, extData.SRC1);
++    if (!src0Inline)
++        src0.readSrc();
++    if (!src1Inline)
++        src1.readSrc();
+ 
+     panic_if(isSDWAInst(), "SDWA not supported for %s", _opcode);
+     panic_if(isDPPInst(), "DPP not supported for %s", _opcode);
+@@ -864,34 +897,32 @@ Inst_VOP3P__V_PK_ADD_F32::execute(GPUDynInstPtr gpuDynInst)
+ 
+     for (int lane = 0; lane < NumVecElemPerVecReg; ++lane) {
+         if (wf->execMask(lane)) {
+-            uint32_t lower_dword = (opsel & 1) ? bits(src0[lane], 63, 32)
+-                                               : bits(src0[lane], 31, 0);
+-            uint32_t upper_dword = (opsel & 2) ? bits(src1[lane], 63, 32)
+-                                               : bits(src1[lane], 31, 0);
+-
+-            float ldwordf = *reinterpret_cast<float*>(&lower_dword);
+-            float udwordf = *reinterpret_cast<float*>(&upper_dword);
+-
+-            if (neg & 1) ldwordf = -ldwordf;
+-            if (neg & 2) udwordf = -udwordf;
+-
+-            float dword1 = ldwordf + udwordf;
+-
+-            lower_dword = (opsel_hi & 1) ? bits(src0[lane], 63, 32)
+-                                         : bits(src0[lane], 31, 0);
+-            upper_dword = (opsel_hi & 2) ? bits(src1[lane], 63, 32)
+-                                         : bits(src1[lane], 31, 0);
+-
+-            ldwordf = *reinterpret_cast<float*>(&lower_dword);
+-            udwordf = *reinterpret_cast<float*>(&upper_dword);
+-
+-            if (neg_hi & 1) ldwordf = -ldwordf;
+-            if (neg_hi & 2) udwordf = -udwordf;
+-
+-            float dword2 = ldwordf + udwordf;
+-
+-            uint32_t result1 = *reinterpret_cast<uint32_t*>(&dword1);
+-            uint32_t result2 = *reinterpret_cast<uint32_t*>(&dword2);
++            const uint64_t src0Value = src0Inline ?
++                *src0Inline : src0[lane];
++            const uint64_t src1Value = src1Inline ?
++                *src1Inline : src1[lane];
++            uint32_t lower_dword = (opsel & 1) ?
++                bits(src0Value, 63, 32) : bits(src0Value, 31, 0);
++            uint32_t upper_dword = (opsel & 2) ?
++                bits(src1Value, 63, 32) : bits(src1Value, 31, 0);
++
++            float dword1 = vop_semantics::packedAddF32(
++                vop_semantics::floatFromBits(lower_dword),
++                vop_semantics::floatFromBits(upper_dword), neg,
++                instData.CLMP);
++
++            lower_dword = (opsel_hi & 1) ? bits(src0Value, 63, 32)
++                                         : bits(src0Value, 31, 0);
++            upper_dword = (opsel_hi & 2) ? bits(src1Value, 63, 32)
++                                         : bits(src1Value, 31, 0);
++
++            float dword2 = vop_semantics::packedAddF32(
++                vop_semantics::floatFromBits(lower_dword),
++                vop_semantics::floatFromBits(upper_dword), neg_hi,
++                instData.CLMP);
++
++            uint32_t result1 = vop_semantics::floatToBits(dword1);
++            uint32_t result2 = vop_semantics::floatToBits(dword2);
+ 
+             vdst[lane] = (static_cast<uint64_t>(result2) << 32) | result1;
+         }
+diff --git a/src/arch/amdgpu/vega/insts/vop_semantics.hh b/src/arch/amdgpu/vega/insts/vop_semantics.hh
+new file mode 100644
+index 000000000..db4824be2
+--- /dev/null
++++ b/src/arch/amdgpu/vega/insts/vop_semantics.hh
+@@ -0,0 +1,170 @@
++/*
++ * Copyright (c) 2026 Advanced Micro Devices, Inc.
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer.
++ *
++ * 2. Redistributions in binary form must reproduce the above copyright
++ * notice, this list of conditions and the following disclaimer in the
++ * documentation and/or other materials provided with the distribution.
++ *
++ * 3. Neither the name of the copyright holder nor the names of its
++ * contributors may be used to endorse or promote products derived from this
++ * software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __ARCH_AMDGPU_VEGA_INSTS_VOP_SEMANTICS_HH__
++#define __ARCH_AMDGPU_VEGA_INSTS_VOP_SEMANTICS_HH__
++
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++#include <cstdlib>
++#include <cstring>
++
++#include "arch/amdgpu/common/dtype/mxfp_types.hh"
++
++namespace gem5
++{
++
++namespace VegaISA
++{
++
++namespace vop_semantics
++{
++
++inline float
++applyOutputModifiers(float value, unsigned omod, bool clamp)
++{
++    switch (omod) {
++      case 0:
++        break;
++      case 1:
++        value *= 2.0f;
++        break;
++      case 2:
++        value *= 4.0f;
++        break;
++      case 3:
++        value *= 0.5f;
++        break;
++      default:
++        std::abort();
++    }
++
++    return clamp ? std::clamp(value, 0.0f, 1.0f) : value;
++}
++
++inline float
++applySourceModifiers(float value, unsigned abs, unsigned neg, unsigned bit)
++{
++    if (abs & bit)
++        value = std::fabs(value);
++    if (neg & bit)
++        value = -value;
++    return value;
++}
++
++inline float
++divFmasF32(float src0, float src1, float src2, bool scale,
++           unsigned omod, bool clamp)
++{
++    float value = std::fma(src0, src1, src2);
++    if (scale)
++        value = std::ldexp(value, 32);
++    return applyOutputModifiers(value, omod, clamp);
++}
++
++inline float
++packedFmaF32(float src0, float src1, float src2, unsigned neg, bool clamp)
++{
++    src0 = applySourceModifiers(src0, 0, neg, 1);
++    src1 = applySourceModifiers(src1, 0, neg, 2);
++    src2 = applySourceModifiers(src2, 0, neg, 4);
++    return applyOutputModifiers(std::fma(src0, src1, src2), 0, clamp);
++}
++
++inline float
++packedMulF32(float src0, float src1, unsigned neg, bool clamp)
++{
++    src0 = applySourceModifiers(src0, 0, neg, 1);
++    src1 = applySourceModifiers(src1, 0, neg, 2);
++    return applyOutputModifiers(src0 * src1, 0, clamp);
++}
++
++inline float
++packedAddF32(float src0, float src1, unsigned neg, bool clamp)
++{
++    src0 = applySourceModifiers(src0, 0, neg, 1);
++    src1 = applySourceModifiers(src1, 0, neg, 2);
++    return applyOutputModifiers(src0 + src1, 0, clamp);
++}
++
++inline float
++floatFromBits(uint32_t value)
++{
++    float result = 0.0f;
++    std::memcpy(&result, &value, sizeof(result));
++    return result;
++}
++
++inline uint32_t
++floatToBits(float value)
++{
++    uint32_t result = 0;
++    std::memcpy(&result, &value, sizeof(result));
++    return result;
++}
++
++template<typename T>
++inline uint32_t
++packF32Pair(float src0, float src1, unsigned abs, unsigned neg,
++            unsigned omod, bool clamp)
++{
++    src0 = applySourceModifiers(src0, abs, neg, 1);
++    src1 = applySourceModifiers(src1, abs, neg, 2);
++    src0 = applyOutputModifiers(src0, omod, clamp);
++    src1 = applyOutputModifiers(src1, omod, clamp);
++
++    const T lower(src0);
++    const T upper(src1);
++    return (upper.data & 0xffff0000u) | (lower.data >> 16);
++}
++
++inline uint32_t
++packF16F32(float src0, float src1, unsigned abs, unsigned neg,
++           unsigned omod, bool clamp)
++{
++    return packF32Pair<AMDGPU::mxfloat16>(
++        src0, src1, abs, neg, omod, clamp);
++}
++
++inline uint32_t
++packBf16F32(float src0, float src1, unsigned abs, unsigned neg,
++            unsigned omod, bool clamp)
++{
++    return packF32Pair<AMDGPU::mxbfloat16>(
++        src0, src1, abs, neg, omod, clamp);
++}
++
++} // namespace vop_semantics
++} // namespace VegaISA
++} // namespace gem5
++
++#endif // __ARCH_AMDGPU_VEGA_INSTS_VOP_SEMANTICS_HH__
+diff --git a/src/arch/amdgpu/vega/insts/vop_semantics.test.cc b/src/arch/amdgpu/vega/insts/vop_semantics.test.cc
+new file mode 100644
+index 000000000..e77eeb8f5
+--- /dev/null
++++ b/src/arch/amdgpu/vega/insts/vop_semantics.test.cc
+@@ -0,0 +1,105 @@
++/*
++ * Copyright (c) 2026 Advanced Micro Devices, Inc.
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer.
++ *
++ * 2. Redistributions in binary form must reproduce the above copyright
++ * notice, this list of conditions and the following disclaimer in the
++ * documentation and/or other materials provided with the distribution.
++ *
++ * 3. Neither the name of the copyright holder nor the names of its
++ * contributors may be used to endorse or promote products derived from this
++ * software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <gtest/gtest.h>
++
++#include <cmath>
++#include <cstdint>
++#include <limits>
++
++#include "arch/amdgpu/vega/insts/vop_semantics.hh"
++
++namespace gem5
++{
++
++namespace VegaISA
++{
++
++namespace
++{
++
++using namespace vop_semantics;
++
++TEST(VopSemanticsTest, PackedFmaUsesPerSourceNegBits)
++{
++    EXPECT_FLOAT_EQ(packedFmaF32(2.0f, 4.0f, 3.0f, 0, false), 11.0f);
++    EXPECT_FLOAT_EQ(packedFmaF32(2.0f, 4.0f, 3.0f, 1, false), -5.0f);
++    EXPECT_FLOAT_EQ(packedFmaF32(2.0f, 4.0f, 3.0f, 2, false), -5.0f);
++    EXPECT_FLOAT_EQ(packedFmaF32(2.0f, 4.0f, 3.0f, 4, false), 5.0f);
++}
++
++TEST(VopSemanticsTest, PackedF32OperationsClampAfterArithmetic)
++{
++    EXPECT_FLOAT_EQ(packedFmaF32(2.0f, 4.0f, 3.0f, 0, true), 1.0f);
++    EXPECT_FLOAT_EQ(packedMulF32(-2.0f, 4.0f, 0, true), 0.0f);
++    EXPECT_FLOAT_EQ(packedAddF32(0.75f, 0.75f, 0, true), 1.0f);
++    EXPECT_FLOAT_EQ(packedAddF32(-0.75f, 0.25f, 0, true), 0.0f);
++    EXPECT_FLOAT_EQ(packedAddF32(0.25f, 0.5f, 0, true), 0.75f);
++}
++
++TEST(VopSemanticsTest, DivideFmasScalesThenAppliesOutputModifiers)
++{
++    EXPECT_FLOAT_EQ(divFmasF32(2.0f, 3.0f, 4.0f, false, 0, false),
++                    10.0f);
++    EXPECT_FLOAT_EQ(divFmasF32(2.0f, 3.0f, 4.0f, false, 3, false),
++                    5.0f);
++    EXPECT_FLOAT_EQ(divFmasF32(2.0f, 3.0f, 4.0f, false, 1, true),
++                    1.0f);
++    EXPECT_FLOAT_EQ(divFmasF32(0.0f, 0.0f, 1.0f, true, 3, false),
++                    std::ldexp(1.0f, 31));
++    EXPECT_FLOAT_EQ(
++        divFmasF32(0.0f, 0.0f, std::ldexp(1.0f, -40), true, 0, false),
++        std::ldexp(1.0f, -8));
++}
++
++TEST(VopSemanticsTest, PackedConversionsApplyModifiersBeforeNarrowing)
++{
++    const float halfMinSubnormalBeforeScale = std::ldexp(1.0f, -25);
++    EXPECT_EQ(packF16F32(
++                  halfMinSubnormalBeforeScale, 0.0f, 0, 0, 1, false),
++              0x00000001u);
++    EXPECT_EQ(packBf16F32(1.0f, -2.0f, 0, 0, 0, false),
++              0xc0003f80u);
++    EXPECT_EQ(packBf16F32(-2.0f, 2.0f, 1, 2, 0, true),
++              0x00003f80u);
++}
++
++TEST(VopSemanticsTest, PackedBf16PreservesSpecialValues)
++{
++    const uint32_t packed = packBf16F32(
++        std::numeric_limits<float>::infinity(),
++        -std::numeric_limits<float>::infinity(), 0, 0, 0, false);
++    EXPECT_EQ(packed, 0xff807f80u);
++}
++
++} // anonymous namespace
++} // namespace VegaISA
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_bridge.cc b/src/dev/amdgpu/host_gpu_bridge.cc
+index f18788c84..ab0df2884 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.cc
++++ b/src/dev/amdgpu/host_gpu_bridge.cc
+@@ -46,6 +46,7 @@
+ #include <cstring>
+ #include <limits>
+ #include <new>
++#include <numeric>
+ #include <sstream>
+ #include <stdexcept>
+ #include <utility>
+@@ -57,6 +58,7 @@
+ #include "dev/amdgpu/host_gpu_dispatch_fixture.hh"
+ #include "dev/amdgpu/host_gpu_generic_dispatch_route.hh"
+ #include "dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh"
++#include "dev/amdgpu/host_gpu_triton_silu_and_mul_fixture.hh"
+ #include "dev/amdgpu/host_gpu_triton_vecadd_fixture.hh"
+ #include "dev/amdgpu/host_gpu_native_dispatch_state_v2.hh"
+ #include "dev/amdgpu/host_gpu_socket_utils.hh"
+@@ -478,6 +480,8 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+     uint32_t executionOutputCrc32c = 0;
+     std::array<uint32_t, 3> executionBufferCrc32c = {};
+     uint32_t executionElementCount = 0;
++    uint32_t executionRows = 0;
++    uint32_t executionInputDwordCount = 0;
+     uint64_t executionBufferBytes = GenericExecutionBufferBytes;
+     uint32_t executionElementsPerWorkgroup = 0;
+     uint32_t executionStoreDwordsPerLane = 1;
+@@ -555,6 +559,12 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+             generic_dispatch_route::LockedExecutionVariant::TritonVecAdd;
+     }
+ 
++    bool isTritonSiluAndMul() const
++    {
++        return executionVariant ==
++            generic_dispatch_route::LockedExecutionVariant::TritonSiluAndMul;
++    }
++
+     bool isVecAdd() const
+     {
+         return isOpenClVecAdd() || isTritonVecAdd();
+@@ -562,14 +572,14 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+ 
+     uint32_t expectedWorkgroups() const
+     {
+-        return isVecAdd() ?
++        return (isVecAdd() || isTritonSiluAndMul()) ?
+             executionGridSize / executionWorkgroupSize :
+             GpuReadWriteExecutionWorkgroups;
+     }
+ 
+     uint32_t expectedWavesPerWorkgroup() const
+     {
+-        return isVecAdd() ?
++        return (isVecAdd() || isTritonSiluAndMul()) ?
+             executionWorkgroupSize / 64 : 4;
+     }
+ 
+@@ -605,6 +615,11 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         static const std::vector<uint32_t> TritonVecAddOffsets(
+             triton_vecadd_fixture::InstructionOffsets.begin(),
+             triton_vecadd_fixture::InstructionOffsets.end());
++        static const std::vector<uint32_t> TritonSiluAndMulOffsets(
++            triton_silu_and_mul_fixture::InstructionOffsets.begin(),
++            triton_silu_and_mul_fixture::InstructionOffsets.end());
++        if (isTritonSiluAndMul())
++            return TritonSiluAndMulOffsets;
+         return isTritonVecAdd() ? TritonVecAddOffsets :
+             (isOpenClVecAdd() ? OpenClVecAddOffsets : GpuReadWriteOffsets);
+     }
+@@ -625,7 +640,8 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+              (address == submitResponse.kernargVa + 16 && byteCount == 8) ||
+              (address == submitResponse.kernargVa + 24 && byteCount == 4) ||
+              (address == submitResponse.kernargVa + 32 && byteCount == 8)) :
+-            (!isTritonVecAdd() && address == submitResponse.kernargVa &&
++            (!isTritonVecAdd() && !isTritonSiluAndMul() &&
++             address == submitResponse.kernargVa &&
+              byteCount == 32);
+         const bool inputRead = executionBuffers[0] &&
+             rangeContains(executionBuffers[0]->address,
+@@ -653,7 +669,7 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+             if (inputRead || secondInputRead) {
+                 panic_if(byteCount == 0 ||
+                              byteCount % sizeof(uint32_t) != 0 ||
+-                             (!isTritonVecAdd() &&
++                             (!isTritonVecAdd() && !isTritonSiluAndMul() &&
+                               byteCount != sizeof(uint32_t)) ||
+                              address % sizeof(uint32_t) != 0,
+                          "generic execution global-read shape mismatch");
+@@ -666,8 +682,8 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+                     secondInputReadCoverage;
+                 for (size_t dword = 0; dword < inputDwords; ++dword) {
+                     panic_if(coverage.count(inputIndex + dword) != 0 ||
+-                                 (isVecAdd() && inputIndex + dword >=
+-                                      executionElementCount),
++                             ((isVecAdd() || isTritonSiluAndMul()) &&
++                              inputIndex + dword >= executionInputDwordCount),
+                              "duplicate generic execution input read");
+                 }
+             }
+@@ -703,7 +719,7 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         if (executionActive) {
+             panic_if(byteCount == 0 ||
+                          byteCount % sizeof(uint32_t) != 0 ||
+-                         (!isTritonVecAdd() &&
++                         (!isTritonVecAdd() && !isTritonSiluAndMul() &&
+                           byteCount != sizeof(uint32_t)) ||
+                          address % sizeof(uint32_t) != 0 ||
+                          outputWrite == resultWrite ||
+@@ -719,7 +735,9 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+             for (size_t dword = 0; dword < dwords; ++dword) {
+                 panic_if(coverage.count(index + dword) != 0 ||
+                              (isVecAdd() && index + dword >=
+-                                  executionElementCount),
++                                  executionElementCount) ||
++                             (isTritonSiluAndMul() && outputWrite &&
++                              index + dword >= executionElementCount),
+                          "duplicate generic execution output write");
+             }
+         }
+@@ -761,21 +779,48 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+             request.submit.kernargOffset;
+         executionGridSize = request.submit.gridX;
+         executionWorkgroupSize = request.submit.workgroupX;
++        executionRows = isTritonSiluAndMul() ?
++            executionGridSize / (4 *
++                triton_silu_and_mul_fixture::WorkgroupSize) : 0;
+         executionBufferBytes = isTritonVecAdd() ?
+-            triton_vecadd_fixture::BufferBytes : GenericExecutionBufferBytes;
++            triton_vecadd_fixture::BufferBytes :
++            (isTritonSiluAndMul() ?
++                static_cast<uint64_t>(executionRows) *
++                    triton_silu_and_mul_fixture::BufferBytesPerRow :
++                GenericExecutionBufferBytes);
+         executionElementsPerWorkgroup = isTritonVecAdd() ?
+-            triton_vecadd_fixture::BlockSize : request.submit.workgroupX;
+-        executionStoreDwordsPerLane = isTritonVecAdd() ? 4 : 1;
++            triton_vecadd_fixture::BlockSize :
++            (isTritonSiluAndMul() ?
++                triton_silu_and_mul_fixture::OutputDwordsPerRow / 4 :
++                request.submit.workgroupX);
++        executionStoreDwordsPerLane = isTritonVecAdd() ? 4 :
++            (isTritonSiluAndMul() ?
++                triton_silu_and_mul_fixture::StoreDwordsPerLane : 1);
+         std::vector<uint8_t> kernarg;
+         const uint32_t expectedKernargSize = isTritonVecAdd() ?
+             triton_vecadd_fixture::KernargBytes :
+-            (isOpenClVecAdd() ? opencl_vecadd_fixture::KernargBytes : 280);
++            (isTritonSiluAndMul() ?
++                triton_silu_and_mul_fixture::KernargBytes :
++                (isOpenClVecAdd() ? opencl_vecadd_fixture::KernargBytes : 280));
+         if (request.submit.kernargSize != expectedKernargSize ||
+             !context->functionalRead(
+                 kernargVa, request.submit.kernargSize, kernarg, requestId) ||
+             kernarg.size() != request.submit.kernargSize)
+             return false;
+-        if (isVecAdd()) {
++        if (isTritonSiluAndMul()) {
++            if (executionRows != triton_silu_and_mul_fixture::DecodeRows &&
++                executionRows != triton_silu_and_mul_fixture::PrefillRows) {
++                return false;
++            }
++            executionElementCount = executionRows *
++                triton_silu_and_mul_fixture::OutputDwordsPerRow;
++            executionInputDwordCount = executionRows *
++                triton_silu_and_mul_fixture::InputDwordsPerRow;
++            for (size_t offset = 24; offset < kernarg.size(); ++offset) {
++                if (kernarg[offset] != 0)
++                    return false;
++            }
++        } else if (isVecAdd()) {
+             std::memcpy(
+                 &executionElementCount, kernarg.data() + 24,
+                 sizeof(executionElementCount));
+@@ -788,6 +833,7 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+                     sizeof(float)) {
+                 return false;
+             }
++            executionInputDwordCount = executionElementCount;
+             for (size_t offset = 28; offset < kernarg.size(); ++offset) {
+                 if (kernarg[offset] != 0)
+                     return false;
+@@ -815,7 +861,8 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+             seen[index] = pointers[index];
+             const auto allocation = [&]() -> std::optional<HostGPUMemoryState::AllocationView> {
+                 for (const auto &candidate : memory.allocationsForOwner(owner)) {
+-                    const bool allocationShape = isTritonVecAdd() ?
++                    const bool allocationShape =
++                        (isTritonVecAdd() || isTritonSiluAndMul()) ?
+                         candidate.size >= executionBufferBytes &&
+                             candidate.alignment >=
+                                 protocol::GenericDispatchPageSize4K :
+@@ -852,7 +899,13 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+                 return false;
+             }
+         }
+-        if (isVecAdd()) {
++        if (isTritonSiluAndMul()) {
++            if (!generic_dispatch_route::tritonSiluAndMulInputsSupported(
++                    executionBefore, executionRows)) {
++                releaseExecutionBuffers(requestId);
++                return false;
++            }
++        } else if (isVecAdd()) {
+             const bool inputsSupported = isTritonVecAdd() ?
+                 generic_dispatch_route::tritonVecAddInputsSupported(
+                     executionBefore, executionElementCount) :
+@@ -950,6 +1003,8 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         executionOutputCrc32c = 0;
+         executionBufferCrc32c = {};
+         executionElementCount = 0;
++        executionRows = 0;
++        executionInputDwordCount = 0;
+         executionBufferBytes = GenericExecutionBufferBytes;
+         executionElementsPerWorkgroup = 0;
+         executionStoreDwordsPerLane = 1;
+@@ -1010,7 +1065,7 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+             task.wgSize(1) != 1 || task.wgSize(2) != 1) {
+             return false;
+         }
+-        if (isVecAdd()) {
++        if (isVecAdd() || isTritonSiluAndMul()) {
+             return task.numWgTotal() == expectedWorkgroups() &&
+                 task.gridSize(0) == executionGridSize &&
+                 task.wgSize(0) == executionWorkgroupSize;
+@@ -1039,6 +1094,19 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+                 after[2], executionRequestId)) {
+             return false;
+         }
++        if (isTritonSiluAndMul()) {
++            const bool outputValid =
++                generic_dispatch_route::validateTritonSiluAndMulOutput(
++                    executionBefore, after, executionRows,
++                    executionOutputCrc32c);
++            if (!outputValid)
++                return false;
++            for (size_t index = 0; index < after.size(); ++index) {
++                executionBufferCrc32c[index] = protocol::crc32c(
++                    after[index].data(), after[index].size());
++            }
++            return executionBufferCrc32c[1] == executionOutputCrc32c;
++        }
+         if (isVecAdd()) {
+             const bool outputValid = isTritonVecAdd() ?
+                 generic_dispatch_route::validateTritonVecAddOutput(
+@@ -1165,11 +1233,19 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         panic_if(!inserted && workgroup->second != workgroupId,
+                  "generic execution dynamic wave changed workgroup");
+         auto &offsets = instructionOffsetsPerWave[dynamicWaveId];
++        const uint32_t offset = static_cast<uint32_t>(pc - task.codeAddr());
++        const size_t offsetIndex = offsets.size();
++        const uint32_t expectedOffset = offsetIndex < expectedOffsets.size() ?
++            expectedOffsets[offsetIndex] :
++            std::numeric_limits<uint32_t>::max();
+         panic_if(offsets.size() >= expectedOffsets.size() ||
+-                     pc - task.codeAddr() !=
+-                         expectedOffsets[offsets.size()],
+-                 "generic execution instruction PC sequence mismatch");
+-        offsets.push_back(static_cast<uint32_t>(pc - task.codeAddr()));
++                     offset != expectedOffset,
++                 "generic execution instruction PC sequence mismatch: "
++                 "wave=%llu index=%llu expected=%#x actual=%#x",
++                 static_cast<unsigned long long>(dynamicWaveId),
++                 static_cast<unsigned long long>(offsetIndex),
++                 expectedOffset, offset);
++        offsets.push_back(offset);
+         panic_if(!instructionSequences.insert(sequence).second,
+                  "duplicate generic execution instruction sequence");
+         auto previous = lastSequencePerWave.find(dynamicWaveId);
+@@ -1216,9 +1292,15 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+                  "generic execution store chunk alignment mismatch");
+         const size_t chunk = offset /
+             (elementsPerStore * sizeof(uint32_t));
++        const size_t siluChunksPerRow =
++            triton_silu_and_mul_fixture::OutputDwordsPerRow /
++            (64 * triton_silu_and_mul_fixture::StoreDwordsPerLane);
++        const size_t expectedWorkgroup = isTritonSiluAndMul() ?
++            (chunk / siluChunksPerRow) * 4 +
++                std::min<size_t>((chunk % siluChunksPerRow) / 4, 3) :
++            chunk / expectedStoreChunksPerWorkgroup();
+         panic_if(chunk >= expectedStoreChunks() ||
+-                     chunk / expectedStoreChunksPerWorkgroup() !=
+-                         static_cast<size_t>(workgroupId),
++                     expectedWorkgroup != static_cast<size_t>(workgroupId),
+                  "generic execution store chunk/workgroup mismatch");
+         const size_t remaining = executionElementCount -
+             chunk * elementsPerStore;
+@@ -1242,7 +1324,7 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         auto &chunks = outputStore ? outputStoreChunks : resultStoreChunks;
+         panic_if(chunks.count(chunk) != 0,
+                  "duplicate generic execution store chunk");
+-        panic_if(!isVecAdd() && outputStore &&
++        panic_if(!isVecAdd() && !isTritonSiluAndMul() && outputStore &&
+                      resultStoreChunks.count(chunk) == 0,
+                  "generic execution B store preceded matching C store");
+         chunks.insert(chunk);
+@@ -1270,15 +1352,22 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+         const uint32_t wavesPerWorkgroup = expectedWavesPerWorkgroup();
+         const uint32_t waves = expectedWaves();
+         const auto &instructionOffsets = expectedInstructionOffsets();
+-        const uint64_t expectedScalarReads = isTritonVecAdd() ? 0 :
++        const uint64_t expectedScalarReads =
++            (isTritonVecAdd() || isTritonSiluAndMul()) ? 0 :
+             waves * (isOpenClVecAdd() ? 5 : 2);
+-        const uint64_t expectedGlobalReads = isVecAdd() ?
+-            2 * executionElementCount : 1024;
+-        const uint64_t expectedGlobalWrites = isVecAdd() ?
+-            executionElementCount : 2048;
++        const uint64_t expectedGlobalReads = isTritonSiluAndMul() ?
++            executionInputDwordCount : (isVecAdd() ?
++                2 * executionElementCount : 1024);
++        const uint64_t expectedGlobalWrites = isVecAdd() ||
++                isTritonSiluAndMul() ? executionElementCount : 2048;
+         const uint32_t storeChunks = expectedStoreChunks();
+-        const uint64_t expectedStoreEvents = isVecAdd() ?
++        const uint64_t expectedStoreEvents = isVecAdd() ||
++                isTritonSiluAndMul() ?
+             storeChunks : 2 * storeChunks;
++        const bool instructionCountValid =
++            instructionStartedCount == waves * instructionOffsets.size();
++        const bool instructionSequenceCountValid =
++            instructionSequences.size() == waves * instructionOffsets.size();
+         const bool outputValid = validateExecutionOutput();
+         const bool countersValid = executionTaskMatches(task) &&
+             executionStarted &&
+@@ -1287,26 +1376,28 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+             fetchedCount == 1 && submittedCount == 1 &&
+             dispatcherStartedCount == 1 &&
+             waveStartedCount == waves && waveStarts.size() == waves &&
+-            instructionStartedCount == waves * instructionOffsets.size() &&
++            instructionCountValid &&
+             instructionsPerWave.size() == waves &&
+             instructionOffsetsPerWave.size() == waves &&
+             workgroupPerWave.size() == waves &&
+             lastSequencePerWave.size() == waves &&
+-            instructionSequences.size() ==
+-                waves * instructionOffsets.size() &&
++            instructionSequenceCountValid &&
+             scalarReads == expectedScalarReads &&
+             globalReads == expectedGlobalReads &&
+-            inputReadCoverage.size() == executionElementCount &&
++            inputReadCoverage.size() == (isTritonSiluAndMul() ?
++                executionInputDwordCount : executionElementCount) &&
+             secondInputReadCoverage.size() ==
+                 (isVecAdd() ? executionElementCount : 0) &&
+             globalWrites == expectedGlobalWrites &&
+             outputWriteCoverage.size() ==
+                 (isVecAdd() ? 0 : executionElementCount) &&
+-            resultWriteCoverage.size() == executionElementCount &&
++            resultWriteCoverage.size() ==
++                (isTritonSiluAndMul() ? 0 : executionElementCount) &&
+             globalStoreEventCount == expectedStoreEvents &&
+             globalStoreLaneCount == expectedGlobalWrites &&
+             outputStoreChunks.size() == (isVecAdd() ? 0 : storeChunks) &&
+-            resultStoreChunks.size() == storeChunks &&
++            resultStoreChunks.size() ==
++                (isTritonSiluAndMul() ? 0 : storeChunks) &&
+             workgroupCompletedCount == workgroups &&
+             completedWorkgroups.size() == workgroups;
+         if (!countersValid || !outputValid) {
+@@ -1316,10 +1407,13 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+                  "wave_ids=%llu instructions=%llu/%llu "
+                  "wave_maps=%llu/%llu/%llu/%llu "
+                  "sequences=%llu scalar_reads=%llu/%llu "
+-                 "global_reads=%llu/%llu read_coverage=%llu/%llu "
+-                 "writes=%llu/%llu write_coverage=%llu "
++                 "global_reads=%llu/%llu "
++                 "read_coverage_input_second=%llu/%llu "
++                 "writes=%llu/%llu "
++                 "write_coverage_output_result=%llu/%llu "
+                  "stores=%llu/%llu store_dwords=%llu/%llu "
+-                 "store_chunks=%llu/%u workgroups=%llu/%u wg_ids=%llu "
++                 "store_chunks_output_result=%llu/%llu expected=%u "
++                 "workgroups=%llu/%u wg_ids=%llu counters_valid=%u "
+                  "output_valid=%u",
+                  static_cast<unsigned>(executionVariant),
+                  executionTaskMatches(task), executionStarted,
+@@ -1347,16 +1441,20 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+                      secondInputReadCoverage.size()),
+                  static_cast<unsigned long long>(globalWrites),
+                  static_cast<unsigned long long>(expectedGlobalWrites),
++                 static_cast<unsigned long long>(
++                     outputWriteCoverage.size()),
+                  static_cast<unsigned long long>(resultWriteCoverage.size()),
+                  static_cast<unsigned long long>(globalStoreEventCount),
+                  static_cast<unsigned long long>(expectedStoreEvents),
+                  static_cast<unsigned long long>(globalStoreLaneCount),
+                  static_cast<unsigned long long>(expectedGlobalWrites),
++                 static_cast<unsigned long long>(outputStoreChunks.size()),
+                  static_cast<unsigned long long>(resultStoreChunks.size()),
+                  storeChunks,
+                  static_cast<unsigned long long>(workgroupCompletedCount),
+                  workgroups,
+                  static_cast<unsigned long long>(completedWorkgroups.size()),
++                 countersValid,
+                  outputValid);
+             return false;
+         }
+@@ -1365,26 +1463,29 @@ struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
+             fetchedCount != 1 || submittedCount != 1 ||
+             dispatcherStartedCount != 1 ||
+             waveStartedCount != waves || waveStarts.size() != waves ||
+-            instructionStartedCount != waves * instructionOffsets.size() ||
++            !instructionCountValid ||
+             instructionsPerWave.size() != waves ||
+             instructionOffsetsPerWave.size() != waves ||
+             workgroupPerWave.size() != waves ||
+             lastSequencePerWave.size() != waves ||
+-            instructionSequences.size() != waves * instructionOffsets.size() ||
++            !instructionSequenceCountValid ||
+             scalarReads != expectedScalarReads ||
+             globalReads != expectedGlobalReads ||
+-            inputReadCoverage.size() != executionElementCount ||
++            inputReadCoverage.size() != (isTritonSiluAndMul() ?
++                executionInputDwordCount : executionElementCount) ||
+             secondInputReadCoverage.size() !=
+                 (isVecAdd() ? executionElementCount : 0) ||
+             globalWrites != expectedGlobalWrites ||
+             outputWriteCoverage.size() !=
+                 (isVecAdd() ? 0 : executionElementCount) ||
+-            resultWriteCoverage.size() != executionElementCount ||
++            resultWriteCoverage.size() !=
++                (isTritonSiluAndMul() ? 0 : executionElementCount) ||
+             globalStoreEventCount != expectedStoreEvents ||
+             globalStoreLaneCount != expectedGlobalWrites ||
+             outputStoreChunks.size() !=
+                 (isVecAdd() ? 0 : storeChunks) ||
+-            resultStoreChunks.size() != storeChunks ||
++            resultStoreChunks.size() !=
++                (isTritonSiluAndMul() ? 0 : storeChunks) ||
+             workgroupCompletedCount != workgroups ||
+             completedWorkgroups.size() != workgroups)
+             return false;
+@@ -2070,11 +2171,13 @@ HostGPUBridge::makeGenericExecutionTraceRecord(
+     const auto &c = session.executionAllocationViews[2];
+     std::ostringstream stream;
+     stream << "{\"schema\":\""
+-           << (session.isTritonVecAdd() ?
++           << (session.isTritonSiluAndMul() ?
++                   "amdgpu-sim.cp30-triton-silu-and-mul-execution-trace.v1" :
++               (session.isTritonVecAdd() ?
+                    "amdgpu-sim.cp28-triton-execution-trace.v1" :
+                (session.isOpenClVecAdd() ?
+                    "amdgpu-sim.cp27-opencl-execution-trace.v1" :
+-                   "amdgpu-sim.cp26-generic-execution-trace.v1"))
++                   "amdgpu-sim.cp26-generic-execution-trace.v1")))
+            << "\""
+            << ",\"event\":\"" << event << "\""
+            << ",\"sim_tick\":" << curTick()
+@@ -2089,19 +2192,53 @@ HostGPUBridge::makeGenericExecutionTraceRecord(
+            << generic_dispatch_route::executionVariantName(
+                   session.executionVariant) << "\""
+            << ",\"kernel\":\""
+-           << (session.isTritonVecAdd() ? "add_kernel" :
++           << (session.isTritonSiluAndMul() ? "silu_and_mul_kernel" :
++               (session.isTritonVecAdd() ? "add_kernel" :
+                (session.isOpenClVecAdd() ? "vecadd" : "gpuReadWrite"))
++              )
+            << "\""
+            << ",\"global_size\":" << session.executionGridSize
+            << ",\"local_size\":" << session.executionWorkgroupSize
+            << ",\"element_count\":" << session.executionElementCount
+            << ",\"buffer_bytes\":" << session.executionBufferBytes
++           << (session.isTritonSiluAndMul() ?
++                   ",\"element_count_unit\":\"output_dwords\"" : "")
++           << (session.isTritonSiluAndMul() ?
++                   ",\"rows\":" +
++                       std::to_string(session.executionRows) : "")
++           << (session.isTritonSiluAndMul() ?
++                   ",\"input_bf16_elements\":" + std::to_string(
++                       static_cast<uint64_t>(session.executionRows) *
++                       triton_silu_and_mul_fixture::InputElementsPerRow) : "")
++           << (session.isTritonSiluAndMul() ?
++                   ",\"output_bf16_elements\":" + std::to_string(
++                       static_cast<uint64_t>(session.executionRows) *
++                       triton_silu_and_mul_fixture::OutputElementsPerRow) : "")
++           << (session.isTritonSiluAndMul() ?
++                   ",\"input_dwords\":" + std::to_string(
++                       session.executionInputDwordCount) : "")
++           << (session.isTritonSiluAndMul() ?
++                   ",\"output_dwords\":" + std::to_string(
++                       session.executionElementCount) : "")
++           << (session.isTritonSiluAndMul() ?
++                   ",\"logical_output_bytes\":" + std::to_string(
++                       static_cast<uint64_t>(session.executionRows) *
++                       triton_silu_and_mul_fixture::OutputElementsPerRow *
++                       sizeof(uint16_t)) : "")
++           << (session.isTritonSiluAndMul() ?
++                   ",\"masked_bf16_elements\":" + std::to_string(
++                       static_cast<uint64_t>(session.executionRows) *
++                       (4 * triton_silu_and_mul_fixture::BlockSize -
++                        triton_silu_and_mul_fixture::OutputElementsPerRow)) :
++                   "")
+            << ",\"required_d2h_mask\":"
+            << session.requiredD2hMask.to_ulong()
+            << ",\"output_oracle\":\""
+-           << (session.isVecAdd() ?
++           << (session.isTritonSiluAndMul() ?
++                   "bf16_silu_and_mul" :
++               (session.isVecAdd() ?
+                    "float32_c_equals_a_plus_b" :
+-                   "cp26_gpu_read_write") << "\""
++                   "cp26_gpu_read_write")) << "\""
+            << ",\"image_sha256\":\""
+            << hexBytes(response.imageSha256) << "\""
+            << ",\"packet_va\":" << response.packetVa
+@@ -4823,8 +4960,22 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+                         client.genericDispatch->mapResponse.mappingId ||
+                     completed.response.mappingGeneration !=
+                         client.genericDispatch->mapResponse.mappingGeneration ||
+-                    completed.bufferBytes == 0 ||
+-                    !client.genericDispatch->resetExecutionForReuse()) {
++                    completed.bufferBytes == 0) {
++                    response.status = protocol::Status::ProtocolState;
++                    break;
++                }
++                fatal_if(writeDispatchTraceBatch({
++                             makeGenericExecutionTraceRecord(
++                                 "generic_execution_reuse_complete",
++                                 *client.genericDispatch,
++                                 completed.requestId, completed.response,
++                                 true, false, true, true, false,
++                                 completed.d2hAckSent,
++                                 completed.unmapAckSent)}) !=
++                             DispatchTraceWriteResult::Ok,
++                         "%s: cannot persist reusable generic completion",
++                         name());
++                if (!client.genericDispatch->resetExecutionForReuse()) {
+                     response.status = protocol::Status::ProtocolState;
+                     break;
+                 }
+diff --git a/src/dev/amdgpu/host_gpu_code_object_image.cc b/src/dev/amdgpu/host_gpu_code_object_image.cc
+index ace25a31d..981d38632 100644
+--- a/src/dev/amdgpu/host_gpu_code_object_image.cc
++++ b/src/dev/amdgpu/host_gpu_code_object_image.cc
+@@ -28,6 +28,7 @@
+ #include "dev/amdgpu/host_gpu_code_object_image.hh"
+ 
+ #include "dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh"
++#include "dev/amdgpu/host_gpu_triton_silu_and_mul_fixture.hh"
+ #include "dev/amdgpu/host_gpu_triton_vecadd_fixture.hh"
+ 
+ #include <gelf.h>
+@@ -544,7 +545,9 @@ targetMatches(const StringView &target,
+      * gfx950 admission path.
+      */
+     return (manifest.imageSha256 == opencl_vecadd_fixture::ImageSha256 ||
+-            manifest.imageSha256 == triton_vecadd_fixture::ImageSha256) &&
++            manifest.imageSha256 == triton_vecadd_fixture::ImageSha256 ||
++            manifest.imageSha256 ==
++                triton_silu_and_mul_fixture::ImageSha256) &&
+         target.size == sizeof(OpenClTarget) - 1 &&
+         std::memcmp(target.data, OpenClTarget,
+                     sizeof(OpenClTarget) - 1) == 0;
+@@ -768,7 +771,9 @@ scanSectionsAndSymbols(Elf *elf, const std::vector<uint8_t> &image,
+             uint64_t fileOffset = 0;
+             const unsigned visibility = symbol.st_other & 0x3;
+             const bool tritonDefaultDescriptor = isDescriptor &&
+-                manifest.imageSha256 == triton_vecadd_fixture::ImageSha256 &&
++                (manifest.imageSha256 == triton_vecadd_fixture::ImageSha256 ||
++                 manifest.imageSha256 ==
++                     triton_silu_and_mul_fixture::ImageSha256) &&
+                 visibility == STV_DEFAULT;
+             if (GELF_ST_BIND(symbol.st_info) != STB_GLOBAL ||
+                 (visibility != STV_PROTECTED &&
+diff --git a/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc b/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
+index f46415ca3..710c79b3e 100644
+--- a/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
++++ b/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
+@@ -30,6 +30,7 @@
+ 
+ #include "dev/amdgpu/host_gpu_code_object_fixture.hh"
+ #include "dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh"
++#include "dev/amdgpu/host_gpu_triton_silu_and_mul_fixture.hh"
+ #include "dev/amdgpu/host_gpu_triton_vecadd_fixture.hh"
+ 
+ namespace gem5::hostgpu::generic_dispatch_route
+@@ -264,6 +265,99 @@ lockedTritonVecAddFixture(
+     return true;
+ }
+ 
++bool
++lockedTritonSiluAndMulFixture(
++    const protocol::CodeObjectManifest &manifest,
++    const std::vector<uint8_t> &image)
++{
++    using namespace triton_silu_and_mul_fixture;
++    if (image.size() != ImageBytes || manifest.imageSize != ImageBytes ||
++        manifest.imageSha256 != ImageSha256 ||
++        manifest.elfMachine != ElfMachine || manifest.elfType != ElfType ||
++        manifest.elfOsabi != ElfOsabi ||
++        manifest.elfAbiVersion != ElfAbiVersion ||
++        manifest.elfFlags != ElfFlags || manifest.gfxTarget != GfxTarget ||
++        manifest.codeObjectVersion != CodeObjectVersion ||
++        manifest.metadataMajor != MetadataMajor ||
++        manifest.metadataMinor != MetadataMinor ||
++        manifest.relocationCount != 0 || manifest.segmentCount != 3 ||
++        manifest.kernelIndex != 0 ||
++        manifest.kernargSegmentSize != KernargBytes ||
++        manifest.kernargSegmentAlign != KernargAlignment ||
++        manifest.groupSegmentFixedSize != 0 ||
++        manifest.privateSegmentFixedSize != 0 ||
++        manifest.maxFlatWorkgroupSize != MaxFlatWorkgroupSize ||
++        manifest.wavefrontSize != WavefrontSize ||
++        manifest.sgprCount != SgprCount || manifest.vgprCount != VgprCount ||
++        manifest.usesDynamicStack != 0 ||
++        manifest.descriptorSize != Descriptor.size() ||
++        manifest.kernelCodeEntryByteOffset != KernelCodeEntryByteOffset ||
++        manifest.codeVirtualAddress != CodeVirtualAddress ||
++        manifest.codeFileOffset != CodeFileOffset ||
++        manifest.codeSize != CodeBytes ||
++        manifest.descriptorVirtualAddress != DescriptorVirtualAddress ||
++        manifest.descriptorFileOffset != DescriptorFileOffset ||
++        !fixedNameEquals(manifest.kernelName, KernelName) ||
++        !fixedNameEquals(manifest.descriptorSymbol, DescriptorSymbol) ||
++        manifest.descriptor != Descriptor ||
++        DescriptorFileOffset > image.size() ||
++        Descriptor.size() > image.size() - DescriptorFileOffset) {
++        return false;
++    }
++    for (size_t index = 0; index < LoadSegments.size(); ++index) {
++        const auto &actual = manifest.segments[index];
++        const auto &expected = LoadSegments[index];
++        if (actual.type != 1 || actual.flags != expected.flags ||
++            actual.fileOffset != expected.fileOffset ||
++            actual.virtualAddress != expected.virtualAddress ||
++            actual.fileSize != expected.fileSize ||
++            actual.memorySize != expected.memorySize ||
++            actual.alignment != 0x1000) {
++            return false;
++        }
++    }
++    return std::equal(
++        Descriptor.begin(), Descriptor.end(),
++        image.begin() + DescriptorFileOffset);
++}
++
++float
++bf16ToFloat(const uint8_t *data)
++{
++    uint32_t bits = 0;
++    uint16_t half = 0;
++    std::memcpy(&half, data, sizeof(half));
++    bits = static_cast<uint32_t>(half) << 16;
++    float value = 0;
++    std::memcpy(&value, &bits, sizeof(value));
++    return value;
++}
++
++uint16_t
++floatToBf16(float value)
++{
++    uint32_t bits = 0;
++    std::memcpy(&bits, &value, sizeof(bits));
++    const uint32_t rounding = 0x7fff + ((bits >> 16) & 1);
++    return static_cast<uint16_t>((bits + rounding) >> 16);
++}
++
++float
++roundToBf16(float value)
++{
++    const uint32_t bits = static_cast<uint32_t>(floatToBf16(value)) << 16;
++    float rounded = 0;
++    std::memcpy(&rounded, &bits, sizeof(rounded));
++    return rounded;
++}
++
++uint64_t
++siluBufferBytes(uint32_t rows)
++{
++    using namespace triton_silu_and_mul_fixture;
++    return static_cast<uint64_t>(rows) * BufferBytesPerRow;
++}
++
+ bool
+ vecAddInputsSupported(
+     const std::array<std::vector<uint8_t>, 3> &before,
+@@ -395,7 +489,9 @@ lockedExecutionMapSupported(
+ {
+     const uint32_t expectedPreload =
+         variant == LockedExecutionVariant::TritonVecAdd ?
+-            triton_vecadd_fixture::DescriptorPreloadDwords : 0;
++            triton_vecadd_fixture::DescriptorPreloadDwords :
++        variant == LockedExecutionVariant::TritonSiluAndMul ?
++            triton_silu_and_mul_fixture::DescriptorPreloadDwords : 0;
+     return variant != LockedExecutionVariant::None &&
+         request.opcode == protocol::GenericDispatchOpcode::MapObject &&
+         request.map.pageSize == protocol::GenericDispatchPageSize4K &&
+@@ -413,6 +509,8 @@ lockedExecutionFixture(
+         return LockedExecutionVariant::OpenClVecAdd;
+     if (lockedTritonVecAddFixture(manifest, image))
+         return LockedExecutionVariant::TritonVecAdd;
++    if (lockedTritonSiluAndMulFixture(manifest, image))
++        return LockedExecutionVariant::TritonSiluAndMul;
+     return LockedExecutionVariant::None;
+ }
+ 
+@@ -431,7 +529,9 @@ lockedExecutionAllocSupported(
+ {
+     const uint64_t expectedSize =
+         variant == LockedExecutionVariant::TritonVecAdd ?
+-            triton_vecadd_fixture::KernargBytes : 512;
++            triton_vecadd_fixture::KernargBytes :
++        variant == LockedExecutionVariant::TritonSiluAndMul ?
++            triton_silu_and_mul_fixture::KernargBytes : 512;
+     return variant != LockedExecutionVariant::None &&
+         request.opcode ==
+             protocol::GenericDispatchOpcode::AllocKernarg &&
+@@ -455,7 +555,8 @@ lockedExecutionSubmitSupported(
+     LockedExecutionVariant variant)
+ {
+     const uint64_t expectedKernargOffset =
+-        variant == LockedExecutionVariant::TritonVecAdd ? 0 : 64;
++        (variant == LockedExecutionVariant::TritonVecAdd ||
++         variant == LockedExecutionVariant::TritonSiluAndMul) ? 0 : 64;
+     if (request.opcode != protocol::GenericDispatchOpcode::SubmitAql ||
+         request.kernelIndex != 0 ||
+         request.submit.kernargOffset != expectedKernargOffset ||
+@@ -484,6 +585,15 @@ lockedExecutionSubmitSupported(
+                 triton_vecadd_fixture::WorkgroupSize &&
+             request.submit.numWarps == triton_vecadd_fixture::NumWarps;
+     }
++    if (variant == LockedExecutionVariant::TritonSiluAndMul) {
++        using namespace triton_silu_and_mul_fixture;
++        return fixedNameEquals(request.kernelName, KernelName) &&
++            request.submit.kernargSize == KernargBytes &&
++            (request.submit.gridX == DecodeRows * 4 * WorkgroupSize ||
++             request.submit.gridX == PrefillRows * 4 * WorkgroupSize) &&
++            request.submit.workgroupX == WorkgroupSize &&
++            request.submit.numWarps == NumWarps;
++    }
+     if (variant != LockedExecutionVariant::OpenClVecAdd ||
+         !fixedNameEquals(request.kernelName, "vecadd") ||
+         request.submit.kernargSize != opencl_vecadd_fixture::KernargBytes ||
+@@ -511,6 +621,8 @@ executionVariantName(LockedExecutionVariant variant)
+         return "opencl_vecadd";
+       case LockedExecutionVariant::TritonVecAdd:
+         return "triton_vecadd";
++      case LockedExecutionVariant::TritonSiluAndMul:
++        return "triton_silu_and_mul";
+       case LockedExecutionVariant::None:
+         return "none";
+     }
+@@ -525,6 +637,8 @@ requiredD2hMask(LockedExecutionVariant variant)
+     if (variant == LockedExecutionVariant::OpenClVecAdd ||
+         variant == LockedExecutionVariant::TritonVecAdd)
+         return std::bitset<3>(0x4);
++    if (variant == LockedExecutionVariant::TritonSiluAndMul)
++        return std::bitset<3>(0x2);
+     return {};
+ }
+ 
+@@ -568,6 +682,84 @@ validateTritonVecAddOutput(
+             outputCrc32c);
+ }
+ 
++bool
++tritonSiluAndMulInputsSupported(
++    const std::array<std::vector<uint8_t>, 3> &before, uint32_t rows)
++{
++    using namespace triton_silu_and_mul_fixture;
++    if (rows != DecodeRows && rows != PrefillRows)
++        return false;
++    const uint64_t bytes = siluBufferBytes(rows);
++    if (std::any_of(before.begin(), before.end(),
++                    [bytes](const auto &buffer) {
++                        return buffer.size() != bytes;
++                    }))
++        return false;
++    for (uint32_t row = 0; row < rows; ++row) {
++        const uint64_t inputBase = static_cast<uint64_t>(row) *
++            InputElementsPerRow;
++        for (uint32_t col = 0; col < OutputElementsPerRow; ++col) {
++            const float gate = bf16ToFloat(
++                before[0].data() + (inputBase + col) * 2);
++            const float up = bf16ToFloat(
++                before[0].data() +
++                    (inputBase + OutputElementsPerRow + col) * 2);
++            if (!std::isfinite(gate) || !std::isfinite(up))
++                return false;
++            const float expected = gate /
++                (1.0f + std::exp(-gate)) * up;
++            if (!std::isfinite(expected) ||
++                !std::isfinite(roundToBf16(expected))) {
++                return false;
++            }
++        }
++    }
++    return true;
++}
++
++bool
++validateTritonSiluAndMulOutput(
++    const std::array<std::vector<uint8_t>, 3> &before,
++    const std::array<std::vector<uint8_t>, 3> &after, uint32_t rows,
++    uint32_t &outputCrc32c)
++{
++    using namespace triton_silu_and_mul_fixture;
++    outputCrc32c = 0;
++    if (!tritonSiluAndMulInputsSupported(before, rows) ||
++        after[0] != before[0] || after[2] != before[2] ||
++        after[1].size() != before[1].size()) {
++        return false;
++    }
++    for (uint32_t row = 0; row < rows; ++row) {
++        const uint64_t inputBase = static_cast<uint64_t>(row) *
++            InputElementsPerRow;
++        const uint64_t outputBase = static_cast<uint64_t>(row) *
++            OutputElementsPerRow;
++        for (uint32_t col = 0; col < OutputElementsPerRow; ++col) {
++            const float gate = bf16ToFloat(
++                before[0].data() + (inputBase + col) * 2);
++            const float up = bf16ToFloat(
++                before[0].data() + (inputBase + OutputElementsPerRow + col) * 2);
++            const float expected = gate / (1.0f + std::exp(-gate)) * up;
++            if (!std::isfinite(expected))
++                return false;
++            const float actual = bf16ToFloat(
++                after[1].data() + (outputBase + col) * 2);
++            const float tolerance = 0.015625f + 0.02f * std::abs(expected);
++            if (!std::isfinite(actual) ||
++                std::abs(actual - expected) > tolerance)
++                return false;
++        }
++    }
++    const size_t tailBegin = static_cast<size_t>(rows) *
++        OutputElementsPerRow * sizeof(uint16_t);
++    if (!std::equal(after[1].begin() + tailBegin, after[1].end(),
++                    before[1].begin() + tailBegin))
++        return false;
++    outputCrc32c = protocol::crc32c(after[1].data(), after[1].size());
++    return true;
++}
++
+ bool
+ executionSessionCanSubmit(
+     bool started, bool completed, bool retired, bool completionRetained)
+diff --git a/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh b/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh
+index 1fa88b233..c36ce5241 100644
+--- a/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh
++++ b/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh
+@@ -43,6 +43,7 @@ enum class LockedExecutionVariant
+     GpuReadWrite,
+     OpenClVecAdd,
+     TritonVecAdd,
++    TritonSiluAndMul,
+ };
+ 
+ /**
+@@ -79,9 +80,10 @@ lockedExecutionMapSupported(
+     LockedExecutionVariant variant);
+ 
+ /**
+- * Select one explicitly audited code object.  Image identity is already
+- * checked by HostGPUCodeObjectState; this gate additionally checks the locked
+- * profile's ELF layout, metadata, descriptor resources, and ISA bytes.
++ * Select one explicitly audited code object.  HostGPUCodeObjectState has
++ * already checked the whole-image digest; this gate additionally checks the
++ * locked profile's ELF layout, metadata, descriptor resources, and the code
++ * bytes explicitly retained by each fixture.
+  */
+ LockedExecutionVariant
+ lockedExecutionFixture(
+@@ -135,6 +137,16 @@ validateTritonVecAddOutput(
+     const std::array<std::vector<uint8_t>, 3> &after,
+     uint32_t elementCount, uint32_t &outputCrc32c);
+ 
++bool
++tritonSiluAndMulInputsSupported(
++    const std::array<std::vector<uint8_t>, 3> &before, uint32_t rows);
++
++bool
++validateTritonSiluAndMulOutput(
++    const std::array<std::vector<uint8_t>, 3> &before,
++    const std::array<std::vector<uint8_t>, 3> &after, uint32_t rows,
++    uint32_t &outputCrc32c);
++
+ /** An execution tracker admits only a fresh or explicitly reset launch. */
+ bool
+ executionSessionCanSubmit(
+diff --git a/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc b/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
+index 8e0b575d0..b16cd29ff 100644
+--- a/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
++++ b/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
+@@ -26,6 +26,7 @@
+  */
+ 
+ #include <algorithm>
++#include <cmath>
+ #include <cstring>
+ #include <cstdlib>
+ #include <iostream>
+@@ -33,6 +34,7 @@
+ 
+ #include "dev/amdgpu/host_gpu_generic_dispatch_route.hh"
+ #include "dev/amdgpu/host_gpu_opencl_vecadd_fixture.hh"
++#include "dev/amdgpu/host_gpu_triton_silu_and_mul_fixture.hh"
+ #include "dev/amdgpu/host_gpu_triton_vecadd_fixture.hh"
+ 
+ namespace gem5::hostgpu
+@@ -51,6 +53,22 @@ require(bool condition, const char *message)
+         throw std::runtime_error(message);
+ }
+ 
++uint16_t
++floatToBf16(float value)
++{
++    uint32_t bits = 0;
++    std::memcpy(&bits, &value, sizeof(bits));
++    const uint32_t rounding = 0x7fff + ((bits >> 16) & 1);
++    return static_cast<uint16_t>((bits + rounding) >> 16);
++}
++
++void
++storeBf16(std::vector<uint8_t> &buffer, size_t element, float value)
++{
++    const uint16_t bits = floatToBf16(value);
++    std::memcpy(buffer.data() + element * sizeof(bits), &bits, sizeof(bits));
++}
++
+ Header
+ header(uint64_t requestId)
+ {
+@@ -269,6 +287,67 @@ tritonVecAddImage()
+     return result;
+ }
+ 
++CodeObjectManifest
++tritonSiluAndMulManifest()
++{
++    using namespace triton_silu_and_mul_fixture;
++    CodeObjectManifest result;
++    result.imageSize = ImageBytes;
++    result.chunkCount = static_cast<uint32_t>(
++        (ImageBytes + CodeObjectChunkDataBytes - 1) /
++        CodeObjectChunkDataBytes);
++    result.segmentCount = LoadSegments.size();
++    result.kernelIndex = 0;
++    result.imageSha256 = ImageSha256;
++    result.elfMachine = ElfMachine;
++    result.elfType = ElfType;
++    result.elfOsabi = ElfOsabi;
++    result.elfAbiVersion = ElfAbiVersion;
++    result.elfFlags = ElfFlags;
++    result.gfxTarget = GfxTarget;
++    result.codeObjectVersion = CodeObjectVersion;
++    result.metadataMajor = MetadataMajor;
++    result.metadataMinor = MetadataMinor;
++    result.kernargSegmentSize = KernargBytes;
++    result.kernargSegmentAlign = KernargAlignment;
++    result.maxFlatWorkgroupSize = MaxFlatWorkgroupSize;
++    result.wavefrontSize = WavefrontSize;
++    result.sgprCount = SgprCount;
++    result.vgprCount = VgprCount;
++    result.kernelCodeEntryByteOffset = KernelCodeEntryByteOffset;
++    result.codeVirtualAddress = CodeVirtualAddress;
++    result.codeFileOffset = CodeFileOffset;
++    result.codeSize = CodeBytes;
++    result.descriptorVirtualAddress = DescriptorVirtualAddress;
++    result.descriptorFileOffset = DescriptorFileOffset;
++    std::copy_n(
++        KernelName, std::strlen(KernelName), result.kernelName.begin());
++    std::copy_n(
++        DescriptorSymbol, std::strlen(DescriptorSymbol),
++        result.descriptorSymbol.begin());
++    result.descriptor = Descriptor;
++    for (size_t index = 0; index < LoadSegments.size(); ++index) {
++        const auto &source = LoadSegments[index];
++        result.segments[index] = {
++            1, source.flags, source.fileOffset, source.virtualAddress,
++            source.fileSize, source.memorySize, 0x1000};
++    }
++    return result;
++}
++
++std::vector<uint8_t>
++tritonSiluAndMulImage()
++{
++    using namespace triton_silu_and_mul_fixture;
++    std::vector<uint8_t> result(ImageBytes, 0);
++    std::copy(
++        Descriptor.begin(), Descriptor.end(),
++        result.begin() + DescriptorFileOffset);
++    /* HostGPUCodeObjectState enforces the whole-image digest before this route
++     * helper runs.  This harness retains the bytes the helper itself checks. */
++    return result;
++}
++
+ void
+ run()
+ {
+@@ -470,7 +549,10 @@ run()
+                 generic_dispatch_route::requiredD2hMask(
+                     LockedExecutionVariant::OpenClVecAdd).to_ulong() == 0x4 &&
+                 generic_dispatch_route::requiredD2hMask(
+-                    LockedExecutionVariant::TritonVecAdd).to_ulong() == 0x4,
++                    LockedExecutionVariant::TritonVecAdd).to_ulong() == 0x4 &&
++                generic_dispatch_route::requiredD2hMask(
++                    LockedExecutionVariant::TritonSiluAndMul).to_ulong() ==
++                    0x2,
+             "execution D2H durability mask mismatch");
+     require(generic_dispatch_route::executionCompletionCanReset(
+                 std::bitset<3>(0x4), std::bitset<3>(0x4)) &&
+@@ -539,6 +621,78 @@ run()
+                 tritonSubmit, LockedExecutionVariant::TritonVecAdd),
+             "Triton noncanonical program count was admitted");
+ 
++    auto siluManifest = tritonSiluAndMulManifest();
++    auto siluImage = tritonSiluAndMulImage();
++    require(generic_dispatch_route::lockedExecutionFixture(
++                siluManifest, siluImage) ==
++                LockedExecutionVariant::TritonSiluAndMul,
++            "locked Triton SiluAndMul fixture was rejected");
++    badManifest = siluManifest;
++    ++badManifest.vgprCount;
++    require(generic_dispatch_route::lockedExecutionFixture(
++                badManifest, siluImage) == LockedExecutionVariant::None,
++            "Triton SiluAndMul resource mutation was admitted");
++    badManifest = siluManifest;
++    badManifest.imageSha256[0] ^= 1;
++    require(generic_dispatch_route::lockedExecutionFixture(
++                badManifest, siluImage) == LockedExecutionVariant::None,
++            "Triton SiluAndMul digest mutation was admitted");
++    badImage = siluImage;
++    badImage[triton_silu_and_mul_fixture::DescriptorFileOffset] ^= 1;
++    require(generic_dispatch_route::lockedExecutionFixture(
++                siluManifest, badImage) == LockedExecutionVariant::None,
++            "Triton SiluAndMul descriptor mutation was admitted");
++
++    auto siluMap = map;
++    siluMap.map.descriptorPreloadDwords =
++        triton_silu_and_mul_fixture::DescriptorPreloadDwords;
++    require(generic_dispatch_route::lockedExecutionMapSupported(
++                siluMap, LockedExecutionVariant::TritonSiluAndMul),
++            "Triton SiluAndMul preload MAP was rejected");
++    --siluMap.map.descriptorPreloadDwords;
++    require(!generic_dispatch_route::lockedExecutionMapSupported(
++                siluMap, LockedExecutionVariant::TritonSiluAndMul),
++            "Triton SiluAndMul MAP admitted the wrong preload length");
++
++    auto siluAlloc = alloc;
++    siluAlloc.allocKernarg.sizeBytes =
++        triton_silu_and_mul_fixture::KernargBytes;
++    require(generic_dispatch_route::lockedExecutionAllocSupported(
++                siluAlloc, LockedExecutionVariant::TritonSiluAndMul),
++            "Triton SiluAndMul exact kernarg allocation was rejected");
++    ++siluAlloc.allocKernarg.sizeBytes;
++    require(!generic_dispatch_route::lockedExecutionAllocSupported(
++                siluAlloc, LockedExecutionVariant::TritonSiluAndMul),
++            "Triton SiluAndMul oversized kernarg allocation was admitted");
++
++    auto siluSubmit = submit;
++    siluSubmit.kernelName.fill(0);
++    std::copy_n(
++        triton_silu_and_mul_fixture::KernelName,
++        std::strlen(triton_silu_and_mul_fixture::KernelName),
++        siluSubmit.kernelName.begin());
++    siluSubmit.submit.kernargOffset = 0;
++    siluSubmit.submit.kernargSize =
++        triton_silu_and_mul_fixture::KernargBytes;
++    siluSubmit.submit.workgroupX =
++        triton_silu_and_mul_fixture::WorkgroupSize;
++    siluSubmit.submit.numWarps = triton_silu_and_mul_fixture::NumWarps;
++    for (const uint32_t rows : {
++             triton_silu_and_mul_fixture::DecodeRows,
++             triton_silu_and_mul_fixture::PrefillRows}) {
++        siluSubmit.submit.gridX = rows * 4 *
++            triton_silu_and_mul_fixture::WorkgroupSize;
++        require(generic_dispatch_route::lockedExecutionSubmitSupported(
++                    siluSubmit,
++                    LockedExecutionVariant::TritonSiluAndMul),
++                "Triton SiluAndMul canonical launch was rejected");
++    }
++    siluSubmit.submit.gridX = 2 * 4 *
++        triton_silu_and_mul_fixture::WorkgroupSize;
++    require(!generic_dispatch_route::lockedExecutionSubmitSupported(
++                siluSubmit, LockedExecutionVariant::TritonSiluAndMul),
++            "Triton SiluAndMul unsupported row count was admitted");
++
+     std::array<std::vector<uint8_t>, 3> before;
+     for (auto &buffer : before)
+         buffer.resize(4096);
+@@ -608,6 +762,84 @@ run()
+                 triton_vecadd_fixture::ElementCount, oracleCrc),
+             "Triton large oracle accepted wrong output");
+ 
++    for (const uint32_t rows : {
++             triton_silu_and_mul_fixture::DecodeRows,
++             triton_silu_and_mul_fixture::PrefillRows}) {
++        std::array<std::vector<uint8_t>, 3> siluBefore;
++        const size_t bufferBytes = static_cast<size_t>(rows) *
++            triton_silu_and_mul_fixture::BufferBytesPerRow;
++        for (auto &buffer : siluBefore)
++            buffer.resize(bufferBytes);
++        std::fill(siluBefore[1].begin(), siluBefore[1].end(), 0x7f);
++        std::fill(siluBefore[2].begin(), siluBefore[2].end(), 0x55);
++        auto siluAfter = siluBefore;
++        constexpr std::array<float, 5> Gates = {-2.0F, -1.0F, 0.0F,
++                                                1.0F, 2.0F};
++        for (uint32_t row = 0; row < rows; ++row) {
++            const size_t inputBase = static_cast<size_t>(row) *
++                triton_silu_and_mul_fixture::InputElementsPerRow;
++            const size_t outputBase = static_cast<size_t>(row) *
++                triton_silu_and_mul_fixture::OutputElementsPerRow;
++            for (uint32_t col = 0;
++                 col < triton_silu_and_mul_fixture::OutputElementsPerRow;
++                 ++col) {
++                const float gate = Gates[(row + col) % Gates.size()];
++                const float up = 0.5F * static_cast<float>(row + 1) +
++                    static_cast<float>(col % 3);
++                storeBf16(siluBefore[0], inputBase + col, gate);
++                storeBf16(
++                    siluBefore[0],
++                    inputBase +
++                        triton_silu_and_mul_fixture::OutputElementsPerRow +
++                        col,
++                    up);
++                const float expected = gate /
++                    (1.0F + std::exp(-gate)) * up;
++                storeBf16(siluAfter[1], outputBase + col, expected);
++            }
++        }
++        siluAfter[0] = siluBefore[0];
++        require(generic_dispatch_route::validateTritonSiluAndMulOutput(
++                    siluBefore, siluAfter, rows, oracleCrc) && oracleCrc != 0,
++                "Triton BF16 SiluAndMul oracle rejected correct output");
++        const uint16_t wrongBf16 = 0x3f80;
++        auto invalidSiluAfter = siluAfter;
++        std::memcpy(
++            invalidSiluAfter[1].data(), &wrongBf16, sizeof(wrongBf16));
++        require(!generic_dispatch_route::validateTritonSiluAndMulOutput(
++                    siluBefore, invalidSiluAfter, rows, oracleCrc),
++                "Triton BF16 SiluAndMul oracle accepted wrong output");
++        invalidSiluAfter = siluAfter;
++        invalidSiluAfter[2][0] ^= 1;
++        require(!generic_dispatch_route::validateTritonSiluAndMulOutput(
++                    siluBefore, invalidSiluAfter, rows, oracleCrc),
++                "Triton BF16 SiluAndMul oracle accepted scratch mutation");
++        invalidSiluAfter = siluAfter;
++        invalidSiluAfter[0][0] ^= 1;
++        require(!generic_dispatch_route::validateTritonSiluAndMulOutput(
++                    siluBefore, invalidSiluAfter, rows, oracleCrc),
++                "Triton BF16 SiluAndMul oracle accepted input mutation");
++        auto invalidSiluBefore = siluBefore;
++        const uint16_t infinityBf16 = 0x7f80;
++        std::memcpy(invalidSiluBefore[0].data(), &infinityBf16,
++                    sizeof(infinityBf16));
++        require(!generic_dispatch_route::tritonSiluAndMulInputsSupported(
++                    invalidSiluBefore, rows),
++                "Triton BF16 SiluAndMul admitted nonfinite input");
++        invalidSiluBefore = siluBefore;
++        constexpr uint16_t MaxFiniteBf16 = 0x7f7f;
++        std::memcpy(invalidSiluBefore[0].data(), &MaxFiniteBf16,
++                    sizeof(MaxFiniteBf16));
++        std::memcpy(
++            invalidSiluBefore[0].data() +
++                triton_silu_and_mul_fixture::OutputElementsPerRow *
++                    sizeof(MaxFiniteBf16),
++            &MaxFiniteBf16, sizeof(MaxFiniteBf16));
++        require(!generic_dispatch_route::tritonSiluAndMulInputsSupported(
++                    invalidSiluBefore, rows),
++                "Triton BF16 SiluAndMul admitted overflowing finite input");
++    }
++
+     GenericDispatchResponse submitAck;
+     submitAck.status = Status::Ok;
+     submitAck.opcode = GenericDispatchOpcode::SubmitAql;
+@@ -694,6 +926,10 @@ main()
+            "\"cp28_triton_admission\":true,"
+            "\"cp28_triton_oracle\":true,"
+            "\"cp28_required_d2h_mask\":4,"
++           "\"cp30_silu_and_mul_admission\":true,"
++           "\"cp30_silu_and_mul_decode_oracle\":true,"
++           "\"cp30_silu_and_mul_prefill_oracle\":true,"
++           "\"cp30_required_d2h_mask\":2,"
+            "\"ack_type19\":true,\"completion_type20\":true,"
+            "\"ticks_ordered\":true,\"packet_crc_bound\":true,"
+            "\"gpu_execution\":false,\"output_validated\":false,"
+diff --git a/src/dev/amdgpu/host_gpu_triton_code_object_main.cc b/src/dev/amdgpu/host_gpu_triton_code_object_main.cc
+index 319434e7f..e2d891f2f 100644
+--- a/src/dev/amdgpu/host_gpu_triton_code_object_main.cc
++++ b/src/dev/amdgpu/host_gpu_triton_code_object_main.cc
+@@ -34,6 +34,7 @@
+ 
+ #include "dev/amdgpu/host_gpu_code_object_image.hh"
+ #include "dev/amdgpu/host_gpu_code_object_state.hh"
++#include "dev/amdgpu/host_gpu_triton_silu_and_mul_fixture.hh"
+ #include "dev/amdgpu/host_gpu_triton_vecadd_fixture.hh"
+ 
+ namespace gem5::hostgpu
+@@ -87,6 +88,54 @@ manifest()
+     return result;
+ }
+ 
++protocol::CodeObjectManifest
++siluAndMulManifest()
++{
++    using namespace triton_silu_and_mul_fixture;
++    protocol::CodeObjectManifest result;
++    result.imageSize = ImageBytes;
++    result.chunkCount = static_cast<uint32_t>(
++        (ImageBytes + protocol::CodeObjectChunkDataBytes - 1) /
++        protocol::CodeObjectChunkDataBytes);
++    result.segmentCount = LoadSegments.size();
++    result.imageSha256 = ImageSha256;
++    result.elfMachine = ElfMachine;
++    result.elfType = ElfType;
++    result.elfOsabi = ElfOsabi;
++    result.elfAbiVersion = ElfAbiVersion;
++    result.elfFlags = ElfFlags;
++    result.gfxTarget = GfxTarget;
++    result.codeObjectVersion = CodeObjectVersion;
++    result.metadataMajor = MetadataMajor;
++    result.metadataMinor = MetadataMinor;
++    result.kernargSegmentSize = KernargBytes;
++    result.kernargSegmentAlign = KernargAlignment;
++    result.maxFlatWorkgroupSize = MaxFlatWorkgroupSize;
++    result.wavefrontSize = WavefrontSize;
++    result.sgprCount = SgprCount;
++    result.vgprCount = VgprCount;
++    result.descriptorSize = Descriptor.size();
++    result.kernelCodeEntryByteOffset = KernelCodeEntryByteOffset;
++    result.codeVirtualAddress = CodeVirtualAddress;
++    result.codeFileOffset = CodeFileOffset;
++    result.codeSize = CodeBytes;
++    result.descriptorVirtualAddress = DescriptorVirtualAddress;
++    result.descriptorFileOffset = DescriptorFileOffset;
++    std::copy_n(
++        KernelName, std::strlen(KernelName), result.kernelName.begin());
++    std::copy_n(
++        DescriptorSymbol, std::strlen(DescriptorSymbol),
++        result.descriptorSymbol.begin());
++    result.descriptor = Descriptor;
++    for (size_t index = 0; index < LoadSegments.size(); ++index) {
++        const auto &source = LoadSegments[index];
++        result.segments[index] = {
++            1, source.flags, source.fileOffset, source.virtualAddress,
++            source.fileSize, source.memorySize, 0x1000};
++    }
++    return result;
++}
++
+ } // namespace gem5::hostgpu
+ 
+ int
+@@ -100,12 +149,21 @@ main(int argc, char **argv)
+     std::vector<uint8_t> image{
+         std::istreambuf_iterator<char>(input),
+         std::istreambuf_iterator<char>()};
+-    const auto manifest = gem5::hostgpu::manifest();
+-    const bool digest = gem5::hostgpu::HostGPUCodeObjectState::imageSha256(
+-        image) == manifest.imageSha256;
++    const auto imageSha =
++        gem5::hostgpu::HostGPUCodeObjectState::imageSha256(image);
++    const bool silu = imageSha ==
++        gem5::hostgpu::triton_silu_and_mul_fixture::ImageSha256;
++    const bool vecadd = imageSha ==
++        gem5::hostgpu::triton_vecadd_fixture::ImageSha256;
++    const auto manifest = silu ? gem5::hostgpu::siluAndMulManifest() :
++        gem5::hostgpu::manifest();
++    const bool digest = imageSha == manifest.imageSha256;
+     const bool parsed = digest && gem5::hostgpu::validateCodeObjectImage(
+         image, manifest);
+-    std::cout << "{\"schema\":\"gem5.cp28-triton-code-object.v1\","
++    std::cout << "{\"schema\":\"gem5.triton-code-object.v2\","
++              << "\"variant\":\""
++              << (silu ? "cp30_silu_and_mul" :
++                  (vecadd ? "cp28_vecadd" : "unknown")) << "\","
+               << "\"bytes\":" << image.size()
+               << ",\"digest\":" << (digest ? "true" : "false")
+               << ",\"parsed\":" << (parsed ? "true" : "false")
+diff --git a/src/dev/amdgpu/host_gpu_triton_silu_and_mul_fixture.hh b/src/dev/amdgpu/host_gpu_triton_silu_and_mul_fixture.hh
+new file mode 100644
+index 000000000..e88302394
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_triton_silu_and_mul_fixture.hh
+@@ -0,0 +1,122 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_TRITON_SILU_AND_MUL_FIXTURE_HH__
++#define __DEV_AMDGPU_HOST_GPU_TRITON_SILU_AND_MUL_FIXTURE_HH__
++
++#include <array>
++#include <cstdint>
++
++namespace gem5::hostgpu::triton_silu_and_mul_fixture
++{
++
++/*
++ * External gemsim_amd code object compiled by the CP-0030 probe.  The image
++ * digest is the primary admission identity; the remaining values bind the
++ * ELF, descriptor, metadata, and launch ABI that the bridge consumes.
++ */
++inline constexpr const char *Id =
++    "cp30-triton-silu-and-mul-gfx950-b010-bf16-v1";
++inline constexpr const char *KernelName = "silu_and_mul_kernel";
++inline constexpr const char *DescriptorSymbol = "silu_and_mul_kernel.kd";
++inline constexpr const char *ImageSha256Hex =
++    "2db0d67ff6903a737f3a4d40cf67e2a2cbbacc8b605863d31b7c90386ccb357e";
++
++inline constexpr uint64_t ImageBytes = 6672;
++inline constexpr uint16_t ElfMachine = 224;
++inline constexpr uint16_t ElfType = 3;
++inline constexpr uint8_t ElfOsabi = 64;
++inline constexpr uint8_t ElfAbiVersion = 3;
++inline constexpr uint32_t ElfFlags = 0x54f;
++inline constexpr uint32_t GfxTarget = 950;
++inline constexpr uint32_t CodeObjectVersion = 5;
++inline constexpr uint32_t MetadataMajor = 1;
++inline constexpr uint32_t MetadataMinor = 2;
++inline constexpr uint32_t KernargBytes = 40;
++inline constexpr uint32_t KernargAlignment = 8;
++inline constexpr uint32_t MaxFlatWorkgroupSize = 256;
++inline constexpr uint32_t WavefrontSize = 64;
++inline constexpr uint32_t SgprCount = 20;
++inline constexpr uint32_t VgprCount = 34;
++inline constexpr uint64_t DescriptorVirtualAddress = 0x5c0;
++inline constexpr uint64_t DescriptorFileOffset = 0x5c0;
++inline constexpr int64_t KernelCodeEntryByteOffset = 0x1040;
++inline constexpr uint64_t CodeVirtualAddress = 0x1600;
++inline constexpr uint64_t CodeFileOffset = 0x600;
++inline constexpr uint64_t CodeBytes = 0x434;
++inline constexpr uint32_t DescriptorPreloadDwords = 10;
++inline constexpr uint32_t DescriptorPreloadOffset = 0;
++
++inline constexpr uint32_t BlockSize = 1024;
++inline constexpr uint32_t WorkgroupSize = 256;
++inline constexpr uint32_t NumWarps = 4;
++inline constexpr uint32_t InputElementsPerRow = 7168;
++inline constexpr uint32_t OutputElementsPerRow = 3584;
++inline constexpr uint32_t DecodeRows = 1;
++inline constexpr uint32_t PrefillRows = 7;
++inline constexpr uint64_t BufferBytesPerRow =
++    static_cast<uint64_t>(InputElementsPerRow) * sizeof(uint16_t);
++inline constexpr uint32_t InputDwordsPerRow = InputElementsPerRow / 2;
++inline constexpr uint32_t OutputDwordsPerRow = OutputElementsPerRow / 2;
++inline constexpr uint32_t StoreDwordsPerLane = 2;
++
++inline constexpr std::array<uint8_t, 32> ImageSha256 = {
++    0x2d, 0xb0, 0xd6, 0x7f, 0xf6, 0x90, 0x3a, 0x73,
++    0x7f, 0x3a, 0x4d, 0x40, 0xcf, 0x67, 0xe2, 0xa2,
++    0xcb, 0xba, 0xcc, 0x8b, 0x60, 0x58, 0x63, 0xd3,
++    0x1b, 0x7c, 0x90, 0x38, 0x6c, 0xcb, 0x35, 0x7e,
++};
++
++inline constexpr std::array<uint8_t, 64> Descriptor = {
++    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x40, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++    0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
++    0x84, 0x00, 0xaf, 0x00, 0x98, 0x00, 0x00, 0x00,
++    0x08, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++
++struct LoadSegment
++{
++    uint32_t flags;
++    uint64_t fileOffset;
++    uint64_t virtualAddress;
++    uint64_t fileSize;
++    uint64_t memorySize;
++};
++
++inline constexpr std::array<LoadSegment, 3> LoadSegments = {{
++    {4, 0x000, 0x0000, 0x600, 0x600},
++    {5, 0x600, 0x1600, 0x840, 0x840},
++    {6, 0xe40, 0x2e40, 0x070, 0x1c0},
++}};
++
++/* Descriptor preloading advances the mapped task entry by 0x100 bytes.  The
++ * offsets below freeze every instruction in [0x1700, 0x1a34), including the
++ * final s_endpgm at +0x330. */
++inline constexpr std::array<uint32_t, 128> InstructionOffsets = {{
++    0x000, 0x004, 0x008, 0x00c, 0x010, 0x014, 0x01c, 0x024,
++    0x028, 0x02c, 0x034, 0x03c, 0x040, 0x048, 0x04c, 0x054,
++    0x058, 0x060, 0x068, 0x070, 0x078, 0x080, 0x088, 0x090,
++    0x098, 0x0a0, 0x0a8, 0x0b0, 0x0b8, 0x0bc, 0x0c0, 0x0c8,
++    0x0cc, 0x0d4, 0x0d8, 0x0e0, 0x0e4, 0x0ec, 0x0f0, 0x0f8,
++    0x0fc, 0x104, 0x108, 0x110, 0x114, 0x11c, 0x124, 0x128,
++    0x130, 0x138, 0x13c, 0x140, 0x148, 0x150, 0x154, 0x158,
++    0x15c, 0x160, 0x164, 0x168, 0x170, 0x178, 0x180, 0x184,
++    0x18c, 0x194, 0x19c, 0x1a4, 0x1ac, 0x1b4, 0x1bc, 0x1c0,
++    0x1c8, 0x1cc, 0x1d4, 0x1dc, 0x1e0, 0x1e4, 0x1ec, 0x1f4,
++    0x1fc, 0x200, 0x208, 0x20c, 0x210, 0x218, 0x21c, 0x224,
++    0x22c, 0x234, 0x238, 0x240, 0x244, 0x24c, 0x250, 0x254,
++    0x258, 0x260, 0x264, 0x26c, 0x274, 0x27c, 0x280, 0x288,
++    0x28c, 0x294, 0x29c, 0x2a0, 0x2a8, 0x2b0, 0x2b4, 0x2bc,
++    0x2c4, 0x2cc, 0x2d0, 0x2d8, 0x2e0, 0x2e8, 0x2f0, 0x2f8,
++    0x300, 0x308, 0x30c, 0x314, 0x31c, 0x320, 0x328, 0x330,
++}};
++
++} // namespace gem5::hostgpu::triton_silu_and_mul_fixture
++
++#endif // __DEV_AMDGPU_HOST_GPU_TRITON_SILU_AND_MUL_FIXTURE_HH__
+-- 
+2.53.0
+

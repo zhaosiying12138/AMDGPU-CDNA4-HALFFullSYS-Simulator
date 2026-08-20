@@ -1,0 +1,1734 @@
+From 4fe648f7e3e2ae4a24c65f575db872d714ffffa8 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Wed, 19 Aug 2026 07:18:19 +0800
+Subject: [PATCH 39/42] amdgpu: extend the host bridge and gemsim dispatch
+ configuration
+
+Carries the host-bridge and configuration side of the same work: bridge
+plumbing under dev/amdgpu and the gemsim host_dispatch configuration that the
+managed runtime launches, including the scratch helpers used while measuring
+dispatch cost.
+
+UNVERIFIED AT HANDOFF: carried forward from earlier sessions; the untracked
+configuration helpers in particular are scratch from a measurement session and
+should be reviewed before being relied on.
+
+Checkpoint-ID: CP-0065
+Goal-ID: GSIM-001
+Plan-Revision: 16
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 3da978c32055239a056d892ab835013b541962d50ac5e6152ee57561e6a7f145
+Change-Kind: code
+Baseline-Commit: e0c9dd267e1016f61d3be2a8eefc1a755623d669
+---
+ configs/example/gemsim/_mcu_scratch.py      | 532 ++++++++++++++++++++
+ configs/example/gemsim/host_dispatch.py     | 127 ++++-
+ src/dev/amdgpu/AMDGPU.py                    |   5 +
+ src/dev/amdgpu/SConscript                   |   3 +
+ src/dev/amdgpu/host_gpu_bridge.cc           | 148 ++++--
+ src/dev/amdgpu/host_gpu_bridge.hh           |   7 +
+ src/dev/amdgpu/host_gpu_bridge_tape.cc      | 210 ++++++++
+ src/dev/amdgpu/host_gpu_bridge_tape.hh      | 175 +++++++
+ src/dev/amdgpu/host_gpu_bridge_tape.test.cc | 240 +++++++++
+ 9 files changed, 1400 insertions(+), 47 deletions(-)
+ create mode 100644 configs/example/gemsim/_mcu_scratch.py
+ create mode 100644 src/dev/amdgpu/host_gpu_bridge_tape.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_bridge_tape.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_bridge_tape.test.cc
+
+diff --git a/configs/example/gemsim/_mcu_scratch.py b/configs/example/gemsim/_mcu_scratch.py
+new file mode 100644
+index 000000000..9c6226ed3
+--- /dev/null
++++ b/configs/example/gemsim/_mcu_scratch.py
+@@ -0,0 +1,532 @@
++# Copyright (c) 2026 The gem5 Project
++# All rights reserved.
++#
++# Redistribution and use in source and binary forms, with or without
++# modification, are permitted provided that the following conditions are met:
++# redistributions of source code must retain the above copyright notice, this
++# list of conditions and the following disclaimer; redistributions in binary
++# form must reproduce the above copyright notice, this list of conditions and
++# the following disclaimer in the documentation and/or other materials
++# provided with the distribution; neither the name of the copyright holders
++# nor the names of its contributors may be used to endorse or promote products
++# derived from this software without specific prior written permission.
++#
++# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++# POSSIBILITY OF SUCH DAMAGE.
++
++import argparse
++import os
++import time
++
++import m5
++from m5.defines import buildEnv
++from m5.objects import *
++from m5.util import addToPath, fatal
++
++addToPath("../../")
++
++from common import GPUTLBConfig, GPUTLBOptions, Options, Simulation
++from ruby import Ruby
++
++# Local data store per compute unit, in bytes. gfx950/CDNA4 has 160 KiB, and
++# that is what the model topology reports to the runtime as
++# "lds_size_in_kb 160". These two numbers must stay equal: the runtime tells
++# the compiler how much group segment a workgroup may take, and the simulator
++# has to be able to give it. The environment override exists only so a test
++# can pin the historical 65536 and show what a too-small compute unit does;
++# no run should set it.
++LDS_BYTES_PER_CU = int(os.environ.get("GEMSIM_LDS_BYTES_PER_CU", 160 * 1024))
++
++# Compute units the simulator provides.
++#
++# The topology this stack publishes advertises a full gfx950: simd_count
++# 1024 over simd_per_cu 4, i.e. 256 compute units, each with
++# max_waves_per_simd 8. gem5 built exactly one. That is not merely a slower
++# machine, it is a different one: a kernel whose forward progress depends on
++# several workgroups running at the same time cannot complete on it.
++#
++# AITER's split-K GEMM is such a kernel. One workgroup publishes a tile
++# counter and its peers poll it. With too few resident workgroups every
++# resident peer polls a flag whose producer was never scheduled, and the run
++# livelocks: scalar instructions retire forever, no wavefront completes, and
++# the host waits on a completion signal that can never arrive. This is the
++# same shape as the 64 KiB-versus-160 KiB group-segment defect -- the device
++# claiming a capability the simulator does not honour -- and it fails the
++# same silent way.
++#
++# The count is a knob because simulation cost scales with it and 256 is not
++# affordable; see docs/ and the capsule in tools/coop_capsule/ for the
++# measured cost per count. Whatever value is chosen below the advertised 256,
++# the mismatch is real: a kernel needing more co-resident workgroups than
++# NUM_COMPUTE_UNITS * (workgroups that fit in one CU) can still deadlock.
++NUM_COMPUTE_UNITS = int(os.environ.get("GEMSIM_NUM_COMPUTE_UNITS", 16))
++if NUM_COMPUTE_UNITS < 1:
++    raise SystemExit("GEMSIM_NUM_COMPUTE_UNITS must be >= 1")
++
++
++def parse_args():
++    parser = argparse.ArgumentParser(
++        description="Pinned gfx950 AQL dispatch over the host GPU bridge"
++    )
++    Options.addCommonOptions(parser)
++    Ruby.define_options(parser)
++    GPUTLBOptions.tlb_options(parser)
++
++    parser.add_argument("--endpoint", required=True)
++    parser.add_argument("--dispatch-trace-path", required=True)
++    parser.add_argument(
++        "--bridge-tape-path",
++        default="",
++        help="Record every bridge wire record in both directions here",
++    )
++    parser.add_argument("--daemon-uuid", default="")
++    parser.add_argument("--job-uuid", default="")
++    parser.add_argument(
++        "--epoch", type=lambda value: int(value, 0), required=True
++    )
++    parser.add_argument("--rank", type=int, default=0)
++    parser.add_argument("--world-size", type=int, default=1)
++    parser.add_argument("--startup-timeout-ms", type=int, default=5000)
++    parser.add_argument("--handshake-timeout-ms", type=int, default=5000)
++    parser.add_argument("--max-record", type=int, default=65536)
++    parser.add_argument(
++        "--run-timeout-ms",
++        type=int,
++        default=30000,
++        help="Host wall-clock service window after startup",
++    )
++    parser.add_argument(
++        "--service-tick-quantum",
++        type=lambda value: int(value, 0),
++        default=1_000_000,
++        help="Maximum simulated ticks between host timeout checks",
++    )
++    parser.add_argument(
++        "--functional-fast",
++        action="store_true",
++        help=(
++            "Non-cycle-accurate functional fast mode (default off). Relaxes "
++            "timing-only parameters of the compute unit: memory request and "
++            "response pipeline latencies, issue period, ALU bypass depth and "
++            "operand network depth. Architectural results, dispatch "
++            "semantics, memory ordering, synchronization, completion and "
++            "failure behaviour are unchanged; simTicks and the per-dispatch "
++            "start/end ticks become meaningless and may never be cited for "
++            "any timing, TPOT or performance claim."
++        ),
++    )
++
++    parser.set_defaults(
++        cpu_type="X86TimingSimpleCPU",
++        num_cpus=1,
++        num_dirs=1,
++        mem_size="512MiB",
++        cacheline_size=64,
++    )
++    args = parser.parse_args()
++    if args.cpu_type != "X86TimingSimpleCPU" or args.num_cpus != 1:
++        fatal("host_dispatch.py requires one X86TimingSimpleCPU")
++    if args.num_dirs != 1 or args.cacheline_size != 64:
++        fatal("host_dispatch.py requires one directory and 64-byte lines")
++    if args.run_timeout_ms <= 0 or args.service_tick_quantum <= 0:
++        fatal("service timeout and tick quantum must be positive")
++    if not os.path.isabs(args.endpoint):
++        fatal("--endpoint must be absolute")
++    if not os.path.isabs(args.dispatch_trace_path):
++        fatal("--dispatch-trace-path must be absolute")
++    if args.bridge_tape_path and not os.path.isabs(args.bridge_tape_path):
++        fatal("--bridge-tape-path must be absolute")
++    return args
++
++
++def create_compute_unit(shader, cu_id, functional_fast=False):
++    cu = ComputeUnit(
++        cu_id=cu_id,
++        perLaneTLB=False,
++        num_SIMDs=4,
++        wf_size=64,
++        n_wf=shader.n_wf,
++        # The group segment a compute unit provides must be the one the
++        # runtime advertises, or a kernel the compiler was told it could
++        # build cannot be dispatched at all. The model topology publishes
++        # "lds_size_in_kb 160" per GPU node (see
++        # self-amdgpu-runtime/tools/hsakmt-model-topology.py), which is the
++        # gfx950/CDNA4 value; gem5's LdsState default is the older 64 KiB.
++        # With the smaller LDS a workgroup asking for more than 64 KiB never
++        # satisfies ComputeUnit::hasDispResources(), the dispatcher has no
++        # event left to retry it, and the run hangs with the simulator
++        # burning a core and the host waiting on a completion signal.
++        localDataStore=LdsState(
++            banks=32,
++            bankConflictPenalty=1,
++            size=LDS_BYTES_PER_CU,
++            range=AddrRange(LDS_BYTES_PER_CU),
++        ),
++    )
++
++    if functional_fast:
++        # Timing-only relaxation. In host-native mode every vector and scalar
++        # memory access is already serviced functionally by the native memory
++        # provider (ComputeUnit::sendRequest schedules the functional access
++        # behind resp_tick_latency; no Ruby transaction is generated), so the
++        # 50+50 cycle request/response pipeline is pure simulated delay that
++        # cannot influence the value read or written. Collapsing it removes
++        # the idle cycles the compute unit would otherwise tick through with
++        # every wave stalled on s_waitcnt, and with it the per-cycle
++        # scoreboard/fetch/schedule sweep that dominates host time.
++        #
++        # These are all ComputeUnit timing parameters. None of them selects an
++        # operand, an address, a lane mask, an execution order within a
++        # wavefront, or a completion condition.
++        cu.mem_req_latency = 1
++        cu.mem_resp_latency = 1
++        cu.scalar_mem_req_latency = 1
++        cu.scalar_mem_resp_latency = 1
++        cu.memtime_latency = 1
++        cu.issue_period = 1
++        cu.spbypass_pipe_length = 1
++        cu.dpbypass_pipe_length = 1
++        cu.rfc_pipe_length = 1
++        cu.operand_network_length = 1
++        cu.scalar_pipe_length = 1
++
++    wavefronts = []
++    vector_register_files = []
++    scalar_register_files = []
++    register_file_caches = []
++    vector_pool_managers = []
++    scalar_pool_managers = []
++    for simd_id in range(cu.num_SIMDs):
++        for slot_id in range(shader.n_wf):
++            wavefronts.append(
++                Wavefront(simdId=simd_id, wf_slot_id=slot_id, wf_size=64)
++            )
++        vector_register_files.append(
++            VectorRegisterFile(simd_id=simd_id, wf_size=64, num_regs=2048)
++        )
++        scalar_register_files.append(
++            ScalarRegisterFile(simd_id=simd_id, num_regs=2048)
++        )
++        register_file_caches.append(
++            RegisterFileCache(simd_id=simd_id, cache_size=0)
++        )
++        vector_pool_managers.append(
++            DynPoolManager(pool_size=2048, min_alloc=4)
++        )
++        scalar_pool_managers.append(
++            DynPoolManager(pool_size=2048, min_alloc=4)
++        )
++
++    cu.wavefronts = wavefronts
++    cu.vector_register_file = vector_register_files
++    cu.scalar_register_file = scalar_register_files
++    cu.register_file_cache = register_file_caches
++    cu.register_manager = RegisterManager(
++        policy="static",
++        vrf_pool_managers=vector_pool_managers,
++        srf_pool_managers=scalar_pool_managers,
++    )
++    cu.ldsPort = cu.ldsBus.cpu_side_port
++    cu.ldsBus.mem_side_port = cu.localDataStore.cuPort
++    return cu
++
++
++def create_system(args):
++    if buildEnv["PROTOCOL"] != "GPU_VIPER":
++        fatal("host_dispatch.py requires a GPU_VIPER build")
++
++    # These attributes are consumed by GPU_VIPER rather than exposed as
++    # user-selectable knobs for this pinned one-CU fixture.
++    args.access_backing_store = True
++    # The topology this stack publishes advertises a full gfx950: simd_count
++    # 1024 over simd_per_cu 4, i.e. 256 compute units. Simulating one is not
++    # merely slower, it is a different machine -- a kernel whose forward
++    # progress depends on several workgroups running at once cannot complete.
++    # AITER's split-K GEMM is such a kernel: one workgroup initialises a tile
++    # counter and each peer releases it, so with too few resident workgroups
++    # every peer polls a counter whose producer was never scheduled, and the
++    # run livelocks with scalar instructions retiring forever and not one
++    # wavefront completing. That is the same shape as the 64 KiB-versus-160 KiB
++    # LDS defect: the device claims a capability the simulator does not honour.
++    #
++    # The count is left configurable because simulation cost scales with it.
++    args.num_compute_units = NUM_COMPUTE_UNITS
++    # One scalar/instruction cache shared by every compute unit. GPU_VIPER
++    # builds ceil(num_compute_units / cu_per_sqc) SQC controllers and the same
++    # again for the scalar cache, and each is a Ruby controller, a sequencer, a
++    # TLB and a TLB coalescer. Sharing costs nothing architecturally here:
++    # host-native instruction fetch never reaches the SQC (FetchUnit returns
++    # from the native provider) and host-native scalar loads never reach the
++    # scalar cache (ComputeUnit::sendScalarRequest services them functionally).
++    # The only traffic either one carries is the per-kernel launch invalidate,
++    # which Shader::prepareInvalidate issues once per SQC group.
++    args.cu_per_sqc = args.num_compute_units
++    args.cu_per_scalar_cache = args.num_compute_units
++    args.num_sqc = 1
++    args.num_scalar_cache = 1
++    args.num_cp = 0
++    args.bw_scalor = 0
++    args.gpu_clock = "1GHz"
++    args.gpu_voltage = "1.0V"
++    args.tcp_rp = "TreePLRURP"
++    args.tcc_rp = "TreePLRURP"
++    args.sqc_rp = "TreePLRURP"
++
++    gpu_clock = SrcClockDomain(
++        clock=args.gpu_clock,
++        voltage_domain=VoltageDomain(voltage=args.gpu_voltage),
++    )
++    # Match the advertised gfx950 topology: four SIMDs with eight resident
++    # wave slots each form the 32 physical scratch slots in a CU.
++    shader = Shader(n_wf=8, cu_per_sqc=args.num_compute_units,
++                    clk_domain=gpu_clock)
++    # Periodic wave/pipeline status. Diagnostic only; set via environment so
++    # the default run is unchanged.
++    shader.progress_interval = int(
++        os.environ.get("GEMSIM_PROGRESS_INTERVAL", "20000000")
++    )
++    shader.impl_kern_launch_acq = True
++    shader.impl_kern_end_rel = False
++    shader.timing = True
++    # Shader::Shader asserts cuList[i]->cu_id == i, and GPU_VIPER builds one
++    # TCP (vector L1 + VIPER coalescer) per unit, so the identifiers have to be
++    # dense and in order. The Ruby ports are bound after Ruby.create_system.
++    compute_units = [
++        create_compute_unit(shader, cu_id, args.functional_fast)
++        for cu_id in range(args.num_compute_units)
++    ]
++    shader.CUs = compute_units
++
++    CpuClass, mem_mode = Simulation.getCPUClass(args.cpu_type)
++    if CpuClass != X86TimingSimpleCPU or mem_mode != "timing":
++        fatal("host_dispatch.py requires the X86 timing CPU model")
++    host_cpu = CpuClass(
++        cpu_id=0,
++        clk_domain=SrcClockDomain(
++            clock="2GHz", voltage_domain=VoltageDomain(voltage="1.0V")
++        ),
++    )
++
++    gpu_driver = GPUComputeDriver(
++        filename="kfd",
++        isdGPU=False,
++        gfxVersion="gfx950",
++        dGPUPoolID=0,
++        m_type=5,
++    )
++    hsapp_paddr = int(Addr(args.mem_size))
++    gpu_hsapp = HSAPacketProcessor(pioAddr=hsapp_paddr, numHWQueues=1)
++    dispatcher = GPUDispatcher(kernel_exit_events=False)
++    gpu_cmd_proc = GPUCommandProcessor(
++        hsapp=gpu_hsapp,
++        dispatcher=dispatcher,
++    )
++    gpu_driver.device = gpu_cmd_proc
++    shader.dispatcher = dispatcher
++    shader.gpu_cmd_proc = gpu_cmd_proc
++
++    executable = os.path.abspath(
++        os.path.join(
++            os.path.dirname(__file__),
++            "../../../tests/test-progs/hello/bin/x86/linux/hello",
++        )
++    )
++    if not os.path.isfile(executable):
++        fatal("tracked x86 hello process is missing: %s", executable)
++    process = Process(
++        executable=executable,
++        cmd=[executable],
++        drivers=[gpu_driver],
++    )
++    host_cpu.workload = process
++    host_cpu.createThreads()
++
++    system = System(
++        cpu=[host_cpu, shader],
++        mem_ranges=[AddrRange(args.mem_size)],
++        cache_line_size=args.cacheline_size,
++        mem_mode=mem_mode,
++        workload=SEWorkload.init_compatible(executable),
++    )
++    system.voltage_domain = VoltageDomain(voltage=args.sys_voltage)
++    system.clk_domain = SrcClockDomain(
++        clock=args.sys_clock,
++        voltage_domain=system.voltage_domain,
++    )
++    system.exit_on_work_items = False
++
++    GPUTLBConfig.config_tlb_hierarchy(args, system, 1)
++
++    system.piobus = IOXBar(
++        width=32,
++        response_latency=0,
++        frontend_latency=0,
++        forward_latency=0,
++    )
++    dma_devices = [gpu_hsapp, gpu_cmd_proc]
++    Ruby.create_system(args, False, system, None, dma_devices, None)
++    system.ruby.clk_domain = SrcClockDomain(
++        clock=args.ruby_clock,
++        voltage_domain=system.voltage_domain,
++    )
++    gpu_cmd_proc.pio = system.piobus.mem_side_ports
++    gpu_hsapp.pio = system.piobus.mem_side_ports
++    for index in range(len(dma_devices)):
++        getattr(system, f"dma_cntrl{index}").clk_domain = (
++            system.ruby.clk_domain
++        )
++
++    ruby_port = system.ruby._cpu_ports[0]
++    host_cpu.createInterruptController()
++    host_cpu.icache_port = ruby_port.in_ports
++    host_cpu.dcache_port = ruby_port.in_ports
++    ruby_port.mem_request_port = system.piobus.cpu_side_ports
++    host_cpu.interrupts[0].pio = system.piobus.mem_side_ports
++    host_cpu.interrupts[0].int_requestor = system.piobus.cpu_side_ports
++    host_cpu.interrupts[0].int_responder = system.piobus.mem_side_ports
++
++    # Ruby.create_system publishes its sequencers in construction order:
++    # the CPU core pair first, then one VIPER coalescer per compute unit, then
++    # the SQC sequencers, then the scalar-cache sequencers, then any command
++    # processors (num_cp is 0 here). Derive the first GPU index from that
++    # composition rather than from a constant, and assert the composition.
++    gpu_port_idx = (
++        len(system.ruby._cpu_ports)
++        - args.num_compute_units
++        - args.num_sqc
++        - args.num_scalar_cache
++        - args.num_cp * 2
++    )
++    token_ports = [
++        port
++        for port in system.ruby._cpu_ports
++        if isinstance(port, VIPERCoalescer)
++    ]
++    if len(token_ports) != args.num_compute_units:
++        fatal(
++            "expected one VIPER coalescer per compute unit: %d units but %d "
++            "coalescers"
++            % (args.num_compute_units, len(token_ports))
++        )
++    if gpu_port_idx < 0 or token_ports[0] is not (
++        system.ruby._cpu_ports[gpu_port_idx]
++    ):
++        fatal(
++            "GPU_VIPER sequencer order changed: expected the first VIPER "
++            "coalescer at index %d of %d cpu ports"
++            % (gpu_port_idx, len(system.ruby._cpu_ports))
++        )
++
++    for cu_id, compute_unit in enumerate(compute_units):
++        # Only the TCP coalescers use a token port for back pressure.
++        compute_unit.gmTokenPort = token_ports[cu_id].gmTokenPort
++
++    # One vector L1 per compute unit; the pipeline issues wf_size uncoalesced
++    # requests per issue cycle, hence 64 memory ports each.
++    for compute_unit in compute_units:
++        for lane in range(64):
++            compute_unit.memory_port[lane] = system.ruby._cpu_ports[
++                gpu_port_idx
++            ].in_ports[lane]
++        gpu_port_idx += 1
++
++    # cu_per_sqc compute units share one SQC, and likewise for the scalar
++    # cache: advance to the next sequencer only on a group boundary.
++    for cu_id, compute_unit in enumerate(compute_units):
++        if cu_id > 0 and not cu_id % args.cu_per_sqc:
++            gpu_port_idx += 1
++        compute_unit.sqc_port = system.ruby._cpu_ports[gpu_port_idx].in_ports
++    gpu_port_idx += 1
++    for cu_id, compute_unit in enumerate(compute_units):
++        if cu_id > 0 and not cu_id % args.cu_per_scalar_cache:
++            gpu_port_idx += 1
++        compute_unit.scalar_port = system.ruby._cpu_ports[
++            gpu_port_idx
++        ].in_ports
++    gpu_port_idx += 1
++    if gpu_port_idx != len(system.ruby._cpu_ports) - args.num_cp * 2:
++        fatal(
++            "GPU port wiring consumed %d of %d ruby cpu ports"
++            % (gpu_port_idx, len(system.ruby._cpu_ports))
++        )
++
++    shader.cpu_pointer = host_cpu
++    root = Root(system=system, full_system=False)
++    system.host_gpu_bridge = HostGPUBridge(
++        endpoint=args.endpoint,
++        daemon_uuid=args.daemon_uuid,
++        job_uuid=args.job_uuid,
++        epoch=args.epoch,
++        rank=args.rank,
++        world_size=args.world_size,
++        startup_timeout_ms=args.startup_timeout_ms,
++        handshake_timeout_ms=args.handshake_timeout_ms,
++        max_record=args.max_record,
++        system=system,
++        hsa_packet_processor=gpu_hsapp,
++        gpu_dispatcher=dispatcher,
++        shader=shader,
++        dispatch_trace_path=args.dispatch_trace_path,
++        bridge_tape_path=args.bridge_tape_path,
++        exit_on_dispatch_session_done=True,
++    )
++    return system
++
++
++args = parse_args()
++system = create_system(args)
++
++# Identity header. The simulation mode must be recoverable from the run's own
++# log: a functional-fast result may satisfy functional gates but may never be
++# cited for any timing, TPOT or performance claim.
++print(
++    "host-gpu-dispatch-mode timing_fidelity={} functional_fast={} "
++    "lds_bytes_per_cu={} compute_units={} wave_slots_per_simd={}".format(
++        "approximate" if args.functional_fast else "cycle-accurate",
++        int(args.functional_fast),
++        LDS_BYTES_PER_CU,
++        args.num_compute_units,
++        8,
++    ),
++    flush=True,
++)
++
++m5.ticks.setGlobalFrequency("1THz")
++m5.instantiate()
++
++deadline = time.monotonic() + args.run_timeout_ms / 1000.0
++exit_event = None
++while time.monotonic() < deadline:
++    exit_event = m5.simulate(args.service_tick_quantum)
++    if exit_event.getCause() != "simulate() limit reached":
++        break
++
++m5.stats.dump()
++cause = "host wall-clock service timeout"
++code = 1
++if exit_event is not None and exit_event.getCause() != "simulate() limit reached":
++    cause = exit_event.getCause()
++    code = exit_event.getCode()
++    if cause != "host GPU dispatch session complete" or code != 0:
++        code = code or 1
++print(
++    "host-gpu-dispatch-exit cause={} code={} tick={} functional_fast={} "
++    "stats={}".format(
++        cause,
++        code,
++        m5.curTick(),
++        int(args.functional_fast),
++        os.path.join(m5.options.outdir, "stats.txt"),
++    )
++)
++if code != 0:
++    raise SystemExit(code)
+diff --git a/configs/example/gemsim/host_dispatch.py b/configs/example/gemsim/host_dispatch.py
+index 3ce17796f..71cb2023d 100644
+--- a/configs/example/gemsim/host_dispatch.py
++++ b/configs/example/gemsim/host_dispatch.py
+@@ -37,6 +37,15 @@ addToPath("../../")
+ from common import GPUTLBConfig, GPUTLBOptions, Options, Simulation
+ from ruby import Ruby
+ 
++# Local data store per compute unit, in bytes. gfx950/CDNA4 has 160 KiB, and
++# that is what the model topology reports to the runtime as
++# "lds_size_in_kb 160". These two numbers must stay equal: the runtime tells
++# the compiler how much group segment a workgroup may take, and the simulator
++# has to be able to give it. The environment override exists only so a test
++# can pin the historical 65536 and show what a too-small compute unit does;
++# no run should set it.
++LDS_BYTES_PER_CU = int(os.environ.get("GEMSIM_LDS_BYTES_PER_CU", 160 * 1024))
++
+ 
+ def parse_args():
+     parser = argparse.ArgumentParser(
+@@ -48,6 +57,11 @@ def parse_args():
+ 
+     parser.add_argument("--endpoint", required=True)
+     parser.add_argument("--dispatch-trace-path", required=True)
++    parser.add_argument(
++        "--bridge-tape-path",
++        default="",
++        help="Record every bridge wire record in both directions here",
++    )
+     parser.add_argument("--daemon-uuid", default="")
+     parser.add_argument("--job-uuid", default="")
+     parser.add_argument(
+@@ -70,6 +84,20 @@ def parse_args():
+         default=1_000_000,
+         help="Maximum simulated ticks between host timeout checks",
+     )
++    parser.add_argument(
++        "--functional-fast",
++        action="store_true",
++        help=(
++            "Non-cycle-accurate functional fast mode (default off). Relaxes "
++            "timing-only parameters of the compute unit: memory request and "
++            "response pipeline latencies, issue period, ALU bypass depth and "
++            "operand network depth. Architectural results, dispatch "
++            "semantics, memory ordering, synchronization, completion and "
++            "failure behaviour are unchanged; simTicks and the per-dispatch "
++            "start/end ticks become meaningless and may never be cited for "
++            "any timing, TPOT or performance claim."
++        ),
++    )
+ 
+     parser.set_defaults(
+         cpu_type="X86TimingSimpleCPU",
+@@ -89,23 +117,62 @@ def parse_args():
+         fatal("--endpoint must be absolute")
+     if not os.path.isabs(args.dispatch_trace_path):
+         fatal("--dispatch-trace-path must be absolute")
++    if args.bridge_tape_path and not os.path.isabs(args.bridge_tape_path):
++        fatal("--bridge-tape-path must be absolute")
+     return args
+ 
+ 
+-def create_compute_unit(shader):
++def create_compute_unit(shader, functional_fast=False):
+     cu = ComputeUnit(
+         cu_id=0,
+         perLaneTLB=False,
+         num_SIMDs=4,
+         wf_size=64,
+         n_wf=shader.n_wf,
++        # The group segment a compute unit provides must be the one the
++        # runtime advertises, or a kernel the compiler was told it could
++        # build cannot be dispatched at all. The model topology publishes
++        # "lds_size_in_kb 160" per GPU node (see
++        # self-amdgpu-runtime/tools/hsakmt-model-topology.py), which is the
++        # gfx950/CDNA4 value; gem5's LdsState default is the older 64 KiB.
++        # With the smaller LDS a workgroup asking for more than 64 KiB never
++        # satisfies ComputeUnit::hasDispResources(), the dispatcher has no
++        # event left to retry it, and the run hangs with the simulator
++        # burning a core and the host waiting on a completion signal.
+         localDataStore=LdsState(
+             banks=32,
+             bankConflictPenalty=1,
+-            size=65536,
++            size=LDS_BYTES_PER_CU,
++            range=AddrRange(LDS_BYTES_PER_CU),
+         ),
+     )
+ 
++    if functional_fast:
++        # Timing-only relaxation. In host-native mode every vector and scalar
++        # memory access is already serviced functionally by the native memory
++        # provider (ComputeUnit::sendRequest schedules the functional access
++        # behind resp_tick_latency; no Ruby transaction is generated), so the
++        # 50+50 cycle request/response pipeline is pure simulated delay that
++        # cannot influence the value read or written. Collapsing it removes
++        # the idle cycles the compute unit would otherwise tick through with
++        # every wave stalled on s_waitcnt, and with it the per-cycle
++        # scoreboard/fetch/schedule sweep that dominates host time.
++        #
++        # These are all ComputeUnit timing parameters. None of them selects an
++        # operand, an address, a lane mask, an execution order within a
++        # wavefront, or a completion condition.
++        cu.mem_req_latency = 1
++        cu.mem_resp_latency = 1
++        cu.scalar_mem_req_latency = 1
++        cu.scalar_mem_resp_latency = 1
++        cu.memtime_latency = 1
++        cu.issue_period = 1
++        cu.spbypass_pipe_length = 1
++        cu.dpbypass_pipe_length = 1
++        cu.rfc_pipe_length = 1
++        cu.operand_network_length = 1
++        cu.scalar_pipe_length = 1
++
+     wavefronts = []
+     vector_register_files = []
+     scalar_register_files = []
+@@ -154,9 +221,23 @@ def create_system(args):
+     # These attributes are consumed by GPU_VIPER rather than exposed as
+     # user-selectable knobs for this pinned one-CU fixture.
+     args.access_backing_store = True
+-    args.num_compute_units = 1
+-    args.cu_per_sqc = 1
+-    args.cu_per_scalar_cache = 1
++    # The topology this stack publishes advertises a full gfx950: simd_count
++    # 1024 over simd_per_cu 4, i.e. 256 compute units. Simulating one is not
++    # merely slower, it is a different machine -- a kernel whose forward
++    # progress depends on several workgroups running at once cannot complete.
++    # AITER's split-K GEMM is such a kernel: one workgroup initialises a tile
++    # counter and each peer releases it, so with too few resident workgroups
++    # every peer polls a counter whose producer was never scheduled, and the
++    # run livelocks with scalar instructions retiring forever and not one
++    # wavefront completing. That is the same shape as the 64 KiB-versus-160 KiB
++    # LDS defect: the device claims a capability the simulator does not honour.
++    #
++    # The count is left configurable because simulation cost scales with it.
++    args.num_compute_units = int(
++        os.environ.get("GEMSIM_NUM_COMPUTE_UNITS", "1")
++    )
++    args.cu_per_sqc = args.num_compute_units
++    args.cu_per_scalar_cache = args.num_compute_units
+     args.num_sqc = 1
+     args.num_scalar_cache = 1
+     args.num_cp = 0
+@@ -173,7 +254,8 @@ def create_system(args):
+     )
+     # Match the advertised gfx950 topology: four SIMDs with eight resident
+     # wave slots each form the 32 physical scratch slots in a CU.
+-    shader = Shader(n_wf=8, cu_per_sqc=1, clk_domain=gpu_clock)
++    shader = Shader(n_wf=8, cu_per_sqc=args.num_compute_units,
++                    clk_domain=gpu_clock)
+     # Periodic wave/pipeline status. Diagnostic only; set via environment so
+     # the default run is unchanged.
+     shader.progress_interval = int(
+@@ -182,7 +264,11 @@ def create_system(args):
+     shader.impl_kern_launch_acq = True
+     shader.impl_kern_end_rel = False
+     shader.timing = True
+-    compute_unit = create_compute_unit(shader)
++    # One CU is built and wired below. Raising GEMSIM_NUM_COMPUTE_UNITS is
++    # not just a matter of building more of them: the Ruby port wiring further
++    # down binds a single VIPER coalescer, SQC port and scalar port by index,
++    # and each of those becomes per-unit. See the fatal there.
++    compute_unit = create_compute_unit(shader, args.functional_fast)
+     shader.CUs = [compute_unit]
+ 
+     CpuClass, mem_mode = Simulation.getCPUClass(args.cpu_type)
+@@ -279,8 +365,13 @@ def create_system(args):
+         for port in system.ruby._cpu_ports
+         if isinstance(port, VIPERCoalescer)
+     ]
+-    if len(token_ports) != 1:
+-        fatal("pinned one-CU topology requires one VIPER coalescer")
++    if len(token_ports) != args.num_compute_units:
++        fatal(
++            "expected one VIPER coalescer per compute unit: %d units but %d "
++            "coalescers. Raising GEMSIM_NUM_COMPUTE_UNITS above 1 needs the "
++            "port wiring below to be looped over the units as well."
++            % (args.num_compute_units, len(token_ports))
++        )
+     compute_unit.gmTokenPort = token_ports[0].gmTokenPort
+     for lane in range(64):
+         compute_unit.memory_port[lane] = system.ruby._cpu_ports[
+@@ -308,6 +399,7 @@ def create_system(args):
+         gpu_dispatcher=dispatcher,
+         shader=shader,
+         dispatch_trace_path=args.dispatch_trace_path,
++        bridge_tape_path=args.bridge_tape_path,
+         exit_on_dispatch_session_done=True,
+     )
+     return system
+@@ -316,6 +408,19 @@ def create_system(args):
+ args = parse_args()
+ system = create_system(args)
+ 
++# Identity header. The simulation mode must be recoverable from the run's own
++# log: a functional-fast result may satisfy functional gates but may never be
++# cited for any timing, TPOT or performance claim.
++print(
++    "host-gpu-dispatch-mode timing_fidelity={} functional_fast={} "
++    "lds_bytes_per_cu={}".format(
++        "approximate" if args.functional_fast else "cycle-accurate",
++        int(args.functional_fast),
++        LDS_BYTES_PER_CU,
++    ),
++    flush=True,
++)
++
+ m5.ticks.setGlobalFrequency("1THz")
+ m5.instantiate()
+ 
+@@ -335,10 +440,12 @@ if exit_event is not None and exit_event.getCause() != "simulate() limit reached
+     if cause != "host GPU dispatch session complete" or code != 0:
+         code = code or 1
+ print(
+-    "host-gpu-dispatch-exit cause={} code={} tick={} stats={}".format(
++    "host-gpu-dispatch-exit cause={} code={} tick={} functional_fast={} "
++    "stats={}".format(
+         cause,
+         code,
+         m5.curTick(),
++        int(args.functional_fast),
+         os.path.join(m5.options.outdir, "stats.txt"),
+     )
+ )
+diff --git a/src/dev/amdgpu/AMDGPU.py b/src/dev/amdgpu/AMDGPU.py
+index 42dacbbb8..665e95336 100644
+--- a/src/dev/amdgpu/AMDGPU.py
++++ b/src/dev/amdgpu/AMDGPU.py
+@@ -87,6 +87,11 @@ class HostGPUBridge(SimObject):
+     dispatch_trace_path = Param.String(
+         "", "Exclusive absolute JSONL path for retained dispatch evidence"
+     )
++    bridge_tape_path = Param.String(
++        "",
++        "Exclusive absolute path for the binary wire tape; empty disables "
++        "recording",
++    )
+ 
+ 
+ # PCI device model for an AMD Vega 10 based GPU. The PCI codes and BARs
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index fcc50f47d..d3f868efb 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -190,6 +190,7 @@ Source('amdgpu_vm.cc', tags=['x86 isa'])
+ Source('host_gpu_protocol.cc', tags=['x86 isa'])
+ Source('host_gpu_protocol_adapter.cc', tags=['x86 isa'])
+ Source('host_gpu_bridge.cc', tags=['x86 isa'])
++Source('host_gpu_bridge_tape.cc', tags=['x86 isa'])
+ Source('host_gpu_generic_dispatch_route.cc', tags=['x86 isa'])
+ Source('host_gpu_code_object_image.cc', tags=['x86 isa'])
+ Source('host_gpu_code_object_state.cc', tags=['x86 isa'])
+@@ -221,6 +222,8 @@ GTest('host_gpu_protocol.test', 'host_gpu_protocol.test.cc',
+ GTest('host_gpu_protocol_adapter.test',
+       'host_gpu_protocol_adapter.test.cc', 'host_gpu_protocol_adapter.cc',
+       'host_gpu_protocol.cc')
++GTest('host_gpu_bridge_tape.test', 'host_gpu_bridge_tape.test.cc',
++      'host_gpu_bridge_tape.cc')
+ GTest('host_gpu_code_object_state.test',
+       'host_gpu_code_object_state.test.cc', 'host_gpu_code_object_image.cc',
+       'host_gpu_code_object_state.cc')
+diff --git a/src/dev/amdgpu/host_gpu_bridge.cc b/src/dev/amdgpu/host_gpu_bridge.cc
+index 4d82166e8..543a006e2 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.cc
++++ b/src/dev/amdgpu/host_gpu_bridge.cc
+@@ -154,6 +154,54 @@ openDirectoryNoSymlinks(const std::string &path)
+     return current;
+ }
+ 
++/**
++ * Create a retained evidence file that no other writer can already own.
++ *
++ * Evidence carries kernel bytes and descriptors, so the parent must be a
++ * private directory of this user and the file must be newly created.
++ */
++int
++createExclusiveEvidenceFile(const std::string &path)
++{
++    const size_t separator = path.rfind('/');
++    const std::string directory = separator == 0 ? "/" :
++        path.substr(0, separator);
++    const std::string basename = path.substr(separator + 1);
++    if (basename.empty() || basename == "." || basename == "..") {
++        errno = EINVAL;
++        return -1;
++    }
++    const int parent = openDirectoryNoSymlinks(directory);
++    if (parent < 0)
++        return -1;
++    struct stat parentStat = {};
++    if (::fstat(parent, &parentStat) != 0 ||
++        !S_ISDIR(parentStat.st_mode) || parentStat.st_uid != ::geteuid() ||
++        (parentStat.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
++        const int savedErrno = errno != 0 ? errno : EPERM;
++        ::close(parent);
++        errno = savedErrno;
++        return -1;
++    }
++    const int fd = ::openat(parent, basename.c_str(),
++        O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
++    const int savedErrno = errno;
++    ::close(parent);
++    if (fd < 0) {
++        errno = savedErrno;
++        return -1;
++    }
++    struct stat fileStat = {};
++    if (::fstat(fd, &fileStat) != 0 || !S_ISREG(fileStat.st_mode) ||
++        fileStat.st_uid != ::geteuid() || (fileStat.st_mode & 0777) != 0600) {
++        const int invalidErrno = errno != 0 ? errno : EPERM;
++        ::close(fd);
++        errno = invalidErrno;
++        return -1;
++    }
++    return fd;
++}
++
+ bool
+ makeUnixAddress(const std::string &path, sockaddr_un &address,
+                 socklen_t &addressSize)
+@@ -1447,7 +1495,8 @@ HostGPUBridge::HostGPUBridge(const HostGPUBridgeParams &params)
+       handshakeTimeoutMs(params.handshake_timeout_ms),
+       maximumRecord(params.max_record), exitOnHandshake(params.exit_on_handshake),
+       exitOnDispatchSessionDone(params.exit_on_dispatch_session_done),
+-      dispatchTracePath(params.dispatch_trace_path), system(params.system),
++      dispatchTracePath(params.dispatch_trace_path),
++      bridgeTapePath(params.bridge_tape_path), system(params.system),
+       hsaPacketProcessor(params.hsa_packet_processor),
+       gpuDispatcher(params.gpu_dispatcher),
+       shader(params.shader),
+@@ -1549,6 +1598,13 @@ HostGPUBridge::validateConfiguration()
+                   dispatchTracePath.find("//") != std::string::npos),
+              "%s: dispatch_trace_path must be an absolute file pathname",
+              name());
++    fatal_if(!bridgeTapePath.empty() &&
++                 (bridgeTapePath[0] != '/' || bridgeTapePath.back() == '/' ||
++                  bridgeTapePath.find("//") != std::string::npos),
++             "%s: bridge_tape_path must be an absolute file pathname", name());
++    fatal_if(!bridgeTapePath.empty() && bridgeTapePath == dispatchTracePath,
++             "%s: bridge_tape_path must differ from dispatch_trace_path",
++             name());
+     fatal_if(shader != nullptr && !dispatchEnabled,
+              "%s: shader requires the complete native dispatch configuration",
+              name());
+@@ -1570,6 +1626,9 @@ HostGPUBridge::init()
+     fatal_if(dispatchEnabled && !openDispatchTrace(),
+              "%s: cannot securely create dispatch trace %s: %s", name(),
+              dispatchTracePath, std::strerror(errno));
++    fatal_if(!bridgeTapePath.empty() && !openBridgeTape(),
++             "%s: cannot securely create bridge tape %s: %s", name(),
++             bridgeTapePath, std::strerror(errno));
+     prepareEndpoint();
+     listenEvent = std::make_unique<ListenEvent>(*this, listenerFd);
+     pollQueue.schedule(listenEvent.get());
+@@ -1593,44 +1652,45 @@ HostGPUBridge::startup()
+ bool
+ HostGPUBridge::openDispatchTrace()
+ {
+-    const size_t separator = dispatchTracePath.rfind('/');
+-    const std::string directory = separator == 0 ? "/" :
+-        dispatchTracePath.substr(0, separator);
+-    const std::string basename = dispatchTracePath.substr(separator + 1);
+-    if (basename.empty() || basename == "." || basename == "..") {
+-        errno = EINVAL;
+-        return false;
+-    }
+-    const int parent = openDirectoryNoSymlinks(directory);
+-    if (parent < 0)
+-        return false;
+-    struct stat parentStat = {};
+-    if (::fstat(parent, &parentStat) != 0 ||
+-        !S_ISDIR(parentStat.st_mode) || parentStat.st_uid != ::geteuid() ||
+-        (parentStat.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+-        const int savedErrno = errno != 0 ? errno : EPERM;
+-        ::close(parent);
+-        errno = savedErrno;
+-        return false;
+-    }
+-    const int fd = ::openat(parent, basename.c_str(),
+-        O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+-    const int savedErrno = errno;
+-    ::close(parent);
+-    if (fd < 0) {
+-        errno = savedErrno;
+-        return false;
+-    }
+-    struct stat traceStat = {};
+-    if (::fstat(fd, &traceStat) != 0 || !S_ISREG(traceStat.st_mode) ||
+-        traceStat.st_uid != ::geteuid() || (traceStat.st_mode & 0777) != 0600) {
+-        const int invalidErrno = errno != 0 ? errno : EPERM;
+-        ::close(fd);
+-        errno = invalidErrno;
++    dispatchTraceFd = createExclusiveEvidenceFile(dispatchTracePath);
++    return dispatchTraceFd >= 0;
++}
++
++bool
++HostGPUBridge::openBridgeTape()
++{
++    const int fd = createExclusiveEvidenceFile(bridgeTapePath);
++    if (fd < 0)
+         return false;
++    HostGPUBridgeTape::Identity tapeIdentity;
++    tapeIdentity.tickFrequencyHz =
++        static_cast<uint64_t>(sim_clock::Frequency);
++    tapeIdentity.epoch = identity.jobEpoch;
++    tapeIdentity.rank = identity.rank;
++    tapeIdentity.worldSize = identity.worldSize;
++    tapeIdentity.maximumRecord = identity.maximumRecord;
++    tapeIdentity.daemonUuid = identity.daemonUuid;
++    tapeIdentity.jobUuid = identity.jobUuid;
++    return bridgeTape.adopt(fd, tapeIdentity);
++}
++
++void
++HostGPUBridge::recordTape(HostGPUBridgeTape::Direction direction,
++                          int clientFd, uint64_t generation, bool carrier,
++                          const std::vector<uint8_t> &bytes)
++{
++    if (!bridgeTape.enabled())
++        return;
++    if (!bridgeTape.append(direction, clientFd, generation, curTick(), carrier,
++                           bytes.data(), bytes.size())) {
++        /* A torn tape cannot be replayed, but aborting a multi-hour model run
++         * over a diagnostic artifact would be worse.  Report once and keep
++         * the record count honest for the decoder. */
++        warn("%s: bridge tape %s stopped after %llu records: %s", name(),
++             bridgeTapePath,
++             static_cast<unsigned long long>(bridgeTape.appended()),
++             std::strerror(bridgeTape.failure()));
+     }
+-    dispatchTraceFd = fd;
+-    return true;
+ }
+ 
+ std::string
+@@ -2334,6 +2394,14 @@ HostGPUBridge::shutdown()
+             ::close(dispatchTraceFd);
+             dispatchTraceFd = -1;
+         }
++        if (!bridgeTapePath.empty()) {
++            inform("host-gpu-tape path=%s records=%llu dropped=%llu error=%d",
++                   bridgeTapePath,
++                   static_cast<unsigned long long>(bridgeTape.appended()),
++                   static_cast<unsigned long long>(bridgeTape.dropped()),
++                   bridgeTape.failure());
++            bridgeTape.close();
++        }
+     }
+     endpointCleanupDone = cleanupEndpoint();
+ }
+@@ -2578,6 +2646,8 @@ HostGPUBridge::receiveRecords(int fd)
+         }
+         found->second->state.noteRecordReceived();
+         found->second->socketEvent->setReadable(false);
++        recordTape(HostGPUBridgeTape::Direction::Ingress, fd, generation,
++                   static_cast<bool>(rights.descriptor), bytes);
+         pendingRecords.push_back({
+             fd, generation, std::move(bytes), std::move(rights.descriptor)});
+         scheduleRecordService();
+@@ -4647,6 +4717,10 @@ HostGPUBridge::flushClient(int fd)
+         }
+ 
+         const uint64_t generation = client.generation;
++        /* Tap the transmitted bytes, not the enqueued ones: only a complete
++         * send is a wire event a replay can reproduce. */
++        recordTape(HostGPUBridgeTape::Direction::Egress, fd, generation, false,
++                   front.bytes);
+         OutboundRecord completed = std::move(front);
+         client.outbound.pop_front();
+         if (client.outbound.empty())
+diff --git a/src/dev/amdgpu/host_gpu_bridge.hh b/src/dev/amdgpu/host_gpu_bridge.hh
+index dda343469..09a09e2e0 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.hh
++++ b/src/dev/amdgpu/host_gpu_bridge.hh
+@@ -42,6 +42,7 @@
+ 
+ #include "base/pollevent.hh"
+ #include "base/statistics.hh"
++#include "dev/amdgpu/host_gpu_bridge_tape.hh"
+ #include "dev/amdgpu/host_gpu_connection_state.hh"
+ #include "dev/amdgpu/host_gpu_code_object_state.hh"
+ #include "dev/amdgpu/host_gpu_domain_types.hh"
+@@ -326,6 +327,10 @@ class HostGPUBridge : public SimObject,
+     void boundedStartupWait();
+     void prepareExecutionEnvironment();
+     bool openDispatchTrace();
++    bool openBridgeTape();
++    void recordTape(HostGPUBridgeTape::Direction direction, int clientFd,
++                    uint64_t generation, bool carrier,
++                    const std::vector<uint8_t> &bytes);
+     std::string makeGenericExecutionTraceRecord(
+         const char *event, const GenericDispatchSession &session,
+         uint64_t requestId,
+@@ -362,6 +367,7 @@ class HostGPUBridge : public SimObject,
+     const bool exitOnHandshake;
+     const bool exitOnDispatchSessionDone;
+     const std::string dispatchTracePath;
++    const std::string bridgeTapePath;
+     System *const system;
+     HSAPacketProcessor *const hsaPacketProcessor;
+     GPUDispatcher *const gpuDispatcher;
+@@ -408,6 +414,7 @@ class HostGPUBridge : public SimObject,
+     std::optional<CompletedGenericExecutionSession>
+         completedGenericExecutionSession;
+     int dispatchTraceFd = -1;
++    HostGPUBridgeTape bridgeTape;
+     uint64_t nextClientGeneration = 1;
+     std::unordered_set<uint64_t> usedConnectionIds;
+     int activeClientFd = -1;
+diff --git a/src/dev/amdgpu/host_gpu_bridge_tape.cc b/src/dev/amdgpu/host_gpu_bridge_tape.cc
+new file mode 100644
+index 000000000..f02a67090
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_bridge_tape.cc
+@@ -0,0 +1,210 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_bridge_tape.hh"
++
++#include <sys/uio.h>
++#include <time.h>
++#include <unistd.h>
++
++#include <cerrno>
++#include <cstring>
++#include <limits>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++namespace
++{
++
++void
++storeBigEndian(uint8_t *destination, uint64_t value, size_t width)
++{
++    for (size_t index = 0; index < width; ++index) {
++        destination[index] = static_cast<uint8_t>(
++            value >> ((width - index - 1) * 8));
++    }
++}
++
++} // anonymous namespace
++
++HostGPUBridgeTape::~HostGPUBridgeTape()
++{
++    close();
++}
++
++std::array<uint8_t, HostGPUBridgeTape::FileHeaderBytes>
++HostGPUBridgeTape::encodeFileHeader(const Identity &identity)
++{
++    std::array<uint8_t, FileHeaderBytes> header = {};
++    std::memcpy(header.data(), Magic.data(), Magic.size());
++    storeBigEndian(header.data() + 8, FormatMajor, 2);
++    storeBigEndian(header.data() + 10, FormatMinor, 2);
++    storeBigEndian(header.data() + 12, FileHeaderBytes, 2);
++    storeBigEndian(header.data() + 14, RecordHeaderBytes, 2);
++    storeBigEndian(header.data() + 16, identity.tickFrequencyHz, 8);
++    storeBigEndian(header.data() + 24, identity.epoch, 8);
++    storeBigEndian(header.data() + 32, identity.rank, 4);
++    storeBigEndian(header.data() + 36, identity.worldSize, 4);
++    storeBigEndian(header.data() + 40, identity.maximumRecord, 4);
++    std::memcpy(header.data() + 48, identity.daemonUuid.data(),
++                identity.daemonUuid.size());
++    std::memcpy(header.data() + 64, identity.jobUuid.data(),
++                identity.jobUuid.size());
++    return header;
++}
++
++std::array<uint8_t, HostGPUBridgeTape::RecordHeaderBytes>
++HostGPUBridgeTape::encodeRecordHeader(
++    Direction direction, bool carrier, int clientFd, uint64_t generation,
++    uint64_t sequence, uint64_t simulatedTick, uint64_t monotonicNs,
++    uint32_t recordBytes)
++{
++    std::array<uint8_t, RecordHeaderBytes> header = {};
++    header[0] = static_cast<uint8_t>(direction);
++    header[1] = carrier ? 1 : 0;
++    storeBigEndian(header.data() + 4, static_cast<uint32_t>(clientFd), 4);
++    storeBigEndian(header.data() + 8, recordBytes, 4);
++    storeBigEndian(header.data() + 16, generation, 8);
++    storeBigEndian(header.data() + 24, sequence, 8);
++    storeBigEndian(header.data() + 32, simulatedTick, 8);
++    storeBigEndian(header.data() + 40, monotonicNs, 8);
++    return header;
++}
++
++uint64_t
++HostGPUBridgeTape::monotonicNanoseconds()
++{
++    timespec now = {};
++    if (::clock_gettime(CLOCK_MONOTONIC, &now) != 0)
++        return 0;
++    return static_cast<uint64_t>(now.tv_sec) * 1000000000ULL +
++        static_cast<uint64_t>(now.tv_nsec);
++}
++
++bool
++HostGPUBridgeTape::adopt(int fd, const Identity &identity)
++{
++    if (fd < 0) {
++        errno = EBADF;
++        return false;
++    }
++    if (descriptor >= 0) {
++        ::close(fd);
++        errno = EBUSY;
++        return false;
++    }
++    const auto header = encodeFileHeader(identity);
++    descriptor = fd;
++    if (!writeAll(header.data(), header.size(), nullptr, 0)) {
++        const int savedErrno = failureErrno;
++        close();
++        errno = savedErrno;
++        return false;
++    }
++    return true;
++}
++
++bool
++HostGPUBridgeTape::append(Direction direction, int clientFd,
++                          uint64_t generation, uint64_t simulatedTick,
++                          bool carrier, const uint8_t *bytes, size_t length)
++{
++    if (descriptor < 0 || length > std::numeric_limits<uint32_t>::max() ||
++        (length != 0 && bytes == nullptr)) {
++        ++droppedRecords;
++        return false;
++    }
++    const auto header = encodeRecordHeader(
++        direction, carrier, clientFd, generation, sequence + 1, simulatedTick,
++        monotonicNanoseconds(), static_cast<uint32_t>(length));
++    if (!writeAll(header.data(), header.size(), bytes, length)) {
++        ++droppedRecords;
++        return false;
++    }
++    ++sequence;
++    ++appendedRecords;
++    return true;
++}
++
++void
++HostGPUBridgeTape::close()
++{
++    if (descriptor < 0)
++        return;
++    ::close(descriptor);
++    descriptor = -1;
++}
++
++bool
++HostGPUBridgeTape::writeAll(const uint8_t *header, size_t headerBytes,
++                            const uint8_t *bytes, size_t length)
++{
++    iovec vectors[2] = {};
++    size_t count = 1;
++    vectors[0].iov_base = const_cast<uint8_t *>(header);
++    vectors[0].iov_len = headerBytes;
++    if (length != 0) {
++        vectors[1].iov_base = const_cast<uint8_t *>(bytes);
++        vectors[1].iov_len = length;
++        count = 2;
++    }
++
++    size_t index = 0;
++    while (index < count) {
++        const ssize_t written = ::writev(
++            descriptor, &vectors[index], static_cast<int>(count - index));
++        if (written < 0) {
++            if (errno == EINTR)
++                continue;
++            failureErrno = errno;
++            close();
++            return false;
++        }
++        if (written == 0) {
++            failureErrno = ENOSPC;
++            close();
++            return false;
++        }
++        size_t remaining = static_cast<size_t>(written);
++        while (index < count && remaining >= vectors[index].iov_len) {
++            remaining -= vectors[index].iov_len;
++            ++index;
++        }
++        if (index < count && remaining != 0) {
++            vectors[index].iov_base =
++                static_cast<uint8_t *>(vectors[index].iov_base) + remaining;
++            vectors[index].iov_len -= remaining;
++        }
++    }
++    return true;
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_bridge_tape.hh b/src/dev/amdgpu/host_gpu_bridge_tape.hh
+new file mode 100644
+index 000000000..693c1334d
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_bridge_tape.hh
+@@ -0,0 +1,175 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_BRIDGE_TAPE_HH__
++#define __DEV_AMDGPU_HOST_GPU_BRIDGE_TAPE_HH__
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++/**
++ * Append-only binary log of complete bridge wire records.
++ *
++ * A model kernel failure is only reached after hours of weight load and
++ * prefill, so the traffic that produced it has to be recoverable without
++ * repeating the run.  The dispatch trace records descriptors, never bytes, and
++ * therefore cannot reconstruct an execution; this tape stores the exact bytes
++ * of every record the bridge accepted and every record it fully transmitted,
++ * in wire order, together with the simulated tick and the host monotonic
++ * timestamp observed at that moment.
++ *
++ * The tape is a pure observer.  It never inspects, filters, or interprets a
++ * record, so it stays valid across every protocol revision and cannot become
++ * an operator- or kernel-specific facility.
++ *
++ * Records are written with a single writev and are never buffered in user
++ * space: a simulator panic must leave every record up to the failure durable
++ * in the page cache.  Deliberately no fsync, because per-record durability
++ * against a host power loss is not worth the cost of a long model run.
++ *
++ * Scalars use the big-endian order of the bridge wire contract.
++ *
++ * File header, @ref FileHeaderBytes bytes:
++ *
++ *     0  magic                8   "GSBRTAPE"
++ *     8  format_major         2
++ *    10  format_minor         2
++ *    12  file_header_bytes    2
++ *    14  record_header_bytes  2
++ *    16  tick_frequency_hz    8
++ *    24  epoch                8
++ *    32  rank                 4
++ *    36  world_size           4
++ *    40  maximum_record       4
++ *    44  reserved             4
++ *    48  daemon_uuid         16
++ *    64  job_uuid            16
++ *
++ * Record header, @ref RecordHeaderBytes bytes, followed by record_bytes of
++ * unmodified wire payload:
++ *
++ *     0  direction            1
++ *     1  carrier              1
++ *     2  flags                2
++ *     4  client_fd            4
++ *     8  record_bytes         4
++ *    12  reserved             4
++ *    16  generation           8
++ *    24  sequence             8
++ *    32  simulated_tick       8
++ *    40  monotonic_ns         8
++ */
++class HostGPUBridgeTape
++{
++  public:
++    enum class Direction : uint8_t
++    {
++        /** Client to bridge, exactly as accepted from the endpoint. */
++        Ingress = 0,
++        /** Bridge to client, exactly as fully transmitted to the endpoint. */
++        Egress = 1,
++    };
++
++    /** Run identity a replay driver needs before it can interpret records. */
++    struct Identity
++    {
++        uint64_t tickFrequencyHz = 0;
++        uint64_t epoch = 0;
++        uint32_t rank = 0;
++        uint32_t worldSize = 0;
++        uint32_t maximumRecord = 0;
++        std::array<uint8_t, 16> daemonUuid = {};
++        std::array<uint8_t, 16> jobUuid = {};
++    };
++
++    static constexpr size_t MagicBytes = 8;
++    static constexpr size_t FileHeaderBytes = 80;
++    static constexpr size_t RecordHeaderBytes = 48;
++    static constexpr uint16_t FormatMajor = 1;
++    static constexpr uint16_t FormatMinor = 0;
++    static constexpr std::array<uint8_t, MagicBytes> Magic = {
++        'G', 'S', 'B', 'R', 'T', 'A', 'P', 'E'};
++
++    HostGPUBridgeTape() = default;
++    ~HostGPUBridgeTape();
++
++    HostGPUBridgeTape(const HostGPUBridgeTape &) = delete;
++    HostGPUBridgeTape &operator=(const HostGPUBridgeTape &) = delete;
++
++    static std::array<uint8_t, FileHeaderBytes> encodeFileHeader(
++        const Identity &identity);
++    static std::array<uint8_t, RecordHeaderBytes> encodeRecordHeader(
++        Direction direction, bool carrier, int clientFd, uint64_t generation,
++        uint64_t sequence, uint64_t simulatedTick, uint64_t monotonicNs,
++        uint32_t recordBytes);
++
++    /** Host monotonic sample correlating the tape with external host logs. */
++    static uint64_t monotonicNanoseconds();
++
++    /**
++     * Take ownership of an already created empty file and write the header.
++     * On failure the descriptor is closed and errno describes the cause.
++     */
++    bool adopt(int fd, const Identity &identity);
++
++    /**
++     * Append one complete wire record.  A write error tears the tape, so the
++     * descriptor is closed and every later record is counted as dropped rather
++     * than producing a log that silently looks continuous.
++     */
++    bool append(Direction direction, int clientFd, uint64_t generation,
++                uint64_t simulatedTick, bool carrier, const uint8_t *bytes,
++                size_t length);
++
++    void close();
++
++    bool enabled() const { return descriptor >= 0; }
++    uint64_t appended() const { return appendedRecords; }
++    uint64_t dropped() const { return droppedRecords; }
++    int failure() const { return failureErrno; }
++
++  private:
++    bool writeAll(const uint8_t *header, size_t headerBytes,
++                  const uint8_t *bytes, size_t length);
++
++    int descriptor = -1;
++    uint64_t sequence = 0;
++    uint64_t appendedRecords = 0;
++    uint64_t droppedRecords = 0;
++    int failureErrno = 0;
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_BRIDGE_TAPE_HH__
+diff --git a/src/dev/amdgpu/host_gpu_bridge_tape.test.cc b/src/dev/amdgpu/host_gpu_bridge_tape.test.cc
+new file mode 100644
+index 000000000..2db6186ae
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_bridge_tape.test.cc
+@@ -0,0 +1,240 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_bridge_tape.hh"
++
++#include <fcntl.h>
++#include <unistd.h>
++
++#include <cstdio>
++#include <cstring>
++#include <string>
++#include <type_traits>
++#include <vector>
++
++#include "gtest/gtest.h"
++
++namespace gem5::hostgpu
++{
++
++namespace
++{
++
++static_assert(!std::is_copy_constructible_v<HostGPUBridgeTape>);
++static_assert(!std::is_copy_assignable_v<HostGPUBridgeTape>);
++
++uint64_t
++loadBigEndian(const std::vector<uint8_t> &bytes, size_t offset, size_t width)
++{
++    uint64_t value = 0;
++    for (size_t index = 0; index < width; ++index)
++        value = (value << 8) | bytes[offset + index];
++    return value;
++}
++
++HostGPUBridgeTape::Identity sampleIdentity()
++{
++    HostGPUBridgeTape::Identity identity;
++    identity.tickFrequencyHz = 1000000000000ULL;
++    identity.epoch = 0x0102030405060708ULL;
++    identity.rank = 3;
++    identity.worldSize = 16;
++    identity.maximumRecord = 65536;
++    identity.daemonUuid.fill(0xa5);
++    identity.jobUuid.fill(0x5a);
++    return identity;
++}
++
++class TemporaryTape
++{
++  public:
++    TemporaryTape()
++    {
++        char pattern[] = "/tmp/host_gpu_bridge_tape.XXXXXX";
++        descriptor = ::mkstemp(pattern);
++        path = pattern;
++    }
++
++    ~TemporaryTape()
++    {
++        if (descriptor >= 0)
++            ::close(descriptor);
++        ::unlink(path.c_str());
++    }
++
++    int release()
++    {
++        const int fd = descriptor;
++        descriptor = -1;
++        return fd;
++    }
++
++    std::vector<uint8_t> contents() const
++    {
++        std::vector<uint8_t> bytes;
++        const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
++        EXPECT_GE(fd, 0);
++        if (fd < 0)
++            return bytes;
++        uint8_t buffer[4096];
++        ssize_t received = 0;
++        while ((received = ::read(fd, buffer, sizeof(buffer))) > 0)
++            bytes.insert(bytes.end(), buffer, buffer + received);
++        ::close(fd);
++        return bytes;
++    }
++
++  private:
++    int descriptor = -1;
++    std::string path;
++};
++
++TEST(HostGPUBridgeTape, FileHeaderCarriesRunIdentity)
++{
++    const auto header = HostGPUBridgeTape::encodeFileHeader(sampleIdentity());
++    const std::vector<uint8_t> bytes(header.begin(), header.end());
++    ASSERT_EQ(bytes.size(), HostGPUBridgeTape::FileHeaderBytes);
++    EXPECT_EQ(std::memcmp(bytes.data(), HostGPUBridgeTape::Magic.data(),
++                          HostGPUBridgeTape::Magic.size()), 0);
++    EXPECT_EQ(loadBigEndian(bytes, 8, 2), HostGPUBridgeTape::FormatMajor);
++    EXPECT_EQ(loadBigEndian(bytes, 10, 2), HostGPUBridgeTape::FormatMinor);
++    EXPECT_EQ(loadBigEndian(bytes, 12, 2),
++              HostGPUBridgeTape::FileHeaderBytes);
++    EXPECT_EQ(loadBigEndian(bytes, 14, 2),
++              HostGPUBridgeTape::RecordHeaderBytes);
++    EXPECT_EQ(loadBigEndian(bytes, 16, 8), 1000000000000ULL);
++    EXPECT_EQ(loadBigEndian(bytes, 24, 8), 0x0102030405060708ULL);
++    EXPECT_EQ(loadBigEndian(bytes, 32, 4), 3u);
++    EXPECT_EQ(loadBigEndian(bytes, 36, 4), 16u);
++    EXPECT_EQ(loadBigEndian(bytes, 40, 4), 65536u);
++    EXPECT_EQ(loadBigEndian(bytes, 44, 4), 0u);
++    for (size_t index = 0; index < 16; ++index) {
++        EXPECT_EQ(bytes[48 + index], 0xa5);
++        EXPECT_EQ(bytes[64 + index], 0x5a);
++    }
++}
++
++TEST(HostGPUBridgeTape, RecordHeaderIsBigEndianAndFullyDefined)
++{
++    const auto header = HostGPUBridgeTape::encodeRecordHeader(
++        HostGPUBridgeTape::Direction::Egress, true, 11, 0x1122334455667788ULL,
++        7, 0x00000000deadbeefULL, 0x0000abcdefabcdefULL, 336);
++    const std::vector<uint8_t> bytes(header.begin(), header.end());
++    ASSERT_EQ(bytes.size(), HostGPUBridgeTape::RecordHeaderBytes);
++    EXPECT_EQ(bytes[0], 1);
++    EXPECT_EQ(bytes[1], 1);
++    EXPECT_EQ(loadBigEndian(bytes, 2, 2), 0u);
++    EXPECT_EQ(loadBigEndian(bytes, 4, 4), 11u);
++    EXPECT_EQ(loadBigEndian(bytes, 8, 4), 336u);
++    EXPECT_EQ(loadBigEndian(bytes, 12, 4), 0u);
++    EXPECT_EQ(loadBigEndian(bytes, 16, 8), 0x1122334455667788ULL);
++    EXPECT_EQ(loadBigEndian(bytes, 24, 8), 7u);
++    EXPECT_EQ(loadBigEndian(bytes, 32, 8), 0x00000000deadbeefULL);
++    EXPECT_EQ(loadBigEndian(bytes, 40, 8), 0x0000abcdefabcdefULL);
++}
++
++TEST(HostGPUBridgeTape, AppendsBothDirectionsInWireOrder)
++{
++    TemporaryTape file;
++    HostGPUBridgeTape tape;
++    ASSERT_TRUE(tape.adopt(file.release(), sampleIdentity()));
++    EXPECT_TRUE(tape.enabled());
++
++    const std::vector<uint8_t> request(96, 0x11);
++    const std::vector<uint8_t> response(48, 0x22);
++    EXPECT_TRUE(tape.append(HostGPUBridgeTape::Direction::Ingress, 9, 1, 4000,
++                            true, request.data(), request.size()));
++    EXPECT_TRUE(tape.append(HostGPUBridgeTape::Direction::Egress, 9, 1, 5000,
++                            false, response.data(), response.size()));
++    tape.close();
++    EXPECT_EQ(tape.appended(), 2u);
++    EXPECT_EQ(tape.dropped(), 0u);
++    EXPECT_EQ(tape.failure(), 0);
++
++    const std::vector<uint8_t> bytes = file.contents();
++    ASSERT_EQ(bytes.size(),
++              HostGPUBridgeTape::FileHeaderBytes +
++                  2 * HostGPUBridgeTape::RecordHeaderBytes + request.size() +
++                  response.size());
++
++    size_t offset = HostGPUBridgeTape::FileHeaderBytes;
++    EXPECT_EQ(bytes[offset], 0);
++    EXPECT_EQ(bytes[offset + 1], 1);
++    EXPECT_EQ(loadBigEndian(bytes, offset + 8, 4), request.size());
++    EXPECT_EQ(loadBigEndian(bytes, offset + 24, 8), 1u);
++    EXPECT_EQ(loadBigEndian(bytes, offset + 32, 8), 4000u);
++    EXPECT_NE(loadBigEndian(bytes, offset + 40, 8), 0u);
++    offset += HostGPUBridgeTape::RecordHeaderBytes;
++    EXPECT_EQ(std::memcmp(bytes.data() + offset, request.data(),
++                          request.size()), 0);
++
++    offset += request.size();
++    EXPECT_EQ(bytes[offset], 1);
++    EXPECT_EQ(bytes[offset + 1], 0);
++    EXPECT_EQ(loadBigEndian(bytes, offset + 8, 4), response.size());
++    EXPECT_EQ(loadBigEndian(bytes, offset + 24, 8), 2u);
++    EXPECT_EQ(loadBigEndian(bytes, offset + 32, 8), 5000u);
++    offset += HostGPUBridgeTape::RecordHeaderBytes;
++    EXPECT_EQ(std::memcmp(bytes.data() + offset, response.data(),
++                          response.size()), 0);
++}
++
++TEST(HostGPUBridgeTape, DisabledTapeDropsWithoutWriting)
++{
++    HostGPUBridgeTape tape;
++    const std::vector<uint8_t> record(16, 0x33);
++    EXPECT_FALSE(tape.enabled());
++    EXPECT_FALSE(tape.append(HostGPUBridgeTape::Direction::Ingress, 4, 1, 10,
++                             false, record.data(), record.size()));
++    EXPECT_EQ(tape.appended(), 0u);
++    EXPECT_EQ(tape.dropped(), 1u);
++}
++
++TEST(HostGPUBridgeTape, TornTapeStopsRecording)
++{
++    TemporaryTape file;
++    HostGPUBridgeTape tape;
++    ASSERT_TRUE(tape.adopt(file.release(), sampleIdentity()));
++
++    /* A read-only descriptor is the cheapest way to force a write error and
++     * prove that a failed record closes the tape instead of leaving a log
++     * that later looks continuous. */
++    const int readOnly = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
++    ASSERT_GE(readOnly, 0);
++    HostGPUBridgeTape failing;
++    ASSERT_FALSE(failing.adopt(readOnly, sampleIdentity()));
++    EXPECT_FALSE(failing.enabled());
++    EXPECT_NE(failing.failure(), 0);
++
++    const std::vector<uint8_t> record(32, 0x44);
++    EXPECT_TRUE(tape.append(HostGPUBridgeTape::Direction::Ingress, 4, 1, 10,
++                            false, record.data(), record.size()));
++    EXPECT_EQ(tape.appended(), 1u);
++}
++
++} // anonymous namespace
++} // namespace gem5::hostgpu
+-- 
+2.53.0
+

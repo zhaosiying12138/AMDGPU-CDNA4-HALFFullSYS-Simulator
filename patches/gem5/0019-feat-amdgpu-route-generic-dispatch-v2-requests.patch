@@ -1,0 +1,928 @@
+From 7d52923899d9017c8ee318aa27dae5229b282a26 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 10 Aug 2026 09:53:49 +0800
+Subject: [PATCH 19/42] feat(amdgpu): route generic dispatch v2 requests
+
+Add an owner-bound MessageType 18 bridge route with canonical type 19 failures, native MAP/ALLOC/UNMAP state, validated H2D kernarg publication, bounded disconnect cleanup, and explicit fail-closed ALLOC/SUBMIT gates. Keep generic capability bit 8 unadvertised and make no GPU execution claim.
+
+Checkpoint-ID: CP-0024
+Goal-ID: GSIM-001
+Plan-Revision: 2
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: e77671d6087b9a0dab7c00c284590e92c152edd818c5a70896bc0d2ee80a5b2a
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/dev/amdgpu/SConscript                     |  14 +
+ src/dev/amdgpu/host_gpu_bridge.cc             | 324 +++++++++++++++++-
+ src/dev/amdgpu/host_gpu_bridge.hh             |   8 +
+ .../amdgpu/host_gpu_generic_dispatch_route.cc |  80 +++++
+ .../amdgpu/host_gpu_generic_dispatch_route.hh |  62 ++++
+ .../host_gpu_generic_dispatch_route_main.cc   | 249 ++++++++++++++
+ 6 files changed, 732 insertions(+), 5 deletions(-)
+ create mode 100644 src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_generic_dispatch_route.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
+
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index f18bbff03..c0ee882b1 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -142,6 +142,14 @@ Executable('host_gpu_native_dispatch_state_v2_core',
+            native_source('host_gpu_protocol.cc'),
+            native_source('host_gpu_memory_state.cc'))
+ 
++# CP24 bridge-facing policy harness.  It exercises the exact type-18 session
++# and stage gates used by HostGPUBridge without claiming GPU execution.
++Executable('host_gpu_generic_dispatch_route_core',
++           Source('host_gpu_generic_dispatch_route_main.cc',
++                  tag_gem5_lib=False),
++           native_source('host_gpu_generic_dispatch_route.cc'),
++           native_source('host_gpu_protocol.cc'))
++
+ if not env['CONF']['USE_X86_ISA']:
+     Return()
+ 
+@@ -159,10 +167,16 @@ Source('amdgpu_smu.cc', tags=['x86 isa'])
+ Source('amdgpu_vm.cc', tags=['x86 isa'])
+ Source('host_gpu_protocol.cc', tags=['x86 isa'])
+ Source('host_gpu_bridge.cc', tags=['x86 isa'])
++Source('host_gpu_generic_dispatch_route.cc', tags=['x86 isa'])
+ Source('host_gpu_code_object_image.cc', tags=['x86 isa'])
+ Source('host_gpu_code_object_state.cc', tags=['x86 isa'])
+ Source('host_gpu_dispatch_state.cc', tags=['x86 isa'])
+ Source('host_gpu_memory_state.cc', tags=['x86 isa'])
++Source('host_native_memory_context.cc', tags=['x86 isa'])
++Source('host_native_code_object_mapper.cc', tags=['x86 isa'])
++Source('host_gpu_native_queue_core.cc', tags=['x86 isa'])
++Source('host_gpu_native_command_processor_core.cc', tags=['x86 isa'])
++Source('host_gpu_native_dispatch_state_v2.cc', tags=['x86 isa'])
+ Source('host_gpu_queue_state.cc', tags=['x86 isa'])
+ Source('host_gpu_signal_state.cc', tags=['x86 isa'])
+ Source('host_gpu_kmt_state.cc', tags=['x86 isa'])
+diff --git a/src/dev/amdgpu/host_gpu_bridge.cc b/src/dev/amdgpu/host_gpu_bridge.cc
+index 69fabd3ad..a66b8674f 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.cc
++++ b/src/dev/amdgpu/host_gpu_bridge.cc
+@@ -46,6 +46,7 @@
+ #include <limits>
+ #include <new>
+ #include <sstream>
++#include <stdexcept>
+ #include <utility>
+ 
+ #include "base/intmath.hh"
+@@ -53,6 +54,8 @@
+ #include "base/socket.hh"
+ #include "cpu/thread_context.hh"
+ #include "dev/amdgpu/host_gpu_dispatch_fixture.hh"
++#include "dev/amdgpu/host_gpu_generic_dispatch_route.hh"
++#include "dev/amdgpu/host_gpu_native_dispatch_state_v2.hh"
+ #include "dev/amdgpu/host_gpu_socket_utils.hh"
+ #include "dev/hsa/hsa_packet_processor.hh"
+ #include "dev/hsa/hsa_queue.hh"
+@@ -397,6 +400,86 @@ dispatchFailure(const protocol::DispatchRequest &request,
+ 
+ } // anonymous namespace
+ 
++/*
++ * The generic adapter is owner-bound and intentionally has one mapping and
++ * one kernarg lease.  Keep the complete dependency graph per client so a
++ * disconnect cannot accidentally reuse a lease or state record from another
++ * socket generation.  SUBMIT is deliberately not represented here yet: the
++ * wire route rejects it before native queue admission until packet/tick and
++ * completion ownership are fully wired.
++ */
++struct HostGPUBridge::GenericDispatchSession
++{
++    using Owner = HostGPUMemoryState::Owner;
++
++    Owner owner;
++    std::unique_ptr<HostNativeMemoryContext> context;
++    std::unique_ptr<HostNativeCodeObjectMapper> mapper;
++    std::unique_ptr<HostNativeCommandProcessorCore> commandProcessor;
++    std::unique_ptr<HostNativeDispatchStateV2> state;
++    protocol::GenericDispatchRequest mapRequest;
++    protocol::GenericDispatchRequest allocRequest;
++    protocol::GenericDispatchResponse mapResponse;
++    protocol::GenericDispatchResponse allocResponse;
++    bool mapped = false;
++    bool allocated = false;
++    bool kernargTombstone = false;
++
++    GenericDispatchSession(
++        HostGPUMemoryState &memory, const Owner &sessionOwner,
++        uint64_t pageBytes)
++        : owner(sessionOwner),
++          context(std::make_unique<HostNativeMemoryContext>(
++              memory, owner, pageBytes)),
++          mapper(std::make_unique<HostNativeCodeObjectMapper>(
++              memory, *context, owner)),
++          commandProcessor(std::make_unique<HostNativeCommandProcessorCore>()),
++          state(std::make_unique<HostNativeDispatchStateV2>(
++              memory, *context, *mapper, *commandProcessor, owner))
++    {
++    }
++
++    bool ownsKernarg(uint64_t allocationId, uint64_t generation) const
++    {
++        return allocated && allocResponse.status == protocol::Status::Ok &&
++            state && state->hasKernarg() &&
++            allocResponse.kernargAllocationId == allocationId &&
++            allocResponse.kernargGeneration == generation;
++    }
++
++    bool claimsKernarg(uint64_t allocationId, uint64_t generation) const
++    {
++        const bool active = ownsKernarg(allocationId, generation);
++        /* Keep a successful UNMAP identity as a tombstone so a late H2D
++         * cannot fall through to legacy memory mutation; failed/cleared
++         * allocations never set this bit. */
++        const bool stale = kernargTombstone && allocationId != 0 &&
++            generation != 0 &&
++            allocResponse.kernargAllocationId == allocationId &&
++            allocResponse.kernargGeneration == generation;
++        return active || stale;
++    }
++
++    bool publishKernarg(
++        uint64_t requestId, const protocol::MemoryRequest &memoryRequest,
++        const std::vector<uint8_t> &bytes)
++    {
++        if (!ownsKernarg(
++                memoryRequest.allocationId, memoryRequest.generation) ||
++            !state) {
++            return false;
++        }
++        return state->publishKernarg(
++            {owner, requestId}, allocRequest, memoryRequest.offset,
++            memoryRequest.allocationId, memoryRequest.generation, bytes);
++    }
++
++    bool clear()
++    {
++        return !state || state->clear();
++    }
++};
++
+ HostGPUBridge::ListenEvent::ListenEvent(HostGPUBridge &bridge, int fd)
+     : PollEvent(fd, POLLIN), bridge(bridge)
+ {
+@@ -452,6 +535,7 @@ HostGPUBridge::DeadlineEvent::process(int revents)
+ 
+ HostGPUBridge::Client::~Client()
+ {
++    genericDispatch.reset();
+     deadlineEvent.reset();
+     socketEvent.reset();
+     if (timerFd >= 0)
+@@ -549,6 +633,10 @@ HostGPUBridge::HostGPUBridge(const HostGPUBridgeParams &params)
+         protocol::KmtOperationCapabilityMask;
+     identity.supported[protocol::CodeObjectTransferCapabilityByte] |=
+         protocol::CodeObjectTransferCapabilityMask;
++    /* CP24 keeps GENERIC_DISPATCH_V2 (runtime bit 8 / wire byte 1 bit 0)
++     * unadvertised.  The handler remains test-injectable, but production
++     * negotiation cannot select a route whose SUBMIT/tick contract is absent.
++     */
+     if (dispatchEnabled) {
+         identity.supported[protocol::PinnedDispatchCapabilityByte] |=
+             protocol::PinnedDispatchCapabilityMask;
+@@ -2335,6 +2423,13 @@ HostGPUBridge::closeClient(int fd)
+                 owner.fd, owner.clientGeneration}) {
+         retiredDispatchCompletion.reset();
+     }
++    if (found->second->genericDispatch) {
++        if (!found->second->genericDispatch->clear()) {
++            warn("%s: generic dispatch session close retained native state",
++                 name());
++        }
++        found->second->genericDispatch.reset();
++    }
+     queueState.disconnect(owner);
+     memoryState.disconnect({owner.fd, owner.clientGeneration});
+     kmtState.disconnect({owner.fd, owner.clientGeneration});
+@@ -2408,6 +2503,12 @@ HostGPUBridge::processRecords()
+                    hasWireMessageType(record.bytes,
+                                       protocol::MessageType::CodeObjectRequest)) {
+             processCodeObjectRecord(record);
++        } else if (found->second->state.phase() ==
++                       ConnectionPhase::Established &&
++                   hasWireMessageType(
++                       record.bytes,
++                       protocol::MessageType::GenericDispatchRequest)) {
++            processGenericDispatchRecord(record);
+         } else {
+             processHelloRecord(record);
+         }
+@@ -2663,13 +2764,38 @@ HostGPUBridge::processMemoryRecord(const PendingRecord &record)
+                         decoded.request, protocol::Status::Internal);
+                     break;
+                 }
+-                if (!dispatchEnabled) {
+-                    response = memoryState.copyFromHost(
+-                        owner, decoded.request, bytes, curTick());
+-                } else if (protocol::crc32c(bytes.data(), bytes.size()) !=
+-                           decoded.request.argument) {
++                if (protocol::crc32c(bytes.data(), bytes.size()) !=
++                    decoded.request.argument) {
+                     response = memoryFailure(
+                         decoded.request, protocol::Status::Malformed);
++                } else if (client.genericDispatch &&
++                           client.genericDispatch->claimsKernarg(
++                               decoded.request.allocationId,
++                               decoded.request.generation)) {
++                    /* Generic kernarg publication owns the native lease.  Do
++                     * not enter the legacy packet-visible mapping path. */
++                    if (!client.genericDispatch->ownsKernarg(
++                            decoded.request.allocationId,
++                            decoded.request.generation)) {
++                        response = memoryFailure(
++                            decoded.request, protocol::Status::ProtocolState);
++                    } else if (!client.genericDispatch->publishKernarg(
++                            decoded.header.requestId, decoded.request, bytes)) {
++                        response = memoryFailure(
++                            decoded.request, protocol::Status::Internal);
++                    } else {
++                        response.status = protocol::Status::Ok;
++                        response.opcode = decoded.request.opcode;
++                        response.allocationId = decoded.request.allocationId;
++                        response.generation = decoded.request.generation;
++                        response.value0 = decoded.request.offset;
++                        response.value1 = decoded.request.byteCount;
++                        response.value2 = decoded.request.argument;
++                        response.simTick = curTick();
++                    }
++                } else if (!dispatchEnabled) {
++                    response = memoryState.copyFromHost(
++                        owner, decoded.request, bytes, curTick());
+                 } else {
+                     const auto allocation = memoryState.allocationView(
+                         owner, decoded.request.allocationId,
+@@ -2944,6 +3070,183 @@ HostGPUBridge::processCodeObjectRecord(const PendingRecord &record)
+     enqueueOutbound(record.clientFd, record.generation, std::move(outbound));
+ }
+ 
++void
++HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
++{
++    auto found = clients.find(record.clientFd);
++    if (found == clients.end() ||
++        found->second->generation != record.generation) {
++        return;
++    }
++    Client &client = *found->second;
++    const auto decoded = protocol::decodeGenericDispatchRequestRecord(
++        record.bytes.data(), record.bytes.size(), maximumRecord);
++    if (decoded.action == protocol::DecodeAction::Drop) {
++        if (decoded.closeConnection)
++            closeClient(record.clientFd);
++        return;
++    }
++
++    /* A manually injected type-18 request must receive a canonical negative
++     * ACK; capability absence is not a framing error and must not mutate a
++     * per-client native session. */
++    const protocol::Status sessionStatus =
++        generic_dispatch_route::sessionStatus(
++            decoded.header, client.selectedCapabilities,
++            identity.daemonUuid, client.connectionId, identity.jobEpoch);
++    protocol::Status status = queueRequestStatus(
++        decoded.status, sessionStatus);
++    if (status == protocol::Status::Ok &&
++        client.requestIds.observe(decoded.header.requestId) !=
++            RequestIdResult::Fresh) {
++        status = protocol::Status::ProtocolState;
++    }
++
++    protocol::GenericDispatchResponse response;
++    response.status = status;
++    response.opcode = decoded.request.opcode;
++    bool routeSuccess = false;
++    if (status == protocol::Status::Ok) {
++        const HostGPUMemoryState::Owner owner{
++            record.clientFd, record.generation};
++        switch (decoded.request.opcode) {
++          case protocol::GenericDispatchOpcode::MapObject: {
++            if (generic_dispatch_route::stageStatus(decoded.request) !=
++                protocol::Status::Ok) {
++                response.status = generic_dispatch_route::stageStatus(
++                    decoded.request);
++                break;
++            }
++            if (client.genericDispatch && client.genericDispatch->context &&
++                client.genericDispatch->context->pageBytes() !=
++                    decoded.request.map.pageSize) {
++                /* The first MAP fixes this owner's native page policy. */
++                response.status = protocol::Status::UnsupportedCapability;
++                break;
++            }
++            const HostGPUCodeObjectState::Owner objectOwner{
++                owner.fd, owner.clientGeneration};
++            std::vector<uint8_t> image;
++            const auto manifest = codeObjectState.committedManifest(
++                objectOwner, decoded.request.objectId,
++                decoded.request.objectGeneration);
++            if (!manifest || !codeObjectState.readCommittedImage(
++                    objectOwner, decoded.request.objectId,
++                    decoded.request.objectGeneration, image)) {
++                response.status = protocol::Status::ProtocolState;
++                break;
++            }
++
++            const bool createdSession = !client.genericDispatch;
++            if (createdSession) {
++                try {
++                    client.genericDispatch =
++                        std::make_unique<GenericDispatchSession>(
++                            memoryState, owner, decoded.request.map.pageSize);
++                } catch (const std::exception &) {
++                    response.status = protocol::Status::ResourceExhausted;
++                    break;
++                }
++            }
++            if (!client.genericDispatch->state) {
++                response.status = protocol::Status::Internal;
++                break;
++            }
++            routeSuccess = client.genericDispatch->state->map(
++                {owner, decoded.header.requestId}, decoded.request, image,
++                *manifest, response);
++            if (routeSuccess && response.status == protocol::Status::Ok) {
++                client.genericDispatch->mapRequest = decoded.request;
++                client.genericDispatch->mapResponse = response;
++                client.genericDispatch->mapped = true;
++            } else if (createdSession &&
++                       !client.genericDispatch->state->hasMapping() &&
++                       !client.genericDispatch->state->hasKernarg()) {
++                /* Failed first MAP must not pin a page policy or empty native
++                 * leases for a later retry. */
++                client.genericDispatch.reset();
++            }
++            break;
++          }
++          case protocol::GenericDispatchOpcode::AllocKernarg:
++            if (generic_dispatch_route::stageStatus(decoded.request) !=
++                protocol::Status::Ok) {
++                response.status = generic_dispatch_route::stageStatus(
++                    decoded.request);
++                break;
++            }
++            if (!client.genericDispatch ||
++                !client.genericDispatch->state ||
++                !client.genericDispatch->state->hasMapping()) {
++                response.status = protocol::Status::ProtocolState;
++                break;
++            }
++            routeSuccess = client.genericDispatch->state->allocateKernarg(
++                {owner, decoded.header.requestId}, decoded.request, response);
++            if (routeSuccess && response.status == protocol::Status::Ok) {
++                client.genericDispatch->allocRequest = decoded.request;
++                client.genericDispatch->allocResponse = response;
++                client.genericDispatch->allocated = true;
++                client.genericDispatch->kernargTombstone = false;
++            }
++            break;
++          case protocol::GenericDispatchOpcode::SubmitAql:
++            response.status = generic_dispatch_route::stageStatus(
++                decoded.request);
++            break;
++          case protocol::GenericDispatchOpcode::UnmapObject:
++            if (!client.genericDispatch ||
++                !client.genericDispatch->state ||
++                !client.genericDispatch->state->hasMapping()) {
++                response.status = protocol::Status::ProtocolState;
++                break;
++            }
++            routeSuccess = client.genericDispatch->state->unmap(
++                {owner, decoded.header.requestId}, decoded.request, response);
++            if (routeSuccess && response.status == protocol::Status::Ok) {
++                client.genericDispatch->kernargTombstone =
++                    client.genericDispatch->allocResponse.status ==
++                        protocol::Status::Ok &&
++                    client.genericDispatch->allocResponse.kernargAllocationId != 0 &&
++                    client.genericDispatch->allocResponse.kernargGeneration !=
++                        0;
++                client.genericDispatch->mapped = false;
++                client.genericDispatch->allocated = false;
++                client.genericDispatch->mapRequest = {};
++                client.genericDispatch->allocRequest = {};
++                client.genericDispatch->mapResponse = {};
++            }
++            break;
++        }
++    }
++
++    found = clients.find(record.clientFd);
++    if (found == clients.end() ||
++        found->second->generation != record.generation) {
++        return;
++    }
++    Client &currentClient = *found->second;
++    currentClient.state.finishEstablishedRecord();
++    const auto responseHeader = protocol::queueResponseHeader(
++        decoded.header, identity, currentClient.connectionId);
++    auto encoded = protocol::encodeGenericDispatchAck(
++        responseHeader, response, currentClient.selectedCapabilities);
++    if (encoded.empty()) {
++        /* Invalid opcodes cannot be represented in the canonical response;
++         * close after consuming the record rather than emit a malformed ACK.
++         */
++        encoded = protocol::encodeGenericDispatchAck(responseHeader, response);
++    }
++    if (encoded.empty()) {
++        closeClient(record.clientFd);
++        return;
++    }
++    sendGenericDispatchResponse(
++        record.clientFd, record.generation, std::move(encoded),
++        OutboundKind::GenericDispatchAck, response.status,
++        routeSuccess && response.status == protocol::Status::Ok);
++}
++
+ void
+ HostGPUBridge::processSignalRecord(const PendingRecord &record)
+ {
+@@ -3430,6 +3733,15 @@ HostGPUBridge::sendQueueResponse(int fd, uint64_t generation,
+         std::nullopt});
+ }
+ 
++void
++HostGPUBridge::sendGenericDispatchResponse(
++    int fd, uint64_t generation, std::vector<uint8_t> record,
++    OutboundKind kind, protocol::Status status, bool success)
++{
++    enqueueOutbound(fd, generation, OutboundRecord{
++        std::move(record), kind, status, success, std::nullopt, std::nullopt});
++}
++
+ void
+ HostGPUBridge::enqueueOutbound(int fd, uint64_t generation,
+                                OutboundRecord record)
+@@ -3505,6 +3817,8 @@ HostGPUBridge::completeOutbound(int fd, uint64_t generation,
+       case OutboundKind::KmtAck:
+       case OutboundKind::SignalAck:
+       case OutboundKind::CodeObjectAck:
++      case OutboundKind::GenericDispatchAck:
++      case OutboundKind::GenericDispatchCompletion:
+         if (found->second->state.phase() == ConnectionPhase::Established &&
+             found->second->state.canReceive()) {
+             found->second->socketEvent->setReadable(true);
+diff --git a/src/dev/amdgpu/host_gpu_bridge.hh b/src/dev/amdgpu/host_gpu_bridge.hh
+index 66a8e6c5b..facf34492 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.hh
++++ b/src/dev/amdgpu/host_gpu_bridge.hh
+@@ -103,6 +103,7 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+     static constexpr size_t MaximumExcessClients = 8;
+ 
+     struct Client;
++    struct GenericDispatchSession;
+ 
+     class ListenEvent : public PollEvent
+     {
+@@ -161,6 +162,8 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+         DispatchAck,
+         DispatchCompletion,
+         CodeObjectAck,
++        GenericDispatchAck,
++        GenericDispatchCompletion,
+     };
+ 
+     enum class DispatchTraceWriteResult
+@@ -196,6 +199,7 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+         protocol::Capabilities selectedCapabilities = {};
+         QueueRequestIdTracker requestIds;
+         std::deque<OutboundRecord> outbound;
++        std::unique_ptr<GenericDispatchSession> genericDispatch;
+         ClientAdmission admission = ClientAdmission::Rejected;
+         bool orderlyEofObserved = false;
+ 
+@@ -234,6 +238,7 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+     void processSignalRecord(const PendingRecord &record);
+     void processDispatchRecord(const PendingRecord &record);
+     void processCodeObjectRecord(const PendingRecord &record);
++    void processGenericDispatchRecord(const PendingRecord &record);
+     void scheduleRecordService();
+     void scheduleQueueService();
+     void processQueueCommands();
+@@ -245,6 +250,9 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+     void sendQueueResponse(int fd, uint64_t generation,
+                            std::vector<uint8_t> record,
+                            OutboundKind kind);
++    void sendGenericDispatchResponse(
++        int fd, uint64_t generation, std::vector<uint8_t> record,
++        OutboundKind kind, protocol::Status status, bool success);
+     void enqueueOutbound(int fd, uint64_t generation,
+                          OutboundRecord record);
+     void flushClient(int fd);
+diff --git a/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc b/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
+new file mode 100644
+index 000000000..b44be4c03
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
+@@ -0,0 +1,80 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, NEGLIGENCE OR
++ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
++ * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_generic_dispatch_route.hh"
++
++#include <algorithm>
++
++namespace gem5::hostgpu::generic_dispatch_route
++{
++
++protocol::Status
++sessionStatus(const protocol::Header &header,
++              const protocol::Capabilities &selected,
++              const protocol::Uuid &daemonUuid,
++              uint64_t connectionId, uint64_t jobEpoch)
++{
++    if (header.daemonUuid != daemonUuid)
++        return protocol::Status::InstanceMismatch;
++    if (header.connectionId != connectionId)
++        return protocol::Status::ProtocolState;
++    if (header.jobEpoch != jobEpoch)
++        return protocol::Status::TopologyMismatch;
++    if (!protocol::genericDispatchCapabilitySelected(selected))
++        return protocol::Status::UnsupportedCapability;
++    return protocol::Status::Ok;
++}
++
++bool
++pageSizeSupported(uint32_t pageBytes)
++{
++    return pageBytes == protocol::GenericDispatchPageSize4K ||
++        pageBytes == protocol::GenericDispatchPageSize64K;
++}
++
++protocol::Status
++stageStatus(const protocol::GenericDispatchRequest &request)
++{
++    switch (request.opcode) {
++      case protocol::GenericDispatchOpcode::MapObject:
++        return pageSizeSupported(request.map.pageSize) ?
++            protocol::Status::Ok : protocol::Status::UnsupportedCapability;
++      case protocol::GenericDispatchOpcode::AllocKernarg:
++        /* The native response exposes backing alignment, so accepting the
++         * runtime's usual logical alignment (8) would produce a protocol
++         * mismatch after allocation. */
++        return request.allocKernarg.alignmentBytes ==
++                    protocol::GenericDispatchPageSize4K ||
++                request.allocKernarg.alignmentBytes ==
++                    protocol::GenericDispatchPageSize64K ?
++            protocol::Status::Ok : protocol::Status::UnsupportedCapability;
++      case protocol::GenericDispatchOpcode::SubmitAql:
++        return protocol::Status::UnsupportedCapability;
++      case protocol::GenericDispatchOpcode::UnmapObject:
++        return protocol::Status::Ok;
++    }
++    return protocol::Status::Malformed;
++}
++
++} // namespace gem5::hostgpu::generic_dispatch_route
+diff --git a/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh b/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh
+new file mode 100644
+index 000000000..06088afd0
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh
+@@ -0,0 +1,62 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_GENERIC_DISPATCH_ROUTE_HH__
++#define __DEV_AMDGPU_HOST_GPU_GENERIC_DISPATCH_ROUTE_HH__
++
++#include "dev/amdgpu/host_gpu_protocol.hh"
++
++namespace gem5::hostgpu::generic_dispatch_route
++{
++
++/**
++ * Validate the immutable session tuple before a type-18 operation can touch
++ * native state.  Capability byte 1 bit 0 is intentionally supplied by the
++ * negotiated client rather than by the daemon identity; the bridge currently
++ * leaves that identity bit clear in production.
++ */
++protocol::Status
++sessionStatus(const protocol::Header &header,
++              const protocol::Capabilities &selected,
++              const protocol::Uuid &daemonUuid,
++              uint64_t connectionId, uint64_t jobEpoch);
++
++/** Return whether the native memory context can honor the requested page size. */
++bool
++pageSizeSupported(uint32_t pageBytes);
++
++/**
++ * Apply stage-level fail-closed gates that do not depend on mutable state.
++ * ALLOC is only honest for page-backed ABI alignments, and SUBMIT is withheld
++ * until queue/signal/tick contracts are implemented end to end.
++ */
++protocol::Status
++stageStatus(const protocol::GenericDispatchRequest &request);
++
++} // namespace gem5::hostgpu::generic_dispatch_route
++
++#endif // __DEV_AMDGPU_HOST_GPU_GENERIC_DISPATCH_ROUTE_HH__
+diff --git a/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc b/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
+new file mode 100644
+index 000000000..6c5760091
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
+@@ -0,0 +1,249 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of its contributors may be used to endorse or promote products
++ * derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <algorithm>
++#include <cstdlib>
++#include <iostream>
++#include <stdexcept>
++
++#include "dev/amdgpu/host_gpu_generic_dispatch_route.hh"
++
++namespace gem5::hostgpu
++{
++namespace
++{
++
++using namespace protocol;
++using generic_dispatch_route::sessionStatus;
++using generic_dispatch_route::stageStatus;
++
++void
++require(bool condition, const char *message)
++{
++    if (!condition)
++        throw std::runtime_error(message);
++}
++
++Header
++header(uint64_t requestId)
++{
++    Header result;
++    result.requestId = requestId;
++    result.connectionId = 0xfeed;
++    result.jobEpoch = 7;
++    result.daemonUuid.fill(0x42);
++    return result;
++}
++
++Capabilities
++selectedCapabilities()
++{
++    Capabilities result = {};
++    /* GENERIC_DISPATCH_V2 is a compound capability: the negotiated session
++     * must also carry topology, queue, memory, signal, and code-object bits. */
++    result[0] = 0x01 | QueueControlCapabilityMask |
++        MemoryControlCapabilityMask | SignalEventCapabilityMask |
++        CodeObjectTransferCapabilityMask;
++    result[GenericDispatchCapabilityByte] |= GenericDispatchCapabilityMask;
++    return result;
++}
++
++GenericDispatchRequest
++mapRequest()
++{
++    GenericDispatchRequest result;
++    result.opcode = GenericDispatchOpcode::MapObject;
++    result.objectId = 7;
++    result.objectGeneration = 9;
++    result.map.kernargSegmentSize = 48;
++    result.map.kernargSegmentAlign = 8;
++    result.map.pageSize = GenericDispatchPageSize4K;
++    for (size_t index = 0; index < result.imageSha256.size(); ++index)
++        result.imageSha256[index] = static_cast<uint8_t>(index + 1);
++    std::copy_n("route-test", 10, result.kernelName.begin());
++    return result;
++}
++
++GenericDispatchRequest
++allocRequest()
++{
++    GenericDispatchRequest result = mapRequest();
++    result.opcode = GenericDispatchOpcode::AllocKernarg;
++    result.mappingId = 11;
++    result.mappingGeneration = 13;
++    result.imageSha256.fill(0);
++    result.kernelName.fill(0);
++    result.allocKernarg.sizeBytes = 48;
++    result.allocKernarg.alignmentBytes = 8;
++    return result;
++}
++
++GenericDispatchRequest
++submitRequest()
++{
++    GenericDispatchRequest result = mapRequest();
++    result.opcode = GenericDispatchOpcode::SubmitAql;
++    result.mappingId = 11;
++    result.mappingGeneration = 13;
++    result.queueId = 17;
++    result.queueGeneration = 19;
++    result.queueSequence = 23;
++    result.submit.kernargAllocationId = 29;
++    result.submit.kernargGeneration = 31;
++    result.submit.kernargSize = 48;
++    result.submit.signalId = 37;
++    result.submit.signalGeneration = 41;
++    result.submit.expectedSignalValueBits = 1;
++    result.submit.gridX = 64;
++    result.submit.gridY = 1;
++    result.submit.gridZ = 1;
++    result.submit.workgroupX = 64;
++    result.submit.workgroupY = 1;
++    result.submit.workgroupZ = 1;
++    result.submit.numWarps = 1;
++    result.submit.numCtas = 1;
++    result.submit.wavefrontSize = 64;
++    return result;
++}
++
++GenericDispatchRequest
++unmapRequest()
++{
++    GenericDispatchRequest result = mapRequest();
++    result.opcode = GenericDispatchOpcode::UnmapObject;
++    result.mappingId = 11;
++    result.mappingGeneration = 13;
++    result.imageSha256.fill(0);
++    result.kernelName.fill(0);
++    return result;
++}
++
++void
++run()
++{
++    const Uuid daemonUuid = [] {
++        Uuid value = {};
++        value.fill(0x42);
++        return value;
++    }();
++    const Header requestHeader = header(101);
++    const auto map = mapRequest();
++
++    /* Raw type-18 input is decodable without selected capabilities so the
++     * bridge can return a canonical UnsupportedCapability ACK. */
++    const auto rawFrame = encodeGenericDispatchRequest(requestHeader, map);
++    require(rawFrame.size() == GenericDispatchRecordBytes,
++            "raw type-18 frame was not encoded");
++    const auto raw = decodeGenericDispatchRequestRecord(
++        rawFrame.data(), rawFrame.size(), MaximumRecordBytes);
++    require(raw.action == DecodeAction::Acknowledge &&
++                raw.status == Status::Ok,
++            "raw type-18 frame did not decode");
++    const Capabilities absent = {};
++    require(sessionStatus(raw.header, absent, daemonUuid,
++                           requestHeader.connectionId,
++                           requestHeader.jobEpoch) ==
++                Status::UnsupportedCapability,
++            "unnegotiated type-18 was not rejected canonically");
++    uint32_t mutationCount = 0;
++    if (sessionStatus(raw.header, absent, daemonUuid,
++                      requestHeader.connectionId, requestHeader.jobEpoch) ==
++            Status::Ok) {
++        ++mutationCount;
++    }
++    require(mutationCount == 0, "unnegotiated route mutated state");
++
++    GenericDispatchResponse failure;
++    failure.status = Status::UnsupportedCapability;
++    failure.opcode = raw.request.opcode;
++    failure.objectId = raw.request.objectId;
++    failure.objectGeneration = raw.request.objectGeneration;
++    failure.mappingId = 99;
++    const auto ack = encodeGenericDispatchAck(raw.header, failure);
++    require(ack.size() == GenericDispatchRecordBytes,
++            "canonical unsupported ACK was not encoded");
++    const auto decodedAck = decodeGenericDispatchResponseRecord(
++        ack.data(), ack.size(), MaximumRecordBytes, raw.header.requestId,
++        MessageType::GenericDispatchAck);
++    require(decodedAck.action == DecodeAction::Acknowledge &&
++                decodedAck.status == Status::UnsupportedCapability,
++            "canonical unsupported ACK did not decode");
++    require(decodedAck.response.objectId == 0 &&
++                decodedAck.response.mappingId == 0 &&
++                decodedAck.response.mappedBaseVa == 0,
++            "unsupported ACK retained success fields");
++
++    const auto selected = selectedCapabilities();
++    require(sessionStatus(raw.header, selected, daemonUuid,
++                           requestHeader.connectionId,
++                           requestHeader.jobEpoch) == Status::Ok,
++            "selected generic capability was not accepted");
++
++    const auto alloc = allocRequest();
++    const auto allocFrame = encodeGenericDispatchRequest(
++        header(102), alloc, selected);
++    const auto allocDecoded = decodeGenericDispatchRequestRecord(
++        allocFrame.data(), allocFrame.size(), MaximumRecordBytes, selected);
++    require(allocDecoded.status == Status::Ok &&
++                stageStatus(allocDecoded.request) ==
++                    Status::UnsupportedCapability,
++            "logical ALLOC alignment was not rejected");
++    const auto submit = submitRequest();
++    const auto submitFrame = encodeGenericDispatchRequest(
++        header(103), submit, selected);
++    const auto submitDecoded = decodeGenericDispatchRequestRecord(
++        submitFrame.data(), submitFrame.size(), MaximumRecordBytes, selected);
++    require(submitDecoded.status == Status::Ok &&
++                stageStatus(submitDecoded.request) ==
++                    Status::UnsupportedCapability,
++            "SUBMIT was not rejected without queue/tick contracts");
++
++    require(stageStatus(map) == Status::Ok,
++            "selected MAP gate unexpectedly rejected 4K");
++    require(stageStatus(unmapRequest()) == Status::Ok,
++            "selected UNMAP gate unexpectedly rejected identity-only stage");
++    require(generic_dispatch_route::pageSizeSupported(
++                GenericDispatchPageSize64K),
++            "64K page policy was not recognized");
++}
++
++} // anonymous namespace
++} // namespace gem5::hostgpu
++
++int
++main()
++{
++    try {
++        gem5::hostgpu::run();
++    } catch (const std::exception &error) {
++        std::cerr << "host_gpu_generic_dispatch_route_core: "
++                  << error.what() << '\n';
++        return EXIT_FAILURE;
++    }
++    std::cout << "host_gpu_generic_dispatch_route_core: PASS\n";
++    return EXIT_SUCCESS;
++}
+-- 
+2.53.0
+

@@ -1,0 +1,618 @@
+From 5b2fe12adc22562997de20fa81b1155a65296a81 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sun, 9 Aug 2026 15:47:04 +0800
+Subject: [PATCH 12/42] feat(amdgpu): add standalone host-native control core
+
+Checkpoint-ID: CP-0015
+Goal-ID: GSIM-001
+Plan-Revision: 2
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 06bfcaec333279484fdabb53df56f67d97d70a3ecf70f1637c75a1a522dd55dc
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ build_opts/HOSTGPU_NATIVE_CONTROL       |   4 +
+ src/dev/amdgpu/SConscript               |  11 +
+ src/dev/amdgpu/host_gpu_control_main.cc | 284 ++++++++++++++++++++++++
+ util/host_native/README.md              |  43 ++--
+ util/host_native/check_control_core.py  | 207 +++++++++++++++++
+ 5 files changed, 536 insertions(+), 13 deletions(-)
+ create mode 100644 build_opts/HOSTGPU_NATIVE_CONTROL
+ create mode 100644 src/dev/amdgpu/host_gpu_control_main.cc
+ create mode 100644 util/host_native/check_control_core.py
+
+diff --git a/build_opts/HOSTGPU_NATIVE_CONTROL b/build_opts/HOSTGPU_NATIVE_CONTROL
+new file mode 100644
+index 000000000..832460586
+--- /dev/null
++++ b/build_opts/HOSTGPU_NATIVE_CONTROL
+@@ -0,0 +1,4 @@
++BUILD_ISA=n
++USE_X86_ISA=n
++BUILD_GPU=y
++VEGA_GPU_ISA=y
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index b6d03ad72..a5de8865b 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -32,6 +32,17 @@ Import('*')
+ if not env['CONF']['BUILD_GPU']:
+     Return()
+ 
++# The control-plane state machines are deliberately registered before the
++# legacy x86-backed AMDGPU model gate.  They only use fixed-width protocol
++# records and host-owned bookkeeping, so this target can be built without an
++# ISA, CPU, Process, or SimObject/System dependency.
++Executable('host_gpu_control_core',
++           'host_gpu_control_main.cc',
++           'host_gpu_protocol.cc',
++           'host_gpu_memory_state.cc',
++           'host_gpu_queue_state.cc',
++           'host_gpu_signal_state.cc')
++
+ if not env['CONF']['USE_X86_ISA']:
+     Return()
+ 
+diff --git a/src/dev/amdgpu/host_gpu_control_main.cc b/src/dev/amdgpu/host_gpu_control_main.cc
+new file mode 100644
+index 000000000..7f400cffd
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_control_main.cc
+@@ -0,0 +1,284 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are
++ * met: redistributions of source code must retain the above copyright
++ * notice, this list of conditions and the following disclaimer;
++ * redistributions in binary form must reproduce the above copyright notice,
++ * this list of conditions and the following disclaimer in the documentation
++ * and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_memory_state.hh"
++#include "dev/amdgpu/host_gpu_protocol.hh"
++#include "dev/amdgpu/host_gpu_queue_state.hh"
++#include "dev/amdgpu/host_gpu_signal_state.hh"
++
++#include <algorithm>
++#include <array>
++#include <cstdint>
++#include <exception>
++#include <iostream>
++#include <stdexcept>
++#include <string>
++#include <vector>
++
++namespace gem5::hostgpu
++{
++namespace
++{
++
++void
++require(bool condition, const char *message)
++{
++    if (!condition)
++        throw std::runtime_error(message);
++}
++
++protocol::Header
++controlHeader(uint64_t requestId)
++{
++    protocol::Header header;
++    header.requestId = requestId;
++    header.connectionId = 0x1020304050607080ULL;
++    header.jobEpoch = 0x0102030405060708ULL;
++    for (size_t index = 0; index < header.daemonUuid.size(); ++index)
++        header.daemonUuid[index] = static_cast<uint8_t>(index + 1);
++    return header;
++}
++
++protocol::Capabilities
++controlCapabilities()
++{
++    auto capabilities = protocol::topologyCapability();
++    capabilities[0] |= protocol::QueueControlCapabilityMask |
++        protocol::MemoryControlCapabilityMask |
++        protocol::SignalEventCapabilityMask;
++    return capabilities;
++}
++
++protocol::ServerIdentity
++controlServer()
++{
++    protocol::ServerIdentity server;
++    server.daemonUuid = controlHeader(0).daemonUuid;
++    server.jobEpoch = controlHeader(0).jobEpoch;
++    server.rank = 0;
++    server.worldSize = 1;
++    server.supported = controlCapabilities();
++    return server;
++}
++
++protocol::Hello
++controlHello(const protocol::ServerIdentity &server)
++{
++    protocol::Hello hello;
++    hello.offered = controlCapabilities();
++    hello.required = hello.offered;
++    hello.receiveMaximum = protocol::MaximumHandshakeBytes;
++    hello.topology.jobUuid = server.jobUuid;
++    hello.topology.rank = server.rank;
++    hello.topology.worldSize = server.worldSize;
++    for (size_t index = 0; index < hello.clientNonce.size(); ++index)
++        hello.clientNonce[index] = static_cast<uint8_t>(0xa0 + index);
++    return hello;
++}
++
++void
++runProtocolSelfTest()
++{
++    const auto server = controlServer();
++    const auto header = controlHeader(1);
++    const auto hello = controlHello(server);
++    const auto frame = protocol::encodeHello(header, hello);
++    require(frame.size() == protocol::HeaderBytes +
++                protocol::HelloFixedBytes + 32,
++            "HELLO frame size");
++    const auto decoded = protocol::decodeHelloRecord(
++        frame.data(), frame.size(), protocol::MaximumHandshakeBytes);
++    require(decoded.action == protocol::DecodeAction::Acknowledge &&
++                decoded.status == protocol::Status::Ok && decoded.hasHello,
++            "HELLO decode");
++    const auto negotiated = protocol::negotiate(
++        decoded.header, decoded.hello, server);
++    require(negotiated.status == protocol::Status::Ok &&
++                negotiated.selected == hello.required,
++            "HELLO negotiation");
++    const std::array<uint8_t, 9> vector = {
++        '1', '2', '3', '4', '5', '6', '7', '8', '9'};
++    require(protocol::crc32c(vector.data(), vector.size()) == 0xe3069283U,
++            "CRC32C vector");
++}
++
++void
++runMemorySelfTest()
++{
++    HostGPUMemoryState state;
++    const HostGPUMemoryState::Owner owner{1, 1};
++    protocol::MemoryRequest allocationRequest;
++    allocationRequest.opcode = protocol::MemoryOpcode::Allocate;
++    allocationRequest.byteCount = 256;
++    allocationRequest.argument = 4096;
++    const auto allocation = state.allocate(owner, allocationRequest, 1);
++    require(allocation.status == protocol::Status::Ok &&
++                allocation.allocationId != 0 && allocation.generation != 0,
++            "memory allocation");
++
++    std::vector<uint8_t> source(64);
++    for (size_t index = 0; index < source.size(); ++index)
++        source[index] = static_cast<uint8_t>(index * 3 + 1);
++    protocol::MemoryRequest write;
++    write.opcode = protocol::MemoryOpcode::CopyH2D;
++    write.allocationId = allocation.allocationId;
++    write.generation = allocation.generation;
++    write.byteCount = source.size();
++    write.argument = protocol::crc32c(source.data(), source.size());
++    require(state.copyFromHost(owner, write, source, 2).status ==
++                protocol::Status::Ok,
++            "memory copy to device");
++
++    protocol::MemoryRequest read = write;
++    read.opcode = protocol::MemoryOpcode::CopyD2H;
++    std::vector<uint8_t> destination;
++    const auto readResponse = state.copyToHost(owner, read, destination, 3);
++    require(readResponse.status == protocol::Status::Ok &&
++                destination == source &&
++                readResponse.value2 == protocol::crc32c(
++                    destination.data(), destination.size()),
++            "memory copy from device");
++
++    protocol::MemoryRequest freeRequest;
++    freeRequest.opcode = protocol::MemoryOpcode::Free;
++    freeRequest.allocationId = allocation.allocationId;
++    freeRequest.generation = allocation.generation;
++    require(state.free(owner, freeRequest, 4).status == protocol::Status::Ok &&
++                state.allocationCount() == 0,
++            "memory free");
++}
++
++void
++runQueueSelfTest()
++{
++    HostGPUQueueState state;
++    const HostGPUQueueState::Owner owner{1, 1};
++    const auto header = controlHeader(2);
++    protocol::QueueRequest create;
++    create.opcode = protocol::QueueOpcode::Create;
++    create.arg0 = 2;
++    const auto created = state.submit(owner, header, create, 10);
++    require(created.response.status == protocol::Status::Ok,
++            "queue create");
++
++    protocol::QueueRequest bell;
++    bell.opcode = protocol::QueueOpcode::Doorbell;
++    bell.queueId = created.response.queueId;
++    bell.generation = created.response.generation;
++    bell.sequence = 1;
++    bell.arg0 = static_cast<uint64_t>(protocol::QueueCommandKind::ControlTest);
++    const auto accepted = state.submit(owner, controlHeader(3), bell, 20);
++    require(accepted.response.status == protocol::Status::Ok &&
++                accepted.commandAccepted && !state.popReady(20),
++            "queue doorbell");
++    const auto command = state.popReady(21);
++    require(command && command->sequence == 1 && command->readyTick == 21,
++            "queue completion scheduling");
++    require(HostGPUQueueState::completionResponse(*command, 21).status ==
++                protocol::Status::Ok,
++            "queue completion");
++
++    protocol::QueueRequest destroy;
++    destroy.opcode = protocol::QueueOpcode::Destroy;
++    destroy.queueId = created.response.queueId;
++    destroy.generation = created.response.generation;
++    const auto destroyed = state.submit(
++        owner, controlHeader(4), destroy, 22);
++    require(destroyed.response.status == protocol::Status::Ok &&
++                state.queueCount() == 0,
++            "queue destroy");
++}
++
++void
++runSignalSelfTest()
++{
++    HostGPUSignalState state;
++    const HostGPUSignalState::Owner owner{1, 1};
++    protocol::SignalRequest create;
++    create.opcode = protocol::SignalOpcode::Create;
++    create.value = -1;
++    const auto created = state.submit(owner, controlHeader(5), create, 30);
++    require(created.status == protocol::Status::Ok,
++            "signal create");
++
++    protocol::SignalRequest store;
++    store.opcode = protocol::SignalOpcode::Store;
++    store.signalId = created.signalId;
++    store.generation = created.generation;
++    store.value = 7;
++    require(state.submit(owner, controlHeader(6), store, 31).status ==
++                protocol::Status::Ok,
++            "signal store");
++
++    protocol::SignalRequest wait;
++    wait.opcode = protocol::SignalOpcode::Wait;
++    wait.signalId = created.signalId;
++    wait.generation = created.generation;
++    wait.sequence = 1;
++    wait.condition = protocol::SignalCondition::GreaterThanOrEqual;
++    wait.value = 7;
++    const auto waiting = state.submit(owner, controlHeader(7), wait, 32);
++    require(waiting.status == protocol::Status::Ok && waiting.ready == 1,
++            "signal wait");
++    const auto completion = state.popReady(33);
++    require(completion && completion->value == 7 &&
++                state.complete(*completion),
++            "signal completion");
++
++    protocol::SignalRequest destroy;
++    destroy.opcode = protocol::SignalOpcode::Destroy;
++    destroy.signalId = created.signalId;
++    destroy.generation = created.generation;
++    require(state.submit(owner, controlHeader(8), destroy, 34).status ==
++                protocol::Status::Ok && state.signalCount() == 0,
++            "signal destroy");
++}
++
++} // namespace
++} // namespace gem5::hostgpu
++
++int
++main()
++{
++    try {
++        gem5::hostgpu::runProtocolSelfTest();
++        gem5::hostgpu::runMemorySelfTest();
++        gem5::hostgpu::runQueueSelfTest();
++        gem5::hostgpu::runSignalSelfTest();
++    } catch (const std::exception &error) {
++        std::cerr << "host_gpu_control_core self-test failed: "
++                  << error.what() << '\n';
++        return 1;
++    }
++
++    constexpr char output[] =
++        "{\"schema\":\"gem5.host-native.control-core.v1\","
++        "\"protocol_self_test\":true,\"memory_self_test\":true,"
++        "\"queue_self_test\":true,\"signal_self_test\":true,"
++        "\"kernel_executed\":false,\"cpu_fallback\":false,"
++        "\"vega_x86\":false}";
++    std::cout << output << '\n';
++    return 0;
++}
+diff --git a/util/host_native/README.md b/util/host_native/README.md
+index 5a7a24c00..d1979877c 100644
+--- a/util/host_native/README.md
++++ b/util/host_native/README.md
+@@ -1,9 +1,9 @@
+-# Host-native boundary inventory
++# Host-native boundary inventory and control core
+ 
+-`check_boundary.py` is a source-only checkpoint tool for the first host-native
+-AMDGPU extraction step. It lists the existing GPU/Vega and host-protocol files
+-that can be reused, and the current files that still require an x86 CPU,
+-`ThreadContext`, an SE `Process`, or x86 page-table types.
++`check_boundary.py` is a source-only inventory tool. It lists the existing
++GPU/Vega and host-protocol files that can be reused, and the current files
++that still require an x86 CPU, `ThreadContext`, an SE `Process`, or x86
++page-table types.
+ 
+ Run it from any directory with:
+ 
+@@ -12,12 +12,29 @@ python3 util/host_native/check_boundary.py
+ python3 util/host_native/check_boundary.py --check
+ ```
+ 
+-The JSON output is deterministic and contains source markers and evidence
+-locations. `--check` reports a failure only when a declared file or marker is
+-missing, or when the inventory schema is malformed. It does not compile or
+-run gem5.
++The inventory is deterministic and makes no claim about GPU execution, Triton
++compilation, or an end-to-end `python/tutorials/01-vector-add.py` run. The
++existing `configs/example/apu_se.py` `VEGA_X86` path remains the compatibility
++path until later gates pass.
+ 
+-The inventory intentionally makes no claim about a host-native build, an
+-x86-free binary, simulator execution, Triton compilation, or an end-to-end
+-`python/tutorials/01-vector-add.py` run. The existing `configs/example/apu_se.py`
+-`VEGA_X86` path remains the compatibility path until those later gates pass.
++## Standalone control core
++
++`HOSTGPU_NATIVE_CONTROL` builds `host_gpu_control_core` without `BUILD_ISA`,
++`USE_X86_ISA`, a simulated CPU, a `Process`, or a gem5 `System`. It reuses the
++fixed-width host protocol and the existing memory, queue, and signal state
++machines. The executable is a control-plane/self-test boundary, not a GPU
++kernel runner.
++
++From the repository root:
++
++```text
++scripts/build_gem5_mold24.sh \
++  build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_control_core.opt
++python3 projects/gem5/util/host_native/check_control_core.py \
++  projects/gem5/build/HOSTGPU_NATIVE_CONTROL/dev/amdgpu/host_gpu_control_core.opt
++```
++
++The audit checks the ELF type, dynamic libraries, undefined symbols, and the
++JSON self-test. `strace` is reported as unavailable when it is not installed;
++the control core itself performs no device or driver opens. Kernel execution,
++Triton integration, and the GPU compute pipeline remain later gates.
+diff --git a/util/host_native/check_control_core.py b/util/host_native/check_control_core.py
+new file mode 100644
+index 000000000..d6a06a4d8
+--- /dev/null
++++ b/util/host_native/check_control_core.py
+@@ -0,0 +1,207 @@
++#!/usr/bin/env python3
++"""Audit and run the standalone host-native control-core executable.
++
++The audit intentionally inspects defined/undefined symbols and dynamic
++dependencies, not every string in the binary.  The host itself may be x86-64;
++the property under test is that the executable does not depend on gem5's
++simulated x86 CPU or its process/translation path.
++"""
++
++from __future__ import annotations
++
++import argparse
++import json
++import os
++import re
++import subprocess
++from pathlib import Path
++
++
++SCHEMA = "gem5.host-native.control-core.v1"
++AUDIT_SCHEMA = "gem5.host-native.control-core.audit.v1"
++DEFAULT_BUILD_OPTS = (
++    Path(__file__).resolve().parents[2] / "build_opts/HOSTGPU_NATIVE_CONTROL"
++)
++EXPECTED_BUILD_OPTS = {
++    "BUILD_ISA": "n",
++    "USE_X86_ISA": "n",
++    "BUILD_GPU": "y",
++}
++
++# Match complete type/namespace components.  In particular, do not match
++# ``gem5::hostgpu`` or ordinary names such as ``processParameters``.
++FORBIDDEN_SYMBOL = re.compile(
++    r"(?:\bX86ISA(?:::|$)|\bBaseCPU(?:::|$)|\bThreadContext(?:::|$)|"
++    r"\bSETranslatingPortProxy(?:::|$)|\bAMDGPUDevice(?:::|$)|"
++    r"\bGPUDispatcher(?:::|$)|\bHSAPacketProcessor(?:::|$)|"
++    r"\bComputeUnit(?:::|$)|\bgem5::(?:System|Process|X86ISA|"
++    r"BaseCPU|ThreadContext)(?:::|$))"
++)
++
++ALLOWED_DYNAMIC_LIBS = (
++    "linux-vdso.so.1",
++    "libstdc++.so",
++    "libgcc_s.so",
++    "libc.so",
++    "libm.so",
++    "ld-linux",
++)
++
++
++def run(*command: str) -> str:
++    result = subprocess.run(
++        command, check=True, text=True, stdout=subprocess.PIPE,
++        stderr=subprocess.PIPE,
++    )
++    return result.stdout
++
++
++def parse_build_opts(path: Path) -> dict[str, str]:
++    """Read simple KEY=VALUE entries from a gem5 build-options file."""
++
++    if not path.is_file():
++        raise SystemExit(f"missing build options: {path}")
++    values: dict[str, str] = {}
++    for lineno, raw_line in enumerate(path.read_text().splitlines(), 1):
++        line = raw_line.split("#", 1)[0].strip()
++        if not line:
++            continue
++        if "=" not in line:
++            raise SystemExit(f"invalid build option at {path}:{lineno}")
++        key, value = line.split("=", 1)
++        key, value = key.strip(), value.strip()
++        if not key or key in values:
++            raise SystemExit(f"duplicate/empty build option at {path}:{lineno}")
++        values[key] = value
++    mismatches = {
++        key: {"actual": values.get(key), "expected": expected}
++        for key, expected in EXPECTED_BUILD_OPTS.items()
++        if values.get(key) != expected
++    }
++    if mismatches:
++        raise SystemExit(
++            "host-native build-options policy failure: "
++            + json.dumps(mismatches, sort_keys=True)
++        )
++    return values
++
++
++def parse_dependencies(ldd_output: str) -> list[str]:
++    """Extract stable sonames from ldd output without matching addresses."""
++
++    dependencies: list[str] = []
++    for line in ldd_output.splitlines():
++        stripped = line.strip()
++        if not stripped or stripped.startswith("statically linked"):
++            continue
++        if "=>" in stripped:
++            library, target = stripped.split("=>", 1)
++            target = target.strip().split()
++            if not target or target[0] == "not":
++                candidate = f"{library.strip()} => not found"
++            else:
++                candidate = target[0]
++        else:
++            candidate = stripped.split()[0]
++        dependencies.append(Path(candidate).name
++                            if candidate.startswith("/") else candidate)
++    return dependencies
++
++
++def forbidden_lines(output: str) -> list[str]:
++    return [line for line in output.splitlines()
++            if FORBIDDEN_SYMBOL.search(line)]
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("executable", type=Path)
++    parser.add_argument(
++        "--build-opts", type=Path, default=DEFAULT_BUILD_OPTS,
++        help=("build-options file to validate (default: %(default)s)"),
++    )
++    args = parser.parse_args()
++    executable = args.executable.resolve()
++    if not executable.is_file():
++        raise SystemExit(f"missing executable: {executable}")
++    if not os.access(executable, os.X_OK):
++        raise SystemExit(f"executable is not executable: {executable}")
++
++    build_opts = args.build_opts.resolve()
++    parsed_opts = parse_build_opts(build_opts)
++
++    file_output = run("file", str(executable)).strip()
++    if "ELF" not in file_output or "executable" not in file_output:
++        raise SystemExit(f"not an executable ELF: {file_output}")
++
++    ldd_output = run("ldd", str(executable))
++    dependencies = parse_dependencies(ldd_output)
++    unexpected_dependencies = [
++        name for name in dependencies
++        if "=> not found" in name or
++        not any(Path(name).name.startswith(prefix)
++                for prefix in ALLOWED_DYNAMIC_LIBS)
++    ]
++    if unexpected_dependencies:
++        raise SystemExit(
++            "unexpected dynamic dependencies: "
++            + ", ".join(unexpected_dependencies)
++        )
++
++    undefined = run("nm", "-C", "--undefined-only", str(executable))
++    forbidden_undefined = forbidden_lines(undefined)
++    if forbidden_undefined:
++        raise SystemExit(
++            "forbidden undefined symbols:\n" + "\n".join(forbidden_undefined)
++        )
++
++    defined = run("nm", "-C", "--defined-only", str(executable))
++    forbidden_defined = forbidden_lines(defined)
++    if forbidden_defined:
++        raise SystemExit(
++            "forbidden defined symbols:\n" + "\n".join(forbidden_defined)
++        )
++
++    self_test = subprocess.run(
++        [str(executable)], check=True, text=True,
++        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
++    )
++    try:
++        result = json.loads(self_test.stdout)
++    except json.JSONDecodeError as error:
++        raise SystemExit(f"self-test did not emit JSON: {error}") from error
++    if not isinstance(result, dict) or result.get("schema") != SCHEMA:
++        raise SystemExit(f"self-test schema mismatch: {result!r}")
++    expected_false = ("kernel_executed", "cpu_fallback", "vega_x86")
++    if any(result.get(key) is not False for key in expected_false):
++        raise SystemExit("self-test scope flags are not explicit false")
++    for key in ("protocol_self_test", "memory_self_test",
++                "queue_self_test", "signal_self_test"):
++        if result.get(key) is not True:
++            raise SystemExit(f"self-test flag is not true: {key}")
++
++    print(json.dumps({
++        "schema": AUDIT_SCHEMA,
++        "executable": str(executable),
++        "build_opts": str(build_opts),
++        "build_options": parsed_opts,
++        "file": file_output,
++        "dynamic_dependencies": dependencies,
++        "forbidden_undefined_symbols": [],
++        "forbidden_defined_symbols": [],
++        "self_test": result,
++        "strace": "unavailable",
++    }, sort_keys=True))
++    return 0
++
++
++if __name__ == "__main__":
++    try:
++        raise SystemExit(main())
++    except subprocess.CalledProcessError as error:
++        command = " ".join(error.cmd)
++        detail = error.stderr.strip() if error.stderr else ""
++        message = f"command failed ({error.returncode}): {command}"
++        if detail:
++            message += f": {detail}"
++        raise SystemExit(message) from error
+-- 
+2.53.0
+

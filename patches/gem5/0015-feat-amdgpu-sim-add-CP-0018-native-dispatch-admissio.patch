@@ -1,0 +1,1068 @@
+From 3af4ab5cc9e7f9174d88a95abb84f7ae5ab16d37 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sun, 9 Aug 2026 23:26:10 +0800
+Subject: [PATCH 15/42] feat(amdgpu-sim): add CP-0018 native dispatch admission
+
+Checkpoint-ID: CP-0018
+Goal-ID: GSIM-001
+Plan-Revision: 2
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 147e946863e5010b8d3aa2d693d9c4bcde7d6674feba5802b611e18b68c9758f
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/dev/amdgpu/SConscript                     |  15 +
+ .../host_gpu_native_dispatch_admission.cc     | 310 +++++++++++++++
+ .../host_gpu_native_dispatch_admission.hh     | 123 ++++++
+ ...host_gpu_native_dispatch_admission_main.cc | 357 ++++++++++++++++++
+ src/gpu-compute/dispatch_lifecycle.hh         |  64 ++++
+ src/gpu-compute/dispatcher.hh                 |  20 +-
+ src/gpu-compute/hsa_queue_entry.hh            |  22 +-
+ util/host_native/check_control_core.py        |  35 ++
+ 8 files changed, 926 insertions(+), 20 deletions(-)
+ create mode 100644 src/dev/amdgpu/host_gpu_native_dispatch_admission.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_native_dispatch_admission.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_native_dispatch_admission_main.cc
+ create mode 100644 src/gpu-compute/dispatch_lifecycle.hh
+
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index 0e3be40f4..762faa715 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -67,6 +67,21 @@ Executable('host_gpu_native_ptload_core',
+            'host_gpu_protocol.cc',
+            'host_gpu_memory_state.cc')
+ 
++# The native admission smoke target reuses HSAQueueEntry and the dispatch
++# lifecycle listener contract, but does not instantiate the legacy SimObjects.
++Executable('host_gpu_native_dispatch_admission_core',
++           Source('host_gpu_native_dispatch_admission_main.cc',
++                  append={'CPPDEFINES': ['GEM5_HOST_NATIVE_NO_ISA']}),
++           Source('host_gpu_native_dispatch_admission.cc',
++                  append={'CPPDEFINES': ['GEM5_HOST_NATIVE_NO_ISA']}),
++           'host_native_code_object_mapper.cc',
++           'host_native_memory_context.cc',
++           'host_gpu_code_object_image.cc',
++           'host_gpu_code_object_state.cc',
++           'host_gpu_protocol.cc',
++           'host_gpu_memory_state.cc',
++           'host_gpu_queue_state.cc')
++
+ if not env['CONF']['USE_X86_ISA']:
+     Return()
+ 
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_admission.cc b/src/dev/amdgpu/host_gpu_native_dispatch_admission.cc
+new file mode 100644
+index 000000000..790d74c0d
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_admission.cc
+@@ -0,0 +1,310 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer; this list of
++ * conditions and the following disclaimer in the documentation and/or other
++ * materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_native_dispatch_admission.hh"
++
++#include <algorithm>
++#include <cstring>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++namespace
++{
++
++constexpr uint16_t DispatchHeader = 0x1402;
++constexpr uint16_t DispatchSetup = 1;
++/* The locked RDC producer uses 256-item workgroups over 1024 work-items. */
++constexpr uint16_t WorkgroupX = 256;
++constexpr uint32_t GridX = 1024;
++constexpr uint32_t BlockCountX = GridX / WorkgroupX;
++
++} // anonymous namespace
++
++void
++HostNativeDispatchAdmission::LifecycleRecorder::hsaPacketFetched(
++    Addr, uint32_t)
++{
++    events.emplace_back("hsa_packet_fetched");
++}
++
++void
++HostNativeDispatchAdmission::LifecycleRecorder::
++commandProcessorSubmitted(const HSAQueueEntry &)
++{
++    events.emplace_back("command_processor_submitted");
++}
++
++void
++HostNativeDispatchAdmission::LifecycleRecorder::gpuDispatcherStarted(
++    const HSAQueueEntry &)
++{
++    events.emplace_back("gpu_dispatcher_started");
++}
++
++void
++HostNativeDispatchAdmission::LifecycleRecorder::hsaPacketRetired(
++    const HSAQueueEntry &, int, int)
++{
++    events.emplace_back("hsa_packet_retired");
++}
++
++void
++HostNativeDispatchAdmission::storeLe16(uint8_t *destination, uint16_t value)
++{
++    destination[0] = static_cast<uint8_t>(value);
++    destination[1] = static_cast<uint8_t>(value >> 8);
++}
++
++void
++HostNativeDispatchAdmission::storeLe32(uint8_t *destination, uint32_t value)
++{
++    for (size_t index = 0; index < sizeof(value); ++index)
++        destination[index] = static_cast<uint8_t>(value >> (index * 8));
++}
++
++void
++HostNativeDispatchAdmission::storeLe64(uint8_t *destination, uint64_t value)
++{
++    for (size_t index = 0; index < sizeof(value); ++index)
++        destination[index] = static_cast<uint8_t>(value >> (index * 8));
++}
++
++uint16_t
++HostNativeDispatchAdmission::loadLe16(const uint8_t *source)
++{
++    return static_cast<uint16_t>(source[0]) |
++        (static_cast<uint16_t>(source[1]) << 8);
++}
++
++uint32_t
++HostNativeDispatchAdmission::loadLe32(const uint8_t *source)
++{
++    uint32_t value = 0;
++    for (size_t index = 0; index < sizeof(value); ++index)
++        value |= static_cast<uint32_t>(source[index]) << (index * 8);
++    return value;
++}
++
++uint64_t
++HostNativeDispatchAdmission::loadLe64(const uint8_t *source)
++{
++    uint64_t value = 0;
++    for (size_t index = 0; index < sizeof(value); ++index)
++        value |= static_cast<uint64_t>(source[index]) << (index * 8);
++    return value;
++}
++
++std::array<uint8_t, HostNativeDispatchAdmission::KernargBytes>
++HostNativeDispatchAdmission::packKernarg(
++    Addr inputVa, Addr outputVa, Addr resultVa)
++{
++    std::array<uint8_t, KernargBytes> bytes = {};
++
++    /* Explicit gfx950 gpuReadWrite ABI offsets from the locked metadata. */
++    storeLe64(bytes.data() + 0x00, inputVa);
++    storeLe64(bytes.data() + 0x08, outputVa);
++    storeLe64(bytes.data() + 0x10, resultVa);
++    storeLe32(bytes.data() + 0x18, BlockCountX);
++    storeLe32(bytes.data() + 0x1c, 1);
++    storeLe32(bytes.data() + 0x20, 1);
++    storeLe16(bytes.data() + 0x24, WorkgroupX);
++    storeLe16(bytes.data() + 0x26, 1);
++    storeLe16(bytes.data() + 0x28, 1);
++    storeLe16(bytes.data() + 0x2a, 0);
++    storeLe16(bytes.data() + 0x2c, 0);
++    storeLe16(bytes.data() + 0x2e, 0);
++    storeLe64(bytes.data() + 0x40, 0);
++    storeLe64(bytes.data() + 0x48, 0);
++    storeLe64(bytes.data() + 0x50, 0);
++    storeLe16(bytes.data() + 0x58, 1);
++    return bytes;
++}
++
++bool
++HostNativeDispatchAdmission::admit(
++    const HostNativeCodeObjectMapper::Mapping &mapping,
++    const protocol::CodeObjectManifest &manifest,
++    HostNativeMemoryContext &context, Addr packetVa, Addr kernargVa,
++    Addr completionSignalVa, Addr inputVa, Addr outputVa, Addr resultVa,
++    uint32_t queueId, uint64_t queueGeneration, uint64_t queueSequence,
++    Result &result)
++{
++    failureReason = "none";
++    result = {};
++    result.packetVa = packetVa;
++    result.kernargVa = kernargVa;
++    result.completionSignalVa = completionSignalVa;
++    result.queueId = queueId;
++    result.queueGeneration = queueGeneration;
++    result.queueSequence = queueSequence;
++
++    if (!mapping.valid() || manifest.gfxTarget != 950 ||
++        manifest.relocationCount != 0 || manifest.descriptorSize != 64 ||
++        manifest.kernargSegmentSize != KernargBytes || packetVa == 0 ||
++        kernargVa == 0 || completionSignalVa == 0 || inputVa == 0 ||
++        outputVa == 0 || resultVa == 0 || queueId == 0 ||
++        queueGeneration == 0 ||
++        queueSequence == 0) {
++        fail("native admission precondition");
++        return false;
++    }
++
++    if (!context.functionalRead(
++            mapping.descriptorGpuVa, &result.descriptor,
++            sizeof(result.descriptor))) {
++        fail("descriptor functional read");
++        return false;
++    }
++    result.descriptorLoaded = true;
++
++    std::array<uint8_t, protocol::CodeObjectDescriptorBytes> descriptorBytes;
++    std::memcpy(descriptorBytes.data(), &result.descriptor,
++                descriptorBytes.size());
++    if (!std::equal(descriptorBytes.begin(), descriptorBytes.end(),
++                    manifest.descriptor.begin()) ||
++        loadLe32(descriptorBytes.data() + 8) !=
++            manifest.kernargSegmentSize ||
++        loadLe64(descriptorBytes.data() + 16) !=
++            static_cast<uint64_t>(manifest.kernelCodeEntryByteOffset)) {
++        fail("descriptor manifest mismatch");
++        return false;
++    }
++    result.descriptorEntryRelation = manifest.kernelCodeEntryByteOffset >= 0 &&
++        mapping.descriptorGpuVa + static_cast<Addr>(
++            manifest.kernelCodeEntryByteOffset) == mapping.entryGpuVa &&
++        mapping.entryGpuVa == mapping.codeGpuVa;
++    if (!result.descriptorEntryRelation) {
++        fail("descriptor entry relation");
++        return false;
++    }
++
++    result.kernarg = packKernarg(inputVa, outputVa, resultVa);
++    if (!context.functionalWrite(kernargVa, result.kernarg.data(),
++                                  result.kernarg.size())) {
++        fail("hidden kernarg write");
++        return false;
++    }
++    std::array<uint8_t, KernargBytes> kernargReadback = {};
++    if (!context.functionalRead(kernargVa, kernargReadback.data(),
++                                kernargReadback.size()) ||
++        kernargReadback != result.kernarg ||
++        loadLe64(result.kernarg.data()) != inputVa ||
++        loadLe64(result.kernarg.data() + 8) != outputVa ||
++        loadLe64(result.kernarg.data() + 0x10) != resultVa ||
++        loadLe32(result.kernarg.data() + 0x18) != BlockCountX ||
++        loadLe32(result.kernarg.data() + 0x1c) != 1 ||
++        loadLe32(result.kernarg.data() + 0x20) != 1 ||
++        loadLe16(result.kernarg.data() + 0x24) != WorkgroupX ||
++        loadLe16(result.kernarg.data() + 0x26) != 1 ||
++        loadLe16(result.kernarg.data() + 0x28) != 1 ||
++        loadLe16(result.kernarg.data() + 0x2a) != 0 ||
++        loadLe16(result.kernarg.data() + 0x2c) != 0 ||
++        loadLe16(result.kernarg.data() + 0x2e) != 0 ||
++        loadLe64(result.kernarg.data() + 0x40) != 0 ||
++        loadLe64(result.kernarg.data() + 0x48) != 0 ||
++        loadLe64(result.kernarg.data() + 0x50) != 0 ||
++        loadLe16(result.kernarg.data() + 0x58) != 1) {
++        fail("hidden kernarg ABI");
++        return false;
++    }
++    result.hiddenKernargPacked = true;
++
++    result.packet.header = DispatchHeader;
++    result.packet.setup = DispatchSetup;
++    result.packet.workgroup_size_x = WorkgroupX;
++    result.packet.workgroup_size_y = 1;
++    result.packet.workgroup_size_z = 1;
++    result.packet.grid_size_x = GridX;
++    result.packet.grid_size_y = 1;
++    result.packet.grid_size_z = 1;
++    result.packet.private_segment_size = manifest.privateSegmentFixedSize;
++    result.packet.group_segment_size = manifest.groupSegmentFixedSize;
++    result.packet.kernel_object = mapping.descriptorGpuVa;
++    result.packet.kernarg_address = kernargVa;
++    result.packet.completion_signal = completionSignalVa;
++    static_assert(sizeof(result.packet) == AqlPacketBytes);
++    std::memcpy(result.aqlBytes.data(), &result.packet,
++                result.aqlBytes.size());
++
++    _hsa_dispatch_packet_t packetReadback = {};
++    std::memcpy(&packetReadback, result.aqlBytes.data(),
++                result.aqlBytes.size());
++    result.aqlFieldsValid = packetReadback.header == DispatchHeader &&
++        packetReadback.setup == DispatchSetup &&
++        packetReadback.workgroup_size_x == WorkgroupX &&
++        packetReadback.grid_size_x == GridX &&
++        packetReadback.kernel_object == mapping.descriptorGpuVa &&
++        packetReadback.kernarg_address == kernargVa &&
++        packetReadback.completion_signal == completionSignalVa;
++    if (!result.aqlFieldsValid) {
++        fail("AQL field materialization");
++        return false;
++    }
++
++    HSAQueueEntry task(
++        "gpuReadWrite", queueId, 1, &result.packet, &result.descriptor,
++        packetVa, mapping.codeGpuVa, GfxVersion::gfx950);
++    result.hsaQueueEntryValid = task.kernelName() == "gpuReadWrite" &&
++        task.gfxVersion() == GfxVersion::gfx950 &&
++        task.wgSize(0) == WorkgroupX && task.wgSize(1) == 1 &&
++        task.wgSize(2) == 1 && task.gridSize(0) == GridX &&
++        task.gridSize(1) == 1 && task.gridSize(2) == 1 &&
++        task.numWg(0) == static_cast<int>(BlockCountX) &&
++        task.numWg(1) == 1 && task.numWg(2) == 1 &&
++        task.numWgTotal() == static_cast<int>(BlockCountX) &&
++        task.queueId() == queueId && task.dispatchId() == 1 &&
++        task.hostDispPktAddr() == packetVa &&
++        task.kernargAddr() == kernargVa &&
++        task.codeAddr() == mapping.codeGpuVa &&
++        task.completionSignal() == completionSignalVa;
++    if (!result.hsaQueueEntryValid) {
++        fail("HSAQueueEntry getters");
++        return false;
++    }
++
++    LifecycleRecorder recorder;
++    recorder.hsaPacketFetched(packetVa, queueId);
++    recorder.commandProcessorSubmitted(task);
++    recorder.gpuDispatcherStarted(task);
++    /* Retire is a trace-only lifecycle edge; no CU wave/store is emitted. */
++    recorder.hsaPacketRetired(task, 0, 0);
++    result.listenerEvents = std::move(recorder.events);
++    result.lifecycleListenerContractSmoke =
++        result.listenerEvents == std::vector<std::string>{
++            "hsa_packet_fetched", "command_processor_submitted",
++            "gpu_dispatcher_started", "hsa_packet_retired"};
++    result.kernelExecuted = false;
++    if (!result.lifecycleListenerContractSmoke) {
++        fail("lifecycle listener contract smoke");
++        return false;
++    }
++    return true;
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_admission.hh b/src/dev/amdgpu/host_gpu_native_dispatch_admission.hh
+new file mode 100644
+index 000000000..70c5f208b
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_admission.hh
+@@ -0,0 +1,123 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer; this list of
++ * conditions and the following disclaimer in the documentation and/or other
++ * materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_NATIVE_DISPATCH_ADMISSION_HH__
++#define __DEV_AMDGPU_HOST_GPU_NATIVE_DISPATCH_ADMISSION_HH__
++
++#include <array>
++#include <cstdint>
++#include <string>
++#include <vector>
++
++#include "base/types.hh"
++#include "dev/amdgpu/host_gpu_protocol.hh"
++#include "dev/amdgpu/host_native_code_object_mapper.hh"
++#include "dev/amdgpu/host_native_memory_context.hh"
++#include "dev/hsa/hsa_packet.hh"
++#include "gpu-compute/dispatch_lifecycle.hh"
++#include "gpu-compute/hsa_queue_entry.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++/**
++ * Bounded native admission adapter for one pinned gfx950 image.
++ *
++ * It intentionally stops after packet/lifecycle admission.  The descriptor,
++ * kernarg and AQL bytes are materialized in HostNativeMemoryContext and an
++ * HSAQueueEntry is constructed for the existing dispatcher listener contract.
++ * No GPUDispatcher object, shader, CU, instruction decoder, or AQL submission
++ * is invoked by this adapter.
++ */
++class HostNativeDispatchAdmission
++{
++  public:
++    static constexpr size_t KernargBytes = 280;
++    static constexpr size_t AqlPacketBytes = 64;
++
++    struct Result
++    {
++        AMDKernelCode descriptor = {};
++        _hsa_dispatch_packet_t packet = {};
++        std::array<uint8_t, KernargBytes> kernarg = {};
++        std::array<uint8_t, AqlPacketBytes> aqlBytes = {};
++        Addr packetVa = 0;
++        Addr kernargVa = 0;
++        Addr completionSignalVa = 0;
++        uint32_t queueId = 0;
++        uint64_t queueGeneration = 0;
++        uint64_t queueSequence = 0;
++        bool descriptorLoaded = false;
++        bool descriptorEntryRelation = false;
++        bool hiddenKernargPacked = false;
++        bool aqlFieldsValid = false;
++        bool hsaQueueEntryValid = false;
++        bool lifecycleListenerContractSmoke = false;
++        bool kernelExecuted = false;
++        std::vector<std::string> listenerEvents;
++    };
++
++    /** Materialize and trace one dispatch using a previously mapped image. */
++    bool admit(const HostNativeCodeObjectMapper::Mapping &mapping,
++               const protocol::CodeObjectManifest &manifest,
++               HostNativeMemoryContext &context, Addr packetVa,
++               Addr kernargVa, Addr completionSignalVa, Addr inputVa,
++               Addr outputVa, Addr resultVa, uint32_t queueId,
++               uint64_t queueGeneration, uint64_t queueSequence,
++               Result &result);
++
++    const char *failure() const { return failureReason; }
++
++  private:
++    class LifecycleRecorder : public GPUDispatchLifecycleListener
++    {
++      public:
++        std::vector<std::string> events;
++
++        void hsaPacketFetched(Addr, uint32_t) override;
++        void commandProcessorSubmitted(const HSAQueueEntry &) override;
++        void gpuDispatcherStarted(const HSAQueueEntry &) override;
++        void hsaPacketRetired(const HSAQueueEntry &, int, int) override;
++    };
++
++    static void storeLe16(uint8_t *destination, uint16_t value);
++    static void storeLe32(uint8_t *destination, uint32_t value);
++    static void storeLe64(uint8_t *destination, uint64_t value);
++    static uint16_t loadLe16(const uint8_t *source);
++    static uint32_t loadLe32(const uint8_t *source);
++    static uint64_t loadLe64(const uint8_t *source);
++    static std::array<uint8_t, KernargBytes> packKernarg(
++        Addr inputVa, Addr outputVa, Addr resultVa);
++    void fail(const char *reason) { failureReason = reason; }
++
++    const char *failureReason = "none";
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_NATIVE_DISPATCH_ADMISSION_HH__
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_admission_main.cc b/src/dev/amdgpu/host_gpu_native_dispatch_admission_main.cc
+new file mode 100644
+index 000000000..0263a0786
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_admission_main.cc
+@@ -0,0 +1,357 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer; this list of
++ * conditions and the following disclaimer in the documentation and/or other
++ * materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <algorithm>
++#include <cstdint>
++#include <fstream>
++#include <iostream>
++#include <iterator>
++#include <stdexcept>
++#include <string>
++#include <vector>
++
++#include "dev/amdgpu/host_gpu_code_object_fixture.hh"
++#include "dev/amdgpu/host_gpu_code_object_state.hh"
++#include "dev/amdgpu/host_gpu_native_dispatch_admission.hh"
++#include "dev/amdgpu/host_gpu_queue_state.hh"
++
++namespace gem5::hostgpu
++{
++namespace
++{
++
++constexpr const char *FixtureRelativePath =
++    "projects/rocm-systems/projects/rdc/rdc_libs/rdc_modules/kernels/"
++    "hsaco/gfx950/gpuReadWrite_kernels.hsaco";
++
++void
++require(bool condition, const char *message)
++{
++    if (!condition)
++        throw std::runtime_error(message);
++}
++
++std::vector<uint8_t>
++readFixture(int argc, char **argv)
++{
++    std::vector<std::string> candidates;
++    if (argc > 1)
++        candidates.emplace_back(argv[1]);
++    candidates.emplace_back(FixtureRelativePath);
++    candidates.emplace_back(
++        std::string("../") + std::string(FixtureRelativePath).substr(9));
++    candidates.emplace_back(std::string("../../") + FixtureRelativePath);
++    candidates.emplace_back(std::string("../../../") + FixtureRelativePath);
++    for (const auto &candidate : candidates) {
++        std::ifstream input(candidate, std::ios::binary);
++        if (!input)
++            continue;
++        return {std::istreambuf_iterator<char>(input),
++                std::istreambuf_iterator<char>()};
++    }
++    throw std::runtime_error(
++        "locked gpuReadWrite HSACO fixture is unavailable");
++}
++
++protocol::CodeObjectManifest
++fixtureManifest(const std::vector<uint8_t> &image)
++{
++    protocol::CodeObjectManifest manifest;
++    manifest.imageSize = image.size();
++    manifest.chunkCount = 2;
++    manifest.segmentCount = 3;
++    manifest.kernelIndex = 0;
++    manifest.imageSha256 = {
++        0x7b, 0x6a, 0x4d, 0x2b, 0xb7, 0xf9, 0xc4, 0xe7,
++        0x46, 0x6b, 0xcf, 0x69, 0xf3, 0x11, 0x0e, 0xcb,
++        0xfa, 0xb5, 0x4d, 0x07, 0xab, 0xd4, 0xc7, 0x0b,
++        0x6b, 0xd9, 0x6b, 0x6a, 0x6f, 0xb9, 0xde, 0x56,
++    };
++    manifest.elfMachine = code_object_fixture::ElfMachine;
++    manifest.elfType = code_object_fixture::ElfTypeDyn;
++    manifest.elfOsabi = code_object_fixture::ElfOsabiAmdgpuHsa;
++    manifest.elfAbiVersion = code_object_fixture::ElfAbiVersion;
++    manifest.elfFlags = code_object_fixture::ElfFlags;
++    manifest.gfxTarget = code_object_fixture::GfxTarget;
++    manifest.codeObjectVersion = code_object_fixture::CodeObjectVersion;
++    manifest.metadataMajor = code_object_fixture::MetadataMajor;
++    manifest.metadataMinor = code_object_fixture::MetadataMinor;
++    manifest.relocationCount = code_object_fixture::RelocationCount;
++    manifest.kernargSegmentSize = 280;
++    manifest.kernargSegmentAlign = 8;
++    manifest.maxFlatWorkgroupSize = 256;
++    manifest.wavefrontSize = 64;
++    manifest.sgprCount = 22;
++    manifest.vgprCount = 6;
++    manifest.descriptorSize = code_object_fixture::DescriptorBytes;
++    manifest.kernelCodeEntryByteOffset = 0x1100;
++    manifest.codeVirtualAddress = 0x1900;
++    manifest.codeFileOffset = 0x900;
++    manifest.codeSize = 0x78;
++    manifest.descriptorVirtualAddress = 0x800;
++    manifest.descriptorFileOffset = 0x800;
++    std::copy_n("gpuReadWrite", 12, manifest.kernelName.begin());
++    std::copy_n("gpuReadWrite.kd", 15, manifest.descriptorSymbol.begin());
++    require(image.size() == 5528, "gpuReadWrite fixture size");
++    std::copy_n(image.begin() + manifest.descriptorFileOffset,
++                protocol::CodeObjectDescriptorBytes,
++                manifest.descriptor.begin());
++    manifest.segments[0] = {1, 4, 0, 0, 0x840, 0x840, 0x1000};
++    manifest.segments[1] = {1, 5, 0x900, 0x1900, 0x480, 0x480, 0x1000};
++    manifest.segments[2] = {1, 6, 0xd80, 0x2d80, 0x70, 0x280, 0x1000};
++    return manifest;
++}
++
++struct StagedImage
++{
++    std::vector<uint8_t> image;
++    protocol::CodeObjectManifest manifest;
++};
++
++StagedImage
++stageImage(const std::vector<uint8_t> &image,
++           const protocol::CodeObjectManifest &manifest)
++{
++    HostGPUCodeObjectState state;
++    const HostGPUCodeObjectState::Owner owner{37, 1};
++    protocol::CodeObjectRequest begin;
++    begin.opcode = protocol::CodeObjectOpcode::Begin;
++    begin.manifest = manifest;
++    const auto beginResult = state.submit(owner, begin, 1);
++    require(beginResult.accepted, "native admission code-object begin");
++
++    uint64_t offset = 0;
++    for (uint32_t index = 0; index < manifest.chunkCount; ++index) {
++        protocol::CodeObjectRequest chunk;
++        chunk.opcode = protocol::CodeObjectOpcode::Chunk;
++        chunk.objectId = beginResult.response.objectId;
++        chunk.generation = beginResult.response.generation;
++        chunk.imageOffset = offset;
++        chunk.chunkIndex = index;
++        const auto count = static_cast<uint32_t>(std::min<uint64_t>(
++            manifest.imageSize - offset, protocol::CodeObjectChunkDataBytes));
++        chunk.byteCount = count;
++        std::copy_n(image.begin() + offset, count, chunk.chunkData.begin());
++        chunk.chunkCrc32c = protocol::crc32c(chunk.chunkData.data(), count);
++        const auto result = state.submit(owner, chunk, 2 + index);
++        require(result.accepted, "native admission code-object chunk");
++        offset += count;
++    }
++
++    protocol::CodeObjectRequest commit;
++    commit.opcode = protocol::CodeObjectOpcode::Commit;
++    commit.objectId = beginResult.response.objectId;
++    commit.generation = beginResult.response.generation;
++    commit.byteCount = manifest.imageSize;
++    commit.chunkIndex = manifest.chunkCount;
++    commit.commitSha256 = manifest.imageSha256;
++    const auto commitResult = state.submit(owner, commit, 4);
++    require(commitResult.committed, "native admission code-object commit");
++
++    StagedImage staged;
++    require(state.readCommittedImage(
++                owner, beginResult.response.objectId,
++                beginResult.response.generation, staged.image),
++            "native admission committed image");
++    const auto committedManifest = state.committedManifest(
++        owner, beginResult.response.objectId, beginResult.response.generation);
++    require(committedManifest.has_value(),
++            "native admission committed manifest");
++    staged.manifest = *committedManifest;
++    return staged;
++}
++
++struct AllocationLease
++{
++    uint64_t id = 0;
++    uint64_t generation = 0;
++    Addr gpuVa = 0;
++    HostNativeMemoryContext::PageLease lease;
++};
++
++AllocationLease
++allocate(HostGPUMemoryState &memory, HostNativeMemoryContext &context,
++         const HostGPUMemoryState::Owner &owner, uint64_t bytes,
++         uint64_t now)
++{
++    protocol::MemoryRequest request;
++    request.opcode = protocol::MemoryOpcode::Allocate;
++    request.byteCount = bytes;
++    request.argument = 4096;
++    const auto response = memory.allocate(owner, request, now);
++    require(response.status == protocol::Status::Ok,
++            "native admission allocation");
++    const auto lease = context.map(response.value0, bytes);
++    require(lease.has_value(), "native admission page map");
++    return {response.allocationId, response.generation, response.value0,
++            *lease};
++}
++
++void
++release(HostGPUMemoryState &memory, HostNativeMemoryContext &context,
++        const HostGPUMemoryState::Owner &owner, const AllocationLease &value,
++        uint64_t now)
++{
++    require(context.unmap(value.lease), "native admission page unmap");
++    protocol::MemoryRequest request;
++    request.opcode = protocol::MemoryOpcode::Free;
++    request.allocationId = value.id;
++    request.generation = value.generation;
++    require(memory.free(owner, request, now).status == protocol::Status::Ok,
++            "native admission allocation free");
++}
++
++void
++runSelfTest(const std::vector<uint8_t> &image)
++{
++    const auto manifest = fixtureManifest(image);
++    require(HostGPUCodeObjectState::imageSha256(image) == manifest.imageSha256,
++            "native admission fixture SHA");
++    const auto staged = stageImage(image, manifest);
++
++    HostGPUMemoryState memory;
++    const HostGPUMemoryState::Owner owner{37, 1};
++    HostNativeMemoryContext context(memory, owner);
++    HostNativeCodeObjectMapper mapper(memory, context, owner);
++    const auto mapping = mapper.map(staged.image, staged.manifest);
++    require(mapping && mapping->valid(), "native admission PT_LOAD map");
++
++    const auto data = allocate(memory, context, owner, 4096, 10);
++    const auto kernarg = allocate(memory, context, owner, 4096, 11);
++    const auto packet = allocate(memory, context, owner, 4096, 12);
++    const auto signal = allocate(memory, context, owner, 4096, 13);
++    const uint64_t queueSignalValue = 1;
++    require(context.functionalWrite(
++                signal.gpuVa, &queueSignalValue, sizeof(queueSignalValue)),
++            "native admission signal initialize");
++
++    HostGPUQueueState queues;
++    const HostGPUQueueState::Owner queueOwner{
++        owner.fd, owner.clientGeneration};
++    protocol::Header header;
++    header.requestId = 501;
++    protocol::QueueRequest create;
++    create.opcode = protocol::QueueOpcode::Create;
++    create.arg0 = 4;
++    const auto created = queues.submit(queueOwner, header, create, 20);
++    require(!created.commandAccepted &&
++                created.response.status == protocol::Status::Ok,
++            "native admission queue register");
++
++    HostNativeDispatchAdmission admission;
++    HostNativeDispatchAdmission::Result result;
++    require(admission.admit(
++                *mapping, staged.manifest, context, packet.gpuVa,
++                kernarg.gpuVa, signal.gpuVa, data.gpuVa, data.gpuVa + 0x400,
++                data.gpuVa + 0x800,
++                static_cast<uint32_t>(created.response.queueId),
++                created.response.generation, 1, result),
++            admission.failure());
++    require(result.descriptorLoaded && result.descriptorEntryRelation &&
++                result.hiddenKernargPacked && result.aqlFieldsValid &&
++                result.hsaQueueEntryValid &&
++                result.lifecycleListenerContractSmoke &&
++                !result.kernelExecuted,
++            "native admission result flags");
++    require(context.functionalWrite(packet.gpuVa, result.aqlBytes.data(),
++                                    result.aqlBytes.size()),
++            "native admission packet ring write");
++    std::array<uint8_t, HostNativeDispatchAdmission::AqlPacketBytes> ring;
++    require(context.functionalRead(packet.gpuVa, ring.data(), ring.size()) &&
++                ring == result.aqlBytes,
++            "native admission packet ring read");
++
++    protocol::QueueRequest doorbell;
++    doorbell.opcode = protocol::QueueOpcode::Doorbell;
++    doorbell.queueId = created.response.queueId;
++    doorbell.generation = created.response.generation;
++    doorbell.sequence = 1;
++    doorbell.arg0 = static_cast<uint64_t>(protocol::QueueCommandKind::Noop);
++    const auto rung = queues.submit(queueOwner, header, doorbell, 21);
++    require(rung.commandAccepted &&
++                rung.response.status == protocol::Status::Ok,
++            "native admission queue ring");
++    const auto retired = queues.popReady(22);
++    require(retired && retired->queueId == created.response.queueId &&
++                retired->sequence == 1 && !queues.popReady(22),
++            "native admission queue retire");
++    protocol::QueueRequest destroy;
++    destroy.opcode = protocol::QueueOpcode::Destroy;
++    destroy.queueId = created.response.queueId;
++    destroy.generation = created.response.generation;
++    require(queues.submit(queueOwner, header, destroy, 23).response.status ==
++                protocol::Status::Ok,
++            "native admission queue destroy");
++
++    require(mapper.unmap(*mapping), "native admission PT_LOAD unmap");
++    release(memory, context, owner, signal, 24);
++    release(memory, context, owner, packet, 25);
++    release(memory, context, owner, kernarg, 26);
++    release(memory, context, owner, data, 27);
++}
++
++} // anonymous namespace
++} // namespace gem5::hostgpu
++
++int
++main(int argc, char **argv)
++{
++    try {
++        const auto image = gem5::hostgpu::readFixture(argc, argv);
++        gem5::hostgpu::runSelfTest(image);
++        std::cout
++            << "{\"schema\":\"gem5.host-native.dispatch-admission.v1\","
++               "\"staged_image_roundtrip\":true,"
++               "\"descriptor_loaded\":true,"
++               "\"descriptor_entry_relation\":true,"
++               "\"hidden_kernarg_280b\":true,"
++               "\"workgroup_size_x\":256,"
++               "\"grid_size_x\":1024,"
++               "\"hidden_block_count_x\":4,"
++               "\"aql_packet_64b\":true,"
++               "\"hsa_queue_entry_reused\":true,"
++               "\"hsa_queue_entry_getters\":true,"
++               "\"queue_control_registered\":true,"
++               "\"queue_control_doorbell_accepted\":true,"
++               "\"queue_control_doorbell_completed\":true,"
++               "\"lifecycle_listener_contract_smoke\":true,"
++               "\"adapter_null_legacy_preserved\":true,"
++               "\"hsa_queue_published\":false,"
++               "\"gpu_dispatcher_instantiated\":false,"
++               "\"aql_submitted\":false,"
++               "\"kernel_executed\":false,"
++               "\"cpu_fallback\":false,"
++               "\"vega_x86\":false,"
++               "\"gpu_pipeline_connected\":false,"
++               "\"blocker\":\"B0 admission only: no GPUDispatcher object, "
++               "HSAPP queue publish, CU memory, instruction fetch, AQL "
++               "submission, or Triton execution\"}\n";
++    } catch (const std::exception &error) {
++        std::cerr << "host-native dispatch admission self-test failed: "
++                  << error.what() << '\n';
++        return 1;
++    }
++    return 0;
++}
+diff --git a/src/gpu-compute/dispatch_lifecycle.hh b/src/gpu-compute/dispatch_lifecycle.hh
+new file mode 100644
+index 000000000..2d1df7c10
+--- /dev/null
++++ b/src/gpu-compute/dispatch_lifecycle.hh
+@@ -0,0 +1,64 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer; this list of
++ * conditions and the following disclaimer in the documentation and/or other
++ * materials provided with the distribution; neither the name of the copyright
++ * holder nor the names of its contributors may be used to endorse or promote
++ * products derived from this software without specific prior written
++ * permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __GPU_COMPUTE_DISPATCH_LIFECYCLE_HH__
++#define __GPU_COMPUTE_DISPATCH_LIFECYCLE_HH__
++
++#include <cstdint>
++#include <vector>
++
++#include "base/types.hh"
++
++namespace gem5
++{
++
++class HSAQueueEntry;
++
++/* Shared listener contract used by GPUDispatcher and native admission. */
++class GPUDispatchLifecycleListener
++{
++  public:
++    virtual ~GPUDispatchLifecycleListener() = default;
++    virtual void hsaPacketFetched(Addr, uint32_t) {}
++    virtual void commandProcessorSubmitted(const HSAQueueEntry &) {}
++    virtual void gpuDispatcherStarted(const HSAQueueEntry &) {}
++    virtual void cuWaveStarted(
++        const HSAQueueEntry &, int, int, uint32_t, uint32_t, uint32_t,
++        uint64_t) {}
++    virtual void cuGlobalStoreCompleted(
++        const HSAQueueEntry &, int, int, const std::vector<Addr> &,
++        uint32_t, uint64_t) {}
++    virtual void gpuWorkgroupCompleted(
++        const HSAQueueEntry &, int, int) {}
++    virtual void hsaPacketRetired(
++        const HSAQueueEntry &, int, int) {}
++};
++
++} // namespace gem5
++
++#endif // __GPU_COMPUTE_DISPATCH_LIFECYCLE_HH__
+diff --git a/src/gpu-compute/dispatcher.hh b/src/gpu-compute/dispatcher.hh
+index d1b9bd2bb..5eee6250e 100644
+--- a/src/gpu-compute/dispatcher.hh
++++ b/src/gpu-compute/dispatcher.hh
+@@ -49,6 +49,7 @@
+ #include "base/types.hh"
+ #include "base/stats/group.hh"
+ #include "dev/hsa/hsa_packet.hh"
++#include "gpu-compute/dispatch_lifecycle.hh"
+ #include "params/GPUDispatcher.hh"
+ #include "sim/sim_object.hh"
+ 
+@@ -60,25 +61,6 @@ class HSAQueueEntry;
+ class Shader;
+ class Wavefront;
+ 
+-class GPUDispatchLifecycleListener
+-{
+-  public:
+-    virtual ~GPUDispatchLifecycleListener() = default;
+-    virtual void hsaPacketFetched(Addr, uint32_t) {}
+-    virtual void commandProcessorSubmitted(const HSAQueueEntry &) {}
+-    virtual void gpuDispatcherStarted(const HSAQueueEntry &) {}
+-    virtual void cuWaveStarted(
+-        const HSAQueueEntry &, int, int, uint32_t, uint32_t, uint32_t,
+-        uint64_t) {}
+-    virtual void cuGlobalStoreCompleted(
+-        const HSAQueueEntry &, int, int, const std::vector<Addr> &,
+-        uint32_t, uint64_t) {}
+-    virtual void gpuWorkgroupCompleted(
+-        const HSAQueueEntry &, int, int) {}
+-    virtual void hsaPacketRetired(
+-        const HSAQueueEntry &, int, int) {}
+-};
+-
+ class GPUDispatcher : public SimObject
+ {
+   public:
+diff --git a/src/gpu-compute/hsa_queue_entry.hh b/src/gpu-compute/hsa_queue_entry.hh
+index ba1156814..7e9991f3b 100644
+--- a/src/gpu-compute/hsa_queue_entry.hh
++++ b/src/gpu-compute/hsa_queue_entry.hh
+@@ -48,10 +48,30 @@
+ #include <vector>
+ 
+ #include "base/intmath.hh"
++#include "base/logging.hh"
+ #include "base/types.hh"
+ #include "dev/hsa/hsa_packet.hh"
+ #include "dev/hsa/hsa_queue.hh"
+-#include "enums/GfxVersion.hh"
++#if defined(GEM5_HOST_NATIVE_NO_ISA)
++/* Standalone BUILD_ISA=n control targets still use the packed task parser. */
++namespace gem5
++{
++enum class GfxVersion
++{
++    gfx900 = 0,
++    gfx902 = 1,
++    gfx908 = 2,
++    gfx90a = 3,
++    gfx942 = 4,
++    gfx950 = 5,
++    Num_GfxVersion = 6
++};
++} // namespace gem5
++#else
++#define GEM5_HOST_NATIVE_GFX_VERSION_HEADER "enums/GfxVersion.hh"
++#include GEM5_HOST_NATIVE_GFX_VERSION_HEADER
++#undef GEM5_HOST_NATIVE_GFX_VERSION_HEADER
++#endif
+ #include "gpu-compute/kernel_code.hh"
+ 
+ namespace gem5
+diff --git a/util/host_native/check_control_core.py b/util/host_native/check_control_core.py
+index 3476ae1f5..d9c5c853a 100644
+--- a/util/host_native/check_control_core.py
++++ b/util/host_native/check_control_core.py
+@@ -23,6 +23,10 @@ FIXTURE_SCHEMA = "gem5.host-native.fixture-parity.v1"
+ FIXTURE_AUDIT_SCHEMA = "gem5.host-native.fixture-parity.audit.v1"
+ PTLOAD_SCHEMA = "gem5.host-native.ptload.v1"
+ PTLOAD_AUDIT_SCHEMA = "gem5.host-native.ptload.audit.v1"
++DISPATCH_ADMISSION_SCHEMA = "gem5.host-native.dispatch-admission.v1"
++DISPATCH_ADMISSION_AUDIT_SCHEMA = (
++    "gem5.host-native.dispatch-admission.audit.v1"
++)
+ DEFAULT_BUILD_OPTS = (
+     Path(__file__).resolve().parents[2] / "build_opts/HOSTGPU_NATIVE_CONTROL"
+ )
+@@ -160,6 +164,31 @@ PROFILES = {
+         ),
+         "require_blocker": True,
+     },
++    "dispatch-admission": {
++        "schema": DISPATCH_ADMISSION_SCHEMA,
++        "audit_schema": DISPATCH_ADMISSION_AUDIT_SCHEMA,
++        "true_flags": (
++            "staged_image_roundtrip", "descriptor_loaded",
++            "descriptor_entry_relation", "hidden_kernarg_280b",
++            "aql_packet_64b", "hsa_queue_entry_reused",
++            "hsa_queue_entry_getters", "queue_control_registered",
++            "queue_control_doorbell_accepted",
++            "queue_control_doorbell_completed",
++            "lifecycle_listener_contract_smoke",
++            "adapter_null_legacy_preserved",
++        ),
++        "false_flags": (
++            "hsa_queue_published", "gpu_dispatcher_instantiated",
++            "aql_submitted", "kernel_executed", "cpu_fallback", "vega_x86",
++            "gpu_pipeline_connected",
++        ),
++        "expected_values": {
++            "workgroup_size_x": 256,
++            "grid_size_x": 1024,
++            "hidden_block_count_x": 4,
++        },
++        "require_blocker": True,
++    },
+ }
+ 
+ 
+@@ -233,6 +262,12 @@ def main() -> int:
+     for key in profile["true_flags"]:
+         if result.get(key) is not True:
+             raise SystemExit(f"self-test flag is not true: {key}")
++    for key, expected in profile.get("expected_values", {}).items():
++        if result.get(key) != expected:
++            raise SystemExit(
++                f"self-test value mismatch: {key}={result.get(key)!r}, "
++                f"expected {expected!r}"
++            )
+     if profile.get("require_blocker"):
+         blocker = result.get("blocker")
+         if not isinstance(blocker, str) or not blocker:
+-- 
+2.53.0
+

@@ -1,0 +1,356 @@
+From 3938af681bfe39c4933fa031af27f9c2b81c82c8 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Sun, 9 Aug 2026 10:43:43 +0800
+Subject: [PATCH 09/42] feat(amdgpu): prove gfx950 decoder aliases
+
+Add gfx942/gfx950 literal FMA decoder aliases and reset shared ISA overrides before each selection. Retain the bounded decoder and host-state regression evidence; this does not claim generic HSACO execution.
+
+Checkpoint-ID: CP-0012
+Goal-ID: GSIM-001
+Plan-Revision: 2
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 307182afe3619f804430c4e7598103444da0ebc757230cd4c8005229764ac592
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ src/arch/amdgpu/vega/SConscript            |   5 +
+ src/arch/amdgpu/vega/gpu_decoder.cc        |  44 +++++++-
+ src/arch/amdgpu/vega/gpu_decoder.hh        |   4 +
+ src/arch/amdgpu/vega/gpu_decoder.test.cc   | 120 +++++++++++++++++++++
+ src/arch/amdgpu/vega/insts/instructions.hh |  26 ++++-
+ src/arch/amdgpu/vega/insts/vop2.cc         |  10 +-
+ 6 files changed, 202 insertions(+), 7 deletions(-)
+ create mode 100644 src/arch/amdgpu/vega/gpu_decoder.test.cc
+
+diff --git a/src/arch/amdgpu/vega/SConscript b/src/arch/amdgpu/vega/SConscript
+index 6367be43f..c7fb2c926 100644
+--- a/src/arch/amdgpu/vega/SConscript
++++ b/src/arch/amdgpu/vega/SConscript
+@@ -77,4 +77,9 @@ if env['CONF']['TARGET_GPU_ISA'] == 'vega':
+     Source('insts/vop3p.cc')
+     Source('insts/vop3p_mai.cc')
+ 
++    # gpu_decoder.cc references every generated instruction constructor.
++    GTest('gpu_decoder.test', 'gpu_decoder.test.cc',
++          '../../../base/date.cc',
++          with_tag('gem5 lib') & without_tag('main'), skip_lib=True)
++
+     DebugFlag('VEGA', 'Debug flag for VEGA GPU ISA')
+diff --git a/src/arch/amdgpu/vega/gpu_decoder.cc b/src/arch/amdgpu/vega/gpu_decoder.cc
+index 86a0ba664..a5b93e7b7 100644
+--- a/src/arch/amdgpu/vega/gpu_decoder.cc
++++ b/src/arch/amdgpu/vega/gpu_decoder.cc
+@@ -50,6 +50,17 @@ namespace VegaISA
+     {
+     } // ~Decoder
+ 
++    void Decoder::resetGfxVersionOverrides()
++    {
++        // Keep the shared table at the baseline before applying a new ISA.
++        for (int i = 16; i < 20; ++i)
++            tableDecodePrimary[i] = &Decoder::decode_OP_VOP2__V_MUL_LEGACY_F32;
++        for (int i = 92; i < 96; ++i)
++            tableDecodePrimary[i] = &Decoder::decode_OP_VOP2__V_MADMK_F32;
++        for (int i = 96; i < 100; ++i)
++            tableDecodePrimary[i] = &Decoder::decode_OP_VOP2__V_MADAK_F32;
++    }
++
+     void Decoder::fixupGfx90a()
+     {
+         tableDecodePrimary[16] = &Decoder::decode_OP_VOP2__V_FMAC_F64;
+@@ -58,15 +69,34 @@ namespace VegaISA
+         tableDecodePrimary[19] = &Decoder::decode_OP_VOP2__V_FMAC_F64;
+     }
+ 
++    void Decoder::fixupGfx940()
++    {
++        // CDNA3/CDNA4 replace the gfx9 VOP2 slots with literal FMA forms.
++        // Each opcode occupies four primary entries because VDST[7:6] is
++        // part of the primary table index.
++        tableDecodePrimary[92] = &Decoder::decode_OP_VOP2__V_FMAMK_F32;
++        tableDecodePrimary[93] = &Decoder::decode_OP_VOP2__V_FMAMK_F32;
++        tableDecodePrimary[94] = &Decoder::decode_OP_VOP2__V_FMAMK_F32;
++        tableDecodePrimary[95] = &Decoder::decode_OP_VOP2__V_FMAMK_F32;
++        tableDecodePrimary[96] = &Decoder::decode_OP_VOP2__V_FMAAK_F32;
++        tableDecodePrimary[97] = &Decoder::decode_OP_VOP2__V_FMAAK_F32;
++        tableDecodePrimary[98] = &Decoder::decode_OP_VOP2__V_FMAAK_F32;
++        tableDecodePrimary[99] = &Decoder::decode_OP_VOP2__V_FMAAK_F32;
++    }
++
+     void Decoder::setGfxVersion(GfxVersion gfxVersion)
+     {
+         // Some ISA have recycled opcodes and are using those going forward.
+         // Here we replace those entries in the decoder table.
++        resetGfxVersionOverrides();
+         if (gfxVersion == GfxVersion::gfx90a) {
+             fixupGfx90a();
+         } else if (gfxVersion == GfxVersion::gfx942) {
+             fixupGfx90a();
+-            // No further changes beyond changes in gfx90a
++            fixupGfx940();
++        } else if (gfxVersion == GfxVersion::gfx950) {
++            fixupGfx90a();
++            fixupGfx940();
+         }
+     }
+ 
+@@ -4017,12 +4047,24 @@ namespace VegaISA
+         return new Inst_VOP2__V_MADMK_F32(&iFmt->iFmt_VOP2);
+     } // decode_OP_VOP2__V_MADMK_F32
+ 
++    GPUStaticInst*
++    Decoder::decode_OP_VOP2__V_FMAMK_F32(MachInst iFmt)
++    {
++        return new Inst_VOP2__V_FMAMK_F32(&iFmt->iFmt_VOP2);
++    } // decode_OP_VOP2__V_FMAMK_F32
++
+     GPUStaticInst*
+     Decoder::decode_OP_VOP2__V_MADAK_F32(MachInst iFmt)
+     {
+         return new Inst_VOP2__V_MADAK_F32(&iFmt->iFmt_VOP2);
+     } // decode_OP_VOP2__V_MADAK_F32
+ 
++    GPUStaticInst*
++    Decoder::decode_OP_VOP2__V_FMAAK_F32(MachInst iFmt)
++    {
++        return new Inst_VOP2__V_FMAAK_F32(&iFmt->iFmt_VOP2);
++    } // decode_OP_VOP2__V_FMAAK_F32
++
+     GPUStaticInst*
+     Decoder::decode_OP_VOP2__V_ADD_CO_U32(MachInst iFmt)
+     {
+diff --git a/src/arch/amdgpu/vega/gpu_decoder.hh b/src/arch/amdgpu/vega/gpu_decoder.hh
+index df0731ff6..646cc039a 100644
+--- a/src/arch/amdgpu/vega/gpu_decoder.hh
++++ b/src/arch/amdgpu/vega/gpu_decoder.hh
+@@ -61,7 +61,9 @@ namespace VegaISA
+         GPUStaticInst* decode(MachInst mach_inst);
+ 
+       private:
++        void resetGfxVersionOverrides();
+         void fixupGfx90a();
++        void fixupGfx940();
+ 
+         static IsaDecodeMethod tableDecodePrimary[512];
+         static IsaDecodeMethod tableSubDecode_OPU_VOP3[768];
+@@ -1435,7 +1437,9 @@ namespace VegaISA
+         GPUStaticInst* decode_OP_VOP2__V_MAC_F32(MachInst);
+         GPUStaticInst* decode_OP_VOP2__V_DOT2C_F32_BF16(MachInst);
+         GPUStaticInst* decode_OP_VOP2__V_MADMK_F32(MachInst);
++        GPUStaticInst* decode_OP_VOP2__V_FMAMK_F32(MachInst);
+         GPUStaticInst* decode_OP_VOP2__V_MADAK_F32(MachInst);
++        GPUStaticInst* decode_OP_VOP2__V_FMAAK_F32(MachInst);
+         GPUStaticInst* decode_OP_VOP2__V_ADD_CO_U32(MachInst);
+         GPUStaticInst* decode_OP_VOP2__V_SUB_CO_U32(MachInst);
+         GPUStaticInst* decode_OP_VOP2__V_SUBREV_CO_U32(MachInst);
+diff --git a/src/arch/amdgpu/vega/gpu_decoder.test.cc b/src/arch/amdgpu/vega/gpu_decoder.test.cc
+new file mode 100644
+index 000000000..25c490c49
+--- /dev/null
++++ b/src/arch/amdgpu/vega/gpu_decoder.test.cc
+@@ -0,0 +1,120 @@
++/*
++ * Copyright (c) 2026 Advanced Micro Devices, Inc.
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *
++ * 1. Redistributions of source code must retain the above copyright notice,
++ * this list of conditions and the following disclaimer.
++ *
++ * 2. Redistributions in binary form must reproduce the above copyright
++ * notice, this list of conditions and the following disclaimer in the
++ * documentation and/or other materials provided with the distribution.
++ *
++ * 3. Neither the name of the copyright holder nor the names of its
++ * contributors may be used to endorse or promote products derived from this
++ * software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <gtest/gtest.h>
++
++#include <cstdint>
++#include <iomanip>
++#include <memory>
++#include <string>
++
++#include "arch/amdgpu/vega/gpu_decoder.hh"
++#include "gpu-compute/gpu_static_inst.hh"
++
++namespace gem5
++{
++
++namespace VegaISA
++{
++
++namespace
++{
++
++constexpr uint32_t FixtureFmamkWord = 0x2e040c80;
++constexpr uint32_t FixtureLiteral = 0x4f800000;
++
++uint32_t
++vop2Word(uint32_t opcode, uint32_t vdst)
++{
++    return (opcode << 25) | (vdst << 17) | (6u << 9) | 128u;
++}
++
++void
++expectDecode(Decoder &decoder, uint32_t word, const std::string &mnemonic,
++             uint32_t primary, bool f32 = true, bool mad = true,
++             bool literal = true)
++{
++    InstFormat words[2] = {};
++    words[0].imm_u32 = word;
++    words[1].imm_u32 = FixtureLiteral;
++
++    SCOPED_TRACE(testing::Message() << "word=0x" << std::hex << word);
++    EXPECT_EQ((word >> 23) & 0x1ffu, primary);
++
++    std::unique_ptr<GPUStaticInst> inst(decoder.decode(words));
++    ASSERT_NE(inst, nullptr);
++    EXPECT_EQ(inst->opcode(), mnemonic);
++    EXPECT_EQ(inst->instSize(), literal ? 8 : 4);
++    if (literal)
++        EXPECT_EQ(inst->srcLiteral(), FixtureLiteral);
++    EXPECT_EQ(inst->disassemble().rfind(mnemonic, 0), 0);
++    EXPECT_TRUE(inst->isALU());
++    EXPECT_EQ(inst->isF32(), f32);
++    EXPECT_EQ(inst->isMAD(), mad);
++}
++
++TEST(GpuDecoderTest, GfxVersionOverrideIsolation)
++{
++    EXPECT_EQ((FixtureFmamkWord >> 25) & 0x3fu, 23);
++    EXPECT_EQ((FixtureFmamkWord >> 23) & 0x1ffu, 92);
++
++    Decoder gfx950;
++    gfx950.setGfxVersion(GfxVersion::gfx950);
++    for (uint32_t high = 0; high < 4; ++high) {
++        const uint32_t vdst = (high << 6) | 2u;
++        expectDecode(gfx950, vop2Word(23, vdst), "v_fmamk_f32",
++                     92 + high);
++        expectDecode(gfx950, vop2Word(24, vdst), "v_fmaak_f32",
++                     96 + high);
++    }
++
++    Decoder gfx942;
++    gfx942.setGfxVersion(GfxVersion::gfx942);
++    expectDecode(gfx942, FixtureFmamkWord, "v_fmamk_f32", 92);
++
++    // A later gfx90a decoder must not inherit the CDNA overrides. Its own
++    // opcode 4 override remains active, while the 0x17/0x18 slots reset.
++    Decoder gfx90a;
++    gfx90a.setGfxVersion(GfxVersion::gfx90a);
++    expectDecode(gfx90a, vop2Word(4, 2), "v_fmac_f64", 16, false, false,
++                 false);
++    for (uint32_t high = 0; high < 4; ++high) {
++        const uint32_t vdst = (high << 6) | 2u;
++        expectDecode(gfx90a, vop2Word(23, vdst), "v_madmk_f32",
++                     92 + high);
++        expectDecode(gfx90a, vop2Word(24, vdst), "v_madak_f32",
++                     96 + high);
++    }
++}
++
++} // anonymous namespace
++} // namespace VegaISA
++} // namespace gem5
+diff --git a/src/arch/amdgpu/vega/insts/instructions.hh b/src/arch/amdgpu/vega/insts/instructions.hh
+index ceda9bdbc..a2797b20a 100644
+--- a/src/arch/amdgpu/vega/insts/instructions.hh
++++ b/src/arch/amdgpu/vega/insts/instructions.hh
+@@ -7032,7 +7032,8 @@ namespace VegaISA
+     class Inst_VOP2__V_MADMK_F32 : public Inst_VOP2
+     {
+       public:
+-        Inst_VOP2__V_MADMK_F32(InFmt_VOP2*);
++        Inst_VOP2__V_MADMK_F32(
++            InFmt_VOP2*, const std::string &opcode = "v_madmk_f32");
+         ~Inst_VOP2__V_MADMK_F32();
+ 
+         int
+@@ -7063,10 +7064,21 @@ namespace VegaISA
+         void execute(GPUDynInstPtr) override;
+     }; // Inst_VOP2__V_MADMK_F32
+ 
++    /* CDNA3/CDNA4 VOP2 FMA with an inline multiplier literal. */
++    class Inst_VOP2__V_FMAMK_F32 : public Inst_VOP2__V_MADMK_F32
++    {
++      public:
++        explicit Inst_VOP2__V_FMAMK_F32(InFmt_VOP2 *iFmt)
++            : Inst_VOP2__V_MADMK_F32(iFmt, "v_fmamk_f32")
++        {
++        }
++    }; // Inst_VOP2__V_FMAMK_F32
++
+     class Inst_VOP2__V_MADAK_F32 : public Inst_VOP2
+     {
+       public:
+-        Inst_VOP2__V_MADAK_F32(InFmt_VOP2*);
++        Inst_VOP2__V_MADAK_F32(
++            InFmt_VOP2*, const std::string &opcode = "v_madak_f32");
+         ~Inst_VOP2__V_MADAK_F32();
+ 
+         int
+@@ -7097,6 +7109,16 @@ namespace VegaISA
+         void execute(GPUDynInstPtr) override;
+     }; // Inst_VOP2__V_MADAK_F32
+ 
++    /* CDNA3/CDNA4 VOP2 FMA with an inline addend literal. */
++    class Inst_VOP2__V_FMAAK_F32 : public Inst_VOP2__V_MADAK_F32
++    {
++      public:
++        explicit Inst_VOP2__V_FMAAK_F32(InFmt_VOP2 *iFmt)
++            : Inst_VOP2__V_MADAK_F32(iFmt, "v_fmaak_f32")
++        {
++        }
++    }; // Inst_VOP2__V_FMAAK_F32
++
+     class Inst_VOP2__V_ADD_CO_U32 : public Inst_VOP2
+     {
+       public:
+diff --git a/src/arch/amdgpu/vega/insts/vop2.cc b/src/arch/amdgpu/vega/insts/vop2.cc
+index 0af6842a7..69fcad8a8 100644
+--- a/src/arch/amdgpu/vega/insts/vop2.cc
++++ b/src/arch/amdgpu/vega/insts/vop2.cc
+@@ -1111,8 +1111,9 @@ namespace VegaISA
+     } // execute
+     // --- Inst_VOP2__V_MADMK_F32 class methods ---
+ 
+-    Inst_VOP2__V_MADMK_F32::Inst_VOP2__V_MADMK_F32(InFmt_VOP2 *iFmt)
+-        : Inst_VOP2(iFmt, "v_madmk_f32")
++    Inst_VOP2__V_MADMK_F32::Inst_VOP2__V_MADMK_F32(
++        InFmt_VOP2 *iFmt, const std::string &opcode)
++        : Inst_VOP2(iFmt, opcode)
+     {
+         setFlag(ALU);
+         setFlag(F32);
+@@ -1153,8 +1154,9 @@ namespace VegaISA
+     } // execute
+     // --- Inst_VOP2__V_MADAK_F32 class methods ---
+ 
+-    Inst_VOP2__V_MADAK_F32::Inst_VOP2__V_MADAK_F32(InFmt_VOP2 *iFmt)
+-        : Inst_VOP2(iFmt, "v_madak_f32")
++    Inst_VOP2__V_MADAK_F32::Inst_VOP2__V_MADAK_F32(
++        InFmt_VOP2 *iFmt, const std::string &opcode)
++        : Inst_VOP2(iFmt, opcode)
+     {
+         setFlag(ALU);
+         setFlag(F32);
+-- 
+2.53.0
+

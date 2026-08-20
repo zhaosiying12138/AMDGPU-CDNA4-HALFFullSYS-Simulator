@@ -390,10 +390,16 @@ if [[ -n $capsule ]]; then
   # A capsule proves something about the lanes only if it runs in the lanes'
   # exact environment and isolation, which is why it is dispatched from here
   # rather than from a script of its own.
+  #
+  # SAGR_CAPSULE_ARGS: optional extra arguments appended to the capsule
+  # invocation, split on whitespace (no quoting/escaping supported). Generic
+  # mechanism so a capsule can expose modes (e.g. --probe NAME) without this
+  # runner growing capsule-specific flags.
+  read -r -a capsule_extra_args <<<"${SAGR_CAPSULE_ARGS:-}"
   unshare -r -m bash -c '
     mount --bind /tmp/empty-nvml.so /usr/lib/wsl/lib/libnvidia-ml.so.1
     exec python "$@"
-  ' _ "$capsule" >>"$log" 2>&1
+  ' _ "$capsule" ${capsule_extra_args[@]+"${capsule_extra_args[@]}"} >>"$log" 2>&1
   status=$?
 elif [[ $engine == sglang ]]; then
   sglang_args=(

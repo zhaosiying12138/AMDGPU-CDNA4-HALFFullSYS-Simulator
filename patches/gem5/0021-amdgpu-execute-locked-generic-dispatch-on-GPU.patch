@@ -1,0 +1,3611 @@
+From a4b80d76ad1a9bf89e0483984953583048e31122 Mon Sep 17 00:00:00 2001
+From: zhaosiying12138 <neucszhaopeng2016@163.com>
+Date: Mon, 10 Aug 2026 16:00:17 +0800
+Subject: [PATCH 21/42] amdgpu: execute locked generic dispatch on GPU
+
+Route the exact owner-bound gpuReadWrite fixture through GPUDispatcher and ComputeUnit only after the type-19 ACK is durable. Preserve the bit-8 control path while bit 9 binds the wide wire token to a bounded dispatch ID, validates the locked ABI and output oracle, and emits type-20 only after physical retirement.
+
+Retain queue, signal, memory, packet, and adapter ownership through completion or disconnected-owner quarantine. The accepted scope is one locked native execution lifecycle; it does not claim general gfx950 execution, compilation, JIT, or fallback.
+
+Checkpoint-ID: CP-0026
+Goal-ID: GSIM-001
+Plan-Revision: 2
+Source-Lock-SHA256: 8c0a6d1d04d5a73ab036ddc56d09ff59f7513077931868bdfac5a763f85a73d4
+Evidence-Manifest-SHA256: 1325d31271c164dcf62cd254f3ca9e99c1582e3572ae370a92370d70c5c84657
+Change-Kind: code
+Baseline-Commit: cbf0eae213c5e39c727172b546434287d47b5bbe
+---
+ configs/example/gemsim/host_dispatch.py       |    1 +
+ src/dev/amdgpu/AMDGPU.py                      |    4 +
+ src/dev/amdgpu/SConscript                     |    7 +
+ src/dev/amdgpu/host_gpu_bridge.cc             | 1305 ++++++++++++++++-
+ src/dev/amdgpu/host_gpu_bridge.hh             |   31 +
+ .../amdgpu/host_gpu_code_object_fixture.hh    |    8 +-
+ .../amdgpu/host_gpu_dispatch_state.test.cc    |    3 +-
+ .../amdgpu/host_gpu_generic_dispatch_route.cc |   78 +
+ .../amdgpu/host_gpu_generic_dispatch_route.hh |   38 +-
+ .../host_gpu_generic_dispatch_route_main.cc   |   56 +
+ .../host_gpu_native_dispatch_state_v2.cc      |   10 +-
+ .../host_gpu_native_dispatch_state_v2.hh      |    9 +-
+ .../host_gpu_native_dispatch_state_v2_main.cc |    6 +-
+ .../host_gpu_native_dispatch_token_mux.cc     |  153 ++
+ .../host_gpu_native_dispatch_token_mux.hh     |   88 ++
+ ...host_gpu_native_dispatch_token_mux.test.cc |   91 ++
+ .../host_gpu_native_execution_adapter.cc      |  352 +++++
+ .../host_gpu_native_execution_adapter.hh      |  189 +++
+ .../amdgpu/host_gpu_native_fixture_main.cc    |    3 +-
+ src/dev/amdgpu/host_gpu_protocol.cc           |   54 +-
+ src/dev/amdgpu/host_gpu_protocol.hh           |    7 +
+ src/dev/amdgpu/host_gpu_protocol.test.cc      |   93 ++
+ src/dev/amdgpu/host_native_gpu_executor.cc    |   56 +-
+ src/dev/amdgpu/host_native_gpu_executor.hh    |   10 +-
+ src/gpu-compute/dispatcher.cc                 |   11 +-
+ src/gpu-compute/dispatcher.hh                 |    8 +
+ 26 files changed, 2608 insertions(+), 63 deletions(-)
+ create mode 100644 src/dev/amdgpu/host_gpu_native_dispatch_token_mux.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_native_dispatch_token_mux.hh
+ create mode 100644 src/dev/amdgpu/host_gpu_native_dispatch_token_mux.test.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_native_execution_adapter.cc
+ create mode 100644 src/dev/amdgpu/host_gpu_native_execution_adapter.hh
+
+diff --git a/configs/example/gemsim/host_dispatch.py b/configs/example/gemsim/host_dispatch.py
+index 13e8c0f63..0de85b243 100644
+--- a/configs/example/gemsim/host_dispatch.py
++++ b/configs/example/gemsim/host_dispatch.py
+@@ -299,6 +299,7 @@ def create_system(args):
+         system=system,
+         hsa_packet_processor=gpu_hsapp,
+         gpu_dispatcher=dispatcher,
++        shader=shader,
+         dispatch_trace_path=args.dispatch_trace_path,
+         exit_on_dispatch_session_done=True,
+     )
+diff --git a/src/dev/amdgpu/AMDGPU.py b/src/dev/amdgpu/AMDGPU.py
+index e63fb40c7..42dacbbb8 100644
+--- a/src/dev/amdgpu/AMDGPU.py
++++ b/src/dev/amdgpu/AMDGPU.py
+@@ -80,6 +80,10 @@ class HostGPUBridge(SimObject):
+     gpu_dispatcher = Param.GPUDispatcher(
+         NULL, "GPU dispatcher observed by the pinned-dispatch bridge"
+     )
++    shader = Param.Shader(
++        NULL,
++        "Shader used by the optional bit-9 generic execution adapter",
++    )
+     dispatch_trace_path = Param.String(
+         "", "Exclusive absolute JSONL path for retained dispatch evidence"
+     )
+diff --git a/src/dev/amdgpu/SConscript b/src/dev/amdgpu/SConscript
+index d811bb705..fa2487b97 100644
+--- a/src/dev/amdgpu/SConscript
++++ b/src/dev/amdgpu/SConscript
+@@ -49,6 +49,8 @@ if not env['CONF']['USE_X86_ISA']:
+         'host_gpu_native_dispatch_admission.cc',
+         'host_gpu_native_queue_core.cc',
+         'host_gpu_native_command_processor_core.cc',
++        'host_gpu_native_dispatch_token_mux.cc',
++        'host_gpu_native_execution_adapter.cc',
+         'host_gpu_native_dispatch_state_v2.cc',
+         'host_native_gpu_executor.cc',
+     ):
+@@ -182,6 +184,8 @@ Source('host_native_memory_context.cc', tags=['x86 isa'])
+ Source('host_native_code_object_mapper.cc', tags=['x86 isa'])
+ Source('host_gpu_native_queue_core.cc', tags=['x86 isa'])
+ Source('host_gpu_native_command_processor_core.cc', tags=['x86 isa'])
++Source('host_gpu_native_dispatch_token_mux.cc', tags=['x86 isa'])
++Source('host_gpu_native_execution_adapter.cc', tags=['x86 isa'])
+ Source('host_gpu_native_dispatch_state_v2.cc', tags=['x86 isa'])
+ Source('host_gpu_queue_state.cc', tags=['x86 isa'])
+ Source('host_gpu_signal_state.cc', tags=['x86 isa'])
+@@ -213,6 +217,9 @@ GTest('host_gpu_kmt_state.test', 'host_gpu_kmt_state.test.cc',
+       'host_gpu_kmt_state.cc', 'host_gpu_protocol.cc')
+ GTest('host_gpu_socket_utils.test', 'host_gpu_socket_utils.test.cc',
+       'host_gpu_socket_utils.cc')
++GTest('host_gpu_native_dispatch_token_mux.test',
++      'host_gpu_native_dispatch_token_mux.test.cc',
++      'host_gpu_native_dispatch_token_mux.cc')
+ 
+ DebugFlag('AMDGPUDevice', tags=['x86 isa'])
+ DebugFlag('AMDGPUMem', tags=['x86 isa'])
+diff --git a/src/dev/amdgpu/host_gpu_bridge.cc b/src/dev/amdgpu/host_gpu_bridge.cc
+index e9f60c6a7..fa9d584cf 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.cc
++++ b/src/dev/amdgpu/host_gpu_bridge.cc
+@@ -39,6 +39,7 @@
+ 
+ #include <algorithm>
+ #include <array>
++#include <bitset>
+ #include <cassert>
+ #include <cerrno>
+ #include <cstddef>
+@@ -54,12 +55,14 @@
+ #include "base/socket.hh"
+ #include "cpu/thread_context.hh"
+ #include "dev/amdgpu/host_gpu_dispatch_fixture.hh"
++#include "dev/amdgpu/host_gpu_code_object_fixture.hh"
+ #include "dev/amdgpu/host_gpu_generic_dispatch_route.hh"
+ #include "dev/amdgpu/host_gpu_native_dispatch_state_v2.hh"
+ #include "dev/amdgpu/host_gpu_socket_utils.hh"
+ #include "dev/hsa/hsa_packet_processor.hh"
+ #include "dev/hsa/hsa_queue.hh"
+ #include "gpu-compute/hsa_queue_entry.hh"
++#include "gpu-compute/shader.hh"
+ #include "mem/se_translating_port_proxy.hh"
+ #include "sim/process.hh"
+ #include "sim/sim_exit.hh"
+@@ -83,6 +86,18 @@ constexpr uint64_t GenericNativeQueueId = 511;
+ constexpr uint32_t GenericNativeQueueBytes = 4096;
+ constexpr uint32_t GenericNativeDoorbellBytes = 8;
+ constexpr uint16_t GenericDispatchHeader = 0x1502;
++constexpr int GenericExecutionDispatchId = 31;
++constexpr uint64_t GenericExecutionBufferBytes = 4096;
++constexpr uint32_t GenericExecutionWorkgroups = 4;
++constexpr uint32_t GenericExecutionWaves = 16;
++constexpr uint32_t GenericExecutionInstructionsPerWave = 19;
++constexpr std::array<uint32_t, 3> GenericExecutionBufferCrc32c = {
++    0x4705cdabU, 0xb28d0486U, 0x4705cdabU};
++constexpr std::array<uint32_t, GenericExecutionInstructionsPerWave>
++    GenericExecutionInstructionOffsets = {
++        0, 8, 16, 20, 24, 32, 36, 40, 48, 52,
++        56, 64, 72, 80, 88, 96, 100, 108, 116,
++    };
+ 
+ uint32_t
+ rotateRight(uint32_t value, unsigned amount)
+@@ -191,6 +206,79 @@ hexBytes(const Container &bytes)
+     return result;
+ }
+ 
++template<size_t Size>
++bool
++fixedNameEquals(const std::array<uint8_t, Size> &value, const char *expected)
++{
++    const size_t length = std::strlen(expected);
++    return length < value.size() &&
++        std::equal(expected, expected + length, value.begin()) &&
++        std::all_of(value.begin() + length, value.end(),
++                    [](uint8_t byte) { return byte == 0; });
++}
++
++bool
++lockedGenericExecutionFixture(
++    const protocol::CodeObjectManifest &manifest,
++    const std::vector<uint8_t> &image)
++{
++    const auto &fixture = code_object_fixture::Images[0];
++    const auto &kernel = fixture.kernels[0];
++    const protocol::CodeObjectSegment expectedSegments[3] = {
++        {1, 4, 0, 0, 0x840, 0x840, 0x1000},
++        {1, 5, 0x900, 0x1900, 0x480, 0x480, 0x1000},
++        {1, 6, 0xd80, 0x2d80, 0x70, 0x280, 0x1000},
++    };
++    if (image.size() != fixture.byteCount ||
++        manifest.imageSize != fixture.byteCount ||
++        hexBytes(manifest.imageSha256) != fixture.sha256 ||
++        manifest.elfMachine != code_object_fixture::ElfMachine ||
++        manifest.elfType != code_object_fixture::ElfTypeDyn ||
++        manifest.elfOsabi != code_object_fixture::ElfOsabiAmdgpuHsa ||
++        manifest.elfAbiVersion != code_object_fixture::ElfAbiVersion ||
++        manifest.elfFlags != code_object_fixture::ElfFlags ||
++        manifest.gfxTarget != code_object_fixture::GfxTarget ||
++        manifest.codeObjectVersion != code_object_fixture::CodeObjectVersion ||
++        manifest.metadataMajor != code_object_fixture::MetadataMajor ||
++        manifest.metadataMinor != code_object_fixture::MetadataMinor ||
++        manifest.relocationCount != 0 || manifest.segmentCount != 3 ||
++        manifest.kernelIndex != 0 ||
++        manifest.kernargSegmentSize != kernel.kernargBytes ||
++        manifest.kernargSegmentAlign != kernel.kernargAlignment ||
++        manifest.groupSegmentFixedSize != 0 ||
++        manifest.privateSegmentFixedSize != 0 ||
++        manifest.maxFlatWorkgroupSize != kernel.maxFlatWorkgroupSize ||
++        manifest.wavefrontSize != kernel.wavefrontSize ||
++        manifest.sgprCount != kernel.sgprCount ||
++        manifest.vgprCount != kernel.vgprCount ||
++        manifest.usesDynamicStack != 0 ||
++        manifest.descriptorSize != protocol::CodeObjectDescriptorBytes ||
++        manifest.kernelCodeEntryByteOffset !=
++            static_cast<int64_t>(kernel.codeEntryByteOffset) ||
++        manifest.codeVirtualAddress != 0x1900 ||
++        manifest.codeFileOffset != 0x900 || manifest.codeSize != 0x78 ||
++        manifest.descriptorVirtualAddress != 0x800 ||
++        manifest.descriptorFileOffset != kernel.descriptorFileOffset ||
++        !fixedNameEquals(manifest.kernelName, kernel.name) ||
++        !fixedNameEquals(manifest.descriptorSymbol, kernel.descriptorSymbol) ||
++        sha256Hex(manifest.descriptor.data(), manifest.descriptor.size()) !=
++            "4d593541914997359607cb1d01d3abf44ce347d3b84104ae1e80b71274cd9003") {
++        return false;
++    }
++    for (size_t index = 0; index < 3; ++index) {
++        const auto &left = manifest.segments[index];
++        const auto &right = expectedSegments[index];
++        if (left.type != right.type || left.flags != right.flags ||
++            left.fileOffset != right.fileOffset ||
++            left.virtualAddress != right.virtualAddress ||
++            left.fileSize != right.fileSize ||
++            left.memorySize != right.memorySize ||
++            left.alignment != right.alignment)
++            return false;
++    }
++    return true;
++}
++
+ bool
+ hasWireMessageType(const std::vector<uint8_t> &record,
+                    protocol::MessageType type)
+@@ -404,7 +492,9 @@ dispatchFailure(const protocol::DispatchRequest &request,
+ 
+ } // anonymous namespace
+ 
+-struct HostGPUBridge::GenericDispatchSession
++struct HostGPUBridge::GenericDispatchSession : public GPUNativeMemory,
++                                               public GPUDispatchLifecycleListener,
++                                               public GPUDispatchCompletionSink
+ {
+     using Owner = HostGPUMemoryState::Owner;
+ 
+@@ -415,7 +505,10 @@ struct HostGPUBridge::GenericDispatchSession
+     };
+ 
+     HostGPUMemoryState &memory;
++    HostGPUBridge &bridge;
+     Owner owner;
++    HostNativeExecutionAdapter *executionAdapter = nullptr;
++    const bool executionMode;
+     std::unique_ptr<HostNativeMemoryContext> context;
+     std::unique_ptr<HostNativeCodeObjectMapper> mapper;
+     std::unique_ptr<HostNativeCommandProcessorCore> commandProcessor;
+@@ -442,12 +535,65 @@ struct HostGPUBridge::GenericDispatchSession
+     bool queuePinned = false;
+     bool signalPinned = false;
+     bool ackSent = false;
++    bool completionScheduled = false;
+     bool completionQueued = false;
++    bool executionBound = false;
++    bool executionStarted = false;
++    bool executionCompleted = false;
++    bool executionRetired = false;
++    uint64_t executionRequestId = 0;
++    Tick executionStartTick = 0;
++    Tick executionEndTick = 0;
++    Tick executionRetireTick = 0;
++    uint32_t executionOutputCrc32c = 0;
++    uint64_t executionSignalBefore = 0;
++    uint64_t executionSignalAfter = 0;
++
++    struct ExecutionAllocation
++    {
++        HostGPUMemoryState::AllocationView view;
++        HostNativeMemoryContext::PageLease lease;
++        Addr address = 0;
++    };
++    std::array<std::optional<ExecutionAllocation>, 3> executionBuffers;
++    std::array<HostGPUMemoryState::AllocationView, 3>
++        executionAllocationViews = {};
++    std::array<std::vector<uint8_t>, 3> executionBefore;
++    bool executionActive = false;
++    uint64_t fetchedCount = 0;
++    uint64_t submittedCount = 0;
++    uint64_t dispatcherStartedCount = 0;
++    uint64_t waveStartedCount = 0;
++    uint32_t waveStartMask = 0;
++    uint64_t instructionStartedCount = 0;
++    std::unordered_map<uint64_t, uint32_t> instructionsPerWave;
++    std::unordered_map<uint64_t, std::vector<uint32_t>>
++        instructionOffsetsPerWave;
++    std::unordered_map<uint64_t, int> workgroupPerWave;
++    std::unordered_map<uint64_t, uint64_t> lastSequencePerWave;
++    std::unordered_set<uint64_t> instructionSequences;
++    uint64_t scalarReads = 0;
++    uint64_t globalReads = 0;
++    std::bitset<GenericExecutionBufferBytes / sizeof(uint32_t)>
++        inputReadCoverage;
++    uint64_t globalWrites = 0;
++    std::bitset<GenericExecutionBufferBytes / sizeof(uint32_t)>
++        outputWriteCoverage;
++    std::bitset<GenericExecutionBufferBytes / sizeof(uint32_t)>
++        resultWriteCoverage;
++    uint64_t globalStoreEventCount = 0;
++    uint64_t globalStoreLaneCount = 0;
++    std::bitset<GenericExecutionWaves> outputStoreChunks;
++    std::bitset<GenericExecutionWaves> resultStoreChunks;
++    uint64_t workgroupCompletedCount = 0;
++    std::bitset<GenericExecutionWorkgroups> completedWorkgroups;
+ 
+     GenericDispatchSession(
+-        HostGPUMemoryState &memory, const Owner &sessionOwner,
+-        uint64_t pageBytes)
+-        : memory(memory), owner(sessionOwner),
++        HostGPUBridge &bridge, HostGPUMemoryState &memory,
++        const Owner &sessionOwner, uint64_t pageBytes,
++        HostNativeExecutionAdapter *adapter, bool execute)
++        : memory(memory), bridge(bridge), owner(sessionOwner),
++          executionAdapter(adapter), executionMode(execute),
+           context(std::make_unique<HostNativeMemoryContext>(
+               memory, owner, pageBytes)),
+           mapper(std::make_unique<HostNativeCodeObjectMapper>(
+@@ -463,6 +609,520 @@ struct HostGPUBridge::GenericDispatchSession
+         clear(0);
+     }
+ 
++    bool read(Addr address, void *destination, size_t byteCount,
++              uint64_t requestId = 0) const override
++    {
++        const bool packetRead = packetAllocation &&
++            address == packetAllocation->view.gpuVa + 4 &&
++            byteCount == sizeof(uint32_t);
++        const bool kernargRead =
++            address == submitResponse.kernargVa && byteCount == 32;
++        const bool inputRead = executionBuffers[0] &&
++            rangeContains(executionBuffers[0]->address,
++                          GenericExecutionBufferBytes, address, byteCount);
++        const bool codeRead = byteCount == 64 && address % 64 == 0 &&
++            (address == mapResponse.entryVa ||
++             address == mapResponse.entryVa + 64);
++        size_t inputIndex = 0;
++        if (executionActive) {
++            panic_if(!packetRead && !kernargRead && !inputRead && !codeRead,
++                     "unexpected generic execution read at %#x/%llu", address,
++                     static_cast<unsigned long long>(byteCount));
++            if (inputRead) {
++                panic_if(byteCount != sizeof(uint32_t) ||
++                             address % sizeof(uint32_t) != 0,
++                         "generic execution global-read shape mismatch");
++                inputIndex = static_cast<size_t>(
++                    (address - executionBuffers[0]->address) /
++                    sizeof(uint32_t));
++                panic_if(inputReadCoverage.test(inputIndex),
++                         "duplicate generic execution input read");
++            }
++        }
++        const bool success = context && context->functionalRead(
++            address, destination, byteCount, requestId);
++        if (!success || !executionActive)
++            return success;
++        if (packetRead || kernargRead) {
++            ++const_cast<GenericDispatchSession *>(this)->scalarReads;
++        } else if (inputRead) {
++            const_cast<GenericDispatchSession *>(this)->inputReadCoverage.set(
++                inputIndex);
++            ++const_cast<GenericDispatchSession *>(this)->globalReads;
++        }
++        return true;
++    }
++
++    bool write(Addr address, const void *source, size_t byteCount,
++               uint64_t requestId = 0) override
++    {
++        const bool outputWrite = executionBuffers[1] &&
++            rangeContains(executionBuffers[1]->address,
++                          GenericExecutionBufferBytes, address, byteCount);
++        const bool resultWrite = executionBuffers[2] &&
++            rangeContains(executionBuffers[2]->address,
++                          GenericExecutionBufferBytes, address, byteCount);
++        size_t index = 0;
++        if (executionActive) {
++            panic_if(byteCount != sizeof(uint32_t) ||
++                         address % sizeof(uint32_t) != 0 ||
++                         outputWrite == resultWrite,
++                     "unexpected generic execution write at %#x/%llu", address,
++                     static_cast<unsigned long long>(byteCount));
++            const Addr base = outputWrite ? executionBuffers[1]->address :
++                executionBuffers[2]->address;
++            index = static_cast<size_t>((address - base) / sizeof(uint32_t));
++            panic_if((outputWrite ? outputWriteCoverage : resultWriteCoverage)
++                         .test(index),
++                     "duplicate generic execution output write");
++        }
++        const bool success = context && context->functionalWrite(
++            address, source, byteCount, requestId);
++        if (!success || !executionActive)
++            return success;
++        (outputWrite ? outputWriteCoverage : resultWriteCoverage).set(index);
++        ++globalWrites;
++        return true;
++    }
++
++    static bool rangeContains(
++        Addr base, uint64_t bytes, Addr address, size_t byteCount)
++    {
++        if (base == 0 || byteCount == 0 || address < base)
++            return false;
++        const uint64_t offset = address - base;
++        return offset <= bytes && byteCount <= bytes - offset;
++    }
++
++    static bool validPointer(Addr value)
++    {
++        return value != 0 && (value & 3) == 0;
++    }
++
++    bool prepareExecutionBuffers(const protocol::GenericDispatchRequest &request,
++                                 uint64_t requestId)
++    {
++        if (!executionMode || !executionAdapter || executionAdapter->active() ||
++            requestId == 0 || !allocResponse.kernargVa ||
++            request.submit.kernargOffset >
++                std::numeric_limits<Addr>::max() - allocResponse.kernargVa)
++            return false;
++        const Addr kernargVa = allocResponse.kernargVa +
++            request.submit.kernargOffset;
++        std::vector<uint8_t> kernarg;
++        if (request.submit.kernargSize != 280 ||
++            !context->functionalRead(
++                kernargVa, request.submit.kernargSize, kernarg, requestId) ||
++            kernarg.size() != request.submit.kernargSize ||
++            kernarg[88] != 1)
++            return false;
++        for (size_t offset = 24; offset < kernarg.size(); ++offset) {
++            if (offset != 88 && kernarg[offset] != 0)
++                return false;
++        }
++        std::array<uint64_t, 3> pointers = {};
++        std::memcpy(pointers.data(), kernarg.data(), sizeof(pointers));
++        std::array<uint64_t, 3> seen = {};
++        for (size_t index = 0; index < pointers.size(); ++index) {
++            if (!validPointer(pointers[index]))
++                return false;
++            for (size_t prior = 0; prior < index; ++prior) {
++                if (seen[prior] == pointers[index])
++                    return false;
++            }
++            seen[index] = pointers[index];
++            const auto allocation = [&]() -> std::optional<HostGPUMemoryState::AllocationView> {
++                for (const auto &candidate : memory.allocationsForOwner(owner)) {
++                    if (pointers[index] == candidate.gpuVa &&
++                        candidate.size == GenericExecutionBufferBytes &&
++                        candidate.alignment == GenericExecutionBufferBytes)
++                        return candidate;
++                }
++                return std::nullopt;
++            }();
++            if (!allocation)
++                return false;
++            const auto lease = context->map(
++                pointers[index], GenericExecutionBufferBytes);
++            if (!lease || !memory.pinPinnedDispatchAllocation(
++                    owner, allocation->allocationId, allocation->generation,
++                    requestId)) {
++                if (lease)
++                    context->unmap(*lease);
++                releaseExecutionBuffers(requestId);
++                return false;
++            }
++            executionBuffers[index].emplace(
++                ExecutionAllocation{*allocation, *lease, pointers[index]});
++            executionAllocationViews[index] = *allocation;
++        }
++        for (size_t index = 0; index < executionBefore.size(); ++index) {
++            if (!context->functionalRead(
++                    executionBuffers[index]->address,
++                    GenericExecutionBufferBytes, executionBefore[index],
++                    requestId)) {
++                releaseExecutionBuffers(requestId);
++                return false;
++            }
++        }
++        for (uint32_t index = 0;
++             index < GenericExecutionBufferBytes / sizeof(uint32_t); ++index) {
++            std::array<uint32_t, 3> values = {};
++            for (size_t buffer = 0; buffer < values.size(); ++buffer) {
++                std::memcpy(&values[buffer],
++                            executionBefore[buffer].data() +
++                                index * sizeof(uint32_t),
++                            sizeof(uint32_t));
++            }
++            if (values[0] != (0x51000000U ^ index) ||
++                values[1] != (0x6b000000U ^ index) ||
++                values[2] != (0x7c000000U ^ index)) {
++                releaseExecutionBuffers(requestId);
++                return false;
++            }
++        }
++        executionRequestId = requestId;
++        if (!executionAdapter->bind(
++                GenericExecutionDispatchId, requestId, *this)) {
++            releaseExecutionBuffers(requestId);
++            executionRequestId = 0;
++            return false;
++        }
++        executionBound = true;
++        executionAdapter->setLifecycleSink(this);
++        executionAdapter->setCompletionSink(this);
++        return true;
++    }
++
++    bool releaseExecutionBuffers(uint64_t requestId)
++    {
++        bool ok = true;
++        for (auto &entry : executionBuffers) {
++            if (!entry)
++                continue;
++            ok = memory.releasePinnedDispatchAllocation(
++                     owner, entry->view.allocationId, entry->view.generation,
++                     requestId) && ok;
++            ok = context->unmap(entry->lease) && ok;
++            entry.reset();
++        }
++        if (ok) {
++            for (auto &snapshot : executionBefore)
++                snapshot.clear();
++        }
++        return ok;
++    }
++
++    bool finishExecutionBinding()
++    {
++        if (!executionBound || !executionAdapter)
++            return !executionMode;
++        if (!executionAdapter->release(GenericExecutionDispatchId))
++            return false;
++        executionBound = false;
++        if (executionAdapter->attached() && !executionAdapter->detach())
++            return false;
++        executionAdapter->setLifecycleSink(&bridge);
++        executionAdapter->setCompletionSink(nullptr);
++        return true;
++    }
++
++    bool claimsExecutionAllocation(
++        uint64_t allocationId, uint64_t generation) const
++    {
++        if (!executionMode || allocationId == 0 || generation == 0)
++            return false;
++        return std::any_of(
++            executionAllocationViews.begin(), executionAllocationViews.end(),
++            [allocationId, generation](const auto &view) {
++                return view.allocationId == allocationId &&
++                    view.generation == generation;
++            });
++    }
++
++    bool executionTaskMatches(const HSAQueueEntry &task) const
++    {
++        return executionMode && executionBound &&
++            task.dispatchId() == GenericExecutionDispatchId &&
++            task.hostDispPktAddr() == submitResponse.packetVa &&
++            task.kernargAddr() == submitResponse.kernargVa &&
++            task.numWgTotal() == 4 && task.gridSize(0) == 1024 &&
++            task.gridSize(1) == 1 && task.gridSize(2) == 1 &&
++            task.wgSize(0) == 256 && task.wgSize(1) == 1 &&
++            task.wgSize(2) == 1;
++    }
++
++    bool validateExecutionOutput()
++    {
++        if (executionBefore[0].size() != GenericExecutionBufferBytes ||
++            !executionBuffers[0] || !executionBuffers[1] ||
++            !executionBuffers[2])
++            return false;
++        std::vector<uint8_t> input;
++        std::vector<uint8_t> output;
++        std::vector<uint8_t> result;
++        if (!context->functionalRead(
++                executionBuffers[0]->address, GenericExecutionBufferBytes,
++                input, executionRequestId) ||
++            !context->functionalRead(
++                executionBuffers[1]->address, GenericExecutionBufferBytes,
++                output, executionRequestId) ||
++            !context->functionalRead(
++                executionBuffers[2]->address, GenericExecutionBufferBytes,
++                result, executionRequestId) ||
++            input != executionBefore[0] || output.size() != input.size() ||
++            result.size() != input.size()) {
++            return false;
++        }
++        for (uint32_t index = 0;
++             index < GenericExecutionBufferBytes / sizeof(uint32_t); ++index) {
++            uint32_t inputValue = 0;
++            uint32_t outputValue = 0;
++            uint32_t resultValue = 0;
++            std::memcpy(&inputValue, input.data() + index * sizeof(uint32_t),
++                        sizeof(inputValue));
++            std::memcpy(&outputValue, output.data() + index * sizeof(uint32_t),
++                        sizeof(outputValue));
++            std::memcpy(&resultValue, result.data() + index * sizeof(uint32_t),
++                        sizeof(resultValue));
++            if (inputValue != (0x51000000U ^ index) ||
++                outputValue != index || resultValue != inputValue)
++                return false;
++        }
++        std::vector<uint8_t> combined;
++        try {
++            combined.reserve(output.size() + result.size());
++            combined.insert(combined.end(), output.begin(), output.end());
++            combined.insert(combined.end(), result.begin(), result.end());
++        } catch (const std::bad_alloc &) {
++            return false;
++        }
++        executionOutputCrc32c = protocol::crc32c(
++            combined.data(), combined.size());
++        return executionOutputCrc32c == 0x6f67026fU;
++    }
++
++    void hsaPacketFetched(Addr hostPacketAddr, uint32_t queueId) override
++    {
++        if (!executionMode || !executionBound ||
++            !packetAllocation || hostPacketAddr != packetAllocation->view.gpuVa ||
++            queueId != 0 || fetchedCount != 0)
++            panic("generic execution fetched-packet identity mismatch");
++        ++fetchedCount;
++    }
++
++    void commandProcessorSubmitted(const HSAQueueEntry &task) override
++    {
++        if (!executionMode || !executionBound ||
++            task.dispatchId() != GenericExecutionDispatchId ||
++            task.queueId() != 0 || submittedCount != 0)
++            panic("generic execution CP identity mismatch");
++        ++submittedCount;
++    }
++
++    void gpuDispatcherStarted(const HSAQueueEntry &task) override
++    {
++        if (!executionTaskMatches(task) || executionStarted ||
++            dispatcherStartedCount != 0)
++            panic("generic execution dispatcher identity mismatch");
++        executionStarted = true;
++        executionActive = true;
++        ++dispatcherStartedCount;
++        executionStartTick = curTick();
++    }
++
++    void cuWaveStarted(
++        const HSAQueueEntry &task, int cuId, int waveId,
++        uint32_t workgroupX, uint32_t workgroupY, uint32_t workgroupZ,
++        uint64_t laneMask) override
++    {
++        if (!executionTaskMatches(task) || cuId != 0 || waveId < 0 ||
++            waveId >= 4 || workgroupX >= GenericExecutionWorkgroups ||
++            workgroupY != 0 || workgroupZ != 0 ||
++            laneMask != std::numeric_limits<uint64_t>::max())
++            panic("generic execution wave identity mismatch");
++        const uint32_t identity = workgroupX * 4 + waveId;
++        panic_if(waveStartMask & (1U << identity),
++                 "duplicate generic execution wave identity");
++        waveStartMask |= 1U << identity;
++        ++waveStartedCount;
++    }
++
++    void cuInstructionStarted(
++        const HSAQueueEntry &task, int cuId, int workgroupId,
++        uint64_t dynamicWaveId, Addr pc, uint64_t sequence) override
++    {
++        if (!executionTaskMatches(task) || cuId != 0 || workgroupId < 0 ||
++            workgroupId >= static_cast<int>(GenericExecutionWorkgroups) ||
++            pc < task.codeAddr() || pc >= task.codeAddr() + 0x78)
++            panic("generic execution instruction identity mismatch");
++        auto [workgroup, inserted] =
++            workgroupPerWave.emplace(dynamicWaveId, workgroupId);
++        panic_if(inserted &&
++                     workgroupPerWave.size() > GenericExecutionWaves,
++                 "generic execution observed too many dynamic waves");
++        panic_if(!inserted && workgroup->second != workgroupId,
++                 "generic execution dynamic wave changed workgroup");
++        auto &offsets = instructionOffsetsPerWave[dynamicWaveId];
++        panic_if(offsets.size() >= GenericExecutionInstructionOffsets.size() ||
++                     pc - task.codeAddr() !=
++                         GenericExecutionInstructionOffsets[offsets.size()],
++                 "generic execution instruction PC sequence mismatch");
++        offsets.push_back(static_cast<uint32_t>(pc - task.codeAddr()));
++        panic_if(!instructionSequences.insert(sequence).second,
++                 "duplicate generic execution instruction sequence");
++        auto previous = lastSequencePerWave.find(dynamicWaveId);
++        panic_if(previous != lastSequencePerWave.end() &&
++                     sequence <= previous->second,
++                 "generic execution instruction sequence did not increase");
++        lastSequencePerWave[dynamicWaveId] = sequence;
++        auto &perWave = instructionsPerWave[dynamicWaveId];
++        ++perWave;
++        panic_if(perWave > GenericExecutionInstructionsPerWave,
++                 "generic execution wave exceeded instruction count");
++        ++instructionStartedCount;
++    }
++
++    void cuGlobalStoreCompleted(
++        const HSAQueueEntry &task, int cuId, int workgroupId,
++        const std::vector<Addr> &addresses, uint32_t bytesPerLane,
++        uint64_t laneMask) override
++    {
++        if (!executionTaskMatches(task) || cuId != 0 || workgroupId < 0 ||
++            workgroupId >= static_cast<int>(GenericExecutionWorkgroups) ||
++            bytesPerLane != sizeof(uint32_t) || addresses.size() != 64 ||
++            laneMask != std::numeric_limits<uint64_t>::max() ||
++            !executionBuffers[1] || !executionBuffers[2])
++            panic("generic execution store identity mismatch");
++        const bool outputStore = rangeContains(
++            executionBuffers[1]->address, GenericExecutionBufferBytes,
++            addresses.front(), bytesPerLane);
++        const bool resultStore = rangeContains(
++            executionBuffers[2]->address, GenericExecutionBufferBytes,
++            addresses.front(), bytesPerLane);
++        panic_if(outputStore == resultStore,
++                 "generic execution store outside unique B/C range");
++        const Addr base = outputStore ? executionBuffers[1]->address :
++            executionBuffers[2]->address;
++        const Addr offset = addresses.front() - base;
++        panic_if(offset % (64 * sizeof(uint32_t)) != 0,
++                 "generic execution store chunk alignment mismatch");
++        const size_t chunk = offset / (64 * sizeof(uint32_t));
++        panic_if(chunk >= GenericExecutionWaves ||
++                     chunk / 4 != static_cast<size_t>(workgroupId),
++                 "generic execution store chunk/workgroup mismatch");
++        for (size_t lane = 0; lane < addresses.size(); ++lane) {
++            panic_if(addresses[lane] !=
++                         base + (chunk * 64 + lane) * sizeof(uint32_t),
++                     "generic execution store lane sequence mismatch");
++        }
++        auto &chunks = outputStore ? outputStoreChunks : resultStoreChunks;
++        panic_if(chunks.test(chunk), "duplicate generic execution store chunk");
++        panic_if(outputStore && !resultStoreChunks.test(chunk),
++                 "generic execution B store preceded matching C store");
++        chunks.set(chunk);
++        ++globalStoreEventCount;
++        globalStoreLaneCount += std::bitset<64>(laneMask).count();
++    }
++
++    void gpuWorkgroupCompleted(
++        const HSAQueueEntry &task, int cuId, int workgroupId) override
++    {
++        if (!executionTaskMatches(task) || cuId != 0 || workgroupId < 0 ||
++            workgroupId >= static_cast<int>(GenericExecutionWorkgroups) ||
++            completedWorkgroups.test(workgroupId))
++            panic("generic execution workgroup identity mismatch");
++        completedWorkgroups.set(workgroupId);
++        ++workgroupCompletedCount;
++    }
++
++    bool completeKernel(
++        const HSAQueueEntry &task, int, int) override
++    {
++        executionActive = false;
++        if (!executionTaskMatches(task) || !executionStarted ||
++            executionCompleted || task.numWgCompleted() != task.numWgTotal() ||
++            fetchedCount != 1 || submittedCount != 1 ||
++            dispatcherStartedCount != 1 ||
++            waveStartedCount != GenericExecutionWaves ||
++            waveStartMask != 0xffffU ||
++            instructionStartedCount != GenericExecutionWaves *
++                GenericExecutionInstructionsPerWave ||
++            instructionsPerWave.size() != GenericExecutionWaves ||
++            instructionOffsetsPerWave.size() != GenericExecutionWaves ||
++            workgroupPerWave.size() != GenericExecutionWaves ||
++            lastSequencePerWave.size() != GenericExecutionWaves ||
++            instructionSequences.size() != GenericExecutionWaves *
++                GenericExecutionInstructionsPerWave ||
++            scalarReads != 32 || globalReads != 1024 ||
++            inputReadCoverage.count() != 1024 || globalWrites != 2048 ||
++            outputWriteCoverage.count() != 1024 ||
++            resultWriteCoverage.count() != 1024 ||
++            globalStoreEventCount != 32 || globalStoreLaneCount != 2048 ||
++            outputStoreChunks.count() != GenericExecutionWaves ||
++            resultStoreChunks.count() != GenericExecutionWaves ||
++            workgroupCompletedCount != GenericExecutionWorkgroups ||
++            completedWorkgroups.count() != GenericExecutionWorkgroups ||
++            !validateExecutionOutput())
++            return false;
++        std::array<uint32_t, GenericExecutionWorkgroups>
++            dynamicWavesPerWorkgroup = {};
++        for (const auto &[dynamicWave, instructionCount] :
++             instructionsPerWave) {
++            const auto workgroup = workgroupPerWave.find(dynamicWave);
++            const auto offsets = instructionOffsetsPerWave.find(dynamicWave);
++            if (instructionCount != GenericExecutionInstructionsPerWave ||
++                workgroup == workgroupPerWave.end() ||
++                offsets == instructionOffsetsPerWave.end() ||
++                offsets->second !=
++                    std::vector<uint32_t>(
++                        GenericExecutionInstructionOffsets.begin(),
++                        GenericExecutionInstructionOffsets.end()) ||
++                workgroup->second < 0 ||
++                workgroup->second >=
++                    static_cast<int>(GenericExecutionWorkgroups)) {
++                return false;
++            }
++            ++dynamicWavesPerWorkgroup[workgroup->second];
++        }
++        if (!std::all_of(
++                dynamicWavesPerWorkgroup.begin(),
++                dynamicWavesPerWorkgroup.end(),
++                [](uint32_t count) { return count == 4; }))
++            return false;
++        uint64_t signalValue = 0;
++        if (!signalAllocation || !context->functionalRead(
++                signalAllocation->view.gpuVa, &signalValue,
++                sizeof(signalValue), executionRequestId) || signalValue != 1)
++            return false;
++        executionSignalBefore = signalValue;
++        signalValue = 0;
++        if (!context->functionalWrite(
++                signalAllocation->view.gpuVa, &signalValue,
++                sizeof(signalValue), executionRequestId))
++            return false;
++        signalValue = 1;
++        if (!context->functionalRead(
++                signalAllocation->view.gpuVa, &signalValue,
++                sizeof(signalValue), executionRequestId) || signalValue != 0)
++            return false;
++        executionSignalAfter = signalValue;
++        executionCompleted = true;
++        executionEndTick = curTick();
++        return true;
++    }
++
++    void hsaPacketRetired(
++        const HSAQueueEntry &task, int, int) override
++    {
++        if (!executionTaskMatches(task) || !executionCompleted ||
++            executionRetired || !executionAdapter->packetRetired())
++            panic("generic execution retirement identity mismatch");
++        executionRetired = true;
++        executionRetireTick = curTick();
++        bridge.genericExecutionRetired(*this);
++    }
++
+     bool allocatePrivate(
+         std::optional<PrivateAllocation> &destination, uint64_t bytes,
+         uint64_t requestId, uint64_t now)
+@@ -642,18 +1302,39 @@ struct HostGPUBridge::GenericDispatchSession
+             releasePrivateResources(now);
+             return false;
+         }
++        if (executionMode && !prepareExecutionBuffers(request, requestId)) {
++            response.status = executionAdapter && executionAdapter->active() ?
++                protocol::Status::Busy : protocol::Status::ProtocolState;
++            releasePrivateResources(now);
++            return false;
++        }
++
+         HostNativeQueueCore::FetchedPacket fetched;
+-        if (!nativeQueue->fetch(fetched, nullptr, requestId)) {
++        if (!nativeQueue->fetch(
++                fetched, executionMode ? executionAdapter : nullptr,
++                requestId)) {
+             response.status = protocol::Status::Internal;
++            if (executionBound) {
++                finishExecutionBinding();
++                releaseExecutionBuffers(requestId);
++                executionRequestId = 0;
++            }
+             releasePrivateResources(now);
+             return false;
+         }
+         cpResult = std::make_unique<HostNativeCommandProcessorCore::Result>();
+         if (!state->submit(
+                 {owner, requestId}, request, signalAllocation->view.gpuVa,
+-                *nativeQueue, fetched, *cpResult, response)) {
++                *nativeQueue, fetched, *cpResult, response,
++                executionMode ? executionAdapter : nullptr,
++                executionMode ? GenericExecutionDispatchId : 0)) {
+             if (nativeQueue->ownsPending(fetched))
+                 nativeQueue->cancelFetch(fetched.ticket);
++            if (executionBound) {
++                finishExecutionBinding();
++                releaseExecutionBuffers(requestId);
++                executionRequestId = 0;
++            }
+             releasePrivateResources(now);
+             return false;
+         }
+@@ -661,6 +1342,9 @@ struct HostGPUBridge::GenericDispatchSession
+         response.simTick = now;
+         response.admissionTick = now;
+         nativeAdmitted = true;
++        submitRequest = request;
++        submitResponse = response;
++        submitRequestId = requestId;
+         return true;
+     }
+ 
+@@ -702,6 +1386,17 @@ struct HostGPUBridge::GenericDispatchSession
+     bool clear(uint64_t now)
+     {
+         bool ok = true;
++        if (executionBound) {
++            if (executionAdapter && executionAdapter->dispatchSubmitted() &&
++                !executionAdapter->packetRetired()) {
++                return false;
++            }
++            ok = finishExecutionBinding() && ok;
++        }
++        if (executionRequestId != 0) {
++            ok = releaseExecutionBuffers(executionRequestId) && ok;
++            executionRequestId = 0;
++        }
+         if (state && state->hasSubmission())
+             ok = state->abandonSubmission() && ok;
+         nativeAdmitted = false;
+@@ -815,9 +1510,11 @@ HostGPUBridge::HostGPUBridge(const HostGPUBridgeParams &params)
+       dispatchTracePath(params.dispatch_trace_path), system(params.system),
+       hsaPacketProcessor(params.hsa_packet_processor),
+       gpuDispatcher(params.gpu_dispatcher),
++      shader(params.shader),
+       dispatchEnabled(params.system && params.hsa_packet_processor &&
+                       params.gpu_dispatcher &&
+                       !params.dispatch_trace_path.empty()),
++      executionEnabled(dispatchEnabled && params.shader != nullptr),
+       recordServiceEvent([this]() { processRecords(); },
+                          name() + ".host_gpu_records"),
+       queueServiceEvent([this]() { processQueueCommands(); },
+@@ -866,6 +1563,9 @@ HostGPUBridge::HostGPUBridge(const HostGPUBridgeParams &params)
+         protocol::CodeObjectTransferCapabilityMask;
+     identity.supported[protocol::GenericDispatchCapabilityByte] |=
+         protocol::GenericDispatchCapabilityMask;
++    if (executionEnabled)
++        identity.supported[protocol::GenericExecutionCapabilityByte] |=
++            protocol::GenericExecutionCapabilityMask;
+     if (dispatchEnabled) {
+         identity.supported[protocol::PinnedDispatchCapabilityByte] |=
+             protocol::PinnedDispatchCapabilityMask;
+@@ -909,6 +1609,9 @@ HostGPUBridge::validateConfiguration()
+                   dispatchTracePath.find("//") != std::string::npos),
+              "%s: dispatch_trace_path must be an absolute file pathname",
+              name());
++    fatal_if(shader != nullptr && !dispatchEnabled,
++             "%s: shader requires the complete native dispatch configuration",
++             name());
+     fatal_if(exitOnDispatchSessionDone && !dispatchEnabled,
+              "%s: exit_on_dispatch_session_done requires native dispatch",
+              name());
+@@ -1026,6 +1729,121 @@ HostGPUBridge::makeDispatchTraceRecord(
+     return stream.str();
+ }
+ 
++std::string
++HostGPUBridge::makeGenericExecutionTraceRecord(
++    const char *event, const GenericDispatchSession &session,
++    uint64_t requestId,
++    const protocol::GenericDispatchResponse &response,
++    bool type20Durable, bool ownerDisconnected, bool queueRetired,
++    bool pinsReleased, bool cleanupComplete,
++    const std::bitset<3> &d2hAckSent, bool unmapAckSent) const
++{
++    const bool pcCoverageExact =
++        session.instructionOffsetsPerWave.size() == GenericExecutionWaves &&
++        std::all_of(
++            session.instructionOffsetsPerWave.begin(),
++            session.instructionOffsetsPerWave.end(),
++            [](const auto &entry) {
++                return entry.second == std::vector<uint32_t>(
++                    GenericExecutionInstructionOffsets.begin(),
++                    GenericExecutionInstructionOffsets.end());
++            });
++    const auto &a = session.executionAllocationViews[0];
++    const auto &b = session.executionAllocationViews[1];
++    const auto &c = session.executionAllocationViews[2];
++    std::ostringstream stream;
++    stream << "{\"schema\":\"amdgpu-sim.cp26-generic-execution-trace.v1\""
++           << ",\"event\":\"" << event << "\""
++           << ",\"sim_tick\":" << curTick()
++           << ",\"owner_fd\":" << session.owner.fd
++           << ",\"owner_generation\":"
++           << session.owner.clientGeneration
++           << ",\"request_id\":" << requestId
++           << ",\"trace_id\":" << response.traceId
++           << ",\"ticket_id\":" << response.ticketId
++           << ",\"dispatch_id\":" << GenericExecutionDispatchId
++           << ",\"image_sha256\":\""
++           << hexBytes(response.imageSha256) << "\""
++           << ",\"packet_va\":" << response.packetVa
++           << ",\"packet_crc32c\":" << response.packetCrc32c
++           << ",\"a_allocation_id\":" << a.allocationId
++           << ",\"a_generation\":" << a.generation
++           << ",\"a_gpu_va\":" << a.gpuVa
++           << ",\"b_allocation_id\":" << b.allocationId
++           << ",\"b_generation\":" << b.generation
++           << ",\"b_gpu_va\":" << b.gpuVa
++           << ",\"c_allocation_id\":" << c.allocationId
++           << ",\"c_generation\":" << c.generation
++           << ",\"c_gpu_va\":" << c.gpuVa
++           << ",\"packet_fetches\":" << session.fetchedCount
++           << ",\"command_processor_submissions\":"
++           << session.submittedCount
++           << ",\"gpu_dispatcher_starts\":"
++           << session.dispatcherStartedCount
++           << ",\"waves_started\":" << session.waveStartedCount
++           << ",\"instructions_started\":"
++           << session.instructionStartedCount
++           << ",\"pc_coverage_waves\":"
++           << session.instructionOffsetsPerWave.size()
++           << ",\"pc_offsets_per_wave\":"
++           << GenericExecutionInstructionsPerWave
++           << ",\"pc_coverage_exact\":"
++           << (pcCoverageExact ? "true" : "false")
++           << ",\"scalar_reads\":" << session.scalarReads
++           << ",\"global_reads\":" << session.globalReads
++           << ",\"global_writes\":" << session.globalWrites
++           << ",\"store_events\":" << session.globalStoreEventCount
++           << ",\"store_lanes\":" << session.globalStoreLaneCount
++           << ",\"workgroups_completed\":"
++           << session.workgroupCompletedCount
++           << ",\"signal_before\":" << session.executionSignalBefore
++           << ",\"signal_after\":" << session.executionSignalAfter
++           << ",\"admission_tick\":" << response.admissionTick
++           << ",\"start_tick\":" << response.startTick
++           << ",\"end_tick\":" << response.endTick
++           << ",\"retire_tick\":" << response.retireTick
++           << ",\"output_crc32c\":" << response.outputCrc32c
++           << ",\"native_queue_retired\":"
++           << (queueRetired ? "true" : "false")
++           << ",\"external_pins_released\":"
++           << (pinsReleased ? "true" : "false")
++           << ",\"adapter_released\":"
++           << (!session.executionBound ? "true" : "false")
++           << ",\"type20_durable\":"
++           << (type20Durable ? "true" : "false")
++           << ",\"d2h_a_durable\":"
++           << (d2hAckSent.test(0) ? "true" : "false")
++           << ",\"d2h_b_durable\":"
++           << (d2hAckSent.test(1) ? "true" : "false")
++           << ",\"d2h_c_durable\":"
++           << (d2hAckSent.test(2) ? "true" : "false")
++           << ",\"unmap_durable\":"
++           << (unmapAckSent ? "true" : "false")
++           << ",\"owner_disconnected\":"
++           << (ownerDisconnected ? "true" : "false")
++           << ",\"owner_quarantined\":"
++           << (session.executionAdapter &&
++                       session.executionAdapter->lastQuarantined() ?
++                   "true" : "false")
++           << ",\"cleanup_complete\":"
++           << (cleanupComplete ? "true" : "false")
++           << ",\"kernel_executed\":"
++           << (session.executionCompleted ? "true" : "false")
++           << ",\"gpu_dispatcher\":true"
++           << ",\"compute_unit\":true"
++           << ",\"execution\":true"
++           << ",\"output_correctness\":true"
++           << ",\"launcher\":false"
++           << ",\"compiler\":false"
++           << ",\"jit\":false"
++           << ",\"triton\":false"
++           << ",\"qwen\":false"
++           << ",\"cpu_fallback\":false"
++           << ",\"nvidia_fallback\":false"
++           << ",\"fallback\":false}\n";
++    return stream.str();
++}
++
+ HostGPUBridge::DispatchTraceWriteResult
+ HostGPUBridge::writeDispatchTraceBatch(
+     const std::vector<std::string> &records)
+@@ -1123,6 +1941,10 @@ HostGPUBridge::prepareDispatchEnvironment()
+     fatal_if(!registerInternalQueue(),
+              "%s: cannot register internal HSA queue", name());
+     gpuDispatcher->setLifecycleListener(this);
++    if (executionEnabled) {
++        executionAdapter = std::make_unique<HostNativeExecutionAdapter>();
++        executionAdapter->setLifecycleSink(this);
++    }
+     thread->suspend();
+ }
+ 
+@@ -2275,6 +3097,12 @@ HostGPUBridge::shutdown()
+         return;
+     if (!shutdownDone) {
+         shutdownDone = true;
++        fatal_if(executionAdapter && executionAdapter->active(),
++                 "%s: generic execution adapter remained active at shutdown",
++                 name());
++        if (executionAdapter)
++            fatal_if(!executionAdapter->detach(),
++                     "%s: generic execution adapter detach failed", name());
+         if (gpuDispatcher)
+             gpuDispatcher->setLifecycleListener(nullptr);
+         if (recordServiceEvent.scheduled())
+@@ -2285,6 +3113,8 @@ HostGPUBridge::shutdown()
+             deschedule(signalServiceEvent);
+         listenEvent.reset();
+         clients.clear();
++        fatal_if(quarantinedGenericDispatch != nullptr,
++                 "%s: quarantined generic execution survived shutdown", name());
+         admissionBudget.reset();
+         pendingRecords.clear();
+         dispatchState.clear();
+@@ -2612,6 +3442,38 @@ HostGPUBridge::closeClient(int fd)
+         queueState.queueCount() == 0 && queueState.inflightCount() == 0 &&
+         memoryState.allocationCount() == 0 && signalState.signalCount() == 0 &&
+         !signalState.nextReadyTick();
++    GenericDispatchSession *genericSession =
++        found->second->genericDispatch.get();
++    const bool exitCompletedGenericExecution =
++        exitOnDispatchSessionDone && completedGenericExecutionSession &&
++        completedGenericExecutionSession->owner.fd == owner.fd &&
++        completedGenericExecutionSession->owner.clientGeneration ==
++            owner.clientGeneration &&
++        completedGenericExecutionSession->response.status ==
++            protocol::Status::Ok &&
++        completedGenericExecutionSession->response.opcode ==
++            protocol::GenericDispatchOpcode::SubmitAql &&
++        completedGenericExecutionSession->response.outputCrc32c ==
++            0x6f67026fU &&
++        completedGenericExecutionSession->d2hAckSent.all() &&
++        completedGenericExecutionSession->unmapAckSent && genericSession &&
++        genericSession->executionMode && genericSession->executionCompleted &&
++        genericSession->executionRetired && !genericSession->executionBound &&
++        !genericSession->nativeAdmitted && !genericSession->queuePinned &&
++        !genericSession->signalPinned && !genericSession->completionQueued &&
++        !genericSession->mapped && !genericSession->allocated &&
++        genericSession->state && !genericSession->state->hasMapping() &&
++        !genericSession->state->hasKernarg() &&
++        !genericSession->state->hasSubmission() && executionAdapter &&
++        !executionAdapter->active() && found->second->orderlyEofObserved &&
++        found->second->outbound.empty() && pendingRecords.empty() &&
++        !dispatchState.pending() && !retiredDispatchCompletion &&
++        queueState.queueCount() == 0 && queueState.inflightCount() == 0 &&
++        memoryState.allocationCount() == 0 && signalState.signalCount() == 0 &&
++        signalState.waitCount() == 0 && !signalState.nextReadyTick() &&
++        kmtState.ownerCount() == 0 && kmtState.allocationCount() == 0 &&
++        kmtState.queueCount() == 0 && kmtState.eventCount() == 0;
++    std::unique_ptr<GenericDispatchSession> completedGenericSession;
+     const auto pending = dispatchState.pending();
+     if (pending && pending->owner == HostGPUDispatchState::Owner{
+             owner.fd, owner.clientGeneration}) {
+@@ -2653,10 +3515,29 @@ HostGPUBridge::closeClient(int fd)
+     }
+     if (found->second->genericDispatch) {
+         GenericDispatchSession &session = *found->second->genericDispatch;
+-        if (!session.clear(curTick())) {
++        const bool retainExecution = session.executionMode &&
++            session.executionBound && executionAdapter &&
++            executionAdapter->dispatchSubmitted();
++        const bool alreadyRetired = retainExecution &&
++            executionAdapter->packetRetired();
++        if (retainExecution) {
++            fatal_if(quarantinedGenericDispatch,
++                     "%s: more than one generic execution quarantine", name());
++            if (!alreadyRetired) {
++                fatal_if(!executionAdapter->quarantine(
++                             GenericExecutionDispatchId),
++                         "%s: cannot quarantine disconnected generic execution",
++                         name());
++            }
++            quarantinedGenericDispatch =
++                std::move(found->second->genericDispatch);
++            quarantinedGenericDispatch->completionScheduled = false;
++            if (alreadyRetired)
++                genericExecutionRetired(*quarantinedGenericDispatch);
++        } else if (!session.clear(curTick())) {
+             warn("%s: generic dispatch session close cleanup failed", name());
+         }
+-        if (session.signalPinned) {
++        if (!retainExecution && session.signalPinned) {
+             const HostGPUSignalState::Owner signalOwner{
+                 owner.fd, owner.clientGeneration};
+             if (!signalState.releasePinnedDispatchSignal(
+@@ -2667,7 +3548,7 @@ HostGPUBridge::closeClient(int fd)
+             }
+             session.signalPinned = false;
+         }
+-        if (session.queuePinned) {
++        if (!retainExecution && session.queuePinned) {
+             if (!queueState.releasePinnedDispatch(
+                     owner, session.submitRequest.queueId,
+                     session.submitRequest.queueGeneration,
+@@ -2676,7 +3557,14 @@ HostGPUBridge::closeClient(int fd)
+             }
+             session.queuePinned = false;
+         }
+-        found->second->genericDispatch.reset();
++        if (!retainExecution) {
++            if (exitCompletedGenericExecution) {
++                completedGenericSession =
++                    std::move(found->second->genericDispatch);
++            } else {
++                found->second->genericDispatch.reset();
++            }
++        }
+     }
+     queueState.disconnect(owner);
+     memoryState.disconnect({owner.fd, owner.clientGeneration});
+@@ -2697,8 +3585,51 @@ HostGPUBridge::closeClient(int fd)
+             owner.fd, owner.clientGeneration}) {
+         completedDispatchSession.reset();
+     }
++    if (exitCompletedGenericExecution) {
++        fatal_if(!completedGenericSession ||
++                     !completedGenericExecutionSession ||
++                     executionAdapter->active() || quarantinedGenericDispatch ||
++                     !completedGenericSession->context ||
++                     completedGenericSession->context->leaseCount() != 0 ||
++                     completedGenericSession->nativeQueue ||
++                     completedGenericSession->packetAllocation ||
++                     completedGenericSession->signalAllocation ||
++                     completedGenericSession->mqdAllocation ||
++                     queueState.queueCount() != 0 ||
++                     queueState.inflightCount() != 0 ||
++                     memoryState.allocationCount() != 0 ||
++                     codeObjectState.objectCount() != 0 ||
++                     codeObjectState.committedCount() != 0 ||
++                     codeObjectState.activeUploadCount() != 0 ||
++                     signalState.signalCount() != 0 ||
++                     signalState.waitCount() != 0 ||
++                     kmtState.ownerCount() != 0 ||
++                     kmtState.allocationCount() != 0 ||
++                     kmtState.queueCount() != 0 ||
++                     kmtState.eventCount() != 0,
++                 "%s: generic execution close left owner resources", name());
++        fatal_if(writeDispatchTraceBatch({makeGenericExecutionTraceRecord(
++                     "generic_execution_session_complete",
++                     *completedGenericSession,
++                     completedGenericExecutionSession->requestId,
++                     completedGenericExecutionSession->response, true, true,
++                     true, true, true,
++                     completedGenericExecutionSession->d2hAckSent,
++                     completedGenericExecutionSession->unmapAckSent)}) !=
++                     DispatchTraceWriteResult::Ok,
++                 "%s: cannot persist completed generic execution session",
++                 name());
++        completedGenericExecutionSession.reset();
++    } else if (completedGenericExecutionSession &&
++               completedGenericExecutionSession->owner.fd == owner.fd &&
++               completedGenericExecutionSession->owner.clientGeneration ==
++                   owner.clientGeneration) {
++        completedGenericExecutionSession.reset();
++    }
+     if (exitCompletedDispatchSession) {
+         exitSimLoop("host GPU dispatch session complete", 0, curTick());
++    } else if (exitCompletedGenericExecution) {
++        exitSimLoop("host GPU dispatch session complete", 0, curTick());
+     }
+ }
+ 
+@@ -2788,8 +3719,9 @@ HostGPUBridge::processHelloRecord(const PendingRecord &record)
+     protocol::NegotiationResult negotiation;
+     if (status == protocol::Status::Ok) {
+         protocol::NegotiationContext context;
+-        context.busy = activeClientFd >= 0 &&
+-            activeClientFd != record.clientFd;
++        context.busy = generic_dispatch_route::helloAdmissionBusy(
++            activeClientFd >= 0 && activeClientFd != record.clientFd,
++            quarantinedGenericDispatch != nullptr);
+         context.resourceExhausted =
+             client.admission == ClientAdmission::ResourceLimited;
+         negotiation = protocol::negotiate(
+@@ -3075,7 +4007,11 @@ HostGPUBridge::processMemoryRecord(const PendingRecord &record)
+                 break;
+             }
+ 
+-            if (!dispatchEnabled) {
++            const bool genericExecutionAllocation = client.genericDispatch &&
++                client.genericDispatch->claimsExecutionAllocation(
++                    decoded.request.allocationId,
++                    decoded.request.generation);
++            if (!dispatchEnabled || genericExecutionAllocation) {
+                 response = memoryState.copyToHost(
+                     owner, decoded.request, bytes, curTick());
+             } else {
+@@ -3164,12 +4100,41 @@ HostGPUBridge::processMemoryRecord(const PendingRecord &record)
+         response.value1 == dispatch_fixture::BufferBytes &&
+         response.value2 == dispatch_fixture::GoldenOutputCrc32c &&
+         response.value2 == completedDispatchSession->response.outputCrc32c;
++    std::optional<size_t> genericExecutionD2hIndex;
++    if (completedGenericExecutionSession &&
++        completedGenericExecutionSession->owner.fd == record.clientFd &&
++        completedGenericExecutionSession->owner.clientGeneration ==
++            record.generation &&
++        decoded.request.opcode == protocol::MemoryOpcode::CopyD2H &&
++        decoded.request.offset == 0 &&
++        decoded.request.byteCount == GenericExecutionBufferBytes &&
++        response.status == protocol::Status::Ok &&
++        response.opcode == protocol::MemoryOpcode::CopyD2H &&
++        response.value0 == 0 &&
++        response.value1 == GenericExecutionBufferBytes) {
++        for (size_t index = 0;
++             index < completedGenericExecutionSession->buffers.size();
++             ++index) {
++            const auto &buffer =
++                completedGenericExecutionSession->buffers[index];
++            if (!completedGenericExecutionSession->d2hAckSent.test(index) &&
++                decoded.request.allocationId == buffer.allocationId &&
++                decoded.request.generation == buffer.generation &&
++                response.allocationId == buffer.allocationId &&
++                response.generation == buffer.generation &&
++                response.value2 == GenericExecutionBufferCrc32c[index]) {
++                genericExecutionD2hIndex = index;
++                break;
++            }
++        }
++    }
+     OutboundRecord outbound;
+     outbound.bytes = encoded;
+     outbound.kind = OutboundKind::MemoryAck;
+     outbound.status = response.status;
+     outbound.success = response.status == protocol::Status::Ok;
+     outbound.dispatchOutputD2h = dispatchOutputD2h;
++    outbound.genericExecutionD2hIndex = genericExecutionD2hIndex;
+     enqueueOutbound(record.clientFd, record.generation, std::move(outbound));
+ }
+ 
+@@ -3384,13 +4349,32 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+                 response.status = protocol::Status::ProtocolState;
+                 break;
+             }
++            const bool execute =
++                (client.selectedCapabilities[
++                     protocol::GenericExecutionCapabilityByte] &
++                 protocol::GenericExecutionCapabilityMask) != 0;
++            if (execute &&
++                (!generic_dispatch_route::lockedExecutionMapSupported(
++                     decoded.request) ||
++                 !lockedGenericExecutionFixture(*manifest, image))) {
++                response.status = protocol::Status::UnsupportedCapability;
++                break;
++            }
+ 
+             const bool createdSession = !client.genericDispatch;
+             if (createdSession) {
+                 try {
++                    if (execute && (!executionEnabled || !executionAdapter)) {
++                        response.status =
++                            protocol::Status::UnsupportedCapability;
++                        break;
++                    }
+                     client.genericDispatch =
+                         std::make_unique<GenericDispatchSession>(
+-                            memoryState, owner, decoded.request.map.pageSize);
++                            *this, memoryState, owner,
++                            decoded.request.map.pageSize,
++                            execute ? executionAdapter.get() : nullptr,
++                            execute);
+                 } catch (const std::exception &) {
+                     response.status = protocol::Status::ResourceExhausted;
+                     break;
+@@ -3430,6 +4414,12 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+                 response.status = protocol::Status::ProtocolState;
+                 break;
+             }
++            if (client.genericDispatch->executionMode &&
++                !generic_dispatch_route::lockedExecutionAllocSupported(
++                    decoded.request)) {
++                response.status = protocol::Status::UnsupportedCapability;
++                break;
++            }
+             routeSuccess = client.genericDispatch->state->allocateKernarg(
+                 {owner, decoded.header.requestId}, decoded.request, response);
+             if (routeSuccess && response.status == protocol::Status::Ok) {
+@@ -3454,6 +4444,32 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+                     protocol::Status::Internal : protocol::Status::ProtocolState;
+                 break;
+             }
++            if (client.genericDispatch->executionMode &&
++                (dispatchState.pending() || !executionAdapter ||
++                 executionAdapter->active())) {
++                response.status = protocol::Status::Busy;
++                break;
++            }
++            const bool completionRetained =
++                completedGenericExecutionSession &&
++                completedGenericExecutionSession->owner.fd == owner.fd &&
++                completedGenericExecutionSession->owner.clientGeneration ==
++                    owner.clientGeneration;
++            if (client.genericDispatch->executionMode &&
++                !generic_dispatch_route::executionSessionCanSubmit(
++                    client.genericDispatch->executionStarted,
++                    client.genericDispatch->executionCompleted,
++                    client.genericDispatch->executionRetired,
++                    completionRetained)) {
++                response.status = protocol::Status::ProtocolState;
++                break;
++            }
++            if (client.genericDispatch->executionMode &&
++                !generic_dispatch_route::lockedExecutionSubmitSupported(
++                    decoded.request)) {
++                response.status = protocol::Status::UnsupportedCapability;
++                break;
++            }
+             const HostGPUQueueState::Owner queueOwner{
+                 owner.fd, owner.clientGeneration};
+             response.status = queueState.validatePinnedDispatch(
+@@ -3492,9 +4508,17 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+             client.genericDispatch->signalPinned = true;
+             routeSuccess = client.genericDispatch->prepareSubmit(
+                 decoded.request, decoded.header.requestId, curTick(), response);
++            const bool executionAdmitted = client.genericDispatch->cpResult &&
++                (client.genericDispatch->executionMode ?
++                    client.genericDispatch->executionBound &&
++                    executionAdapter &&
++                    !executionAdapter->dispatchSubmitted() &&
++                    client.genericDispatch->cpResult->taskValid &&
++                    client.genericDispatch->cpResult->task :
++                    client.genericDispatch->cpResult->taskValid);
+             if (routeSuccess && response.status == protocol::Status::Ok &&
+                 client.genericDispatch->cpResult &&
+-                client.genericDispatch->cpResult->taskValid &&
++                executionAdmitted &&
+                 client.genericDispatch->cpResult->commandProcessorSubmitted &&
+                 !client.genericDispatch->cpResult->kernelExecuted) {
+                 client.genericDispatch->submitRequest = decoded.request;
+@@ -3502,6 +4526,17 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+                 client.genericDispatch->submitRequestId =
+                     decoded.header.requestId;
+             } else {
++                if (client.genericDispatch->executionMode &&
++                    client.genericDispatch->executionBound) {
++                    fatal_if(executionAdapter &&
++                                 executionAdapter->dispatchSubmitted(),
++                             "%s: issued generic task failed pre-ACK admission",
++                             name());
++                    client.genericDispatch->finishExecutionBinding();
++                    client.genericDispatch->releaseExecutionBuffers(
++                        client.genericDispatch->executionRequestId);
++                    client.genericDispatch->executionRequestId = 0;
++                }
+                 if (client.genericDispatch->state->hasSubmission())
+                     client.genericDispatch->state->abandonSubmission();
+                 client.genericDispatch->nativeAdmitted = false;
+@@ -3583,7 +4618,7 @@ HostGPUBridge::processGenericDispatchRecord(const PendingRecord &record)
+         record.clientFd, record.generation, std::move(encoded),
+         OutboundKind::GenericDispatchAck, response.status,
+         routeSuccess && response.status == protocol::Status::Ok,
+-        submitAccepted ?
++        routeSuccess && response.status == protocol::Status::Ok ?
+             std::optional<protocol::GenericDispatchResponse>(response) :
+             std::nullopt);
+ }
+@@ -3597,11 +4632,15 @@ HostGPUBridge::processGenericDispatchCompletion(int fd, uint64_t generation)
+         return;
+     }
+     GenericDispatchSession &session = *found->second->genericDispatch;
++    session.completionScheduled = false;
+     if (!session.ackSent || session.completionQueued ||
+         !session.nativeAdmitted || !session.state ||
+         !session.nativeQueue || !session.state->hasSubmission() ||
+         session.submitRequestId == 0 || curTick() == 0 ||
+-        curTick() < session.submitResponse.admissionTick) {
++        curTick() < session.submitResponse.admissionTick ||
++        (session.executionMode &&
++         (!session.executionCompleted || !session.executionRetired ||
++          !executionAdapter || !executionAdapter->packetRetired()))) {
+         closeClient(fd);
+         return;
+     }
+@@ -3634,12 +4673,36 @@ HostGPUBridge::processGenericDispatchCompletion(int fd, uint64_t generation)
+     }
+     session.signalPinned = false;
+ 
++    if (session.executionMode) {
++        if (!session.finishExecutionBinding() ||
++            !session.releaseExecutionBuffers(session.executionRequestId)) {
++            closeClient(fd);
++            return;
++        }
++        session.executionRequestId = 0;
++    }
++
+     protocol::GenericDispatchResponse completion = session.submitResponse;
+     completion.simTick = curTick();
+-    completion.startTick = curTick();
+-    completion.endTick = curTick();
+-    completion.retireTick = curTick();
+-    completion.outputCrc32c = 0;
++    if (session.executionMode) {
++        completion.startTick = session.executionStartTick;
++        completion.endTick = session.executionEndTick;
++        completion.retireTick = session.executionRetireTick;
++        completion.outputCrc32c = session.executionOutputCrc32c;
++    } else {
++        completion.startTick = curTick();
++        completion.endTick = curTick();
++        completion.retireTick = curTick();
++        completion.outputCrc32c = 0;
++    }
++    if (session.executionMode) {
++        fatal_if(writeDispatchTraceBatch({makeGenericExecutionTraceRecord(
++                     "generic_execution_retired", session,
++                     session.submitRequestId, completion, false, false, true,
++                     true, false, {}, false)}) !=
++                     DispatchTraceWriteResult::Ok,
++                 "%s: cannot persist generic execution retirement", name());
++    }
+     auto encoded = protocol::encodeGenericDispatchCompletion(
+         session.submitResponseHeader, completion,
+         found->second->selectedCapabilities);
+@@ -3654,6 +4717,118 @@ HostGPUBridge::processGenericDispatchCompletion(int fd, uint64_t generation)
+         completion);
+ }
+ 
++void
++HostGPUBridge::genericExecutionRetired(GenericDispatchSession &session)
++{
++    if (quarantinedGenericDispatch.get() == &session) {
++        if (session.completionScheduled)
++            return;
++        session.completionScheduled = true;
++        auto *event = new EventFunctionWrapper(
++            [this]() { cleanupQuarantinedGenericExecution(); },
++            name() + ".host_gpu_quarantined_generic_cleanup", true);
++        schedule(event, curTick());
++        return;
++    }
++    auto found = clients.find(session.owner.fd);
++    if (found == clients.end() ||
++        found->second->generation != session.owner.clientGeneration ||
++        found->second->genericDispatch.get() != &session ||
++        !session.ackSent || session.completionScheduled ||
++        session.completionQueued) {
++        return;
++    }
++    session.completionScheduled = true;
++    const int fd = session.owner.fd;
++    const uint64_t generation = session.owner.clientGeneration;
++    auto *event = new EventFunctionWrapper(
++        [this, fd, generation]() {
++            processGenericDispatchCompletion(fd, generation);
++        }, name() + ".host_gpu_generic_execution_completion", true);
++    schedule(event, curTick());
++}
++
++void
++HostGPUBridge::cleanupQuarantinedGenericExecution()
++{
++    if (!quarantinedGenericDispatch)
++        return;
++    GenericDispatchSession &session = *quarantinedGenericDispatch;
++    session.completionScheduled = false;
++    fatal_if(!session.executionMode || !session.executionRetired ||
++                 !session.executionCompleted || !session.state ||
++                 !session.nativeQueue || !session.state->hasSubmission() ||
++                 !executionAdapter || !executionAdapter->packetRetired(),
++             "%s: invalid quarantined generic retirement state", name());
++    fatal_if(!session.state->retire(
++                 {session.owner, session.submitRequestId},
++                 session.submitRequest, *session.nativeQueue),
++             "%s: quarantined generic native retirement failed", name());
++    session.nativeAdmitted = false;
++
++    const HostGPUQueueState::Owner queueOwner{
++        session.owner.fd, session.owner.clientGeneration};
++    fatal_if(!session.queuePinned || !queueState.releasePinnedDispatch(
++                 queueOwner, session.submitRequest.queueId,
++                 session.submitRequest.queueGeneration,
++                 session.submitRequestId),
++             "%s: quarantined generic queue release failed", name());
++    session.queuePinned = false;
++    const HostGPUSignalState::Owner signalOwner{
++        session.owner.fd, session.owner.clientGeneration};
++    fatal_if(!session.signalPinned ||
++                 !signalState.releasePinnedDispatchSignal(
++                     signalOwner, session.submitRequest.submit.signalId,
++                     session.submitRequest.submit.signalGeneration,
++                     session.submitRequestId),
++             "%s: quarantined generic signal release failed", name());
++    session.signalPinned = false;
++    fatal_if(!session.finishExecutionBinding() ||
++                 !session.releaseExecutionBuffers(session.executionRequestId),
++             "%s: quarantined generic adapter release failed", name());
++    session.executionRequestId = 0;
++    fatal_if(!session.releasePrivateResources(curTick()) ||
++                 !session.state->clear(),
++             "%s: quarantined generic private cleanup failed", name());
++
++    const HostGPUMemoryState::Owner memoryOwner{
++        session.owner.fd, session.owner.clientGeneration};
++    queueState.disconnect(queueOwner);
++    signalState.disconnect(signalOwner);
++    codeObjectState.disconnect({memoryOwner.fd, memoryOwner.clientGeneration});
++    kmtState.disconnect({memoryOwner.fd, memoryOwner.clientGeneration});
++    memoryState.disconnect(memoryOwner);
++    const bool resourcesRemain = executionAdapter->active() ||
++        session.context->leaseCount() != 0 || session.nativeQueue ||
++        session.packetAllocation || session.signalAllocation ||
++        session.mqdAllocation || queueState.queueCount() != 0 ||
++        queueState.inflightCount() != 0 || memoryState.allocationCount() != 0 ||
++        codeObjectState.objectCount() != 0 ||
++        codeObjectState.committedCount() != 0 ||
++        codeObjectState.activeUploadCount() != 0 ||
++        signalState.signalCount() != 0 || signalState.waitCount() != 0 ||
++        kmtState.ownerCount() != 0 || kmtState.allocationCount() != 0 ||
++        kmtState.queueCount() != 0 || kmtState.eventCount() != 0;
++    fatal_if(!generic_dispatch_route::quarantinedExecutionCanExit(
++                 session.executionCompleted, session.executionRetired, false,
++                 executionAdapter->active(), resourcesRemain),
++             "%s: quarantined generic execution left owner resources", name());
++    protocol::GenericDispatchResponse completion = session.submitResponse;
++    completion.simTick = curTick();
++    completion.startTick = session.executionStartTick;
++    completion.endTick = session.executionEndTick;
++    completion.retireTick = session.executionRetireTick;
++    completion.outputCrc32c = session.executionOutputCrc32c;
++    fatal_if(writeDispatchTraceBatch({makeGenericExecutionTraceRecord(
++                 "generic_execution_quarantine_cleanup", session,
++                 session.submitRequestId, completion, false, true, true,
++                 true, true, {}, false)}) != DispatchTraceWriteResult::Ok,
++             "%s: cannot persist quarantined generic cleanup", name());
++    quarantinedGenericDispatch.reset();
++    if (exitOnDispatchSessionDone)
++        exitSimLoop("host GPU dispatch session complete", 0, curTick());
++}
++
+ void
+ HostGPUBridge::processSignalRecord(const PendingRecord &record)
+ {
+@@ -3834,7 +5009,8 @@ HostGPUBridge::processDispatchRecord(const PendingRecord &record)
+                 decoded.request.signalGeneration, 1);
+         }
+         if (status == protocol::Status::Ok &&
+-            (dispatchState.pending() ||
++            ((executionAdapter && executionAdapter->active()) ||
++             dispatchState.pending() ||
+              queueState.pinnedDispatchBusy(
+                  queueOwner, decoded.request.queueId,
+                  decoded.request.queueGeneration) ||
+@@ -4089,7 +5265,7 @@ HostGPUBridge::processSignalCompletions()
+             OutboundRecord{std::move(encoded),
+                            OutboundKind::SignalCompletion,
+                            protocol::Status::Ok, true, *completion,
+-                           std::nullopt, false, std::nullopt});
++                           std::nullopt, false, std::nullopt, std::nullopt});
+         if (dispatchSignal) {
+             found = clients.find(completion->owner.fd);
+             if (found == clients.end() || found->second->generation !=
+@@ -4127,7 +5303,7 @@ HostGPUBridge::sendAck(int fd, uint64_t generation,
+         return;
+     enqueueOutbound(fd, generation, OutboundRecord{
+         std::move(record), OutboundKind::HandshakeAck, status, success,
+-        std::nullopt, std::nullopt, false, std::nullopt});
++        std::nullopt, std::nullopt, false, std::nullopt, std::nullopt});
+ }
+ 
+ void
+@@ -4137,7 +5313,7 @@ HostGPUBridge::sendQueueResponse(int fd, uint64_t generation,
+ {
+     enqueueOutbound(fd, generation, OutboundRecord{
+         std::move(record), kind, protocol::Status::Ok, true, std::nullopt,
+-        std::nullopt, false, std::nullopt});
++        std::nullopt, false, std::nullopt, std::nullopt});
+ }
+ 
+ void
+@@ -4148,7 +5324,7 @@ HostGPUBridge::sendGenericDispatchResponse(
+ {
+     enqueueOutbound(fd, generation, OutboundRecord{
+         std::move(record), kind, status, success, std::nullopt, std::nullopt,
+-        false, std::move(correlation)});
++        false, std::nullopt, std::move(correlation)});
+ }
+ 
+ void
+@@ -4232,6 +5408,32 @@ HostGPUBridge::completeOutbound(int fd, uint64_t generation,
+         }
+         break;
+       case OutboundKind::GenericDispatchAck: {
++        const bool successfulUnmap = record.success &&
++            record.genericDispatchResponse &&
++            record.genericDispatchResponse->opcode ==
++                protocol::GenericDispatchOpcode::UnmapObject;
++        if (successfulUnmap && completedGenericExecutionSession) {
++            const auto &unmap = *record.genericDispatchResponse;
++            fatal_if(completedGenericExecutionSession->owner.fd != fd ||
++                         completedGenericExecutionSession->owner
++                                 .clientGeneration != generation ||
++                         completedGenericExecutionSession->unmapAckSent ||
++                         unmap.objectId !=
++                             completedGenericExecutionSession->response
++                                 .objectId ||
++                         unmap.objectGeneration !=
++                             completedGenericExecutionSession->response
++                                 .objectGeneration ||
++                         unmap.mappingId !=
++                             completedGenericExecutionSession->response
++                                 .mappingId ||
++                         unmap.mappingGeneration !=
++                             completedGenericExecutionSession->response
++                                 .mappingGeneration,
++                     "%s: generic UNMAP durable correlation mismatch",
++                     name());
++            completedGenericExecutionSession->unmapAckSent = true;
++        }
+         const bool successfulSubmit = record.success &&
+             record.genericDispatchResponse &&
+             record.genericDispatchResponse->opcode ==
+@@ -4258,11 +5460,31 @@ HostGPUBridge::completeOutbound(int fd, uint64_t generation,
+             break;
+         }
+         session->ackSent = true;
++        if (session->executionMode) {
++            if (!executionAdapter || !session->executionBound ||
++                !session->cpResult || !session->cpResult->taskValid ||
++                !session->cpResult->task ||
++                executionAdapter->dispatchSubmitted() ||
++                !executionAdapter->attach(*gpuDispatcher, *shader) ||
++                !executionAdapter->submit(
++                    session->cpResult->releaseTask())) {
++                closeClient(fd);
++                break;
++            }
++            /* CU execution begins only after the type-19 bytes above became
++             * durable.  Its retirement callback schedules type 20. */
++            if (!session->executionRetired)
++                break;
++        }
++        if (session->completionScheduled) {
++            break;
++        }
++        session->completionScheduled = true;
+         auto *event = new EventFunctionWrapper(
+             [this, fd, generation]() {
+                 processGenericDispatchCompletion(fd, generation);
+             }, name() + ".host_gpu_generic_dispatch_completion", true);
+-        schedule(event, curTick() + 1);
++        schedule(event, session->executionMode ? curTick() : curTick() + 1);
+         break;
+       }
+       case OutboundKind::GenericDispatchCompletion: {
+@@ -4276,6 +5498,23 @@ HostGPUBridge::completeOutbound(int fd, uint64_t generation,
+             closeClient(fd);
+             break;
+         }
++        if (session->executionMode) {
++            fatal_if(completedGenericExecutionSession ||
++                         session->submitRequestId == 0,
++                     "%s: duplicate generic execution completion", name());
++            completedGenericExecutionSession =
++                CompletedGenericExecutionSession{
++                    session->owner, session->submitRequestId,
++                    *record.genericDispatchResponse,
++                    session->executionAllocationViews, {}, false};
++            fatal_if(writeDispatchTraceBatch({makeGenericExecutionTraceRecord(
++                         "generic_execution_type20_durable", *session,
++                         session->submitRequestId,
++                         *record.genericDispatchResponse, true, false, true,
++                         true, false, {}, false)}) !=
++                         DispatchTraceWriteResult::Ok,
++                     "%s: cannot persist durable generic type20", name());
++        }
+         session->completionQueued = false;
+         session->ackSent = false;
+         session->submitRequestId = 0;
+@@ -4298,6 +5537,18 @@ HostGPUBridge::completeOutbound(int fd, uint64_t generation,
+                 name());
+             completedDispatchSession->outputD2hAckSent = true;
+         }
++        if (record.genericExecutionD2hIndex) {
++            const size_t index = *record.genericExecutionD2hIndex;
++            fatal_if(!completedGenericExecutionSession || index >= 3 ||
++                         completedGenericExecutionSession->owner.fd != fd ||
++                         completedGenericExecutionSession->owner
++                                 .clientGeneration != generation ||
++                         completedGenericExecutionSession->d2hAckSent.test(
++                             index),
++                     "%s: sent generic D2H ACK lost retained correlation",
++                     name());
++            completedGenericExecutionSession->d2hAckSent.set(index);
++        }
+         if (found->second->state.phase() == ConnectionPhase::Established &&
+             found->second->state.canReceive()) {
+             found->second->socketEvent->setReadable(true);
+diff --git a/src/dev/amdgpu/host_gpu_bridge.hh b/src/dev/amdgpu/host_gpu_bridge.hh
+index 983605762..2d97ff31c 100644
+--- a/src/dev/amdgpu/host_gpu_bridge.hh
++++ b/src/dev/amdgpu/host_gpu_bridge.hh
+@@ -31,6 +31,7 @@
+ #include <sys/types.h>
+ 
+ #include <array>
++#include <bitset>
+ #include <cstdint>
+ #include <deque>
+ #include <memory>
+@@ -46,6 +47,7 @@
+ #include "dev/amdgpu/host_gpu_code_object_state.hh"
+ #include "dev/amdgpu/host_gpu_dispatch_state.hh"
+ #include "dev/amdgpu/host_gpu_memory_state.hh"
++#include "dev/amdgpu/host_gpu_native_execution_adapter.hh"
+ #include "dev/amdgpu/host_gpu_kmt_state.hh"
+ #include "dev/amdgpu/host_gpu_protocol.hh"
+ #include "dev/amdgpu/host_gpu_queue_state.hh"
+@@ -61,6 +63,7 @@ namespace gem5
+ class HSAPacketProcessor;
+ class Process;
+ class System;
++class Shader;
+ 
+ namespace hostgpu
+ {
+@@ -182,6 +185,7 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+         std::optional<HostGPUSignalState::Completion> signalCompletion;
+         std::optional<protocol::DispatchResponse> dispatchCompletion;
+         bool dispatchOutputD2h = false;
++        std::optional<size_t> genericExecutionD2hIndex;
+         std::optional<protocol::GenericDispatchResponse>
+             genericDispatchResponse;
+     };
+@@ -215,6 +219,16 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+         bool outputD2hAckSent = false;
+     };
+ 
++    struct CompletedGenericExecutionSession
++    {
++        HostGPUMemoryState::Owner owner;
++        uint64_t requestId = 0;
++        protocol::GenericDispatchResponse response;
++        std::array<HostGPUMemoryState::AllocationView, 3> buffers = {};
++        std::bitset<3> d2hAckSent;
++        bool unmapAckSent = false;
++    };
++
+     void validateConfiguration();
+     void prepareEndpoint();
+     void abandonEndpointPreparation();
+@@ -242,6 +256,8 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+     void processCodeObjectRecord(const PendingRecord &record);
+     void processGenericDispatchRecord(const PendingRecord &record);
+     void processGenericDispatchCompletion(int fd, uint64_t generation);
++    void genericExecutionRetired(GenericDispatchSession &session);
++    void cleanupQuarantinedGenericExecution();
+     void scheduleRecordService();
+     void scheduleQueueService();
+     void processQueueCommands();
+@@ -301,6 +317,13 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+         const protocol::Header &header,
+         const protocol::DispatchResponse &response,
+         const std::string &eventFields) const;
++    std::string makeGenericExecutionTraceRecord(
++        const char *event, const GenericDispatchSession &session,
++        uint64_t requestId,
++        const protocol::GenericDispatchResponse &response,
++        bool type20Durable, bool ownerDisconnected, bool queueRetired,
++        bool pinsReleased, bool cleanupComplete,
++        const std::bitset<3> &d2hAckSent, bool unmapAckSent) const;
+     DispatchTraceWriteResult writeDispatchTraceBatch(
+         const std::vector<std::string> &records);
+     bool writeDispatchTrace(
+@@ -347,7 +370,13 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+     System *const system;
+     HSAPacketProcessor *const hsaPacketProcessor;
+     GPUDispatcher *const gpuDispatcher;
++    Shader *const shader;
+     const bool dispatchEnabled;
++    const bool executionEnabled;
++    std::unique_ptr<HostNativeExecutionAdapter> executionAdapter;
++    /* A disconnected owner may still own an admitted CU task.  Keep the
++     * session and its leases reachable until the adapter observes retirement. */
++    std::unique_ptr<GenericDispatchSession> quarantinedGenericDispatch;
+ 
+     protocol::ServerIdentity identity;
+     int directoryFd = -1;
+@@ -381,6 +410,8 @@ class HostGPUBridge : public SimObject, public GPUDispatchLifecycleListener
+     std::optional<HostGPUDispatchState::Completion>
+         retiredDispatchCompletion;
+     std::optional<CompletedDispatchSession> completedDispatchSession;
++    std::optional<CompletedGenericExecutionSession>
++        completedGenericExecutionSession;
+     uint64_t dispatchEndTick = 0;
+     uint64_t dispatchFetchReadIndex = 0;
+     bool dispatchGeometryValidated = false;
+diff --git a/src/dev/amdgpu/host_gpu_code_object_fixture.hh b/src/dev/amdgpu/host_gpu_code_object_fixture.hh
+index c49ad6443..b5b3666e7 100644
+--- a/src/dev/amdgpu/host_gpu_code_object_fixture.hh
++++ b/src/dev/amdgpu/host_gpu_code_object_fixture.hh
+@@ -40,9 +40,10 @@ namespace code_object_fixture
+ 
+ /*
+  * These records are provenance, not an embedded code image or an execution
+- * promise.  The bytes remain in the locked rocm-systems checkout and are
+- * parsed by the runtime-side validator.  gem5 currently rejects execution
+- * claims because its gfx950 decoder feature proof is incomplete.
++ * promise for arbitrary gfx950 code.  The bytes remain in the locked
++ * rocm-systems checkout and are parsed by the runtime-side validator.  gem5
++ * accepts only the first image's exact gpuReadWrite kernel through the bounded
++ * host-native execution route; general gfx950 ISA support remains unproven.
+  */
+ constexpr uint16_t ElfMachine = 224;
+ constexpr uint16_t ElfTypeDyn = 3;
+@@ -56,6 +57,7 @@ constexpr uint32_t MetadataMinor = 2;
+ constexpr uint32_t DescriptorBytes = 64;
+ constexpr uint32_t RelocationCount = 0;
+ constexpr bool Gem5IsaSupported = false;
++constexpr bool LockedGpuReadWriteExecutionSupported = true;
+ 
+ struct KernelRecord
+ {
+diff --git a/src/dev/amdgpu/host_gpu_dispatch_state.test.cc b/src/dev/amdgpu/host_gpu_dispatch_state.test.cc
+index 7088a139a..2eda52ff2 100644
+--- a/src/dev/amdgpu/host_gpu_dispatch_state.test.cc
++++ b/src/dev/amdgpu/host_gpu_dispatch_state.test.cc
+@@ -176,7 +176,7 @@ TEST(HostGpuDispatchFixture, AuthorityBytesAndMaterializationAreExact)
+                            kernarg.begin()));
+ }
+ 
+-TEST(HostGpuCodeObjectFixture, LockedGfx950MetadataIsNotExecutionProof)
++TEST(HostGpuCodeObjectFixture, LockedExecutionDoesNotClaimGeneralGfx950)
+ {
+     using namespace code_object_fixture;
+     ASSERT_EQ(Images.size(), 2U);
+@@ -192,6 +192,7 @@ TEST(HostGpuCodeObjectFixture, LockedGfx950MetadataIsNotExecutionProof)
+     EXPECT_EQ(DescriptorBytes, 64U);
+     EXPECT_EQ(RelocationCount, 0U);
+     EXPECT_FALSE(Gem5IsaSupported);
++    EXPECT_TRUE(LockedGpuReadWriteExecutionSupported);
+ 
+     const auto &readWrite = Images[0];
+     EXPECT_STREQ(readWrite.id, "gfx950-rdc-gpuReadWrite-v1");
+diff --git a/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc b/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
+index fc9d8262e..c2ac57c88 100644
+--- a/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
++++ b/src/dev/amdgpu/host_gpu_generic_dispatch_route.cc
+@@ -25,10 +25,27 @@
+ #include "dev/amdgpu/host_gpu_generic_dispatch_route.hh"
+ 
+ #include <algorithm>
++#include <cstring>
+ 
+ namespace gem5::hostgpu::generic_dispatch_route
+ {
+ 
++namespace
++{
++
++template<size_t Size>
++bool
++fixedNameEquals(const std::array<uint8_t, Size> &value, const char *expected)
++{
++    const size_t length = std::strlen(expected);
++    return length < value.size() &&
++        std::equal(expected, expected + length, value.begin()) &&
++        std::all_of(value.begin() + length, value.end(),
++                    [](uint8_t byte) { return byte == 0; });
++}
++
++} // anonymous namespace
++
+ protocol::Status
+ sessionStatus(const protocol::Header &header,
+               const protocol::Capabilities &selected,
+@@ -77,4 +94,65 @@ stageStatus(const protocol::GenericDispatchRequest &request)
+     return protocol::Status::Malformed;
+ }
+ 
++bool
++lockedExecutionMapSupported(
++    const protocol::GenericDispatchRequest &request)
++{
++    return request.opcode == protocol::GenericDispatchOpcode::MapObject &&
++        request.map.pageSize == protocol::GenericDispatchPageSize4K;
++}
++
++bool
++lockedExecutionAllocSupported(
++    const protocol::GenericDispatchRequest &request)
++{
++    return request.opcode ==
++            protocol::GenericDispatchOpcode::AllocKernarg &&
++        request.allocKernarg.sizeBytes == 512 &&
++        request.allocKernarg.alignmentBytes == 8 &&
++        request.allocKernarg.allocationFlags == 0 &&
++        request.allocKernarg.reserved == 0;
++}
++
++bool
++lockedExecutionSubmitSupported(
++    const protocol::GenericDispatchRequest &request)
++{
++    return request.opcode == protocol::GenericDispatchOpcode::SubmitAql &&
++        request.kernelIndex == 0 &&
++        fixedNameEquals(request.kernelName, "gpuReadWrite") &&
++        request.submit.kernargOffset == 64 &&
++        request.submit.kernargSize == 280 && request.submit.gridX == 1024 &&
++        request.submit.gridY == 1 && request.submit.gridZ == 1 &&
++        request.submit.workgroupX == 256 &&
++        request.submit.workgroupY == 1 &&
++        request.submit.workgroupZ == 1 && request.submit.numWarps == 4 &&
++        request.submit.numCtas == 1 &&
++        request.submit.sharedMemoryBytes == 0 &&
++        request.submit.wavefrontSize == 64 &&
++        request.submit.launchFlags == 0 && request.submit.reserved == 0;
++}
++
++bool
++executionSessionCanSubmit(
++    bool started, bool completed, bool retired, bool completionRetained)
++{
++    return !started && !completed && !retired && !completionRetained;
++}
++
++bool
++quarantinedExecutionCanExit(
++    bool completed, bool retired, bool type20Durable,
++    bool adapterActive, bool resourcesRemain)
++{
++    return completed && retired && !type20Durable && !adapterActive &&
++        !resourcesRemain;
++}
++
++bool
++helloAdmissionBusy(bool anotherOwnerActive, bool executionQuarantined)
++{
++    return anotherOwnerActive || executionQuarantined;
++}
++
+ } // namespace gem5::hostgpu::generic_dispatch_route
+diff --git a/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh b/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh
+index 06088afd0..eacda9277 100644
+--- a/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh
++++ b/src/dev/amdgpu/host_gpu_generic_dispatch_route.hh
+@@ -35,9 +35,8 @@ namespace gem5::hostgpu::generic_dispatch_route
+ 
+ /**
+  * Validate the immutable session tuple before a type-18 operation can touch
+- * native state.  Capability byte 1 bit 0 is intentionally supplied by the
+- * negotiated client rather than by the daemon identity; the bridge currently
+- * leaves that identity bit clear in production.
++ * native state.  Capability byte 1 bit 0 must be present in the negotiated
++ * client session before the bridge accepts the operation.
+  */
+ protocol::Status
+ sessionStatus(const protocol::Header &header,
+@@ -51,12 +50,41 @@ pageSizeSupported(uint32_t pageBytes);
+ 
+ /**
+  * Apply stage-level fail-closed gates that do not depend on mutable state.
+- * ALLOC is only honest for page-backed ABI alignments, and SUBMIT is withheld
+- * until queue/signal/tick contracts are implemented end to end.
++ * The general bit-8 route accepts the bounded control lifecycle; the separate
++ * locked-execution predicates below narrow bit 9 to one exact fixture ABI.
+  */
+ protocol::Status
+ stageStatus(const protocol::GenericDispatchRequest &request);
+ 
++/** Exact launch ABI accepted by the bit-9 locked gpuReadWrite route. */
++bool
++lockedExecutionMapSupported(
++    const protocol::GenericDispatchRequest &request);
++
++bool
++lockedExecutionAllocSupported(
++    const protocol::GenericDispatchRequest &request);
++
++bool
++lockedExecutionSubmitSupported(
++    const protocol::GenericDispatchRequest &request);
++
++/** Bit-9 sessions deliberately admit one execution before UNMAP. */
++bool
++executionSessionCanSubmit(
++    bool started, bool completed, bool retired, bool completionRetained);
++
++/** A disconnected issued owner exits only after physical cleanup, without
++ * claiming that a type-20 completion was delivered. */
++bool
++quarantinedExecutionCanExit(
++    bool completed, bool retired, bool type20Durable,
++    bool adapterActive, bool resourcesRemain);
++
++/** Do not admit another owner while an issued execution is quarantined. */
++bool
++helloAdmissionBusy(bool anotherOwnerActive, bool executionQuarantined);
++
+ } // namespace gem5::hostgpu::generic_dispatch_route
+ 
+ #endif // __DEV_AMDGPU_HOST_GPU_GENERIC_DISPATCH_ROUTE_HH__
+diff --git a/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc b/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
+index cbdb3f60c..b6105f946 100644
+--- a/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
++++ b/src/dev/amdgpu/host_gpu_generic_dispatch_route_main.cc
+@@ -227,6 +227,59 @@ run()
+     unsupported.submit.sharedMemoryBytes = 64;
+     require(stageStatus(unsupported) == Status::UnsupportedCapability,
+             "dynamic shared memory did not fail closed");
++    auto execution = submit;
++    execution.kernelName.fill(0);
++    std::copy_n("gpuReadWrite", 12, execution.kernelName.begin());
++    execution.submit.kernargOffset = 64;
++    execution.submit.kernargSize = 280;
++    execution.submit.gridX = 1024;
++    execution.submit.workgroupX = 256;
++    execution.submit.numWarps = 4;
++    require(generic_dispatch_route::lockedExecutionSubmitSupported(execution),
++            "locked execution launch was rejected");
++    execution.submit.kernargOffset = 63;
++    require(!generic_dispatch_route::lockedExecutionSubmitSupported(execution),
++            "noncanonical execution kernarg offset was accepted");
++    require(generic_dispatch_route::executionSessionCanSubmit(
++                false, false, false, false) &&
++                !generic_dispatch_route::executionSessionCanSubmit(
++                    true, false, false, false) &&
++                !generic_dispatch_route::executionSessionCanSubmit(
++                    false, true, true, true),
++            "one-execution session gate did not fail closed");
++    uint32_t secondSubmitIssueCount = 0;
++    if (generic_dispatch_route::executionSessionCanSubmit(
++            true, true, true, true)) {
++        ++secondSubmitIssueCount;
++    }
++    require(secondSubmitIssueCount == 0,
++            "second execution reached the issue boundary");
++    require(generic_dispatch_route::quarantinedExecutionCanExit(
++                true, true, false, false, false) &&
++                !generic_dispatch_route::quarantinedExecutionCanExit(
++                    true, true, true, false, false) &&
++                !generic_dispatch_route::quarantinedExecutionCanExit(
++                    true, true, false, true, false),
++            "quarantined execution exit gate was not fail closed");
++    require(!generic_dispatch_route::helloAdmissionBusy(false, false) &&
++                generic_dispatch_route::helloAdmissionBusy(true, false) &&
++                generic_dispatch_route::helloAdmissionBusy(false, true),
++            "quarantined execution did not block owner admission");
++    auto executionMap = map;
++    require(generic_dispatch_route::lockedExecutionMapSupported(executionMap),
++            "locked execution 4K MAP was rejected");
++    executionMap.map.pageSize = GenericDispatchPageSize64K;
++    require(!generic_dispatch_route::lockedExecutionMapSupported(executionMap),
++            "locked execution accepted 64K MAP");
++    auto executionAlloc = alloc;
++    executionAlloc.allocKernarg.sizeBytes = 512;
++    require(generic_dispatch_route::lockedExecutionAllocSupported(
++                executionAlloc),
++            "locked execution ALLOC was rejected");
++    executionAlloc.allocKernarg.sizeBytes = 504;
++    require(!generic_dispatch_route::lockedExecutionAllocSupported(
++                executionAlloc),
++            "locked execution accepted nonfixture ALLOC size");
+ 
+     GenericDispatchResponse submitAck;
+     submitAck.status = Status::Ok;
+@@ -304,6 +357,9 @@ main()
+         << "{\"schema\":\"gem5.host-gpu.generic-dispatch-route.v2\","
+            "\"unnegotiated_rejected\":true,\"bit8_selected\":true,"
+            "\"logical_alignment\":8,\"submit_subset\":true,"
++           "\"second_submit_rejected\":true,"
++           "\"second_submit_issue_count\":0,"
++           "\"quarantine_exit_gate\":true,"
+            "\"ack_type19\":true,\"completion_type20\":true,"
+            "\"ticks_ordered\":true,\"packet_crc_bound\":true,"
+            "\"gpu_execution\":false,\"output_validated\":false,"
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc
+index e6c78d069..7c9660ac3 100644
+--- a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.cc
+@@ -580,7 +580,7 @@ HostNativeDispatchStateV2::submit(
+     Addr completionSignalVa, HostNativeQueueCore &queue,
+     const HostNativeQueueCore::FetchedPacket &fetched,
+     HostNativeCommandProcessorCore::Result &result, Response &response,
+-    GPUDispatchLifecycleListener *listener)
++    GPUDispatchLifecycleListener *listener, uint64_t dispatchIdOverride)
+ {
+     resetResponse(request, response);
+     if (!validateContext(requestContext)) {
+@@ -624,13 +624,15 @@ HostNativeDispatchStateV2::submit(
+             submission ? Failure::Busy : Failure::InvalidRequest,
+             submission ? "SUBMIT already admitted" : "invalid SUBMIT request");
+     }
+-    if (nextTraceId == 0 ||
+-        nextTraceId > static_cast<uint64_t>(INT_MAX)) {
++    if ((dispatchIdOverride != 0 && dispatchIdOverride > INT_MAX) ||
++        (dispatchIdOverride == 0 &&
++         (nextTraceId == 0 || nextTraceId > static_cast<uint64_t>(INT_MAX)))) {
+         return failResponse(
+             request, response, protocol::Status::ResourceExhausted,
+             Failure::Overflow, "SUBMIT internal task identity exhausted");
+     }
+-    const uint64_t traceId = nextTraceId++;
++    const uint64_t traceId = dispatchIdOverride != 0 ? dispatchIdOverride :
++        nextTraceId++;
+     /* The negotiated queue tuple is validated by HostGPUQueueState.  The
+      * native queue is daemon-private and intentionally has an independent ID,
+      * generation, and ring index. */
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.hh b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.hh
+index 3174911ca..7d50a9f66 100644
+--- a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.hh
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2.hh
+@@ -117,7 +117,8 @@ class HostNativeDispatchStateV2
+         const HostNativeQueueCore::FetchedPacket &fetched,
+         HostNativeCommandProcessorCore::Result &result,
+         Response &response,
+-        GPUDispatchLifecycleListener *listener = nullptr);
++        GPUDispatchLifecycleListener *listener = nullptr,
++        uint64_t dispatchIdOverride = 0);
+     bool retire(
+         const RequestContext &context, const Request &request,
+         HostNativeQueueCore &queue);
+@@ -251,10 +252,12 @@ class HostNativeDispatchBridgeAdapter
+         const HostNativeQueueCore::FetchedPacket &fetched,
+         HostNativeCommandProcessorCore::Result &result,
+         State::Response &response,
+-        GPUDispatchLifecycleListener *listener = nullptr)
++        GPUDispatchLifecycleListener *listener = nullptr,
++        uint64_t dispatchIdOverride = 0)
+     {
+         return state.submit({owner, requestId}, request, completionSignalVa,
+-                            queue, fetched, result, response, listener);
++                            queue, fetched, result, response, listener,
++                            dispatchIdOverride);
+     }
+     bool handleRetire(
+         const Owner &owner, uint64_t requestId,
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2_main.cc b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2_main.cc
+index 19dcc2300..47f48b320 100644
+--- a/src/dev/amdgpu/host_gpu_native_dispatch_state_v2_main.cc
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_state_v2_main.cc
+@@ -464,11 +464,12 @@ runSelfTest(const std::vector<uint8_t> &image)
+     require(adapter.handleSubmit(
+                 owner, SubmitRequestId, submitRequest,
+                 signalAllocation.gpuVa, queue,
+-                fetched, result, submitResponse) &&
++                fetched, result, submitResponse, nullptr, 31) &&
+                 submitResponse.status == protocol::Status::Ok &&
+                 result.taskValid && result.commandProcessorSubmitted &&
++                result.task && result.task->dispatchId() == 31 &&
+                 !result.kernelExecuted && state.hasSubmission() &&
+-                submitResponse.traceId != 0 &&
++                submitResponse.traceId == 31 &&
+                 submitResponse.kernargVa == allocResponse.kernargVa + 64 &&
+                 submitResponse.kernargAlignment ==
+                     staged.manifest.kernargSegmentAlign,
+@@ -570,6 +571,7 @@ main(int argc, char **argv)
+                "\"owner_bound\":true,\"preload\":\"unsupported\","
+                "\"logical_alignment\":8,\"backing_page\":4096,"
+                "\"subrange_offset\":64,\"submit_admitted\":true,"
++               "\"dispatch_id_override\":31,"
+                "\"retired\":true,\"disconnect_retired\":true,"
+                "\"unmapped\":true,\"hsa_queue_entry\":true,"
+                "\"wire_ack_valid\":true,\"identity_guards\":true,"
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_token_mux.cc b/src/dev/amdgpu/host_gpu_native_dispatch_token_mux.cc
+new file mode 100644
+index 000000000..cbb46158f
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_token_mux.cc
+@@ -0,0 +1,153 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ */
++
++#include "dev/amdgpu/host_gpu_native_dispatch_token_mux.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++bool
++HostNativeDispatchTokenMux::fail(const char *reason)
++{
++    failure = reason ? reason : "token mux failure";
++    return false;
++}
++
++bool
++HostNativeDispatchTokenMux::bind(
++    int dispatchId, uint64_t wireRequestId, GPUNativeMemory &newBacking)
++{
++    if (bound)
++        return fail("one-in-flight binding is busy");
++    if (dispatchId <= 0)
++        return fail("dispatch ID must be positive");
++    if (wireRequestId == 0)
++        return fail("wire request token must be nonzero");
++    backing = &newBacking;
++    currentDispatchId = dispatchId;
++    currentWireRequestId = wireRequestId;
++    bound = true;
++    submitted = false;
++    ownerQuarantined = false;
++    kernelDone = false;
++    packetDone = false;
++    historicalDispatchId = static_cast<uint64_t>(dispatchId);
++    historicalWireRequestId = wireRequestId;
++    historicalQuarantine = false;
++    historicalRetire = false;
++    historicalTranslation = false;
++    failure.clear();
++    return true;
++}
++
++bool
++HostNativeDispatchTokenMux::markSubmitted(int dispatchId)
++{
++    if (!bound || dispatchId != currentDispatchId)
++        return fail("submission dispatch ID mismatch");
++    if (submitted)
++        return fail("binding already submitted");
++    submitted = true;
++    return true;
++}
++
++bool
++HostNativeDispatchTokenMux::quarantine(int dispatchId)
++{
++    if (!bound || dispatchId != currentDispatchId)
++        return fail("quarantine dispatch ID mismatch");
++    if (packetDone)
++        return fail("cannot quarantine a retired packet");
++    ownerQuarantined = true;
++    historicalQuarantine = true;
++    return true;
++}
++
++bool
++HostNativeDispatchTokenMux::markKernelCompleted(int dispatchId)
++{
++    if (!bound || dispatchId != currentDispatchId || !submitted || kernelDone)
++        return fail("kernel completion lifecycle mismatch");
++    kernelDone = true;
++    return true;
++}
++
++bool
++HostNativeDispatchTokenMux::markPacketRetired(int dispatchId)
++{
++    if (!bound || dispatchId != currentDispatchId || !kernelDone || packetDone)
++        return fail("packet retirement lifecycle mismatch");
++    packetDone = true;
++    historicalRetire = true;
++    return true;
++}
++
++bool
++HostNativeDispatchTokenMux::release(int dispatchId)
++{
++    if (!bound || dispatchId != currentDispatchId)
++        return fail("release dispatch ID mismatch");
++    if (submitted && !packetDone)
++        return fail("submitted binding is retained until packet retirement");
++    historicalQuarantine = historicalQuarantine || ownerQuarantined;
++    historicalRetire = historicalRetire || packetDone;
++    clearBinding();
++    return true;
++}
++
++void
++HostNativeDispatchTokenMux::clearBinding()
++{
++    backing = nullptr;
++    currentDispatchId = 0;
++    currentWireRequestId = 0;
++    bound = false;
++    submitted = false;
++    ownerQuarantined = false;
++    kernelDone = false;
++    packetDone = false;
++}
++
++bool
++HostNativeDispatchTokenMux::read(
++    Addr address, void *destination, size_t byteCount,
++    uint64_t dispatchRequestId) const
++{
++    if (!bound || !backing || dispatchRequestId == 0 ||
++        dispatchRequestId != static_cast<uint64_t>(currentDispatchId)) {
++        failure = "native read request token does not match dispatch binding";
++        return false;
++    }
++    const bool success = backing->read(
++        address, destination, byteCount, currentWireRequestId);
++    if (success) {
++        ++readCount;
++        historicalTranslation = true;
++    }
++    return success;
++}
++
++bool
++HostNativeDispatchTokenMux::write(
++    Addr address, const void *source, size_t byteCount,
++    uint64_t dispatchRequestId)
++{
++    if (!bound || !backing || dispatchRequestId == 0 ||
++        dispatchRequestId != static_cast<uint64_t>(currentDispatchId)) {
++        return fail("native write request token does not match dispatch binding");
++    }
++    const bool success = backing->write(
++        address, source, byteCount, currentWireRequestId);
++    if (success) {
++        ++writeCount;
++        historicalTranslation = true;
++    }
++    return success;
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_token_mux.hh b/src/dev/amdgpu/host_gpu_native_dispatch_token_mux.hh
+new file mode 100644
+index 000000000..e12b5a9c0
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_token_mux.hh
+@@ -0,0 +1,88 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_NATIVE_DISPATCH_TOKEN_MUX_HH__
++#define __DEV_AMDGPU_HOST_GPU_NATIVE_DISPATCH_TOKEN_MUX_HH__
++
++#include <cstddef>
++#include <cstdint>
++#include <string>
++
++#include "base/types.hh"
++#include "gpu-compute/gpu_native_memory.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++/**
++ * Dependency-free state core for the one-in-flight native dispatch adapter.
++ *
++ * GPU-facing callers use a bounded signed dispatch ID; host memory leases use
++ * the full-width wire request token.  This class translates the former to the
++ * latter and retains the binding through owner quarantine until packet
++ * retirement.  Dispatcher and Shader hooks are intentionally kept in
++ * HostNativeExecutionAdapter.
++ */
++class HostNativeDispatchTokenMux final
++{
++  public:
++    bool bind(int dispatchId, uint64_t wireRequestId,
++              GPUNativeMemory &backing);
++    bool markSubmitted(int dispatchId);
++    bool quarantine(int dispatchId);
++    bool markKernelCompleted(int dispatchId);
++    bool markPacketRetired(int dispatchId);
++    bool release(int dispatchId);
++
++    bool read(Addr address, void *destination, size_t byteCount,
++              uint64_t dispatchRequestId = 0) const;
++    bool write(Addr address, const void *source, size_t byteCount,
++               uint64_t dispatchRequestId = 0);
++
++    bool active() const { return bound; }
++    bool dispatchSubmitted() const { return submitted; }
++    bool quarantined() const { return ownerQuarantined; }
++    bool kernelCompleted() const { return kernelDone; }
++    bool packetRetired() const { return packetDone; }
++    bool lastQuarantined() const { return historicalQuarantine; }
++    bool lastPacketRetired() const { return historicalRetire; }
++    bool tokenTranslated() const { return historicalTranslation; }
++    int dispatchId() const { return currentDispatchId; }
++    uint64_t wireRequestId() const { return currentWireRequestId; }
++    uint64_t lastDispatchId() const { return historicalDispatchId; }
++    uint64_t lastWireRequestId() const { return historicalWireRequestId; }
++    uint64_t forwardedReadCount() const { return readCount; }
++    uint64_t forwardedWriteCount() const { return writeCount; }
++    const std::string &failureReason() const { return failure; }
++
++  private:
++    bool fail(const char *reason);
++    void clearBinding();
++
++    GPUNativeMemory *backing = nullptr;
++    int currentDispatchId = 0;
++    uint64_t currentWireRequestId = 0;
++    bool bound = false;
++    bool submitted = false;
++    bool ownerQuarantined = false;
++    bool kernelDone = false;
++    bool packetDone = false;
++
++    bool historicalQuarantine = false;
++    bool historicalRetire = false;
++    mutable bool historicalTranslation = false;
++    uint64_t historicalDispatchId = 0;
++    uint64_t historicalWireRequestId = 0;
++    mutable uint64_t readCount = 0;
++    uint64_t writeCount = 0;
++    mutable std::string failure;
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_NATIVE_DISPATCH_TOKEN_MUX_HH__
+diff --git a/src/dev/amdgpu/host_gpu_native_dispatch_token_mux.test.cc b/src/dev/amdgpu/host_gpu_native_dispatch_token_mux.test.cc
+new file mode 100644
+index 000000000..56c72c79c
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_dispatch_token_mux.test.cc
+@@ -0,0 +1,91 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ */
++
++#include "dev/amdgpu/host_gpu_native_dispatch_token_mux.hh"
++
++#include <array>
++#include <cstdint>
++#include <cstring>
++
++#include <gtest/gtest.h>
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++namespace
++{
++
++class RecordingMemory final : public GPUNativeMemory
++{
++  public:
++    bool read(Addr, void *destination, size_t byteCount,
++              uint64_t requestId) const override
++    {
++        lastReadToken = requestId;
++        ++readCalls;
++        std::memset(destination, 0xa5, byteCount);
++        return true;
++    }
++
++    bool write(Addr, const void *, size_t,
++               uint64_t requestId) override
++    {
++        lastWriteToken = requestId;
++        ++writeCalls;
++        return true;
++    }
++
++    mutable uint64_t lastReadToken = 0;
++    uint64_t lastWriteToken = 0;
++    mutable uint64_t readCalls = 0;
++    uint64_t writeCalls = 0;
++};
++
++} // anonymous namespace
++
++TEST(HostNativeDispatchTokenMuxTest, TranslationAndQuarantine)
++{
++    constexpr int dispatchId = 17;
++    constexpr uint64_t wireToken = 0x100000001ULL;
++    RecordingMemory memory;
++    HostNativeDispatchTokenMux mux;
++    std::array<uint8_t, 8> bytes = {};
++    const uint8_t source = 0x3c;
++
++    ASSERT_TRUE(mux.bind(dispatchId, wireToken, memory));
++    EXPECT_TRUE(mux.read(0x4000, bytes.data(), bytes.size(), dispatchId));
++    EXPECT_FALSE(mux.read(0x4000, bytes.data(), bytes.size(), dispatchId + 1));
++    EXPECT_TRUE(mux.write(0x4000, &source, sizeof(source), dispatchId));
++    EXPECT_FALSE(mux.bind(dispatchId + 1, wireToken + 1, memory));
++    ASSERT_TRUE(mux.markSubmitted(dispatchId));
++    ASSERT_TRUE(mux.quarantine(dispatchId));
++    EXPECT_FALSE(mux.release(dispatchId));
++    ASSERT_TRUE(mux.markKernelCompleted(dispatchId));
++    ASSERT_TRUE(mux.markPacketRetired(dispatchId));
++    ASSERT_TRUE(mux.release(dispatchId));
++
++    EXPECT_EQ(bytes[0], 0xa5);
++    EXPECT_EQ(memory.lastReadToken, wireToken);
++    EXPECT_EQ(memory.lastWriteToken, wireToken);
++    EXPECT_EQ(memory.readCalls, 1U);
++    EXPECT_EQ(memory.writeCalls, 1U);
++    EXPECT_TRUE(mux.lastQuarantined());
++    EXPECT_TRUE(mux.lastPacketRetired());
++    EXPECT_TRUE(mux.tokenTranslated());
++    EXPECT_FALSE(mux.active());
++}
++
++TEST(HostNativeDispatchTokenMuxTest, RejectsInvalidBindings)
++{
++    RecordingMemory memory;
++    HostNativeDispatchTokenMux mux;
++    EXPECT_FALSE(mux.bind(0, 1, memory));
++    EXPECT_FALSE(mux.bind(17, 0, memory));
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_native_execution_adapter.cc b/src/dev/amdgpu/host_gpu_native_execution_adapter.cc
+new file mode 100644
+index 000000000..a99071ccf
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_execution_adapter.cc
+@@ -0,0 +1,352 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of their contributors may be used to endorse or promote
++ * products derived from this software without specific prior written
++ * permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "dev/amdgpu/host_gpu_native_execution_adapter.hh"
++
++#include <utility>
++
++#include "base/logging.hh"
++#include "gpu-compute/dispatcher.hh"
++#include "gpu-compute/hsa_queue_entry.hh"
++#include "gpu-compute/shader.hh"
++#include "sim/core.hh"
++
++namespace gem5
++{
++namespace hostgpu
++{
++
++HostNativeExecutionAdapter::~HostNativeExecutionAdapter()
++{
++    /* The dispatcher and shader are SimObjects owned by the configuration.
++     * They outlive this value member, so restore their hooks while the
++     * delegate pointers are still valid.  An in-flight task is intentionally
++     * left untouched; callers must quarantine and retire it before teardown. */
++    fatal_if(tokenMux.active(),
++             "native execution adapter destroyed with an active binding");
++    if (attached())
++        fatal_if(!detach(), "native execution adapter detach failed");
++}
++
++bool
++HostNativeExecutionAdapter::fail(const char *reason)
++{
++    failure = reason ? reason : "adapter failure";
++    return false;
++}
++
++bool
++HostNativeExecutionAdapter::attach(GPUDispatcher &newDispatcher, Shader &newShader)
++{
++    if (tokenMux.active() && attached())
++        return fail("cannot attach with an active binding");
++    if (attached() && (dispatcher != &newDispatcher || shader != &newShader))
++        return fail("adapter is already attached to another pipeline");
++    if (attached())
++        return true;
++
++    dispatcher = &newDispatcher;
++    shader = &newShader;
++    previousNativeMemory = shader->nativeMemory();
++    shader->setNativeMemory(this);
++    previousLifecycleSink = dispatcher->lifecycleListenerPtr();
++    dispatcher->setLifecycleListener(this);
++    if (tokenMux.active()) {
++        previousCompletionSink = dispatcher->completionSinkPtr();
++        dispatcher->setCompletionSink(this);
++        completionEngaged = true;
++    }
++    failure.clear();
++    return true;
++}
++
++bool
++HostNativeExecutionAdapter::detach()
++{
++    if (tokenMux.active())
++        return fail("cannot detach with an active binding");
++    if (!attached())
++        return true;
++
++    if (shader->nativeMemory() == this)
++        shader->setNativeMemory(previousNativeMemory);
++    dispatcher->setLifecycleListener(previousLifecycleSink);
++    if (completionEngaged)
++        dispatcher->setCompletionSink(previousCompletionSink);
++    dispatcher = nullptr;
++    shader = nullptr;
++    previousNativeMemory = nullptr;
++    previousLifecycleSink = nullptr;
++    return true;
++}
++
++bool
++HostNativeExecutionAdapter::bind(
++    int newDispatchId, uint64_t newWireRequestId, GPUNativeMemory &newBacking)
++{
++    if (&newBacking == this)
++        return fail("adapter cannot back itself");
++    if (!tokenMux.bind(newDispatchId, newWireRequestId, newBacking)) {
++        failure = tokenMux.failureReason();
++        return false;
++    }
++    commandProcessorSeen = false;
++    dispatchStartTick = 0;
++    dispatchEndTick = 0;
++    dispatchRetireTick = 0;
++    if (attached()) {
++        previousCompletionSink = dispatcher->completionSinkPtr();
++        dispatcher->setCompletionSink(this);
++        completionEngaged = true;
++    }
++    failure.clear();
++    return true;
++}
++
++bool
++HostNativeExecutionAdapter::submit(std::unique_ptr<HSAQueueEntry> task)
++{
++    if (!attached())
++        return fail("cannot submit before attach");
++    if (!tokenMux.active())
++        return fail("cannot submit without a binding");
++    if (tokenMux.dispatchSubmitted())
++        return fail("binding already submitted");
++    if (!task)
++        return fail("null task");
++    if (!task->ownsDispatchPacket())
++        return fail("task does not own its dispatch packet");
++    if (task->dispatchId() != tokenMux.dispatchId())
++        return fail("task dispatch ID does not match binding");
++    if (attached() && !completionEngaged)
++        return fail("completion sink is not engaged for the binding");
++
++    if (!tokenMux.markSubmitted(tokenMux.dispatchId())) {
++        failure = tokenMux.failureReason();
++        return false;
++    }
++    dispatcher->dispatch(task.release());
++    return true;
++}
++
++bool
++HostNativeExecutionAdapter::quarantine(int expectedDispatchId)
++{
++    if (!tokenMux.active())
++        return fail("cannot quarantine without a binding");
++    if (!tokenMux.quarantine(expectedDispatchId)) {
++        failure = tokenMux.failureReason();
++        return false;
++    }
++    return true;
++}
++
++bool
++HostNativeExecutionAdapter::release(int expectedDispatchId)
++{
++    if (!tokenMux.active())
++        return fail("cannot release without a binding");
++    if (!tokenMux.release(expectedDispatchId)) {
++        failure = tokenMux.failureReason();
++        return false;
++    }
++    clearBinding();
++    return true;
++}
++
++void
++HostNativeExecutionAdapter::clearBinding()
++{
++    if (completionEngaged && dispatcher)
++        dispatcher->setCompletionSink(previousCompletionSink);
++    completionEngaged = false;
++    previousCompletionSink = nullptr;
++    commandProcessorSeen = false;
++    dispatchStartTick = 0;
++    dispatchEndTick = 0;
++    dispatchRetireTick = 0;
++}
++
++bool
++HostNativeExecutionAdapter::read(
++    Addr address, void *destination, size_t byteCount, uint64_t requestId) const
++{
++    const bool success = tokenMux.read(
++        address, destination, byteCount, requestId);
++    if (!success)
++        failure = tokenMux.failureReason();
++    return success;
++}
++
++bool
++HostNativeExecutionAdapter::write(
++    Addr address, const void *source, size_t byteCount, uint64_t requestId)
++{
++    const bool success = tokenMux.write(
++        address, source, byteCount, requestId);
++    if (!success)
++        failure = tokenMux.failureReason();
++    return success;
++}
++
++bool
++HostNativeExecutionAdapter::taskMatches(const HSAQueueEntry &task) const
++{
++    return tokenMux.active() && task.dispatchId() == tokenMux.dispatchId();
++}
++
++void
++HostNativeExecutionAdapter::hsaPacketFetched(
++    Addr hostPacketAddr, uint32_t queueId)
++{
++    if (tokenMux.active()) {
++        panic_if(!lifecycleSink,
++                 "native execution adapter has no lifecycle sink");
++        lifecycleSink->hsaPacketFetched(hostPacketAddr, queueId);
++    } else if (lifecycleSink) {
++        lifecycleSink->hsaPacketFetched(hostPacketAddr, queueId);
++    }
++}
++
++void
++HostNativeExecutionAdapter::commandProcessorSubmitted(
++    const HSAQueueEntry &task)
++{
++    if (tokenMux.active()) {
++        panic_if(!taskMatches(task),
++                 "native execution adapter command-processor identity mismatch");
++        commandProcessorSeen = true;
++    }
++    if (lifecycleSink)
++        lifecycleSink->commandProcessorSubmitted(task);
++}
++
++void
++HostNativeExecutionAdapter::gpuDispatcherStarted(const HSAQueueEntry &task)
++{
++    if (tokenMux.active()) {
++        panic_if(!taskMatches(task) || !tokenMux.dispatchSubmitted(),
++                 "native execution adapter dispatcher identity mismatch");
++        dispatchStartTick = curTick();
++    }
++    if (lifecycleSink)
++        lifecycleSink->gpuDispatcherStarted(task);
++}
++
++void
++HostNativeExecutionAdapter::cuWaveStarted(
++    const HSAQueueEntry &task, int cuId, int waveId, uint32_t workgroupX,
++    uint32_t workgroupY, uint32_t workgroupZ, uint64_t laneMask)
++{
++    if (tokenMux.active())
++        panic_if(!taskMatches(task),
++                 "native execution adapter wave identity mismatch");
++    if (lifecycleSink)
++        lifecycleSink->cuWaveStarted(
++            task, cuId, waveId, workgroupX, workgroupY, workgroupZ, laneMask);
++}
++
++void
++HostNativeExecutionAdapter::cuInstructionStarted(
++    const HSAQueueEntry &task, int cuId, int workgroupId,
++    uint64_t dynamicWaveId, Addr pc, uint64_t sequence)
++{
++    if (tokenMux.active())
++        panic_if(!taskMatches(task),
++                 "native execution adapter instruction identity mismatch");
++    if (lifecycleSink)
++        lifecycleSink->cuInstructionStarted(
++            task, cuId, workgroupId, dynamicWaveId, pc, sequence);
++}
++
++void
++HostNativeExecutionAdapter::cuGlobalStoreCompleted(
++    const HSAQueueEntry &task, int cuId, int workgroupId,
++    const std::vector<Addr> &addresses, uint32_t bytesPerLane,
++    uint64_t laneMask)
++{
++    if (tokenMux.active())
++        panic_if(!taskMatches(task),
++                 "native execution adapter global-store identity mismatch");
++    if (lifecycleSink)
++        lifecycleSink->cuGlobalStoreCompleted(
++            task, cuId, workgroupId, addresses, bytesPerLane, laneMask);
++}
++
++void
++HostNativeExecutionAdapter::gpuWorkgroupCompleted(
++    const HSAQueueEntry &task, int cuId, int workgroupId)
++{
++    if (tokenMux.active())
++        panic_if(!taskMatches(task),
++                 "native execution adapter workgroup identity mismatch");
++    if (lifecycleSink)
++        lifecycleSink->gpuWorkgroupCompleted(task, cuId, workgroupId);
++}
++
++void
++HostNativeExecutionAdapter::hsaPacketRetired(
++    const HSAQueueEntry &task, int cuId, int workgroupId)
++{
++    if (tokenMux.active()) {
++        panic_if(!taskMatches(task) || !tokenMux.kernelCompleted(),
++                 "native execution adapter retirement identity mismatch");
++        panic_if(!tokenMux.markPacketRetired(tokenMux.dispatchId()),
++                 "native execution adapter packet-retire state mismatch");
++        dispatchRetireTick = curTick();
++    }
++    if (lifecycleSink)
++        lifecycleSink->hsaPacketRetired(task, cuId, workgroupId);
++}
++
++bool
++HostNativeExecutionAdapter::completeKernel(
++    const HSAQueueEntry &task, int cuId, int workgroupId)
++{
++    if (tokenMux.active()) {
++        if (!taskMatches(task) || tokenMux.kernelCompleted())
++            return fail("native execution adapter completion identity mismatch");
++        if (!completionSink)
++            return fail("native execution adapter has no completion sink");
++        const bool success = completionSink->completeKernel(
++            task, cuId, workgroupId);
++        if (success) {
++            if (!tokenMux.markKernelCompleted(tokenMux.dispatchId())) {
++                failure = tokenMux.failureReason();
++                return false;
++            }
++            dispatchEndTick = curTick();
++        }
++        return success;
++    }
++    return completionSink && completionSink->completeKernel(
++        task, cuId, workgroupId);
++}
++
++} // namespace hostgpu
++} // namespace gem5
+diff --git a/src/dev/amdgpu/host_gpu_native_execution_adapter.hh b/src/dev/amdgpu/host_gpu_native_execution_adapter.hh
+new file mode 100644
+index 000000000..8229177f0
+--- /dev/null
++++ b/src/dev/amdgpu/host_gpu_native_execution_adapter.hh
+@@ -0,0 +1,189 @@
++/*
++ * Copyright (c) 2026 The gem5 Project
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ * redistributions of source code must retain the above copyright notice, this
++ * list of conditions and the following disclaimer; redistributions in binary
++ * form must reproduce the above copyright notice, this list of conditions and
++ * the following disclaimer in the documentation and/or other materials
++ * provided with the distribution; neither the name of the copyright holders
++ * nor the names of their contributors may be used to endorse or promote
++ * products derived from this software without specific prior written
++ * permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++ * POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#ifndef __DEV_AMDGPU_HOST_GPU_NATIVE_EXECUTION_ADAPTER_HH__
++#define __DEV_AMDGPU_HOST_GPU_NATIVE_EXECUTION_ADAPTER_HH__
++
++#include <cstddef>
++#include <cstdint>
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "base/types.hh"
++#include "dev/amdgpu/host_gpu_native_dispatch_token_mux.hh"
++#include "gpu-compute/dispatch_lifecycle.hh"
++#include "gpu-compute/gpu_dispatch_completion.hh"
++#include "gpu-compute/gpu_native_memory.hh"
++
++namespace gem5
++{
++
++class GPUDispatcher;
++class HSAQueueEntry;
++class Shader;
++
++namespace hostgpu
++{
++
++/**
++ * One-in-flight adapter for a host-owned native dispatch.
++ *
++ * The GPU pipeline identifies a task with a bounded signed dispatch ID.  The
++ * transport and memory leases use the wider wire request token instead.  This
++ * object is the only place where the two identifiers are joined: CU memory
++ * traffic must present the dispatch ID and is forwarded to the backing memory
++ * with the wire token.  A disconnected owner is quarantined until the
++ * dispatcher retires its packet; no cancellation is implied by quarantine.
++ */
++class HostNativeExecutionAdapter final : public GPUNativeMemory,
++                                          public GPUDispatchLifecycleListener,
++                                          public GPUDispatchCompletionSink
++{
++  public:
++    HostNativeExecutionAdapter() = default;
++    ~HostNativeExecutionAdapter() override;
++
++    /** Install this adapter as the dispatcher's listener/sink and shader
++     * native-memory provider.  The delegates receive all lifecycle callbacks
++     * (including callbacks for non-adapted legacy work). */
++    bool attach(GPUDispatcher &dispatcher, Shader &shader);
++    bool detach();
++
++    void setLifecycleSink(GPUDispatchLifecycleListener *sink)
++    {
++        lifecycleSink = sink;
++    }
++
++    GPUDispatchLifecycleListener *lifecycleSinkPtr() const
++    {
++        return lifecycleSink;
++    }
++
++    void setCompletionSink(GPUDispatchCompletionSink *sink)
++    {
++        completionSink = sink;
++    }
++
++    /** Bind the sole in-flight task to a backing GPUNativeMemory object.
++     * Binding is allowed before attach so the token mux can be tested without
++     * constructing SimObjects; submit still requires an attached dispatcher. */
++    bool bind(int dispatchId, uint64_t wireRequestId,
++              GPUNativeMemory &backing);
++
++    /** Transfer ownership of an admitted task to GPUDispatcher. */
++    bool submit(std::unique_ptr<HSAQueueEntry> task);
++
++    /** Mark the client owner disconnected while retaining the task binding. */
++    bool quarantine(int dispatchId);
++
++    /** Release the binding only before submission or after packet retirement. */
++    bool release(int dispatchId);
++
++    bool attached() const { return dispatcher != nullptr && shader != nullptr; }
++    bool active() const { return tokenMux.active(); }
++    bool dispatchSubmitted() const { return tokenMux.dispatchSubmitted(); }
++    bool commandProcessorObserved() const { return commandProcessorSeen; }
++    bool quarantined() const { return tokenMux.quarantined(); }
++    bool kernelCompleted() const { return tokenMux.kernelCompleted(); }
++    bool packetRetired() const { return tokenMux.packetRetired(); }
++
++    bool lastQuarantined() const { return tokenMux.lastQuarantined(); }
++    bool lastPacketRetired() const { return tokenMux.lastPacketRetired(); }
++    bool tokenTranslated() const { return tokenMux.tokenTranslated(); }
++    uint64_t lastDispatchId() const { return tokenMux.lastDispatchId(); }
++    uint64_t lastWireRequestId() const
++    {
++        return tokenMux.lastWireRequestId();
++    }
++    uint64_t forwardedReadCount() const
++    {
++        return tokenMux.forwardedReadCount();
++    }
++    uint64_t forwardedWriteCount() const
++    {
++        return tokenMux.forwardedWriteCount();
++    }
++    Tick startTick() const { return dispatchStartTick; }
++    Tick endTick() const { return dispatchEndTick; }
++    Tick retireTick() const { return dispatchRetireTick; }
++    const std::string &failureReason() const { return failure; }
++
++    bool read(Addr address, void *destination, size_t byteCount,
++              uint64_t requestId = 0) const override;
++    bool write(Addr address, const void *source, size_t byteCount,
++               uint64_t requestId = 0) override;
++
++    void hsaPacketFetched(Addr hostPacketAddr, uint32_t queueId) override;
++    void commandProcessorSubmitted(const HSAQueueEntry &task) override;
++    void gpuDispatcherStarted(const HSAQueueEntry &task) override;
++    void cuWaveStarted(
++        const HSAQueueEntry &task, int cuId, int waveId,
++        uint32_t workgroupX, uint32_t workgroupY, uint32_t workgroupZ,
++        uint64_t laneMask) override;
++    void cuInstructionStarted(
++        const HSAQueueEntry &task, int cuId, int workgroupId,
++        uint64_t dynamicWaveId, Addr pc, uint64_t sequence) override;
++    void cuGlobalStoreCompleted(
++        const HSAQueueEntry &task, int cuId, int workgroupId,
++        const std::vector<Addr> &addresses, uint32_t bytesPerLane,
++        uint64_t laneMask) override;
++    void gpuWorkgroupCompleted(
++        const HSAQueueEntry &task, int cuId, int workgroupId) override;
++    void hsaPacketRetired(
++        const HSAQueueEntry &task, int cuId, int workgroupId) override;
++
++    bool completeKernel(
++        const HSAQueueEntry &task, int cuId, int workgroupId) override;
++
++  private:
++    bool fail(const char *reason);
++    bool taskMatches(const HSAQueueEntry &task) const;
++    void clearBinding();
++
++    GPUDispatcher *dispatcher = nullptr;
++    Shader *shader = nullptr;
++    GPUNativeMemory *previousNativeMemory = nullptr;
++    GPUDispatchLifecycleListener *lifecycleSink = nullptr;
++    GPUDispatchLifecycleListener *previousLifecycleSink = nullptr;
++    GPUDispatchCompletionSink *completionSink = nullptr;
++    GPUDispatchCompletionSink *previousCompletionSink = nullptr;
++
++    HostNativeDispatchTokenMux tokenMux;
++    bool commandProcessorSeen = false;
++    bool completionEngaged = false;
++    Tick dispatchStartTick = 0;
++    Tick dispatchEndTick = 0;
++    Tick dispatchRetireTick = 0;
++    mutable std::string failure;
++};
++
++} // namespace hostgpu
++} // namespace gem5
++
++#endif // __DEV_AMDGPU_HOST_GPU_NATIVE_EXECUTION_ADAPTER_HH__
+diff --git a/src/dev/amdgpu/host_gpu_native_fixture_main.cc b/src/dev/amdgpu/host_gpu_native_fixture_main.cc
+index 6406ac001..3ab32f37a 100644
+--- a/src/dev/amdgpu/host_gpu_native_fixture_main.cc
++++ b/src/dev/amdgpu/host_gpu_native_fixture_main.cc
+@@ -225,7 +225,8 @@ runFixtureParity()
+ {
+     require(code_object_fixture::Images.size() == 2 &&
+                 code_object_fixture::GfxTarget == 950 &&
+-                !code_object_fixture::Gem5IsaSupported,
++                !code_object_fixture::Gem5IsaSupported &&
++                code_object_fixture::LockedGpuReadWriteExecutionSupported,
+             "gfx950 fixture provenance");
+     require(dispatch_fixture::CodeImage.size() == 108,
+             "gfx950 fixture code image");
+diff --git a/src/dev/amdgpu/host_gpu_protocol.cc b/src/dev/amdgpu/host_gpu_protocol.cc
+index 85459c67f..2928a1940 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.cc
++++ b/src/dev/amdgpu/host_gpu_protocol.cc
+@@ -585,6 +585,23 @@ genericDispatchCapabilitySelected(const Capabilities &selected)
+          CodeObjectTransferCapabilityMask) != 0;
+ }
+ 
++Capabilities
++genericExecutionCapability()
++{
++    Capabilities capabilities = {};
++    capabilities[GenericExecutionCapabilityByte] =
++        GenericExecutionCapabilityMask;
++    return capabilities;
++}
++
++bool
++genericExecutionCapabilitySelected(const Capabilities &selected)
++{
++    return (selected[GenericExecutionCapabilityByte] &
++            GenericExecutionCapabilityMask) != 0 &&
++        genericDispatchCapabilitySelected(selected);
++}
++
+ CodeObjectManifestValidation
+ validateCodeObjectManifest(const CodeObjectManifest &manifest)
+ {
+@@ -850,6 +867,11 @@ negotiate(const Header &header, const Hello &hello,
+         result.selected[GenericDispatchCapabilityByte] &=
+             ~GenericDispatchCapabilityMask;
+     }
++    if ((hello.required[GenericExecutionCapabilityByte] &
++         GenericExecutionCapabilityMask) == 0) {
++        result.selected[GenericExecutionCapabilityByte] &=
++            ~GenericExecutionCapabilityMask;
++    }
+     if (hello.unknownCriticalTlv ||
+         !capabilitySubset(hello.required, result.selected) ||
+         (hello.offered[0] & 1) == 0 ||
+@@ -869,6 +891,13 @@ negotiate(const Header &header, const Hello &hello,
+         result.status = Status::UnsupportedCapability;
+         return result;
+     }
++    if ((result.selected[GenericExecutionCapabilityByte] &
++         GenericExecutionCapabilityMask) != 0 &&
++        !genericExecutionCapabilitySelected(result.selected)) {
++        result.selected.fill(0);
++        result.status = Status::UnsupportedCapability;
++        return result;
++    }
+     if (!isZero(header.daemonUuid) && header.daemonUuid != server.daemonUuid) {
+         result.selected.fill(0);
+         result.status = Status::InstanceMismatch;
+@@ -2431,6 +2460,24 @@ genericResponseSuccessValid(const GenericDispatchResponse &response,
+     return false;
+ }
+ 
++bool
++genericResponseCapabilityValid(
++    const GenericDispatchResponse &response, MessageType type,
++    const Capabilities &selected)
++{
++    if (response.status != Status::Ok ||
++        response.opcode != GenericDispatchOpcode::SubmitAql) {
++        return true;
++    }
++    if (type == MessageType::GenericDispatchAck)
++        return response.outputCrc32c == 0;
++    if (type != MessageType::GenericDispatchCompletion)
++        return true;
++    const bool execution = genericExecutionCapabilitySelected(selected);
++    return execution ? response.outputCrc32c != 0 :
++        response.outputCrc32c == 0;
++}
++
+ GenericDispatchDecodeResult
+ genericRequestDrop(const std::string &reason, bool closeConnection = true)
+ {
+@@ -2700,10 +2747,13 @@ decodeGenericResponseInternal(const uint8_t *record, size_t size,
+                                   response);
+     }
+     if (response.status == Status::Ok) {
+-        if (!genericResponseSuccessValid(response, expectedMessageType))
++        if (!genericResponseSuccessValid(response, expectedMessageType) ||
++            (selected != nullptr && !genericResponseCapabilityValid(
++                 response, expectedMessageType, *selected))) {
+             return genericResponseAck(Status::Malformed,
+                                       "invalid successful generic response",
+                                       header, response);
++        }
+         return genericResponseAck(Status::Ok, "generic response decoded",
+                                   header, response);
+     }
+@@ -2971,6 +3021,8 @@ encodeGenericDispatchResponse(MessageType type, const Header &request,
+ {
+     if (!genericDispatchCapabilitySelected(selected))
+         return {};
++    if (!genericResponseCapabilityValid(response, type, selected))
++        return {};
+     return encodeGenericDispatchResponse(type, request, response);
+ }
+ 
+diff --git a/src/dev/amdgpu/host_gpu_protocol.hh b/src/dev/amdgpu/host_gpu_protocol.hh
+index 1e19b7ad7..da8d869fd 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.hh
++++ b/src/dev/amdgpu/host_gpu_protocol.hh
+@@ -116,6 +116,11 @@ constexpr uint16_t GenericDispatchProtocolMajor = GenericDispatchMajor;
+ constexpr uint16_t GenericDispatchProtocolMinor = GenericDispatchMinor;
+ constexpr uint8_t GenericDispatchCapabilityByte = 1;
+ constexpr uint8_t GenericDispatchCapabilityMask = 0x01;
++/* Bit 9 is deliberately separate from the CP25 control route (bit 8).
++ * It is advertised only when a configured Shader/GPUDispatcher pair is
++ * wired through HostNativeExecutionAdapter. */
++constexpr uint8_t GenericExecutionCapabilityByte = 1;
++constexpr uint8_t GenericExecutionCapabilityMask = 0x02;
+ constexpr uint8_t GenericDispatchV2CapabilityByte =
+     GenericDispatchCapabilityByte;
+ constexpr uint8_t GenericDispatchV2CapabilityMask =
+@@ -869,6 +874,8 @@ Capabilities kmtOperationCapability();
+ Capabilities codeObjectTransferCapability();
+ Capabilities genericDispatchCapability();
+ bool genericDispatchCapabilitySelected(const Capabilities &selected);
++Capabilities genericExecutionCapability();
++bool genericExecutionCapabilitySelected(const Capabilities &selected);
+ bool capabilitySubset(const Capabilities &subset,
+                       const Capabilities &superset);
+ CodeObjectManifestValidation validateCodeObjectManifest(
+diff --git a/src/dev/amdgpu/host_gpu_protocol.test.cc b/src/dev/amdgpu/host_gpu_protocol.test.cc
+index 26be62ec5..8fa579722 100644
+--- a/src/dev/amdgpu/host_gpu_protocol.test.cc
++++ b/src/dev/amdgpu/host_gpu_protocol.test.cc
+@@ -2067,6 +2067,39 @@ TEST(HostGpuProtocol, GenericDispatchCapabilityUsesWireByteOne)
+     EXPECT_EQ(negotiated.status, Status::UnsupportedCapability);
+ }
+ 
++TEST(HostGpuProtocol, GenericExecutionRequiresGenericDependencies)
++{
++    auto selected = genericSelectedCapabilities();
++    selected[GenericExecutionCapabilityByte] |=
++        GenericExecutionCapabilityMask;
++    auto server = goldenServer();
++    auto hello = goldenHello();
++    server.supported = selected;
++    hello.offered = selected;
++    hello.required = selected;
++    auto negotiated = negotiate(goldenHeader(), hello, server);
++    ASSERT_EQ(negotiated.status, Status::Ok);
++    EXPECT_TRUE(genericExecutionCapabilitySelected(negotiated.selected));
++    EXPECT_EQ(negotiated.selected[GenericExecutionCapabilityByte], 0x03U);
++
++    hello = goldenHello();
++    hello.offered = selected;
++    hello.required = topologyCapability();
++    hello.required[GenericExecutionCapabilityByte] |=
++        GenericExecutionCapabilityMask;
++    negotiated = negotiate(goldenHeader(), hello, server);
++    EXPECT_EQ(negotiated.status, Status::UnsupportedCapability);
++
++    hello = goldenHello();
++    hello.offered = selected;
++    hello.required = genericSelectedCapabilities();
++    negotiated = negotiate(goldenHeader(), hello, server);
++    ASSERT_EQ(negotiated.status, Status::Ok);
++    EXPECT_TRUE(genericDispatchCapabilitySelected(negotiated.selected));
++    EXPECT_FALSE(genericExecutionCapabilitySelected(negotiated.selected));
++    EXPECT_EQ(negotiated.selected[GenericExecutionCapabilityByte], 0x01U);
++}
++
+ TEST(HostGpuProtocol, GenericDispatchRequestsUseFixedV2Payload)
+ {
+     const auto capabilities = genericSelectedCapabilities();
+@@ -2380,6 +2413,66 @@ TEST(HostGpuProtocol, GenericDispatchSuccessIdentityFieldsAreRequired)
+     EXPECT_EQ(decoded.status, Status::Malformed);
+ }
+ 
++TEST(HostGpuProtocol, GenericExecutionCompletionCrcIsCapabilityBound)
++{
++    const auto control = genericSelectedCapabilities();
++    auto execution = control;
++    execution[GenericExecutionCapabilityByte] |=
++        GenericExecutionCapabilityMask;
++    const Header header = goldenMemoryHeader(404);
++
++    GenericDispatchResponse submit;
++    submit.status = Status::Ok;
++    submit.opcode = GenericDispatchOpcode::SubmitAql;
++    submit.objectId = 7;
++    submit.objectGeneration = 9;
++    submit.mappingId = 11;
++    submit.mappingGeneration = 13;
++    submit.queueId = 17;
++    submit.queueGeneration = 19;
++    submit.queueSequence = 23;
++    submit.signalId = 37;
++    submit.signalGeneration = 41;
++    submit.signalValueBits = 1;
++    submit.kernargAllocationId = 29;
++    submit.kernargGeneration = 31;
++    submit.kernargVa = 0x100000004000ULL;
++    submit.kernargSize = 280;
++    submit.kernargAlignment = 8;
++    submit.ticketId = 59;
++    submit.traceId = 67;
++    submit.packetVa = 0x100000005000ULL;
++    submit.imageSha256.fill(0xa5);
++
++    EXPECT_FALSE(encodeGenericDispatchAck(header, submit, control).empty());
++    EXPECT_FALSE(encodeGenericDispatchAck(header, submit, execution).empty());
++    submit.outputCrc32c = 0x6f67026fU;
++    EXPECT_TRUE(encodeGenericDispatchAck(header, submit, control).empty());
++    EXPECT_TRUE(encodeGenericDispatchAck(header, submit, execution).empty());
++
++    submit.outputCrc32c = 0;
++    EXPECT_FALSE(
++        encodeGenericDispatchCompletion(header, submit, control).empty());
++    EXPECT_TRUE(
++        encodeGenericDispatchCompletion(header, submit, execution).empty());
++    submit.outputCrc32c = 0x6f67026fU;
++    EXPECT_TRUE(
++        encodeGenericDispatchCompletion(header, submit, control).empty());
++    auto frame = encodeGenericDispatchCompletion(header, submit, execution);
++    ASSERT_EQ(frame.size(), GenericDispatchRecordBytes);
++    auto decoded = decodeGenericDispatchResponseRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, execution,
++        header.requestId, MessageType::GenericDispatchCompletion);
++    EXPECT_EQ(decoded.status, Status::Ok);
++
++    store32(frame, HeaderBytes + 228, 0);
++    recomputeCrc(frame);
++    decoded = decodeGenericDispatchResponseRecord(
++        frame.data(), frame.size(), MaximumRecordBytes, execution,
++        header.requestId, MessageType::GenericDispatchCompletion);
++    EXPECT_EQ(decoded.status, Status::Malformed);
++}
++
+ } // anonymous namespace
+ } // namespace protocol
+ } // namespace hostgpu
+diff --git a/src/dev/amdgpu/host_native_gpu_executor.cc b/src/dev/amdgpu/host_native_gpu_executor.cc
+index d3f867fc9..80bdcd609 100644
+--- a/src/dev/amdgpu/host_native_gpu_executor.cc
++++ b/src/dev/amdgpu/host_native_gpu_executor.cc
+@@ -134,9 +134,10 @@ HostNativeGPUExecutor::HostNativeGPUExecutor(
+ {
+     fatal_if(!shader || !dispatcher,
+              "%s: shader and dispatcher are required", name());
+-    shader->setNativeMemory(this);
+-    dispatcher->setLifecycleListener(this);
+-    dispatcher->setCompletionSink(this);
++    executionAdapter.setLifecycleSink(this);
++    executionAdapter.setCompletionSink(this);
++    fatal_if(!executionAdapter.attach(*dispatcher, *shader),
++             "%s: cannot attach native execution adapter", name());
+ }
+ 
+ void
+@@ -422,15 +423,18 @@ HostNativeGPUExecutor::setupDispatch()
+         return false;
+     }
+ 
++    if (!executionAdapter.bind(DispatchId, RequestId, *this))
++        return false;
++
+     HostNativeQueueCore::FetchedPacket fetched;
+-    if (!queue.fetch(fetched, this, RequestId) ||
++    if (!queue.fetch(fetched, &executionAdapter, RequestId) ||
+         fetched.queueIndex != 0 || fetched.registeredIndex != 0) {
+         return false;
+     }
+     HostNativeCommandProcessorCore::Result submitted;
+     if (!commandProcessor.submit(
+             fetched, queue, *mapping, manifest, context, DispatchId,
+-            submitted, this, RequestId) || !submitted.taskValid ||
++            submitted, &executionAdapter, RequestId) || !submitted.taskValid ||
+         !submitted.task || submitted.task->numWgTotal() != ExpectedWorkgroups ||
+         submitted.task->wgSize(0) != 256 ||
+         submitted.task->gridSize(0) != ElementCount) {
+@@ -448,7 +452,14 @@ HostNativeGPUExecutor::setupDispatch()
+     completion.hostPacketVa = fetched.hostPacketVa;
+     completion.ticket = fetched.ticket;
+     completion.valid = true;
+-    dispatcher->dispatch(submitted.releaseTask().release());
++    if (!executionAdapter.submit(submitted.releaseTask()))
++        return false;
++    /* Model the transport owner disappearing immediately after durable
++     * submission.  The adapter keeps all leases live until the CU retires the
++     * packet, which is the disconnect/quarantine contract used by the daemon. */
++    adapterQuarantined = executionAdapter.quarantine(DispatchId);
++    if (!adapterQuarantined)
++        return false;
+     return true;
+ }
+ 
+@@ -501,11 +512,12 @@ HostNativeGPUExecutor::cuInstructionStarted(
+ {
+     panic_if(task.dispatchId() != DispatchId || cuId != 0 ||
+                  workgroupId < 0 || workgroupId >= ExpectedWorkgroups ||
+-                 dynamicWaveId >= ExpectedWaves || pc < task.codeAddr() ||
+-                 pc >= task.codeAddr() + 0x78,
++                 pc < task.codeAddr() || pc >= task.codeAddr() + 0x78,
+              "B2 CU instruction-start identity mismatch");
+     auto [workgroup, inserted] =
+         workgroupPerWave.emplace(dynamicWaveId, workgroupId);
++    panic_if(inserted && workgroupPerWave.size() > ExpectedWaves,
++             "B2 observed too many dynamic waves");
+     panic_if(!inserted && workgroup->second != workgroupId,
+              "B2 dynamic wave changed workgroup identity");
+     auto &offsets = instructionOffsetsPerWave[dynamicWaveId];
+@@ -667,16 +679,25 @@ HostNativeGPUExecutor::completeKernel(
+         !validateOutput()) {
+         return false;
+     }
++    std::array<uint32_t, ExpectedWorkgroups> dynamicWavesPerWorkgroup = {};
+     for (const auto &[dynamicWaveId, count] : instructionsPerWave) {
+-        if (dynamicWaveId >= ExpectedWaves || count != InstructionsPerWave ||
++        const auto workgroup = workgroupPerWave.find(dynamicWaveId);
++        if (count != InstructionsPerWave ||
++            workgroup == workgroupPerWave.end() ||
+             instructionOffsetsPerWave.at(dynamicWaveId) !=
+                 std::vector<uint32_t>(InstructionOffsets.begin(),
+                                       InstructionOffsets.end()) ||
+-            workgroupPerWave.at(dynamicWaveId) !=
+-                static_cast<int>(dynamicWaveId / 4)) {
++            workgroup->second < 0 ||
++            workgroup->second >= ExpectedWorkgroups) {
+             return false;
+         }
++        ++dynamicWavesPerWorkgroup[workgroup->second];
+     }
++    if (!std::all_of(
++            dynamicWavesPerWorkgroup.begin(),
++            dynamicWavesPerWorkgroup.end(),
++            [](uint32_t count) { return count == 4; }))
++        return false;
+ 
+     uint64_t signalBefore = 0;
+     _amd_queue_t mqdBefore = {};
+@@ -730,6 +751,9 @@ HostNativeGPUExecutor::hsaPacketRetired(
+              "B2 packet retirement identity mismatch");
+     ++retiredCount;
+     panic_if(!releasePins(), "B2 pinned-allocation release failed");
++    adapterReleased = executionAdapter.release(DispatchId);
++    panic_if(!adapterReleased,
++             "B2 execution adapter release after retirement failed");
+     emitResultAndExit();
+ }
+ 
+@@ -752,6 +776,16 @@ HostNativeGPUExecutor::emitResultAndExit()
+         << ",\"command_processor_submitted_count\":" << submittedCount
+         << ",\"gpu_dispatcher_started_count\":" << dispatcherStartedCount
+         << ",\"hsa_packet_retired_count\":" << retiredCount
++        << ",\"dispatch_id\":" << DispatchId
++        << ",\"wire_request_id\":" << RequestId
++        << ",\"request_token_translated\":"
++        << (executionAdapter.tokenTranslated() ? "true" : "false")
++        << ",\"owner_quarantined\":"
++        << (adapterQuarantined ? "true" : "false")
++        << ",\"quarantine_retained_until_retire\":"
++        << (executionAdapter.lastPacketRetired() ? "true" : "false")
++        << ",\"adapter_released\":"
++        << (adapterReleased ? "true" : "false")
+         << ",\"separate_abc_4k\":true,"
+            "\"old_abi_global_offsets_zero\":true,"
+            "\"output_b_is_gid\":true,\"output_c_is_a\":true,"
+diff --git a/src/dev/amdgpu/host_native_gpu_executor.hh b/src/dev/amdgpu/host_native_gpu_executor.hh
+index a93f639aa..501bc24ff 100644
+--- a/src/dev/amdgpu/host_native_gpu_executor.hh
++++ b/src/dev/amdgpu/host_native_gpu_executor.hh
+@@ -42,6 +42,7 @@
+ #include "dev/amdgpu/host_gpu_memory_state.hh"
+ #include "dev/amdgpu/host_gpu_native_command_processor_core.hh"
+ #include "dev/amdgpu/host_gpu_native_queue_core.hh"
++#include "dev/amdgpu/host_gpu_native_execution_adapter.hh"
+ #include "dev/amdgpu/host_native_code_object_mapper.hh"
+ #include "dev/amdgpu/host_native_memory_context.hh"
+ #include "gpu-compute/dispatch_lifecycle.hh"
+@@ -100,8 +101,10 @@ class HostNativeGPUExecutor : public SimObject,
+   private:
+     static constexpr uint32_t QueueId = 511;
+     static constexpr uint64_t QueueGeneration = 1;
+-    static constexpr uint64_t DispatchId = 1;
+-    static constexpr uint64_t RequestId = DispatchId;
++    /* Keep the CU-facing ID bounded/signed while retaining the full wire
++     * request token used by memory leases and transport correlation. */
++    static constexpr int DispatchId = 17;
++    static constexpr uint64_t RequestId = 0x100000001ULL;
+     static constexpr uint32_t QueueBytes = 4096;
+     static constexpr uint32_t ElementCount = 1024;
+     static constexpr uint32_t AllocationBytes = 4096;
+@@ -197,6 +200,9 @@ class HostNativeGPUExecutor : public SimObject,
+     uint64_t workgroupCompletedCount = 0;
+     std::bitset<ExpectedWorkgroups> completedWorkgroups;
+     uint64_t retiredCount = 0;
++    HostNativeExecutionAdapter executionAdapter;
++    bool adapterQuarantined = false;
++    bool adapterReleased = false;
+ };
+ 
+ } // namespace hostgpu
+diff --git a/src/gpu-compute/dispatcher.cc b/src/gpu-compute/dispatcher.cc
+index 5681584a2..54f0c1faa 100644
+--- a/src/gpu-compute/dispatcher.cc
++++ b/src/gpu-compute/dispatcher.cc
+@@ -381,8 +381,13 @@ GPUDispatcher::notifyWgCompl(Wavefront *wf)
+     }
+ 
+     if (task->numWgCompleted() == task->numWgTotal()) {
+-        if (completionSink) {
+-            panic_if(!completionSink->completeKernel(
++        /* Completion and retirement callbacks may restore the dispatcher's
++         * previous hooks.  Keep this task's native/legacy mode stable for the
++         * remainder of the final-workgroup path. */
++        auto *const taskCompletionSink = completionSink;
++        const bool nativeCompletion = taskCompletionSink != nullptr;
++        if (nativeCompletion) {
++            panic_if(!taskCompletionSink->completeKernel(
+                          *task, wf->computeUnit->cu_id, wf->wgId),
+                      "host-native kernel completion failed");
+         } else {
+@@ -400,7 +405,7 @@ GPUDispatcher::notifyWgCompl(Wavefront *wf)
+             lifecycleListener->hsaPacketRetired(
+                 *task, wf->computeUnit->cu_id, wf->wgId);
+         }
+-        if (task->completionSignal() && !completionSink) {
++        if (task->completionSignal() && !nativeCompletion) {
+ #if USE_X86_ISA
+             DPRINTF(GPUDisp, "HSA AQL Kernel Complete with completion "
+                     "signal! Addr: %d\n", task->completionSignal());
+diff --git a/src/gpu-compute/dispatcher.hh b/src/gpu-compute/dispatcher.hh
+index e6d9a3cfb..e9e21eb00 100644
+--- a/src/gpu-compute/dispatcher.hh
++++ b/src/gpu-compute/dispatcher.hh
+@@ -76,6 +76,14 @@ class GPUDispatcher : public SimObject
+     void setShader(Shader *new_shader);
+     void setLifecycleListener(GPUDispatchLifecycleListener *listener);
+     void setCompletionSink(GPUDispatchCompletionSink *sink);
++    GPUDispatchLifecycleListener *lifecycleListenerPtr() const
++    {
++        return lifecycleListener;
++    }
++    GPUDispatchCompletionSink *completionSinkPtr() const
++    {
++        return completionSink;
++    }
+     void notifyHsaPacketFetched(Addr hostPacketAddr, uint32_t queueId);
+     void notifyCommandProcessorSubmitted(const HSAQueueEntry &task);
+     void notifyCuWaveStarted(
+-- 
+2.53.0
+
