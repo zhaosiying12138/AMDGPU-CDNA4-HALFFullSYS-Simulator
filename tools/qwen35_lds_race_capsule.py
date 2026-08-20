@@ -51,6 +51,7 @@ def main() -> int:
     import struct as _s
     u = lambda f: _s.unpack("<I", _s.pack("<f", f))[0]
     exps = [u(words[t*8+1]) for t in range(256)]
+    raws = [[u(words[t*8+2+j]) for j in range(4)] for t in range(256)]
     uvals = [u(v) for v in vals]
     bad = sum(1 for i, x in enumerate(uvals) if x != exps[i])
     result = {
@@ -59,8 +60,9 @@ def main() -> int:
         "correct": bad == 0,
         "stale_reads": bad,
         "first_stale": [i for i, x in enumerate(uvals) if not (60 <= x <= 123)][:8],
-        "sample_read": uvals[:16],
-        "sample_expected": exps[:16],
+        "sample_read": uvals[:8],
+        "sample_expected": exps[:8],
+        "raw_v0123_ticket0_4": raws[:4],
     }
     args.output_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
     (args.output_dir / "result.json").write_text(
