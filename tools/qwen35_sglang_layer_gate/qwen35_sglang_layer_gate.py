@@ -585,6 +585,8 @@ class LayerGate:
         self.decode_row = None
         self.decode_wait = False
         self.decode_done = []
+        self._decode_wrappers_installed = False
+        self._state_captured = None
         self.operator_module_paths: dict[int, str] = {}
         self.operator_last: dict[str, torch.Tensor] = {}
         self.operator_inputs: dict[str, torch.Tensor] = {}
@@ -831,7 +833,8 @@ class LayerGate:
             )
 
     def _capture_decode_states(
-        self, label: str, kwargs: dict, output: object
+        self, label: str, kwargs: dict, output: object,
+        args: tuple = (),
     ) -> None:
         """Dump the decode-entry GDN state pools for the active decode row.
 
@@ -841,14 +844,28 @@ class LayerGate:
         decode.  Capture conv_states/ssm_states pools, cache_indices and
         the kernel inputs once per (decode_row, label) at layer 0.
         """
-        if self.decode_row is None or self.next_layer != 0:
+        # The kernels of layer 0 run BEFORE the layer post-hook that arms
+        # the decode row, so arming cannot gate the capture: capture on the
+        # first kernel of each decode forward while the row is still pending
+        # (decode_wait) and tag it with the row about to be processed.
+        if not (self.decode_wait or self.decode_row is not None):
             return
-        key = f"decode{self.decode_row}_{label}"
-        if getattr(self, "_state_captured", None) == key:
+        row = (
+            self.decode_row
+            if self.decode_row is not None
+            else min(self.decode_rows_remaining, default=-1)
+        )
+        if row < 0:
+            return
+        key = f"decode{row}_{label}"
+        if self._state_captured == key:
             return
         self._state_captured = key
         try:
             conv_states = kwargs.get("conv_states")
+            if conv_states is None and len(args) > 1:
+                # causal_conv1d_update receives the state pool positionally.
+                conv_states = args[1]
             ssm_states = kwargs.get("ssm_states")
             cache_indices = kwargs.get("cache_indices") or kwargs.get(
                 "conv_state_indices"
@@ -1037,9 +1054,12 @@ class LayerGate:
         # that arm the row, but SGLang threads later layers' context
         # without repeating them -- a missing positions kwarg mid-row must
         # not drop the remaining 23 layer comparisons.
-        if self.decode_wait and not self.active and not _patched_functions:
+        if self.decode_wait and not self.active and not self._decode_wrappers_installed:
             # Decode-entry state capture needs the kernel wrappers before the
-            # decode forward; prefill-only arming would install them too late.
+            # decode forward; prefill-only arming installs the five operator
+            # wrappers but not the decode-state patches, so install here too
+            # (idempotent: _patch_attribute no-ops on already-patched keys).
+            self._decode_wrappers_installed = True
             _install_function_wrappers()
         if not (self.active and self.decode_row is not None):
             positions = _normalize_positions(kwargs.get("positions"))
@@ -1496,7 +1516,9 @@ def _install_function_wrappers() -> None:
         def wrapped(*args, **kwargs):
             output = original(*args, **kwargs)
             controller = _controller()
-            controller._capture_decode_states(label, kwargs or {}, output)
+            controller._capture_decode_states(
+                label, kwargs or {}, output, args=args
+            )
             return output
 
         return wrapped
