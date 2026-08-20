@@ -235,7 +235,10 @@ if [[ -z "${gpu_archs_value//[[:space:]]/}" ]]; then
 fi
 
 export SAGR_MANAGED_GEM5="$gem5"
-export SAGR_MANAGED_GEM5_CONFIG="${ROOT}/projects/gem5/configs/example/gemsim/host_dispatch.py"
+# The managed config path is normally this worktree's script; an already-set
+# value lets a diagnostic lane point at another worktree's config (e.g. the
+# hybrid-CTA branch whose script carries extra options the main tree lacks).
+export SAGR_MANAGED_GEM5_CONFIG="${SAGR_MANAGED_GEM5_CONFIG:-${ROOT}/projects/gem5/configs/example/gemsim/host_dispatch.py}"
 export SAGR_MANAGED_REPO_ROOT="${ROOT}"
 # SAGR_MANAGED_RUN_ROOT is inherited from the lane supervisor. It confines this
 # lane's simulators to their own directory so progress accounting and cleanup
