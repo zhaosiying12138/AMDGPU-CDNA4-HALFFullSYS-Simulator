@@ -284,7 +284,12 @@ if [[ $engine == sglang ]]; then
   else
     export PYTHONPATH="${ROOT}/projects/sglang-0.5.17:${ROOT}/env/sglang-overlay-cp312"
   fi
-  export SGLANG_USE_AITER=1
+  # aiter's tuned-GEMM table has no valid tiling for the decode m=1 GEMM
+  # shapes (n=8192 k=1024 rejected by selection_filter), which kills the
+  # engine at the first decode step.  SAGR_SGLANG_USE_AITER=0 routes the
+  # linear layers through the standard torch F.linear path while leaving the
+  # attention backend selection untouched.
+  export SGLANG_USE_AITER="${SAGR_SGLANG_USE_AITER:-1}"
   export FLA_CACHE_RESULTS=1
 else
   # vLLM runs on the formal Triton path: the unchanged upstream AMD hip

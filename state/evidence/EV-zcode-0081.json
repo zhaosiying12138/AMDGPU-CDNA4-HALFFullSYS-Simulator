@@ -1,0 +1,13 @@
+{
+  "checkpoint_id": "CP-0081",
+  "claim": "RETRACTION AND CORRECTION of CP-0077/CP-0079. The 'VOP3/VOP3P write-back only for one lane' conclusion was an artifact of the test kernel itself: it used LDS (ds_add_rtn_u32 ticket counter) while declaring group_segment_fixed_size=0, so every LDS atomic was out of bounds and LdsChunk::atomic silently returned 0 to all lanes (lds_state.hh drops out-of-range atomics), collapsing every per-lane store address to the same ticket-0 block. With a __shared__ 64-byte pad forcing group_segment_fixed_size=64, the same kernel returns ALL CORRECT for all 256 lanes: chained v_mfma_f32_32x32x16_bf16 with C/D in AGPR = 32.0f on every lane, v_accvgpr_write/read roundtrip = 100.0f, v_pk_mul_f32 = 3.0f, v_mbcnt = correct per-lane ids. gem5's VOP3/VOP3P/MFMA/AGPR unified-file model is verified correct end to end. The REAL aiter attention divergence remains, and is already pinned by the absorbed fable5 attention probes (main e16d6f3): the simulated d256 Q.K MFMA keeps only its final k-block (a race) -- that is the actual defect to repair for the aiter backend. All diagnostic DPRINTFs added during this hunt are debug-flag-gated (VEGA/GPUInitAbi) and retained as instrumentation.",
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1",
+  "supersedes": [
+    "EV-zcode-0077",
+    "EV-zcode-0079"
+  ],
+  "verification": {
+    "kernel": "tools/mfma_isa_test/mfma_test.hsaco (mfma_t4.hip: __shared__ volatile pad, group_segment_fixed_size=64)",
+    "result": "accvgpr_rt/mfma_a0/mfma_a1/pk_mul_lo all 0/256 bad; 1276 nonzero words across distinct per-lane blocks"
+  }
+}

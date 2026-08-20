@@ -46,7 +46,10 @@ def main() -> int:
                                    ctypes.c_void_p(stream), params, None)
     assert rc == 0, f"launch {rc}"
     torch.cuda.synchronize()
-    words = out.detach().cpu().tolist()
+    raw = out.detach().cpu()
+    words = raw.tolist()
+    nz = (raw != 0).nonzero().flatten().tolist()
+    print(f"output nonzero words: {len(nz)}/2048 first16={nz[:16]}", flush=True)
     u32 = lambda f: struct.unpack("<I", struct.pack("<f", f))[0]
     tickets = sorted(set(int(words[t*8]) for t in range(256)) | {0})
     slots = {}
