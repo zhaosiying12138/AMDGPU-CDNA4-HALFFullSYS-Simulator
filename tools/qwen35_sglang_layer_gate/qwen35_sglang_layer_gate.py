@@ -1611,6 +1611,46 @@ def _install_function_wrappers() -> None:
         conv_mod, "causal_conv1d_update",
         lambda orig: decode_state_capture(orig, "conv_update"),
     )
+    hybrid_mod = importlib.import_module(
+        "sglang.srt.layers.attention.hybrid_linear_attn_backend"
+    )
+    for cls_name in ("MambaAttnBackendBase", "HybridLinearAttnBackend"):
+        cls_h = getattr(hybrid_mod, cls_name, None)
+        if cls_h is not None and hasattr(cls_h, "_track_mamba_state_extend"):
+            def track_wrapper(original):
+                def wrapped(self_b, forward_batch, h, ssm_states, forward_metadata):
+                    controller = _controller()
+                    pre_hashes = {}
+                    md = forward_metadata
+                    for field in ("track_ssm_h_dst", "track_ssm_final_dst"):
+                        dst = getattr(md, field, None)
+                        if dst is not None and dst.numel() > 0:
+                            d0 = int(dst.reshape(-1)[0].long().item())
+                            if 0 <= d0 < ssm_states.shape[0]:
+                                pre_hashes[field] = _slot_fingerprint(
+                                    ssm_states, d0
+                                )
+                    original(self_b, forward_batch, h, ssm_states, md)
+                    for field, pre in pre_hashes.items():
+                        dst = getattr(md, field, None)
+                        d0 = int(dst.reshape(-1)[0].long().item())
+                        post = _slot_fingerprint(ssm_states, d0)
+                        event = {
+                            "event": "track_extend_write",
+                            "field": field,
+                            "dst0": d0,
+                            "pre": pre.get("slot_sha256_16"),
+                            "post": post.get("slot_sha256_16"),
+                        }
+                        controller._journal_event(event)
+
+                return wrapped
+
+            _patch_attribute(
+                cls_h, "_track_mamba_state_extend", track_wrapper
+            )
+            break
+
     pool_mod = importlib.import_module(
         "sglang.srt.mem_cache.memory_pool"
     )
@@ -1639,6 +1679,28 @@ def _install_function_wrappers() -> None:
             return wrapped
 
         _patch_attribute(pool_cls, "copy_from", copy_from_wrapper)
+
+        rtt_cls = getattr(pool_mod, "HybridReqToTokenPool", None)
+        if rtt_cls is not None:
+            def donate_wrapper(original):
+                def wrapped(self_r, req, new_slot):
+                    result = original(self_r, req, new_slot)
+                    controller = _controller()
+                    controller._journal_event({
+                        "event": "donate_ping_pong",
+                        "donated": int(result.reshape(-1)[0].item())
+                        if result is not None and result.numel() else -1,
+                        "new_slot": int(new_slot.reshape(-1)[0].item())
+                        if new_slot is not None and new_slot.numel() else -1,
+                        "req_pool_idx": int(getattr(req, "req_pool_idx", -1)),
+                    })
+                    return result
+
+                return wrapped
+
+            _patch_attribute(
+                rtt_cls, "donate_mamba_ping_pong_slot", donate_wrapper
+            )
 
     dispatcher_mod = importlib.import_module(
         "sglang.srt.layers.attention.linear.gdn_backend"
