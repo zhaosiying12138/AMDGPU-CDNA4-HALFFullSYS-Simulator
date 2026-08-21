@@ -1610,9 +1610,85 @@ def _install_function_wrappers() -> None:
     conv_mod = importlib.import_module(
         "sglang.srt.layers.attention.linear.gdn_backend"
     )
+    def conv_update_probe(original):
+        # The only kernel call between the decode-entry journal and the
+        # dispatcher's packed_decode journal.  Fingerprint the conv slot AND
+        # the entry-stashed temporal slot (the very object decode_entry_pool
+        # journaled) before and after the call: a temporal flip across this
+        # call convicts the conv kernel through the production envelope
+        # layout; survival moves any rewrite to between this call and the
+        # packed_decode kwarg binding.  ``original`` here is the legacy
+        # post-call decode_state_capture wrapper, so the historic
+        # "conv_update" journal events and tensor dumps are unchanged.
+        def wrapped(*args, **kwargs):
+            controller = _controller()
+            out = None
+            try:
+                conv_states = kwargs.get("conv_states")
+                if conv_states is None and len(args) > 1:
+                    conv_states = args[1]
+                idxs = kwargs.get("conv_state_indices")
+                idx = (
+                    int(idxs.detach().reshape(-1)[0].long().item())
+                    if idxs is not None
+                    else -1
+                )
+                if idx < 0:
+                    idx = getattr(controller, "_conv_probe_idx", -1)
+                temporal = getattr(controller, "_conv_probe_temporal", None)
+
+                def snap(tag):
+                    event = {
+                        "event": "conv_update",
+                        "tag": tag,
+                        "layer": getattr(controller, "_conv_probe_layer", None),
+                        "slot": idx,
+                    }
+                    if conv_states is not None and idx >= 0:
+                        event["conv_ptr"] = hex(conv_states.data_ptr())
+                        event["conv_shape"] = list(conv_states.shape)
+                        event["conv_stride"] = list(conv_states.stride())
+                        event.update(
+                            {
+                                f"conv_{k}": v
+                                for k, v in _slot_fingerprint(
+                                    conv_states, idx
+                                ).items()
+                            }
+                        )
+                    if temporal is not None and idx >= 0:
+                        event["ssm_ptr"] = hex(temporal.data_ptr())
+                        event["ssm_shape"] = list(temporal.shape)
+                        event["ssm_stride"] = list(temporal.stride())
+                        event.update(
+                            {
+                                f"ssm_{k}": v
+                                for k, v in _slot_fingerprint(
+                                    temporal, idx
+                                ).items()
+                            }
+                        )
+                    controller._journal_event(event)
+
+                snap("before")
+                out = original(*args, **kwargs)
+                snap("after")
+            except Exception as error:  # noqa: BLE001
+                controller._journal_event({
+                    "event": "conv_update_error",
+                    "error": f"{type(error).__name__}: {error}"[:160],
+                })
+                if out is None:
+                    out = original(*args, **kwargs)
+            return out
+
+        return wrapped
+
     _patch_attribute(
         conv_mod, "causal_conv1d_update",
-        lambda orig: decode_state_capture(orig, "conv_update"),
+        lambda orig: conv_update_probe(
+            decode_state_capture(orig, "conv_update")
+        ),
     )
     hybrid_mod = importlib.import_module(
         "sglang.srt.layers.attention.hybrid_linear_attn_backend"
@@ -1722,8 +1798,32 @@ def _install_function_wrappers() -> None:
                     "tensor_shape": list(temporal.shape),
                     "tensor_stride": list(temporal.stride()),
                 }
+                conv_pool = cache.conv[0] if cache.conv else None
+                if conv_pool is not None and idx0 >= 0:
+                    # The conv state is the other half of the prefill->decode
+                    # carry: fingerprint it at the same point so a corrupted
+                    # conv slot is visible without another run.
+                    event["conv_ptr"] = hex(conv_pool.data_ptr())
+                    event["conv_shape"] = list(conv_pool.shape)
+                    event["conv_stride"] = list(conv_pool.stride())
+                    event.update(
+                        {
+                            f"conv_{k}": v
+                            for k, v in _slot_fingerprint(
+                                conv_pool, idx0
+                            ).items()
+                        }
+                    )
                 event.update(_slot_fingerprint(temporal, idx0))
                 controller._journal_event(event)
+                # Hand the per-layer temporal view to the causal_conv1d_update
+                # wrapper so it can fingerprint the SAME tensor before/after
+                # the conv call: this closes the last uninstrumented gap in
+                # the rewrite bracket (entry journal -> conv update ->
+                # packed_decode kwarg) without touching sglang source.
+                controller._conv_probe_temporal = temporal
+                controller._conv_probe_layer = int(layer_id)
+                controller._conv_probe_idx = idx0
             except Exception as error:  # noqa: BLE001
                 controller._journal_event({
                     "event": "decode_entry_pool_error",
@@ -1735,6 +1835,94 @@ def _install_function_wrappers() -> None:
 
     if extend_cls is not None and hasattr(extend_cls, "forward_decode"):
         _patch_attribute(extend_cls, "forward_decode", decode_entry_wrapper)
+
+    # Final-boundary probe.  decode-15 passed every layer-boundary
+    # comparison for both decode rows yet still emitted the wrong second
+    # token, so the divergence lives at or after the final norm / lm_head /
+    # sampler.  LogitsProcessor.forward receives the post-final-norm hidden
+    # states and returns next_token_logits, so one wrapper sees both sides
+    # of the lm_head.  Offline, recomputing logits from the captured hidden
+    # with the checkpoint lm_head splits the remaining suspects: host
+    # logits agreeing with golden while the journaled top-5 disagrees
+    # convicts the engine's m=1 lm_head GEMM or the sampler; host logits
+    # disagreeing with golden means the (tolerated) layer drift flipped a
+    # near-tie argmax and the defect is inside the layers after all.
+    logits_cls = getattr(
+        importlib.import_module("sglang.srt.layers.logits_processor"),
+        "LogitsProcessor",
+        None,
+    )
+
+    def logits_probe(original):
+        def wrapped(
+            self_lp,
+            input_ids,
+            hidden_states,
+            lm_head,
+            logits_metadata,
+            *args,
+            **kwargs,
+        ):
+            out = original(
+                self_lp,
+                input_ids,
+                hidden_states,
+                lm_head,
+                logits_metadata,
+                *args,
+                **kwargs,
+            )
+            try:
+                controller = _controller()
+                mode = getattr(logits_metadata, "forward_mode", None)
+                is_decode = bool(
+                    mode is not None
+                    and hasattr(mode, "is_decode")
+                    and mode.is_decode()
+                )
+                controller._logits_calls = (
+                    getattr(controller, "_logits_calls", 0) + 1
+                )
+                seq = controller._logits_calls
+                logits = getattr(out, "next_token_logits", None)
+                if logits is None:
+                    return out
+                flat = logits.detach().float().reshape(-1)
+                top = torch.topk(flat, min(5, flat.numel()))
+                controller._journal_event({
+                    "event": "logits_proc",
+                    "seq": seq,
+                    "decode": is_decode,
+                    "shape": list(logits.shape),
+                    "top5_ids": [int(x) for x in top.indices.tolist()],
+                    "top5_vals": [round(float(v), 6) for v in top.values.tolist()],
+                })
+                key = f"logits_seq{seq}_{'decode' if is_decode else 'extend'}"
+                payload = save_safetensors({
+                    "hidden_states": (
+                        hidden_states.detach().float().cpu().contiguous()
+                    ),
+                    "next_token_logits": (
+                        logits.detach().float().cpu().contiguous()
+                    ),
+                })
+                _atomic_write(
+                    controller.output / f"{key}_states.safetensors", payload
+                )
+            except Exception as error:  # noqa: BLE001 - diagnostics must not kill the lane
+                try:
+                    _controller()._journal_event({
+                        "event": "logits_proc_error",
+                        "error": f"{type(error).__name__}: {error}"[:160],
+                    })
+                except Exception:
+                    pass
+            return out
+
+        return wrapped
+
+    if logits_cls is not None:
+        _patch_attribute(logits_cls, "forward", logits_probe)
 
     pool_mod = importlib.import_module(
         "sglang.srt.mem_cache.memory_pool"

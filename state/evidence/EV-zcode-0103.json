@@ -1,0 +1,26 @@
+{
+ "acquired": [
+  "decode rows' layer boundaries are massively wrong while layer_input-0 is exact",
+  "prefill late-layer drift is deterministic across runs",
+  "post-conv mixed_qkv at decode already uncorrelated (defect upstream of packed_decode)",
+  "lm_head m=1 matmul acquitted at production shapes",
+  "gemma_rmsnorm m=1 and projection matmuls m=1 acquitted",
+  "SSM state uncorrelated with no layout explanation"
+ ],
+ "checkpoint_id": "CP-0103",
+ "claim": "Second-token defect re-diagnosed from artifacts, no new lane needed for the decisive split. decode-15's comparisons.jsonl (which its diagnostic summary misreports as passed) shows BOTH decode rows' layer boundaries are catastrophically wrong (cos 0.0-0.5 from layer 0 onward) while decode row 1's layer_input-0 is cos 1.0 EXACT: the embedding/input is bit-perfect and layer 0's decode computation produces garbage. The prefill drift is deterministic (decode-18 reproduces decode-15's layer 17-23 cosines bit-for-bit: 0.992314/0.993747/...) -- no race. Offline analyzer tools/qwen35_gdn_state_expected.py reimplements the golden generator's layer-0 recurrence (sanity vs golden: 1.000049) and proves the engine's post-conv mixed_qkv entering packed_decode is already uncorrelated (cos 0.012 pos2 / 0.028 pos3), as are the SSM (cos ~0.0001, no transpose/head-permutation explanation) and conv line states. CP-0101's 'rewrite inside forward_decode' is RETRACTED (post-call journal semantics); the journal instead shows a self-consistent carry (row2 entry == row1 post-update). Suspect elimination by capsule, all on the simulator with golden inputs: (1) lm_head m=1 matmul at production shapes N=248320 K=1024 (m1 rows 1/2/3, m4, random) -- argmax exact, mean diff 0.0025 (tools/qwen35_lmhead_m1_capsule.py, artifacts/qwen35-lmhead-m1-capsule/v1); (2) plain gemma_rmsnorm Triton kernel m=1/m=2 -- cos 1.0; (3) m=1 projection matmuls n=8192 and n=32 -- cos 1.0 (tools/qwen35_decode_input_chain_capsule.py, artifacts/qwen35-decode-input-chain-capsule/v1). Remaining suspects inside layer-0 decode: fused_qkvzba split kernel at m=1 and causal_conv1d_update on the real trajectory -- capsule tools/qwen35_split_conv_capsule.py launched with true post-prefill conv line (zero,t0,t1) and golden pre-conv rows. ALSO: decode-18 lane crashed at the prefill/decode boundary with a gem5 host-native load fault (kernel global_load_dword on unmapped host address, capture artifacts/lanes/zcode-decode-18/fatal-20260821T122252) -- the intermittent crash family seen once before at token-1; relaunch pending after capsules finish to avoid concurrent-lane interference. Gate instrumentation added for the next lane run: causal_conv1d_update before/after fingerprints (composed with the legacy post-call capture so historic events are unchanged), conv-slot fingerprint at decode entry, and a LogitsProcessor probe journaling top-5 + saving post-norm hidden and next_token_logits per forward.",
+ "lanes": {
+  "capsules": [
+   "qwen35-lmhead-m1-capsule/v1 (passed: argmax exact all cases)",
+   "qwen35-decode-input-chain-capsule/v1 (passed: norm+projections exact m=1/m=2)",
+   "qwen35-split-conv-capsule (running)"
+  ],
+  "crashed": "zcode-decode-18 (gem5 host-native load fault at prefill/decode boundary)"
+ },
+ "observed_at": "2026-08-21T12:30:51",
+ "retractions": [
+  "CP-0101 forward_decode-internal rewrite bracket (post-call journal semantics)"
+ ],
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
