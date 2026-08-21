@@ -1,0 +1,19 @@
+{
+ "checkpoint_id": "CP-0106",
+ "claim": "SGLang TP1 FORMAL ACCEPTANCE GREEN. Lane zcode-tp1-formal-v1 (standard config: no debug layer gate, upstream --attention-backend triton selection, --fast, full generation + teardown + run-identity gate) completed exit=0 in 1304s e2e with output_ids [27841, 27841], token_golden correct=true (actual==expected, prompt [248044,266], checkpoint weights), and clean process-tree teardown at 14:26:49. The identity gate recorded the expected stock-HIP mode warning (libamdhip64 resolves from rocm-sysroot, i.e. the lane's documented stock-HIP + rebuilt-ROCr default) -- informational, run not voided. GOAL ladder state: SGLang TP1 accepted; next rung vLLM TP1. Replay evidence for the defect fix chain: CP-0103 (re-diagnosis, all m=1 logits-path kernels capsule-acquitted), CP-0104 (probe-side GPU topk crash fixed + aiter table pinned per lane), CP-0105 (debug-lane [27841,27841] + mechanism confirmation via convprobe cos 1.0).",
+ "lane": "zcode-tp1-formal-v1",
+ "next": "vLLM TP1 bring-up per GOAL ladder (vllm pip package, --engine vllm branch of the lane script, same golden gate)",
+ "observed_at": "2026-08-21T14:30:22",
+ "result": {
+  "e2e_s": 1304.13,
+  "exit": 0,
+  "output_ids": [
+   27841,
+   27841
+  ],
+  "teardown": "kill_process_tree clean, finished status=0",
+  "token_gate_correct": true
+ },
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
