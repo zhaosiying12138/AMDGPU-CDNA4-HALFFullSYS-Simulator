@@ -293,6 +293,33 @@ if [[ $engine == sglang ]]; then
   # linear layers through the standard torch F.linear path while leaving the
   # attention backend selection untouched.
   export SGLANG_USE_AITER="${SAGR_SGLANG_USE_AITER:-1}"
+  # aiter resolves its bf16 tuned-GEMM table from a machine-global file
+  # (/tmp/aiter_configs/bf16_tuned_gemm.csv).  Two concurrent lanes once
+  # rewrote that file mid-run: the victim lane then selected a different,
+  # freshly JIT-compiled GEMM for shapes that earlier runs had served from
+  # the table, and the fresh kernel chased a stale pointer into a gem5
+  # host-native load panic (zcode-decode-18, capture fatal-20260821T122252;
+  # the same signature explains the never-reproduced "Invalid tiling" crash
+  # of lgate-4).  Pin the table per lane to a frozen copy so dispatch
+  # decisions are lane-local and reproducible.
+  aiter_cfg_dir="${SAGR_MANAGED_RUN_ROOT:-/tmp}/aiter-config"
+  mkdir -p "$aiter_cfg_dir"
+  if [[ ! -s ${aiter_cfg_dir}/bf16_tuned_gemm.csv ]]; then
+    # Seed from the package-owned table (deterministic per pinned env), not
+    # the mutable /tmp copy whose contents depend on what other lanes last
+    # merged into it.  aiter's import merges the package model_configs into
+    # this file at startup, so the lane-local copy ends up complete either
+    # way, and only this lane ever writes it.
+    for src in \
+      "${PREFIX}/lib/python3.12/site-packages/aiter/configs/bf16_tuned_gemm.csv" \
+      /tmp/aiter_configs/bf16_tuned_gemm.csv; do
+      if [[ -r $src ]]; then
+        cp "$src" "${aiter_cfg_dir}/bf16_tuned_gemm.csv"
+        break
+      fi
+    done
+  fi
+  export AITER_CONFIG_GEMM_BF16="${aiter_cfg_dir}/bf16_tuned_gemm.csv"
   export FLA_CACHE_RESULTS=1
 else
   # vLLM runs on the formal Triton path: the unchanged upstream AMD hip

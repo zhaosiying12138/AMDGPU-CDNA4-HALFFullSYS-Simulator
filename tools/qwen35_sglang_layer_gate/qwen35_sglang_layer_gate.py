@@ -1671,8 +1671,43 @@ def _install_function_wrappers() -> None:
                     controller._journal_event(event)
 
                 snap("before")
+                line_before_tensor = (
+                    conv_states[idx].detach().float().cpu().contiguous()
+                    if conv_states is not None and idx >= 0
+                    else None
+                )
                 out = original(*args, **kwargs)
                 snap("after")
+                # Once per layer, persist the exact boundary tensors: the
+                # PRE-conv mixed_qkv (args[0]) decides between "the
+                # projection produced zeros/garbage" and "the conv kernel
+                # lost its write"; the two line snapshots pin the roll.
+                layer_now = getattr(controller, "_conv_probe_layer", None)
+                if layer_now is not None and conv_states is not None and idx >= 0:
+                    key = f"convprobe_L{layer_now}"
+                    if getattr(controller, "_conv_probe_saved", None) != key:
+                        controller._conv_probe_saved = key
+                        pre_input = args[0] if args else kwargs.get("x")
+                        payload = {
+                            "pre_conv_input": (
+                                pre_input.detach().float().cpu().contiguous()
+                            )
+                            if pre_input is not None
+                            else torch.zeros(1),
+                            "line_before": (
+                                line_before_tensor
+                                if line_before_tensor is not None
+                                else torch.zeros(1)
+                            ),
+                            "line_after": (
+                                conv_states[idx].detach().float().cpu().contiguous()
+                            ),
+                            "slot": torch.tensor([idx], dtype=torch.int64),
+                        }
+                        _atomic_write(
+                            controller.output / f"{key}_states.safetensors",
+                            save_safetensors(payload),
+                        )
             except Exception as error:  # noqa: BLE001
                 controller._journal_event({
                     "event": "conv_update_error",
@@ -1887,7 +1922,15 @@ def _install_function_wrappers() -> None:
                 logits = getattr(out, "next_token_logits", None)
                 if logits is None:
                     return out
-                flat = logits.detach().float().reshape(-1)
+                # Copy raw tensors to the host and do ALL math there: a
+                # probe-side torch.topk on the 248k-wide logits launches a
+                # fresh huge-grid kernel that crashed gem5 at the
+                # prefill->decode boundary (decode-18/19, identical panic
+                # signature at the same wavefront).  Diagnostics must not
+                # add GPU code paths the engine itself never runs.
+                logits_cpu = logits.detach().cpu()
+                hidden_cpu = hidden_states.detach().cpu()
+                flat = logits_cpu.float().reshape(-1)
                 top = torch.topk(flat, min(5, flat.numel()))
                 controller._journal_event({
                     "event": "logits_proc",
@@ -1899,12 +1942,8 @@ def _install_function_wrappers() -> None:
                 })
                 key = f"logits_seq{seq}_{'decode' if is_decode else 'extend'}"
                 payload = save_safetensors({
-                    "hidden_states": (
-                        hidden_states.detach().float().cpu().contiguous()
-                    ),
-                    "next_token_logits": (
-                        logits.detach().float().cpu().contiguous()
-                    ),
+                    "hidden_states": hidden_cpu.float().contiguous(),
+                    "next_token_logits": logits_cpu.float().contiguous(),
                 })
                 _atomic_write(
                     controller.output / f"{key}_states.safetensors", payload

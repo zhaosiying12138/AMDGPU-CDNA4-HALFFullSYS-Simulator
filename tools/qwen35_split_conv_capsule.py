@@ -188,7 +188,7 @@ def main() -> int:
         dev = causal_conv1d_update(
             pre_conv[cur_row : cur_row + 1].to("cuda"),
             pool,
-            W["conv"].to("cuda"),
+            W["conv"].reshape(QKV_DIM, 4).contiguous().to("cuda"),
             conv_bias.to("cuda") if conv_bias is not None else None,
             "silu",
             conv_state_indices=indices,
