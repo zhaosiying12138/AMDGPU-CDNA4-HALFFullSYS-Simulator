@@ -1681,9 +1681,22 @@ def _install_function_wrappers() -> None:
 
         return wrapped
 
-    gdn_base_cls = getattr(hybrid_mod, "MambaAttnBackendBase", None)
-    if gdn_base_cls is not None and hasattr(gdn_base_cls, "forward_extend"):
-        _patch_attribute(gdn_base_cls, "forward_extend", extend_exit_wrapper)
+    gdn_mod_cls = getattr(
+        importlib.import_module(
+            "sglang.srt.layers.attention.linear.gdn_backend"
+        ),
+        "GDNAttnBackend",
+        None,
+    )
+    # The GDN subclass overrides forward_extend/forward_decode, so patching
+    # the base class alone never fires.
+    extend_cls = (
+        gdn_mod_cls
+        if gdn_mod_cls is not None
+        else getattr(hybrid_mod, "MambaAttnBackendBase", None)
+    )
+    if extend_cls is not None and hasattr(extend_cls, "forward_extend"):
+        _patch_attribute(extend_cls, "forward_extend", extend_exit_wrapper)
 
     def decode_entry_wrapper(original):
         def wrapped(self_b, *args, **kwargs):
@@ -1714,8 +1727,8 @@ def _install_function_wrappers() -> None:
 
         return wrapped
 
-    if gdn_base_cls is not None and hasattr(gdn_base_cls, "forward_decode"):
-        _patch_attribute(gdn_base_cls, "forward_decode", decode_entry_wrapper)
+    if extend_cls is not None and hasattr(extend_cls, "forward_decode"):
+        _patch_attribute(extend_cls, "forward_decode", decode_entry_wrapper)
 
     pool_mod = importlib.import_module(
         "sglang.srt.mem_cache.memory_pool"
