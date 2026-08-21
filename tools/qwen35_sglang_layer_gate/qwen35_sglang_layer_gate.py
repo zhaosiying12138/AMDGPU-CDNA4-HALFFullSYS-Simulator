@@ -1651,6 +1651,72 @@ def _install_function_wrappers() -> None:
             )
             break
 
+    def extend_exit_wrapper(original):
+        def wrapped(self_b, *args, **kwargs):
+            output = original(self_b, *args, **kwargs)
+            controller = _controller()
+            try:
+                layer = kwargs.get("layer")
+                layer_id = getattr(layer, "layer_id", None)
+                cache = self_b.req_to_token_pool.mamba2_layer_cache(
+                    int(layer_id)
+                )
+                temporal = cache.temporal
+                md = self_b.forward_metadata
+                idx_x = md.mamba_cache_indices
+                idx0 = int(idx_x.reshape(-1)[0].long().item())
+                event = {
+                    "event": "extend_exit_pool",
+                    "layer": int(layer_id),
+                    "cache_indices": [int(x) for x in idx_x.reshape(-1).tolist()],
+                }
+                event.update(_slot_fingerprint(temporal, idx0))
+                controller._journal_event(event)
+            except Exception as error:  # noqa: BLE001
+                controller._journal_event({
+                    "event": "extend_exit_pool_error",
+                    "error": f"{type(error).__name__}: {error}"[:160],
+                })
+            return output
+
+        return wrapped
+
+    gdn_base_cls = getattr(hybrid_mod, "MambaAttnBackendBase", None)
+    if gdn_base_cls is not None and hasattr(gdn_base_cls, "forward_extend"):
+        _patch_attribute(gdn_base_cls, "forward_extend", extend_exit_wrapper)
+
+    def decode_entry_wrapper(original):
+        def wrapped(self_b, *args, **kwargs):
+            controller = _controller()
+            try:
+                layer = kwargs.get("layer")
+                layer_id = getattr(layer, "layer_id", None)
+                cache = self_b.req_to_token_pool.mamba2_layer_cache(
+                    int(layer_id)
+                )
+                temporal = cache.temporal
+                md = self_b.forward_metadata
+                idx_x = md.mamba_cache_indices
+                idx0 = int(idx_x.reshape(-1)[0].long().item())
+                event = {
+                    "event": "decode_entry_pool",
+                    "layer": int(layer_id),
+                    "cache_indices": [int(x) for x in idx_x.reshape(-1).tolist()],
+                }
+                event.update(_slot_fingerprint(temporal, idx0))
+                controller._journal_event(event)
+            except Exception as error:  # noqa: BLE001
+                controller._journal_event({
+                    "event": "decode_entry_pool_error",
+                    "error": f"{type(error).__name__}: {error}"[:160],
+                })
+            return original(self_b, *args, **kwargs)
+
+        return wrapped
+
+    if gdn_base_cls is not None and hasattr(gdn_base_cls, "forward_decode"):
+        _patch_attribute(gdn_base_cls, "forward_decode", decode_entry_wrapper)
+
     pool_mod = importlib.import_module(
         "sglang.srt.mem_cache.memory_pool"
     )
