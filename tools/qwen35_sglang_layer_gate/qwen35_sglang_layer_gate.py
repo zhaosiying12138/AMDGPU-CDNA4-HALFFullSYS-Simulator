@@ -943,6 +943,9 @@ class LayerGate:
         )
         if pool is not None and idx_j >= 0:
             event["pool"] = "ssm" if ssm_states is not None else "conv"
+            event["tensor_ptr"] = hex(pool.data_ptr())
+            event["tensor_shape"] = list(pool.shape)
+            event["tensor_stride"] = list(pool.stride())
             event.update(_slot_fingerprint(pool, idx_j))
         self._journal_event(event)
         if not first_of_key:
@@ -1715,6 +1718,9 @@ def _install_function_wrappers() -> None:
                     "event": "decode_entry_pool",
                     "layer": int(layer_id),
                     "cache_indices": [int(x) for x in idx_x.reshape(-1).tolist()],
+                    "tensor_ptr": hex(temporal.data_ptr()),
+                    "tensor_shape": list(temporal.shape),
+                    "tensor_stride": list(temporal.stride()),
                 }
                 event.update(_slot_fingerprint(temporal, idx0))
                 controller._journal_event(event)
