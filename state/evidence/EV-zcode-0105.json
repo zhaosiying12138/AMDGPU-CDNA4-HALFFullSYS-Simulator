@@ -1,0 +1,32 @@
+{
+ "checkpoint_id": "CP-0105",
+ "claim": "SECOND-TOKEN DEFECT FIXED; SGLang TP1 EMITS THE GOLDEN CONTINUATION. Lane zcode-decode-20 (debug gate, triton attention) completed exit=0 with output_ids [27841, 27841] and the in-lane token golden gate reporting correct=true (actual==expected [27841,27841], prompt [248044,266]). All three LogitsProcessor probes match the golden host reference: prefill top1 27841@19.25 (ref 19.235), decode row1 27841@20.125 (ref 20.012), decode row2 27841@22.5 (ref 22.521). Convprobe tensors confirm the mechanism: the engine's decode pre-conv mixed_qkv is now cos 1.0 with the golden projection of token 27841 (rows t2/t3 identical because both decode steps process the same token id), where decode-15's equivalent was cos 0.012 garbage. ROOT CAUSE: aiter resolves its bf16 tuned-GEMM table from the machine-global /tmp/aiter_configs/bf16_tuned_gemm.csv, which every sglang import rewrites and whose entries drifted across runs; with drifted entries, decode-phase m=1 GEMM shapes dispatched to aiter JIT CK kernels whose gem5 execution is defective (the known CK-loss family), producing garbage projections -> garbage conv/mixed_qkv -> garbage hidden (cos 0.1-0.5 layer boundaries) -> greedy token 3 (rank 5354 in golden, logit 5.43 vs top 20.01). FIX (committed in the lane script, CP-0104): AITER_CONFIG_GEMM_BF16 pinned per lane to a frozen copy seeded from the package-owned table; shapes without entries dispatch to the torch/hipBLASLt path, which capsules prove exact at m=1 for n=8192/5120/32/248320. This is a dispatch-level correction (choose the kernel path gem5 executes correctly), not a simulator hack; the underlying gem5 CK-kernel defect remains tracked for the aiter-backend-green workstream so ANY operator keeps working regardless of table state. NOTE the probe-side crash fix (CP-0104) was equally necessary: the boundary panic in decode-18/19 was the diagnostics' own GPU torch.topk, now host-side. Formal acceptance lane zcode-tp1-formal-v1 (standard config: no debug gate, upstream --attention-backend triton flag, full generation + teardown + identity gate) launched with this evidence.",
+ "lane_formal": "zcode-tp1-formal-v1 (running)",
+ "logits_vs_golden": {
+  "decode_row1": "27841@20.125 vs ref 20.012",
+  "decode_row2": "27841@22.5 vs ref 22.521",
+  "prefill": "27841@19.25 vs ref 19.235"
+ },
+ "mechanism_confirmation": {
+  "diverging_variable": "aiter tuned-GEMM table state: machine-global drift vs package-pinned",
+  "pre_conv_input_decode20": "cos 1.0 vs golden projection of token 27841 (was 0.012 in decode-15)"
+ },
+ "observed_at": "2026-08-21T13:59:54",
+ "open_followups": [
+  "gem5 CK-kernel execution defect (aiter JIT GEMMs) remains: required before the aiter attention/GEMM backend can be called green; keeps any-operator generality independent of table state",
+  "prefill late-layer drift = bf16 accumulation noise (tolerance calibration, not a defect)",
+  "GLOBAL_STORE_BYTE_D16_HI decoder class gap",
+  "vLLM TP1 next per GOAL ladder"
+ ],
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf",
+ "token_gate": {
+  "correct": true,
+  "lane": "zcode-decode-20",
+  "output_ids": [
+   27841,
+   27841
+  ],
+  "schema": "amdgpu-sim.qwen35-token-golden-gate.v1"
+ }
+}
