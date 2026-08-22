@@ -1,0 +1,9 @@
+{
+ "checkpoint_id": "CP-0116",
+ "claim": "vLLM lane v9 (MUBUF-ACC + MFMA-4x4x4-bf16 fixed gem5) walked past every former wall: weight load, mamba-page setup, the FLA warmup that blocked v4-v7, and the memory profiling phase -- reaching dispatch 1869+ (deepest ever; prior ceiling was ~1733 mid-profile) -- and then faulted in the real-generate territory on the pointer-chasing kernel family: global_load_dword v2, v[2:3], off at a wild unmapped address, kernel index 32, lds 4112, kernargHead [0,0,ptr,ptr,ptr], the SAME signature as the decode-18/19 intermittent crash (capture retained: artifacts/lanes/zcode-vllm-tp1-v9/fatal-20260823T023644). The earlier attribution of that family to the probe-side topk is now DOUBTED: the probe never ran here; the family is either nondeterministic or phase-position-dependent. Next step: identify kernel 32 at THIS phase (post-profile generate; dispatch trace + code object disassembly), bisect its wild pointer source -- candidate mechanisms per the earlier forensics: a two-step OOB-read-then-dereference, or a stale descriptor pointer after JIT load. Lane progress recap this session: v7 warmup crash -> (d16_hi) -> v8 next-gap MFMA -> (4x4x4 bf16) -> v9 generate-phase pointer chase. Three gem5 gaps closed in sequence; each lane now walks further.",
+ "crash_family": "kernel-32 lds-4112 pointer chase (recurs across phases; probe-topk attribution now doubted)",
+ "observed_at": "2026-08-23T02:45:08",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf",
+ "v9_progress": "deepest run ever: past warmup + profiling into generate; crash capture retained"
+}
