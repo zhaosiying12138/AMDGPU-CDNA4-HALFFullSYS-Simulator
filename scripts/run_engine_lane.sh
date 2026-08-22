@@ -341,7 +341,16 @@ else
   # gemsim_hip, which is no longer discovered here, and Triton rejects an
   # unknown TRITON_DEFAULT_BACKEND outright.
   export TRITON_DEFAULT_BACKEND=amd
-  export PYTHONPATH=""
+  # Keep PYTHONPATH empty for upstream purity EXCEPT the read-only Triton
+  # launch probe, which names kernels through sitecustomize so vLLM bring-up
+  # can attribute dispatch-trace signatures (the 16.7M-workitem kernels that
+  # dominate bring-up are otherwise anonymous).  The probe writes no state
+  # into the engine and is skipped entirely when the log env is unset.
+  if [[ -n ${SAGR_TRITON_LAUNCH_LOG:-} ]]; then
+    export PYTHONPATH="${ROOT}/tools/triton_launch_probe"
+  else
+    export PYTHONPATH=""
+  fi
   # Empty allowlist: vllm/plugins/__init__.py loads a plugin only when its name
   # is in VLLM_PLUGINS, and an empty value parses to a list matching nothing.
   # This is the hard kill switch for both vllm.platform_plugins and
@@ -454,6 +463,13 @@ else
     --tp-size "$tp" --model-path "$model"
     --context-length 16 --max-new-tokens "$max_new_tokens" --max-num-seqs 1
     --seed 0
+    # vLLM sizes every cache pool from the utilization fraction of the
+    # device's reported memory; on the simulated 287 GB device the 0.30
+    # default dedicates ~84 GB to caches, and zeroing that mamba pool is
+    # what dominated zcode-vllm-tp1-v1 past its 12 h ceiling (643 kernels
+    # of 16.7M workitems before the dummy profile run even finished).  A
+    # 16-token context with one sequence needs almost nothing.
+    --gpu-memory-utilization "${SAGR_VLLM_GPU_MEM_UTIL:-0.30}"
   )
   (( dummy_weights )) && vllm_args+=(--load-format dummy)
   # A real file, not a heredoc: with tensor_parallel_size > 1 vLLM spawns
