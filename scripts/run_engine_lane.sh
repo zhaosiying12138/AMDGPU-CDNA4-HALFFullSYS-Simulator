@@ -342,11 +342,12 @@ else
   # unknown TRITON_DEFAULT_BACKEND outright.
   export TRITON_DEFAULT_BACKEND=amd
   # Keep PYTHONPATH empty for upstream purity EXCEPT the read-only Triton
-  # launch probe, which names kernels through sitecustomize so vLLM bring-up
-  # can attribute dispatch-trace signatures (the 16.7M-workitem kernels that
-  # dominate bring-up are otherwise anonymous).  The probe writes no state
-  # into the engine and is skipped entirely when the log env is unset.
-  if [[ -n ${SAGR_TRITON_LAUNCH_LOG:-} ]]; then
+  # probe sitecustomize, which (a) names kernels through the launch log and
+  # (b) optionally disables do_bench's L2-flush zero during autotune
+  # (SAGR_TRITON_FAST_AUTOTUNE=1) -- the flush is the one-time-tuning wall
+  # that consumed whole 12h lanes on 16.7M-workitem fill kernels.  Both
+  # behaviors are gated by env and write no state into the engine.
+  if [[ -n ${SAGR_TRITON_LAUNCH_LOG:-} || -n ${SAGR_TRITON_FAST_AUTOTUNE:-} ]]; then
     export PYTHONPATH="${ROOT}/tools/triton_launch_probe"
   else
     export PYTHONPATH=""
