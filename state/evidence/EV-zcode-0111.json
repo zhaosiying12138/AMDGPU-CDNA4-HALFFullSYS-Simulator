@@ -1,0 +1,18 @@
+{
+ "checkpoint_id": "CP-0111",
+ "claim": "vLLM crash investigation status after the saveexec retraction. (1) The CP-0110 p3 anomaly was RETRACTED by deep instrumentation: gem5's saveexec->e64-cndmask path is correct (sdst receives the old exec; the immediately-following VOP3 read sees the right pair; wavefront execution is strictly in-order so no transient is possible). The capsule p3 'failure' was three bugs in the capsule itself: (a) the oracle expected exec-INACTIVE lanes to receive cndmask writes, which hardware never does (VOP3 dst writes are exec-predicated); (b) the raw-dump store layout overlapped 8-byte payloads at 4-byte stride so 63 checked words were never written; (c) saveexec_ok compared signed words against 0xFFFFFFFF. The corrected probe (tools/qwen35_cndmask_probe2_capsule.py + cndmask_probe2.hsaco, committed by this checkpoint) passes everything on clean gem5 (bad=0 across five patterns, saveexec dst raw all-ones); the CK synthetic/package oracles and the lm_head m1 capsule show no regression. gem5 was left byte-identical (no fix needed). (2) The vLLM wild-store crash therefore has a DIFFERENT mechanism, and the h-kernel disassembly shows its masks come from SOP2 s_and_b64 (not saveexec) feeding e64 cndmask offset selects. (3) A stage-by-stage FLA capsule (tools/qwen35_vllm_fla_stages_capsule.py: cumsum->kkt->solve_tril->wy->fwd_h->fwd_o with per-stage markers and intermediate dumps) was built to bisect, but its first run hung in gem5 at dispatch 54 -- a tiny cast kernel during the input-dump phase, spinning at 300% CPU with zero retiring dispatches (the documented gem5 spin-hang family; capsules have no watchdog). The same environment previously cleared the dump phase twice (the full-chain capsule reached dispatch 71 and reproduced the lane crash in the h-kernel), so the hang is nondeterministic and INTERLEAVED with the wild-store fault: two failure modes sharing the bring-up path. ALSO recorded: two stale fla_warmup capsule processes (300% CPU each) from earlier kills that silently failed were reaped; process hygiene matters because a silently-surviving capsule competes for CPU and muddies every subsequent observation.",
+ "corrections": {
+  "gem5": "unchanged (projects/gem5 clean at cb3968339)",
+  "probe": "qwen35_cndmask_probe2_capsule.py passes on clean gem5 (p0-p3b + raw all exact)"
+ },
+ "observed_at": "2026-08-22T21:03:34",
+ "open": [
+  "vLLM wild-store mechanism (h-kernel, masks via SOP2 s_and_b64): needs the single-op bisect with the stage capsule; dodge or watchdog the spin-hang",
+  "gem5 spin-hang at trivial kernels (nondeterministic, 300% CPU, zero retiring): capsule watchdog gap"
+ ],
+ "retractions": [
+  "CP-0110's saveexec-destination-read anomaly (capsule bugs, not gem5)"
+ ],
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
