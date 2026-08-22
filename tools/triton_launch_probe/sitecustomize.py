@@ -40,7 +40,14 @@ def _install() -> None:
     if getattr(CompiledKernel, "_sagr_probe", False):
         return
 
-    stream = open(_LOG_PATH, "a", buffering=1)
+    try:
+        stream = open(_LOG_PATH, "a", buffering=1)
+    except OSError as error:
+        # An unopenable log must not take the fast-autotune shim down with
+        # it: sitecustomize has no caller to catch, and one missing log
+        # directory once silently reverted a whole lane to real autotuning.
+        print(f"[sagr] triton launch probe DISABLED ({error})", file=sys.stderr)
+        return
     lock = threading.Lock()
     counter = {"n": 0}
     original = CompiledKernel.launch_metadata
