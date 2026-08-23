@@ -1,0 +1,20 @@
+{
+ "checkpoint_id": "CP-0122",
+ "claim": "TWO-PROCESS NCCL CAPSULE SUITE BUILT; THE TP2 COLLECTIVE WALL IS AN INTERMITTENT PER-OP HANG, NOT A BROKEN COLLECTIVE. tools/qwen35_nccl_allreduce_capsule.py (two processes, one per simulated GPU on the lane's generated 2-GPU topology, NET/Socket via NCCL_SHM_DISABLE=1, run under --engine sglang --tp 2 --capsule) progressively established: (v1) a 256-float all_reduce COMPLETES on both ranks with identical correct results -- the data-collective machinery fundamentally works under gem5; a later dist.barrier hung and the watchdog's ncclRemoteError killed the run. (v2) with an instrumented sequence, all_reduce #2, a 1-element all_reduce, and the FIRST barrier all return instantly -- the v1 barrier hang did not reproduce; the run then hung at a LATER tail barrier. (v3) a 10-iteration loop of all_reduce + barrier with interleaved .cpu() syncs: ALL TWENTY OPS PASS, both ranks print 'loop completed'. (v4) the first extended collective (all_gather 1024, list API) hung symmetrically. (v5) with discriminators, all_gather tiny(list), all_gather 1024(list), all_gather_into_tensor, and broadcast ALL PASS (0.0-0.1s); the run hung at reduce_scatter (last marker: broadcast ok; no reduce_scatter line). CONCLUSION: every collective type works most of the time; roughly once per capsule run ONE op (varying: barrier, barrier, all_gather, reduce_scatter) deadlocks symmetrically with frozen wavefronts -- an intermittent race hitting a small per-op probability. The SGLang TP2 lane's symmetric freeze at 1618 dispatches is this race hit under the engine's per-layer collective storm (thousands of ops). NEXT: (a) a rate-measuring loop (1000 mixed collectives with per-op timeout) to quantify the probability and test protocol knobs (NCCL_PROTO=Simple/LL128, NCCL_ALGO) for rate change; (b) instrument gem5's host-native read path around NCCL flag buffers for cross-process allocation resolution and visibility (the crash-forensics audit noted memoryInfo's deliberate ambiguity refusal when two live allocations overlap a range -- a refused or stale flag read during a poll window is the candidate mechanism); (c) fix, then rerun the SGLang TP2 lane.",
+ "capsule": "tools/qwen35_nccl_allreduce_capsule.py (+ five runner generations, artifacts/qwen35-nccl-allreduce-capsule/v1..v5)",
+ "findings": {
+  "all_reduce": "works: identical correct results both ranks (v1), repeatable (v3 10/10)",
+  "barrier": "works in-loop 10/10; hung twice at tail positions (v1, v2)",
+  "all_gather": "all variants pass (v5); hung once (v4)",
+  "reduce_scatter": "hung once (v5) -- not yet observed passing",
+  "pattern": "intermittent symmetric per-op deadlock, ~1 per run, op type varies"
+ },
+ "next": [
+  "1000-collective rate loop + NCCL_PROTO/ALGO sensitivity",
+  "gem5 host-native cross-process flag-visibility instrumentation",
+  "fix -> SGLang TP2 lane rerun -> token gate"
+ ],
+ "observed_at": "2026-08-23T19:20:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
