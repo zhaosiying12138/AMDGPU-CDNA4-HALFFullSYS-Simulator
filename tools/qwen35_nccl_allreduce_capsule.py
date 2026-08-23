@@ -72,67 +72,56 @@ def worker(rank: int, world: int, addr: str, port: int) -> int:
     torch.cuda.synchronize()
     log(f"all_reduce returned after {time.time() - t0:.1f}s")
 
-    # The v1 run hung at a LATE barrier while an early barrier passed
-    # instantly: intermittent.  Loop collectives with markers and an
-    # interleaved host sync so the first op that never returns -- and
-    # whether host-side sync between collectives correlates -- lands in
-    # the log.
-    for i in range(10):
-        b = torch.randn(SIZE, device="cuda", dtype=torch.float32)
-        t1 = time.time()
-        dist.all_reduce(b, op=dist.ReduceOp.SUM)
-        torch.cuda.synchronize()
-        log(f"iter {i}: all_reduce ok {time.time() - t1:.1f}s")
-        host = b.cpu()  # interleaved D2H sync like the real engine does
-        t2 = time.time()
-        dist.barrier()
-        log(f"iter {i}: barrier ok {time.time() - t2:.1f}s")
-    log("loop completed")
+    # warm-up collective (also the v1-v3 baseline case)
+    log("RATE warm allreduce begin")
+    dist.all_reduce(buf, op=dist.ReduceOp.SUM)
+    torch.cuda.synchronize()
+    log("RATE warm allreduce ok")
 
     # The engine's remaining collective vocabulary: all_gather (logits
     # collection, vocab-wide), broadcast (weight distribution), and
     # reduce_scatter.  The lanes froze at 1618 dispatches with allreduce
     # healthy, so the blocker is plausibly one of these.
-    # Escalating all_gather discriminators: 1-element list API, then the
-    # into_tensor API the engines actually use, then a bigger one.
-    tiny_parts = [torch.zeros(1, device="cuda", dtype=torch.float32)
-                  for _ in range(2)]
-    t4 = time.time()
-    dist.all_gather(tiny_parts, tiny_parts[rank])
-    torch.cuda.synchronize()
-    log(f"all_gather tiny(list) ok {time.time() - t4:.1f}s")
-
-    big_parts = [torch.randn(1024, device="cuda", dtype=torch.float32)
-                 for _ in range(2)]
-    t4b = time.time()
-    dist.all_gather(big_parts, big_parts[rank])
-    torch.cuda.synchronize()
-    log(f"all_gather 1024(list) ok {time.time() - t4b:.1f}s")
-
-    src_t = torch.randn(1024, device="cuda", dtype=torch.float32)
-    dst_t = torch.empty(2 * 1024, device="cuda", dtype=torch.float32)
-    t4c = time.time()
-    dist.all_gather_into_tensor(dst_t, src_t)
-    torch.cuda.synchronize()
-    log(f"all_gather_into_tensor ok {time.time() - t4c:.1f}s "
-        f"finite={bool(torch.isfinite(dst_t).all())}")
-
-    bcast = torch.zeros(2048, device="cuda", dtype=torch.float32)
-    if rank == 0:
-        bcast.normal_()
-    t5 = time.time()
-    dist.broadcast(bcast, src=0)
-    torch.cuda.synchronize()
-    log(f"broadcast ok {time.time() - t5:.1f}s "
-        f"finite={bool(torch.isfinite(bcast).all())}")
-
-    rs = torch.randn(2 * 1024, device="cuda", dtype=torch.float32)
-    t6 = time.time()
-    dist.reduce_scatter_tensor(rs, rs)
-    torch.cuda.synchronize()
-    log(f"reduce_scatter ok {time.time() - t6:.1f}s "
-        f"finite={bool(torch.isfinite(rs).all())}")
-    log("extended collectives completed")
+    # Mixed-collective rate loop: every op logs its index and type BEFORE
+    # running; when the intermittent deadlock hits, the last marker in the
+    # log names the hanging op, and the completed-op count across runs
+    # measures the per-op hang probability under this run's NCCL knobs
+    # (the runner sets NCCL_PROTO/NCCL_ALGO for sensitivity comparison).
+    LOOP_OPS = int(os.environ.get("CAPSULE_LOOP_OPS", "60"))
+    # Minimal-determinism mode: a single reduce_scatter with nothing else
+    # in the sequence (the op that hung 3/3 across protocol variants).
+    if os.environ.get("CAPSULE_RS_ONLY") == "1":
+        rs = torch.randn(2 * 1024, device="cuda", dtype=torch.float32)
+        log("RS-ONLY begin")
+        dist.reduce_scatter_tensor(rs, rs)
+        torch.cuda.synchronize()
+        log(f"RS-ONLY ok finite={bool(torch.isfinite(rs).all())}")
+        dist.barrier()
+        dist.destroy_process_group()
+        log("RS-ONLY PASS")
+        return 0
+    ag_src = torch.randn(1024, device="cuda", dtype=torch.float32)
+    ag_dst = torch.empty(2 * 1024, device="cuda", dtype=torch.float32)
+    rs_buf = torch.randn(2 * 1024, device="cuda", dtype=torch.float32)
+    ar_buf = torch.randn(256, device="cuda", dtype=torch.float32)
+    one = torch.ones(1, device="cuda", dtype=torch.float32)
+    for i in range(LOOP_OPS):
+        kind = ("allreduce", "barrier", "all_gather", "broadcast",
+                "reduce_scatter")[i % 5]
+        log(f"RATE {i} {kind} begin")
+        if kind == "allreduce":
+            dist.all_reduce(ar_buf, op=dist.ReduceOp.SUM)
+        elif kind == "barrier":
+            dist.barrier()
+        elif kind == "all_gather":
+            dist.all_gather_into_tensor(ag_dst, ag_src)
+        elif kind == "broadcast":
+            dist.broadcast(one, src=0)
+        else:
+            dist.reduce_scatter_tensor(rs_buf, rs_buf)
+        torch.cuda.synchronize()
+        log(f"RATE {i} {kind} ok")
+    log(f"rate loop completed: {LOOP_OPS} ops")
 
     got = buf.cpu()  # checked against the FIRST allreduce result
     log(f"result mean={float(got.mean()):.6f} finite={bool(torch.isfinite(got).all())}")

@@ -1,0 +1,18 @@
+{
+ "checkpoint_id": "CP-0123",
+ "claim": "REDUCE_SCATTER IS A DETERMINISTIC COLLECTIVE DEADLOCK: 4/4 reproducible in the two-process capsule with a minimal sequence. The mixed rate loop (60 ops, every op typed and numbered) hung at exactly op#4 reduce_scatter under BOTH the default protocol and NCCL_PROTO=Simple (identical dispatch counts, 292) -- protocol-independent, like the earlier transport independence. The RS-ONLY mode (one warm 256-float allreduce, then ONE reduce_scatter_tensor on 2048 floats) hangs symmetrically on both ranks every time: the definitive minutes-scale oracle for the TP2 collective wall. Refined picture vs CP-0122: allreduce is robust (10/10 plus every run's warm op), all_gather is intermittent (hung once, passed in three variants), barrier passed 10/10 in-loop but hung at tail positions twice in early capsule generations (no reduce_scatter present in those sequences), and reduce_scatter is deterministic. The SGLang TP2 lane's 1618-dispatch symmetric freeze is consistent with hitting the deterministic RS (if the engine's path uses it) or the intermittent all_gather. NEXT: bisect the RS kernel's spin under gem5 with the established agent methodology (disassemble the kernel from the dispatch trace code object, instrument cross-process host-native flag reads, fix); the capsule's RS-ONLY mode is the oracle.",
+ "observed_at": "2026-08-23T19:55:00+08:00",
+ "oracle": "CAPSULE_RS_ONLY=1 in tools/qwen35_nccl_allreduce_capsule.py: warm allreduce passes, one reduce_scatter hangs, both ranks, 4/4",
+ "per_collective": {
+  "allreduce": "robust",
+  "all_gather": "intermittent",
+  "barrier": "in-loop robust; tail-position hangs twice",
+  "reduce_scatter": "deterministic 4/4"
+ },
+ "schema": "amdgpu-sim.evidence.v1",
+ "sensitivity": {
+  "NCCL_PROTO=Simple": "identical hang (op4 RS, 292 dispatches)",
+  "transports": "SHM and Socket both affected"
+ },
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
