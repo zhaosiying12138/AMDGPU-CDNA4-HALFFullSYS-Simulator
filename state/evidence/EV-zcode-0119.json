@@ -1,0 +1,24 @@
+{
+ "checkpoint_id": "CP-0119",
+ "claim": "vLLM TP1 FORMAL ACCEPTANCE GREEN. Lane zcode-vllm-tp1-formal-v1 (standard configuration: examples/vllm/qwen35_inference.py driven by the lane script's vllm branch, upstream engine with PYTHONPATH empty -- no probe, no instrumentation; simulator-environment adaptations only: SAGR_VLLM_GPU_MEM_UTIL=0.015 cache cap and SAGR_TRITON_FAST_AUTOTUNE=1 deterministic autotune) completed exit=0 with 5611 dispatches, generated_token_ids [27841, 27841], token_golden correct=true (prompt [248044,266], checkpoint weights), the run-identity gate recorded the expected loaded libraries (stock HIP informational note as in the SGLang formal lane; zcode ROCr stage + product runtime), and a clean finish. GOAL LADDER STATE: rung 1 SGLang TP1 (CP-0106) and rung 2 vLLM TP1 (this checkpoint) are BOTH ACCEPTED. The rung-2 bring-up closed five gem5 defects along the way, each verified by a keeper capsule oracle: packed-bf16 atomic alignment (CP-0109), global_store_byte_d16_hi decode (CP-0112), MUBUF ACC bit (CP-0114), v_mfma_f32_4x4x4_16b_bf16 decode (CP-0115), and the VOP3 clamp-on-unsigned-add/sub saturation (CP-0118) -- plus the wall-clock unblocks (aiter table pin CP-0104, vLLM cache cap and fast deterministic autotune CP-0107). Next rung: both engines at TP2.",
+ "goal_ladder": {
+  "next": "dual-engine TP2",
+  "rung1_sglang_tp1": "accepted CP-0106",
+  "rung2_vllm_tp1": "accepted CP-0119"
+ },
+ "lane": "zcode-vllm-tp1-formal-v1",
+ "observed_at": "2026-08-23T14:38:04",
+ "result": {
+  "dispatches": 5611,
+  "exit": 0,
+  "finish": "status=0",
+  "generated": [
+   27841,
+   27841
+  ],
+  "identity": "run-identity-gate.v1 recorded",
+  "token_gate_correct": true
+ },
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
