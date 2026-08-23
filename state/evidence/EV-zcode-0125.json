@@ -1,0 +1,15 @@
+{
+ "checkpoint_id": "CP-0125",
+ "claim": "SGLANG TP2 FORMAL ACCEPTANCE GREEN. Lane zcode-sglang-tp2-formal-v1 (standard TP2 configuration: upstream SGLang at tensor_parallel_size=2 on the lane-generated 2-GPU topology with the CU-count consistency fix from CP-0124, upstream --attention-backend triton selection, NCCL_SHM_DISABLE=1 as the documented transport adaptation) completed exit=0 with 3694 dispatches in ~20 minutes, generated [27841, 27841], token_golden correct=true, clean process teardown. GOAL LADDER: rung 3 SGLang side ACCEPTED (with CP-0124's fix); vLLM TP2 bring-up is the remaining half of the dual-engine rung, launching next on the same fix. This closes the tensor-parallel chapter for SGLang on the simulator: TP1 (CP-0106) and TP2 both formally green, with the collective stack (NCCL NET/Socket) functionally validated end to end at engine scale.",
+ "goal_ladder": {
+  "rung1_sglang_tp1": "accepted CP-0106",
+  "rung2_vllm_tp1": "accepted CP-0119",
+  "rung3_sglang_tp2": "accepted CP-0125 (this)",
+  "rung3_vllm_tp2": "in progress"
+ },
+ "lane": "zcode-sglang-tp2-formal-v1",
+ "result": {"exit": 0, "dispatches": 3694, "generated": [27841, 27841], "token_gate": "correct=true", "finish": "status=0"},
+ "observed_at": "2026-08-23T22:05:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
