@@ -170,6 +170,36 @@ if (( tp > 1 )); then
       --output-dir "$HSA_MODEL_TOPOLOGY" --gpu-count "$tp" >/dev/null || {
         printf 'could not generate a %s-GPU topology\n' "$tp" >&2; exit 2; }
   fi
+  # The generated topology advertises a full gfx950 (simd_count 1024 =
+  # 256 compute units), but the simulator instantiates NUM_COMPUTE_UNITS
+  # (default 4). That mismatch is not just cosmetic: engine libraries size
+  # kernels by the advertised CU count (aiter's get_cu_num() parses this
+  # very topology through the product rocminfo shim), and its split-K GEMMs
+  # assign early workgroups to poll workspace flags that later workgroups
+  # publish -- a schedule that assumes near-full-grid co-residency. With a
+  # 4-CU simulator and in-order workgroup admission, the first resident
+  # cohort is all pollers, the publishers are never admitted, and both TP
+  # ranks livelock deterministically (observed at dispatch 1618/1619 on
+  # every SGLang TP2 run). Publish exactly what is simulated:
+  # simd_count = NUM_COMPUTE_UNITS * simd_per_cu.
+  gemsim_cus="${GEMSIM_NUM_COMPUTE_UNITS:-4}"
+  if [[ ! $gemsim_cus =~ ^[0-9]+$ ]] || (( gemsim_cus < 1 )); then
+    gemsim_cus=4
+  fi
+  gemsim_simds=$(( gemsim_cus * 4 ))
+  for node_props in "${HSA_MODEL_TOPOLOGY}"/nodes/*/properties; do
+    [[ -f $node_props ]] || continue
+    # Only GPU nodes carry a non-zero simd_count; the CPU node's 0 marks it
+    # as a CPU, and rewriting it would publish a bogus gfx000 GPU agent.
+    current_simds=$(sed -n 's/^simd_count \([0-9][0-9]*\)$/\1/p' "$node_props")
+    if [[ -n $current_simds ]] && (( current_simds > 0 )) && \
+       (( current_simds != gemsim_simds )); then
+      sed -i "s/^simd_count [0-9][0-9]*$/simd_count ${gemsim_simds}/" \
+        "$node_props"
+      printf 'topology %s: simd_count -> %d (%d CUs) to match the simulator\n' \
+        "$node_props" "$gemsim_simds" "$gemsim_cus" >&2
+    fi
+  done
 else
   export HSA_MODEL_TOPOLOGY="${HEAD_PRODUCT}/share/self-amdgpu-runtime/hsakmt-topology"
 fi

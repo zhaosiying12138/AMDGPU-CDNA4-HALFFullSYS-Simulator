@@ -1,0 +1,17 @@
+{
+ "checkpoint_id": "CP-0124",
+ "claim": "TP2 COLLECTIVE WALL ROOT-CAUSED TO A DEVICE-MODEL INCONSISTENCY AND FIXED; SGLANG TP2 PASSES THE TOKEN GATE. Root cause (subagent forensics, every link measured live): the lane-generated 2-GPU topology advertised simd_count 1024 (= 256 compute units, a full MI350X) while gem5 simulates 4 CUs; the product rocminfo shim reports the advertised count; aiter's get_cu_num() parses it and selects a split-K CK GEMM whose 970-workgroup grid assumes near-full co-residency, with early 'fixup' workgroups polling per-block workspace flags that later 'publisher' workgroups write. Under in-order workgroup admission with only 16 resident slots the first cohort is all pollers, publishers are never admitted, and both ranks spin deterministically -- the dispatch-1618 freeze. Proof: GEM5-SPIN traces showed flag polls reading zero forever with the flag region byte-identical over 10s, and EXTERNALLY WRITING THE FLAGS completed the frozen dispatch in 2s (kernel mechanics healthy; only the writers were missing). The suspected NCCL/transport layer was exonerated: all collectives including a valid reduce_scatter pass in isolation (new tools/qwen35_nccl_rsprobe_capsule.py with a numeric oracle), and the prior RS-ONLY 'deterministic deadlock' was a pre-existing client-side capsule bug (reduce_scatter_tensor with input==output violates the 2:1 size rule and raises ValueError before reaching NCCL) -- recorded as a retraction of CP-0123's per-collective interpretation. FIX: run_engine_lane.sh now rewrites each GPU node's simd_count to GEMSIM_NUM_COMPUTE_UNITS x simd_per_cu (default 4x4=16, CPU node untouched) so the stack advertises exactly what is simulated; the gpu-2 topology files updated; plus an inert-by-flag gem5 spin-trace instrumentation (dispatch-start logger + scalar poll-watch) as a keeper diagnostic, and the corrected rsprobe capsule. VERIFICATION: SGLang TP2 lane rsfix-sglang-v4 COMPLETED exit=0, ~18 min, generated [27841, 27841], token_golden correct=true, identity gate + clean finish; regression gates green (CK synthetic+package exact, cndmask probe2, vLLM FLA warmup chain). GOAL LADDER: rung 3 half-accepted (SGLang TP2 token gate; formal lane next); vLLM TP2 bring-up follows on the same fix.",
+ "corrections": "CP-0123's per-collective picture retracted: the RS-ONLY hang never reached NCCL (client-side ValueError in the capsule); the true blocker was the CU-count mismatch",
+ "evidence_chain": [
+  "topology simd_count 1024 vs gem5 4 CUs (measured)",
+  "aiter get_cu_num()->256 -> split-K 970-block grid sized for full residency",
+  "flag polls read 0 forever; flag region unchanged 10s (GEM5-SPIN trace)",
+  "external flag injection completed the frozen dispatch in 2s",
+  "fix -> lane completes [27841,27841]"
+ ],
+ "fix": "run_engine_lane.sh publishes simulated CU count (simd_count = NUM_CUs x 4) in generated topologies; inert spin-trace instrumentation; corrected rsprobe capsule",
+ "result": {"lane": "rsfix-sglang-v4", "exit": 0, "generated": [27841, 27841], "token_gate": "correct=true", "duration": "~18 min"},
+ "observed_at": "2026-08-23T21:40:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
