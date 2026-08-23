@@ -1,0 +1,14 @@
+{
+ "checkpoint_id": "CP-0120",
+ "claim": "TP2 BRING-UP FIRST FAILURE CHARACTERIZED: a symmetric on-device collective deadlock. Lane zcode-sglang-tp2-v1 (SGLang, tp=2, auto-generated 2-GPU topology artifacts/topology/gpu-2): both ranks initialized cleanly (TP0/TP1 logs, weight load, attn-gate setup, 'multimem all-gather disabled' probes), each rank's gem5 retired 1656 dispatches with identical kernel streams (74 distinct kernels; last retired: a 256x1x1 kernarg-816 kernel, NCCL-style param size), then each rank launched a kernel that NEVER retired: gem5 processes at 99.9% CPU with completed_wavefronts FROZEN at 600014 for 20+ minutes on BOTH ranks while the engine host sat in generate() waiting on GPU. Classic symmetric NCCL spin: each rank's collective kernel polls a flag that the OTHER rank's gem5 process must set -- the inter-GPU transport between the two simulator instances (cross-process doorbell/IPC over the modeled 2-GPU topology) is not delivering. This is the CCL-strengthening workstream's entry point, as the GOAL ladder anticipated. Both ranks' sessions, dispatch traces, and the symmetric freeze are preserved under /tmp/sagr-lane-zcode-sglang-tp2-v1/ and artifacts/lanes/zcode-sglang-tp2-v1/. Next: identify the exact NCCL transport the topology selects (nccl info env NCCL_DEBUG=INFO), then either implement the missing inter-instance transport in the hsakmt model / gem5 bridge or force a transport that already works (e.g. NCCL_P2P_DISABLE=1 + net/shm path), capsule-first per the established methodology.",
+ "deadlock_signature": {
+  "last_retired": "grid [256,1,1] kernarg 816 (NCCL-style)",
+  "mechanism": "inter-rank collective spin: cross-simulator GPU transport not delivering",
+  "ranks": "both gem5s: 1656 dispatches retired, symmetric kernel streams",
+  "stuck": "kernel never retires on either rank; wavefronts frozen 600014; engine host in generate() wait"
+ },
+ "next": "NCCL_DEBUG=INFO run to name the transport; hsakmt-model inter-instance doorbell audit; capsule-first CCL bring-up",
+ "observed_at": "2026-08-23T15:34:27",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
