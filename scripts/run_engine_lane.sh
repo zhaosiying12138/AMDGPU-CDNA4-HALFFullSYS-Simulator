@@ -502,6 +502,17 @@ else
     # 16-token context with one sequence needs almost nothing.
     --gpu-memory-utilization "${SAGR_VLLM_GPU_MEM_UTIL:-0.30}"
   )
+  # The driver's RPC into workers (sample_tokens and friends) times out
+  # after VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS (default 300s).  Under the
+  # simulator the sampler plus its TP2 collectives can exceed that wall
+  # clock while being perfectly alive -- vLLM TP2 once reached the very
+  # last sampling step of generation and died only on this timeout.
+  export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS="${SAGR_VLLM_RPC_TIMEOUT_SECONDS:-300}"
+  # The NCCL watchdog separately kills any single collective that outlives
+  # ParallelConfig.distributed_timeout_seconds (default 600s); the example
+  # exposes it as --distributed-timeout.  Under the simulator the TP2
+  # logits all-gather is a legitimately multi-hour collective.
+  vllm_args+=(--distributed-timeout "${SAGR_VLLM_DIST_TIMEOUT_SECONDS:-600}")
   (( dummy_weights )) && vllm_args+=(--load-format dummy)
   # A real file, not a heredoc: with tensor_parallel_size > 1 vLLM spawns
   # workers through multiprocessing, and spawn re-imports the parent __main__

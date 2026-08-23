@@ -48,6 +48,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-num-seqs", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
+        "--distributed-timeout", type=int, default=None,
+        help="Process-group collective timeout in seconds (ParallelConfig."
+        "distributed_timeout_seconds; the NCCL watchdog kills the engine "
+        "when any single collective outlives it).  Under the simulator "
+        "the TP2 logits all-gather can run far past the 600 s default "
+        "while making steady progress.",
+    )
+    parser.add_argument(
         "--gpu-memory-utilization",
         type=float,
         default=0.30,
@@ -100,6 +108,8 @@ def main() -> int:
         # tower out of the decode path.
         limit_mm_per_prompt={"image": 0, "video": 0},
         load_format=args.load_format,
+        **({"distributed_timeout_seconds": args.distributed_timeout}
+           if args.distributed_timeout is not None else {}),
     )
 
     # Loaded-library proof, written after weight load so it reflects the run
