@@ -203,6 +203,12 @@ def build_worker_env(prompt: str, max_tokens: int, model: str, tp: int) -> dict:
         "HSA_ENABLE_DXG_DETECTION": "0",
         "HSA_ENABLE_INTERRUPT": "0",
         "HIP_PLATFORM": "amd",
+        "ROCM_PATH": f"{CONDA_PREFIX}/rocm-sysroot/opt/rocm-7.2.3",
+        "HIP_PATH": f"{CONDA_PREFIX}/rocm-sysroot/opt/rocm-7.2.3",
+        "HIP_CLANG_PATH": f"{CONDA_PREFIX}/rocm-sysroot/opt/rocm-7.2.3/lib/llvm/bin",
+        "PYTORCH_ROCM_ARCH": "gfx950",
+        "GPU_ARCHS": "gfx950",
+        "SAGR_SIM_ROCMINFO": f"{STATE_DIR}/tool-shim/rocminfo",
         "SAGR_MANAGED_RUN_ROOT": RUN_ROOT.format(TP=tp),
         "SAGR_ROCR_LIBRARY_DIR": ROCR_LIB,
         "SGLANG_USE_AITER": "1",
@@ -267,7 +273,25 @@ def main() -> int:
     print(f"  {c('并行', 'dim')}: TP{tp}（rank 0-{tp - 1} 各持一个模拟 gfx950，NCCL Socket）")
     print(f"  {c('目标', 'dim')}: {args.max_tokens} tokens（贪心解码）")
     print()
-    print(c("  ▸ 拉起工作进程：2-GPU CU 一致拓扑 → DTIF fast-copy 权重注入…", "dim"), flush=True)
+    print(
+        c(f"  ▸ 拉起工作进程：{tp}-GPU CU 一致拓扑 → DTIF fast-copy 权重注入…", "dim"),
+        flush=True,
+    )
+
+    # Tool shim mirroring run_engine_lane: the product rocminfo and the
+    # arch shim first on PATH so aiter resolves gfx950 without a real KMD.
+    shim = f"{STATE_DIR}/tool-shim"
+    os.makedirs(shim, exist_ok=True)
+    runtime_build = RUNTIME_BUILD
+    try:
+        os.symlink(f"{runtime_build}/sagr-rocminfo", f"{shim}/rocminfo")
+    except FileExistsError:
+        pass
+    try:
+        os.symlink(f"{ROOT}/tools/sim_amdgpu_arch.sh", f"{shim}/amdgpu-arch")
+    except FileExistsError:
+        pass
+    env["PATH"] = f"{shim}:{env['PATH']}"
 
     worker_path = f"{STATE_DIR}/worker.py"
     with open(worker_path, "w") as f:

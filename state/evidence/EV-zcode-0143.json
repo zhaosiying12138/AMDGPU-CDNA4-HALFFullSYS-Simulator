@@ -1,0 +1,14 @@
+{
+ "checkpoint_id": "CP-0143",
+ "claim": "TP4 9B DEMO CRASH FIXED (script-only). Two defects: (1) the banner line printed the hard-coded 2-GPU text for any tp -- now f-string on tp; the crash itself was different: (2) the worker died at import time in aiter cpp_extension.get_hip_version() with ROCm version file not found -- the demo env lacked ROCM_PATH/HIP_PATH, so aiter rocm-root discovery fell through to /opt/rocm which does not exist here. Fix: worker env now carries the full pinned compiler stack the product activation sets -- ROCM_PATH, HIP_PATH, HIP_CLANG_PATH, PYTORCH_ROCM_ARCH=gfx950 (all pointing at the conda rocm-sysroot whose include/hip/hip_version.h and .info/version exist, verified on disk) -- plus GPU_ARCHS=gfx950 and the tool shim (sagr-rocminfo + sim_amdgpu-arch first on PATH, mirroring run_engine_lane) so aiter_meta resolves the arch without a real KMD. All four shim targets verified to exist. Script compiles; delivered per operator instruction without execution.",
+ "fixes": [
+  "banner text tp-driven",
+  "ROCM_PATH/HIP_PATH/HIP_CLANG_PATH/PYTORCH_ROCM_ARCH in worker env",
+  "GPU_ARCHS=gfx950",
+  "rocminfo/amdgpu-arch tool shim on worker PATH"
+ ],
+ "observed_at": "2026-08-25T06:20:00+08:00",
+ "root_cause": "aiter get_hip_version found no ROCM root: env lacked ROCM_PATH; /opt/rocm absent on this host",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
