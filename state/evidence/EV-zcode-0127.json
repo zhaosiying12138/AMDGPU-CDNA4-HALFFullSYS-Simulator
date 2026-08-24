@@ -1,0 +1,13 @@
+{
+ "checkpoint_id": "CP-0127",
+ "claim": "CCL-STRENGTHENING ITEM 1 CLOSED: FLAT and MTBUF formats now honor the ACC bit, completing the accumulator-redirect family. Audit: the decoder header carried bit 23 of both formats' second dword as legacy TFE/NV, but from gfx90a through gfx950 (CDNA4) it is ACC -- llvm-mc verification: `flat_load_dword a0` emits second-word bit 23 set while `v0` clears it (encoding 0x00800000 vs 0x00000000). Fix (zcode/gem5-absorb fc3408ded): decode the bit as ACC in InFmt_FLAT_1 and InFmt_MTBUF_1; Inst_FLAT gains flatAccOffset/flatDataIdx/flatVdstIdx and Inst_MTBUF gains mtbufAccOffset/mtbufDataIdx, both mirroring the proven MUBUF/DS fail-closed accumOffset redirect (ADDR/VADDR never redirected); all 13 VDST and 13 DATA construction sites in flat.cc route through the new helpers. MTBUF's tbuffer instruction bodies are upstream panicUnimplemented stubs, so its plumbing activates when those bodies are filled -- the redirect is in place, fail-closed. ITEM 2 CLOSED IN THE SAME SESSION: the aiter attention capsule -- the long-standing dims-[0:128)-loss signature -- now reports 'AITER ATTN CAPSULE: matches fp32 reference' exit 0 on the fixed binary (the MUBUF ACC repair cured it; the signature was the split-K epilogue writing AGPR-destined data into architectural VGPRs). Regressions on the rebuilt binary: CK synthetic (cos 0.999997-0.999999 all four shapes) and FLA warmup chain (passed=True) both green. ITEM 3 IN FLIGHT: the unpinned-table decode lane (AITER_CONFIG_GEMM_BF16 pointed at the drifted /tmp table) runs to verify table independence.",
+ "items": {
+  "1_flat_mtbuf_acc": "implemented fc3408ded; llvm-mc-verified bit; 13+13 sites routed; MTBUF bodies remain upstream stubs (plumbing ready)",
+  "2_aiter_attention": "PASSES on fixed binary ('matches fp32 reference', exit 0) -- dims[0:128) loss signature cured by the MUBUF ACC repair",
+  "3_table_independence": "unpinned decode lane zcode-decode-nopin in flight"
+ },
+ "regressions": {"ck_synthetic": "cos 0.999997-0.999999 x4 ok", "fla_warmup": "passed=True"},
+ "observed_at": "2026-08-24T08:00:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
