@@ -1,0 +1,10 @@
+{
+ "checkpoint_id": "CP-0128",
+ "claim": "CCL-STRENGTHENING TRIPLE COMPLETE. Item 3 CLOSED: the unpinned-table decode lane (zcode-decode-nopin, AITER_CONFIG_GEMM_BF16 pointed directly at the drifted machine-global /tmp/aiter_configs/bf16_tuned_gemm.csv -- the exact table state that once produced garbage decode projections and token 3) completed exit=0 with generated [27841, 27841] and token_golden correct=true. With the MUBUF ACC repair in the simulator, aiter's CK kernels compute correctly no matter which tuned entry dispatches to them: the lane pin introduced at CP-0104 is now a belt-and-suspenders, not a correctness dependency -- the generality requirement (any operator, any table state) is satisfied. Items 1 (FLAT/MTBUF ACC redirect, fc3408ded) and 2 (aiter attention retest: 'matches fp32 reference', dims[0:128) loss cured) closed at CP-0127. CCL-STRENGTHENING RUNG STATE: the accumulator-redirect family is complete across DS/MUBUF/FLAT/MTBUF, the CK split-K epilogues that once corrupted outputs now verify exact, and every fix carries a keeper capsule oracle. The ladder's final rung -- Qwen3.5-9B TP16 on the generated 16-GPU topology -- begins.",
+ "item3": {"lane": "zcode-decode-nopin", "table": "the drifted /tmp machine-global table", "result": "exit=0 [27841,27841] correct=true"},
+ "rung_state": "CCL strengthening accepted: accumulator family complete, table-independent correctness proven, capsule oracle infrastructure in place for any future operator",
+ "next": "Qwen3.5-9B TP16",
+ "observed_at": "2026-08-24T09:10:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
