@@ -1,0 +1,9 @@
+{
+ "checkpoint_id": "CP-0133",
+ "claim": "GEM5 SUBMODULE RECONSTRUCTED after accidental deletion. A layered-push setup script ran rm -rf * .[!.]* inside projects/gem5 which destroyed the clone including its .git (the zcode/gem5-absorb object store); a stray empty commit landed on the main branch and was reset. No verified work is lost: the main repo (all 70 commits, evidence, capsules) was pushed to public/zcode/sglang-tp1-dpp BEFORE the accident, and every gem5 fix diff was reconstructed verbatim from the session record onto a fresh clone of the main-tree gem5 head (branch zcode/gem5-rebuild, gem5 commit a6e9be550): packed-bf16 atomic alignment, d16_hi store decode, MUBUF/FLAT/MTBUF ACC redirects, MFMA 4x4x4 bf16, VOP3 clamp saturation, bitop3 32-bit accumulator, s_memrealtime, panic instruction dump, 64+64 admission budget, opcode prints. Regression gates green on the rebuilt binary: CK synthetic cos 0.999997+ all four shapes; FLA warmup passed=True. The DPP semantics question (main-tree preserve vs the deleted branch suppress repair) is deliberately deferred to the SGLang TP1 formal lane as the deciding oracle. LESSON RECORDED: never rm -rf in a checkout; use git worktree add for scratch builds.",
+ "gem5_commit": "a6e9be550 (zcode/gem5-rebuild)",
+ "loss_scope": "main repo safe (pushed pre-accident); gem5 commits lost as objects, reconstructed and capsule-verified",
+ "observed_at": "2026-08-24T15:20:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
