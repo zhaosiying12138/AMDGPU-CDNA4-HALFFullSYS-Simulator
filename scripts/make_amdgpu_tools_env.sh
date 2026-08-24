@@ -4,7 +4,7 @@
 # The environment carries no packages of its own: it is a pure
 # activation wrapper that puts the simulator toolchain first on PATH
 # and gives it private caches, so `conda activate AMDGPU-CDNA4-SIM`
-# yields a shell where rocm-smi, gem5-session, and triton-softmax
+# yields a shell where rocm-smi and gem5-session
 # just work while the base shell stays untouched.  Regenerating is
 # idempotent and instant (a few symlinks and two shell scripts).
 #
@@ -24,7 +24,7 @@ for f in "${ROCM_PREFIX}/bin/python" "${RUNTIME_BUILD}/libself_amdgpu_runtime.so
          "${ROCR_LIB}/libhsa-runtime64.so.1" "${GEMSIM_SMI}" "${ROOT}/tools/gemsim_smi_publish.py" \
          "${ROOT}/build/rocr_logging_preload.so" \
          "${ROOT}/projects/gem5/build/VEGA_X86/gem5.opt" \
-         "${ROOT}/tools/triton_softmax_demo.py" \
+         "${ROOT}/tools/softmax_demo.py" \
          "${ROOT}/scripts/gem5_session_control.sh" \
          "${TOPOLOGY}"; do
   [[ -e $f ]] || { echo "missing prerequisite: $f" >&2; exit 2; }
@@ -110,43 +110,9 @@ SMI
 # gem5-session: start/stop/restart/status for the standalone simulator.
 ln -sfn "${ROOT}/scripts/gem5_session_control.sh" "${TOOLS_ENV}/bin/gem5-session"
 
-# triton-softmax: the one-shot correctness demo (no benchmark).  The
-# demo re-execs itself through a clean environment and a private mount
-# namespace with NVML masked -- the same isolation the working capsule
-# lanes use -- because a full interactive conda shell carries variables
-# that break the simulated device stack at hsa_init.
-cat > "${TOOLS_ENV}/bin/triton-softmax" <<'DEMO'
-#!/bin/bash
-# Shuttle every needed variable through the env -i boundary, then run
-# the demo exactly the way a working capsule runs: env -i + unshare.
-set -eu
-DEMO_PY="/home/zhaosiying/zcode-lane/tools/triton_softmax_demo.py"
-exec unshare -r -m env -i \
-  HOME="${HOME:-/home/zhaosiying}" \
-  TERM="${TERM:-dumb}" \
-  PATH="${PATH}" \
-  LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
-  LD_PRELOAD="${LD_PRELOAD}" \
-  HSA_MODEL_LIB="${HSA_MODEL_LIB}" \
-  HSA_MODEL_TOPOLOGY="${HSA_MODEL_TOPOLOGY}" \
-  ROCM_SIM_ROOT="${ROCM_SIM_ROOT}" \
-  HSA_PATH="${HSA_PATH}" \
-  HIP_PLATFORM=amd \
-  HSA_ENABLE_DXG_DETECTION=0 \
-  HSA_ENABLE_INTERRUPT=0 \
-  TRITON_CACHE_DIR="${TRITON_CACHE_DIR}" \
-  XDG_CACHE_HOME="${XDG_CACHE_HOME}" \
-  ${SAGR_GENERIC_BRIDGE_ENDPOINT:+SAGR_GENERIC_BRIDGE_ENDPOINT="${SAGR_GENERIC_BRIDGE_ENDPOINT}"} \
-  /usr/bin/bash -c '
-    : > /tmp/amdgpu-sim-tools-empty-nvml.so
-    mount --bind /tmp/amdgpu-sim-tools-empty-nvml.so /usr/lib/wsl/lib/libnvidia-ml.so.1 2>/dev/null || true
-    exec python "'"${DEMO_PY}"'" "$@"
-  ' demo-sh
-DEMO
-
 chmod +x "${TOOLS_ENV}/bin/rocm-smi" "${TOOLS_ENV}/bin/triton-softmax" \
-        "${ROOT}/scripts/gem5_session_control.sh" "${ROOT}/tools/triton_softmax_demo.py"
+        "${ROOT}/scripts/gem5_session_control.sh" "${ROOT}/tools/softmax_demo.py"
 
 echo "AMDGPU-CDNA4-SIM environment ready: ${TOOLS_ENV}"
 echo "  conda activate AMDGPU-CDNA4-SIM     (or: conda activate ${TOOLS_ENV})"
-echo "  then:  rocm-smi | gem5-session start | triton-softmax"
+echo '  then:  rocm-smi | gem5-session start 1 | python tools/softmax_demo.py'

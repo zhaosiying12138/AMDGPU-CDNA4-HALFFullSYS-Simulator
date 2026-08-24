@@ -409,15 +409,18 @@ gem5-session start 2 --accurate  # 用时序精确模式（默认 functional-fas
 `SAGR_TOOLS_INSTANCE_COUNT` 与 `SAGR_TOOLS_INSTANCE_ENDPOINTS` 列表）；
 新 shell 或重新激活自动附加到实例 0。
 
-### 3. Triton softmax demo（无 benchmark）
+### 3. Triton softmax demo（单次 kernel，无 benchmark）
 
 ```bash
-gem5-session start 1 && triton-softmax
+gem5-session start 1
+python /home/zhaosiying/zcode-lane/tools/softmax_demo.py
 ```
 
-默认 8×256 fp32 + 4×256 bf16，单次 kernel 对照 `torch.softmax`，秒级。
-`--rows/--cols/--block` 可调。demo 自动在干净 env + unshare 下执行。
-实测：fp32 和 bf16 均精确到 0.00000，PASS。
+单次 Triton kernel：输入在 CPU 生成（GPU 不跑 RNG kernel）、参照
+softmax 也在 CPU 算好，设备侧只有一次 H2D 拷贝 + 一次 softmax kernel
++ 一次 D2H 拷贝。默认 4×128 fp32，实测 **约 2 秒** 完成且精确到
+0.00000（PASS）。`--rows/--cols/--block/--dtype bfloat16` 可调。若所在
+shell 的杂散变量打翻设备栈，脚本自动经干净 env 重启自身，无需手动处理。
 
 ### 组件与关键开关
 
@@ -426,7 +429,7 @@ gem5-session start 1 && triton-softmax
 | `rocm-smi` | `tools/gemsim_smi.py`（读 `/tmp/amdgpu-sim-smi-<uid>/` 的 320 字节签名 lease）|
 | `gem5-session` | `scripts/gem5_session_control.sh`（listener-mode 多实例 + SMI lease 发布）|
 | SMI lease 发布 | `tools/gemsim_smi_publish.py`（flock 持有的 per-slot 记录 daemon）|
-| `triton-softmax` | `tools/triton_softmax_demo.py` |
+| softmax demo | `tools/softmax_demo.py`（`python softmax_demo.py` 直跑）|
 | 环境生成 | `scripts/make_amdgpu_tools_env.sh` |
 
 三个已固化进生成器的可移植性陷阱（详因见各工具源码注释）：
