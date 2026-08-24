@@ -3,7 +3,7 @@
 #
 # The environment carries no packages of its own: it is a pure
 # activation wrapper that puts the simulator toolchain first on PATH
-# and gives it private caches, so `conda activate amdgpu-sim-tools`
+# and gives it private caches, so `conda activate AMDGPU-CDNA4-SIM`
 # yields a shell where rocm-smi, gem5-session, and triton-softmax
 # just work while the base shell stays untouched.  Regenerating is
 # idempotent and instant (a few symlinks and two shell scripts).
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 ROOT="/home/zhaosiying/zcode-lane"
-TOOLS_ENV="${ROOT}/env/conda/amdgpu-sim-tools"
+TOOLS_ENV="${SAGR_TOOLS_ENV_TARGET:-${HOME}/miniforge3/envs/AMDGPU-CDNA4-SIM}"
 ROCM_PREFIX="${ROOT}/env/conda/rocm-pytorch-v3-fa8414cce688f934f538163621423376c2542acff3e4d3e403df4340d90fcd6d"
 PRODUCT_PREFIX="${ROOT}/env/rocm/product-v1-1c3b9563dbf3e08265b909068599abdd6a16bfa340ebc1635b2365b87c7fd4c8"
 RUNTIME_BUILD="${ROOT}/projects/self-amdgpu-runtime/build/cp28-runtime-clang"
@@ -21,7 +21,7 @@ TOPOLOGY="${PRODUCT_PREFIX}/share/self-amdgpu-runtime/hsakmt-topology"
 GEMSIM_SMI="${ROOT}/tools/gemsim_smi.py"
 
 for f in "${ROCM_PREFIX}/bin/python" "${RUNTIME_BUILD}/libself_amdgpu_runtime.so.1" \
-         "${ROCR_LIB}/libhsa-runtime64.so.1" "${GEMSIM_SMI}" \
+         "${ROCR_LIB}/libhsa-runtime64.so.1" "${GEMSIM_SMI}" "${ROOT}/tools/gemsim_smi_publish.py" \
          "${ROOT}/build/rocr_logging_preload.so" \
          "${ROOT}/projects/gem5/build/VEGA_X86/gem5.opt" \
          "${ROOT}/tools/triton_softmax_demo.py" \
@@ -147,6 +147,6 @@ DEMO
 chmod +x "${TOOLS_ENV}/bin/rocm-smi" "${TOOLS_ENV}/bin/triton-softmax" \
         "${ROOT}/scripts/gem5_session_control.sh" "${ROOT}/tools/triton_softmax_demo.py"
 
-echo "amdgpu-sim-tools environment ready: ${TOOLS_ENV}"
-echo "  conda activate amdgpu-sim-tools     (or: conda activate ${TOOLS_ENV})"
+echo "AMDGPU-CDNA4-SIM environment ready: ${TOOLS_ENV}"
+echo "  conda activate AMDGPU-CDNA4-SIM     (or: conda activate ${TOOLS_ENV})"
 echo "  then:  rocm-smi | gem5-session start | triton-softmax"

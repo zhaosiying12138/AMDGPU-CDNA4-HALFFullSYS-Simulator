@@ -243,6 +243,7 @@ def device_document(directory: Path) -> dict[str, Any]:
     return {
         "schema": OUTPUT_SCHEMA,
         "logical_device_count": DEVICE_COUNT,
+        "device_model": DEVICE_MODEL,
         "on_count": on_count,
         "off_count": DEVICE_COUNT - on_count,
         "state_directory": str(directory),
@@ -292,11 +293,15 @@ def _cell(value: Any) -> str:
     return "-" if value is None else str(value)
 
 
+DEVICE_MODEL = "AMD Instinct MI350X（虞书欣粉丝特供版）"
+
+
 def _device_table(document: dict[str, Any]) -> str:
-    headers = ("GPU", "STATUS", "DAEMON_PID", "DAEMON_UUID", "RANK", "WORLD", "JOB_UUID")
+    headers = ("GPU", "MODEL", "STATUS", "DAEMON_PID", "DAEMON_UUID", "RANK", "WORLD", "JOB_UUID")
     rows = [
         (
             str(device["device"]),
+            DEVICE_MODEL,
             device["status"],
             _cell(device["daemon_pid"]),
             _cell(device["daemon_uuid"]),
@@ -314,7 +319,10 @@ def _device_table(document: dict[str, Any]) -> str:
     def render(row: Sequence[str]) -> str:
         return "  ".join(value.ljust(widths[index]) for index, value in enumerate(row))
 
-    summary = f"GemSim devices: {document['on_count']} ON, {document['off_count']} OFF"
+    summary = (
+        f"GemSim devices: {document['on_count']} ON, {document['off_count']} OFF"
+        f"  model: {DEVICE_MODEL}"
+    )
     return "\n".join((summary, render(headers), render(tuple("-" * width for width in widths)), *(render(row) for row in rows)))
 
 
