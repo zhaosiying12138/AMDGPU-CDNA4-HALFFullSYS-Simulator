@@ -358,3 +358,76 @@ projection GEMMs, all 15 complete model contracts, a complete layer, and the
 model remain unaccepted. P5-OPS-01 expands the operator matrix next.
 
 The frozen `SOURCE_LOCK.json` and registered project baseline remain immutable.
+
+---
+
+## 用户工具链（隔离 conda 环境 · rocm-smi · gem5 一键启停 · Triton demo）
+
+本节面向想在模拟 GPU 上直接动手的使用者（无需了解 lane 体系）。
+
+### 0. 一键创建
+
+```bash
+bash scripts/make_amdgpu_tools_env.sh
+```
+
+幂等、秒级（只建 symlink 和激活脚本，零包复制）。产出
+`env/conda/amdgpu-sim-tools`——纯激活环境：激活后把模拟器工具链置于
+PATH 前列并配私有 Triton/XDG 缓存，`conda deactivate` 后 base shell 不受
+任何影响。前置（缺一即报错）：`build/rocr-stage-zcode`、
+`projects/self-amdgpu-runtime/build/cp28-runtime-clang`、
+`build/rocr_logging_preload.so`、`projects/gem5/build/VEGA_X86/gem5.opt`。
+
+### 1. 激活后直接 rocm-smi
+
+```bash
+conda activate /home/zhaosiying/zcode-lane/env/conda/amdgpu-sim-tools
+rocm-smi            # 文本表格；rocm-smi --json 供脚本消费
+```
+
+16 个模拟 GPU 槽位；每个活着的 gem5 会话一行：`DAEMON_PID`（gem5 进程）、
+`RANK/WORLD`（TP 位置）、`JOB_UUID`（同一次启动）、JSON 里的 `endpoint`
+（bridge socket）。记录带 PID+starttime 校验，进程死了槽位自动 OFF。
+
+### 2. gem5 一键启停
+
+```bash
+gem5-session start              # 独立模拟器（functional-fast）
+gem5-session start --accurate   # 时序精确模式
+gem5-session status             # pid / endpoint / dispatch 数
+gem5-session stop | restart
+```
+
+启动后 endpoint 写入 `/tmp/amdgpu-sim-tools-session/session.env`，新 shell
+或重新激活自动附加到该模拟器（激活脚本会 source 它）。会话目录强制 0700
+——gem5 的 evidence 文件拒绝含 symlink 或宽松权限的路径。
+
+### 3. Triton softmax demo（无 benchmark）
+
+```bash
+gem5-session start && triton-softmax
+```
+
+默认 8×256 fp32 + 4×256 bf16，单次 kernel 对照 `torch.softmax`，秒级。
+`--rows/--cols/--block` 可调。demo 自动在干净 env + unshare 下执行（交互
+shell 的杂散变量会在 hsa_init 打翻设备栈）。实测：
+
+```
+[softmax] device: AMD Instinct MI350X
+[softmax] 8x256 float32 BLOCK_N=256: max_err=0.00000 wall=0.9s -> PASS
+[softmax] 4x256 bfloat16 BLOCK_N=256: max_err=0.00000 wall=0.0s -> PASS
+[softmax] overall: PASS
+```
+
+### 组件与关键开关
+
+| 工具 | 实现 |
+|---|---|
+| `rocm-smi` | `tools/gemsim_smi.py`（读 `/tmp/amdgpu-sim-smi-<uid>/` registry）|
+| `gem5-session` | `scripts/gem5_session_control.sh`（listener-mode + endpoint）|
+| `triton-softmax` | `tools/triton_softmax_demo.py` |
+| 环境生成 | `scripts/make_amdgpu_tools_env.sh` |
+
+生成器内置两个必要开关（勿删）：`HSA_ENABLE_DXG_DETECTION=0`（WSL 的
+/dev/dxg 会把 ROCr thunk 引向 librocdxg 死路，永远到不了模型库）与
+`HSA_ENABLE_INTERRUPT=0`。
