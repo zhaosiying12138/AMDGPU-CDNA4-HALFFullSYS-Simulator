@@ -278,13 +278,17 @@ def main() -> int:
         flush=True,
     )
 
+    worker_path = f"{STATE_DIR}/worker.py"
+    with open(worker_path, "w") as f:
+        f.write(WORKER_SOURCE)
+    env = build_worker_env(args.prompt, args.max_tokens, model, tp)
+
     # Tool shim mirroring run_engine_lane: the product rocminfo and the
     # arch shim first on PATH so aiter resolves gfx950 without a real KMD.
     shim = f"{STATE_DIR}/tool-shim"
     os.makedirs(shim, exist_ok=True)
-    runtime_build = RUNTIME_BUILD
     try:
-        os.symlink(f"{runtime_build}/sagr-rocminfo", f"{shim}/rocminfo")
+        os.symlink(f"{RUNTIME_BUILD}/sagr-rocminfo", f"{shim}/rocminfo")
     except FileExistsError:
         pass
     try:
@@ -292,11 +296,6 @@ def main() -> int:
     except FileExistsError:
         pass
     env["PATH"] = f"{shim}:{env['PATH']}"
-
-    worker_path = f"{STATE_DIR}/worker.py"
-    with open(worker_path, "w") as f:
-        f.write(WORKER_SOURCE)
-    env = build_worker_env(args.prompt, args.max_tokens, model, tp)
     worker = subprocess.Popen(
         [f"{CONDA_PREFIX}/bin/python", worker_path],
         env=env,
