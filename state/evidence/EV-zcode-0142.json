@@ -1,0 +1,11 @@
+{
+ "behavior": {
+  "tp4": "requires explicit --model; error message names the 9B path",
+  "tp<=2": "default 0.8B (or --model override)"
+ },
+ "checkpoint_id": "CP-0142",
+ "claim": "DEMO --tp 4 NO LONGER AUTO-SELECTS THE MODEL per operator request. --model defaults only for tp<=2 (Qwen3.5-0.8B); at --tp 4 the script errors out with an actionable message naming the 9B path instead of silently switching models. Verified: --tp 4 without --model exits with the error; --tp 4 --model .../Qwen3.5-9B and default --tp 2 both parse. Script-only delivery; compiles.",
+ "observed_at": "2026-08-25T05:50:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

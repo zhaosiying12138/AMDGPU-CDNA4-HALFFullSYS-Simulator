@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""一键客户演示：SGLang 多 TP 生成 100 个 token（默认 TP2 最快；--tp 4 为 9B）。
+"""一键客户演示：SGLang 多 TP 生成 100 个 token（默认 TP2 最快；--tp 4 需手动 --model 指定 9B）。
 
 用法（无需手动 gem5-session——TP2 引擎自己按 rank 拉起两个模拟器）：
 
@@ -230,12 +230,21 @@ def main() -> int:
     parser.add_argument("--max-tokens", type=int, default=100)
     parser.add_argument("--tp", type=int, default=2,
                         choices=(1, 2, 4),
-                        help="TP 度：1/2 用 0.8B，4 用 9B（TP4 是 9B 的数学最大并行）")
+                        help="TP 度；4 档需手动 --model 指定 9B（TP4 是 9B 的数学最大并行）")
     parser.add_argument("--model", default=None,
-                        help="默认按 --tp 自动选择（tp<=2 → 0.8B, tp4 → 9B）")
+                        help="模型路径；--tp 4（9B 档）必须显式指定，"
+                             "tp<=2 默认 Qwen3.5-0.8B")
     args = parser.parse_args()
     tp = args.tp
-    model = args.model or (DEFAULT_MODEL_9B if tp >= 4 else DEFAULT_MODEL_8B)
+    if args.model:
+        model = args.model
+    elif tp >= 4:
+        parser.error(
+            "--tp 4 需要显式 --model（例如 --model "
+            f"{DEFAULT_MODEL_9B}）；不会自动选择 9B"
+        )
+    else:
+        model = DEFAULT_MODEL_8B
 
     shutil.rmtree(STATE_DIR, ignore_errors=True)
     run_root = RUN_ROOT.format(TP=tp)
