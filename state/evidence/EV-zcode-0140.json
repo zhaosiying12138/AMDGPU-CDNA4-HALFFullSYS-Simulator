@@ -1,0 +1,9 @@
+{
+ "checkpoint_id": "CP-0140",
+ "claim": "DEMO GENERATOR SWITCHED TO SGLANG TP2 PER OPERATOR REQUEST (fastest accepted configuration at 552s e2e). tools/demo_gen.py rewritten as a two-process design: the UI process assembles the exact TP2 engine environment the accepted lane used -- 2-GPU CU-consistent topology, NCCL NET/Socket, triton attention, DTIF fast-copy weight injection via the pinned ROCr stage, private run root where the engine spawns one gem5 per rank -- and launches a worker subprocess under env -i with that environment. The worker builds SGLang Engine(tp_size=2) offline, generates token by token (greedy), and streams each new token plus timing to a progress JSONL; the UI renders a live two-line display (token i/N, both ranks dispatch signatures sampled from each rank real dispatch-trace, elapsed, sliding window of the decoded text), kernel checkpoint logs every ten tokens naming the simulator fix paths in play, and a closing TTFT/TPOT/throughput block. No gem5-session needed: the TP2 engine manages its own two simulators; the aiter GEMM table is pinned to a per-demo frozen copy (correctness is table-independent per CP-0128, the pin is belt-and-suspenders). Smoke launch was started then killed per operator instruction (script-only delivery); the script compiles and --help verified.",
+ "design": "UI process + env -i worker subprocess; worker = SGLang Engine(tp=2) offline; progress JSONL between them",
+ "environment_mirrors": "run_engine_lane sglang TP2 branch: gpu-2 CU-consistent topology, NCCL_SHM_DISABLE=1, triton attention, pinned aiter table, private SAGR_MANAGED_RUN_ROOT",
+ "observed_at": "2026-08-25T05:00:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
