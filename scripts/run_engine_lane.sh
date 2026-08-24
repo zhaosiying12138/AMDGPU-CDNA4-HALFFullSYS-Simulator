@@ -135,7 +135,15 @@ source "${ROOT}/scripts/fastcopy_mode.sh" fast
 # minutes proving nothing.
 STALE="${ROOT}/env/rocm/product-v1-f76db762609b346cb83b920cc82cd2b734b75cd31b8562e6536ad81275fe17e1"
 HEAD_PRODUCT="${ROOT}/env/rocm/product-v1-4d9d40454031c7345f25da81b6781995b09a3b10e4dd66026e019306fc7ee39b"
-RUNTIME_BUILD="${ROOT}/projects/self-amdgpu-runtime/build/cp28-runtime-clang"
+RUNTIME_BUILD="${SAGR_RUNTIME_LIBRARY_DIR:-${ROOT}/projects/self-amdgpu-runtime/build/cp28-runtime-clang}"
+# SAGR_RUNTIME_LIBRARY_DIR (optional): point the lane at a rebuilt runtime
+# tree (it must contain libself_amdgpu_hsakmt_model.so.1 and
+# libself_amdgpu_runtime.so.1). Used by the TP16 lane to run the build whose
+# SMI registry holds 64 device slots instead of 16: a TP16 engine holds 18
+# concurrent registry leases (16 schedulers + engine process + detokenizer),
+# and with 16 slots the 17th/18th hsa_init failed OUT_OF_RESOURCES after its
+# gem5 session had already handshaken, killing a random scheduler with
+# "No CUDA GPUs are available".
 # Keep the product as the base, but default this worktree to the rebuilt ROCr
 # stage: the conda product prefix named by the activate script predates every
 # fast-copy commit in projects/rocm-systems, and a lane that loads it falls
