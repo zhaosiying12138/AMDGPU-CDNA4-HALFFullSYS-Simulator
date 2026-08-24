@@ -1,0 +1,12 @@
+{
+ "checkpoint_id": "CP-0141",
+ "claim": "DEMO GENERATOR GENERALIZED TO --tp {1,2,4}: ONE SCRIPT, TWO MODELS. The TP2 demo becomes the default; --tp 4 switches to Qwen3.5-9B (TP4 being that model mathematical maximum parallelism per the divisibility analysis -- 4 KV heads, 12-way vision division). Everything TP-count-driven: the generated gpu-<TP> topology (CU-consistent), the per-TP private run root under which the engine spawns TP simulators, worker Engine(tp_size=tp) with context/max-total-tokens sized per model (256/64 for 0.8B, 512/160 for 9B), the live rank display (r0..r{TP-1} each with dispatch count + kernel signature), and the closing metrics (engine load labelled TP-rank weight injection). --model overrides the automatic model selection. Script-only delivery per operator instruction: compiles, --help shows the tp choices; no execution performed.",
+ "modes": {
+  "default": "TP2 Qwen3.5-0.8B (fastest accepted: 552s e2e)",
+  "tp4": "Qwen3.5-9B (TP4 = its mathematical max parallelism)"
+ },
+ "observed_at": "2026-08-25T05:30:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf",
+ "usage": "python tools/demo_gen.py [prompt] [--tp {1,2,4}] [--max-tokens N] [--model PATH]"
+}

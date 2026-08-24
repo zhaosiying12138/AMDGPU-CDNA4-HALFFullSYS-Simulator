@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""一键客户演示：SGLang TP2 双 gem5 实例生成 100 个 token。
+"""一键客户演示：SGLang 多 TP 生成 100 个 token（默认 TP2 最快；--tp 4 为 9B）。
 
 用法（无需手动 gem5-session——TP2 引擎自己按 rank 拉起两个模拟器）：
 
@@ -8,7 +8,7 @@
 流程：本脚本以干净环境 + 私有 run root 启动工作子进程；工作进程按
 run_engine_lane 的 TP2 配置（2-GPU CU 一致拓扑、NCCL NET/Socket、
 triton attention）构造 SGLang Engine(tp=2)，逐 token 生成并把每个新
-token + 计时写进进度文件；UI 进程实时渲染进度（token i/N、双 rank
+token + 计时写进进度文件；UI 进程实时渲染进度（token i/N、各 rank
 dispatch 签名、已生成文本滑窗）、每 10 token 输出 kernel 检查点日志
 （体现 DTIF fast-copy 权重注入与 Triton GDN 内核路径），结束时打印
 完整回答与 TTFT/TPOT/吞吐指标。
@@ -34,11 +34,13 @@ CONDA_PREFIX = (
 )
 RUNTIME_BUILD = f"{ROOT}/projects/self-amdgpu-runtime/build/cp28-runtime-clang"
 ROCR_LIB = f"{ROOT}/build/rocr-stage-zcode/lib"
-TOPOLOGY = f"{ROOT}/artifacts/topology/gpu-2"
+TOPOLOGY = f"{ROOT}/artifacts/topology/gpu-{{TP}}"
+DEFAULT_MODEL_8B = f"{ROOT}/models/Qwen3.5-0.8B"
+DEFAULT_MODEL_9B = f"{ROOT}/models/Qwen3.5-9B"
 DEFAULT_PROMPT = "为什么说鞠婧祎主演的《月鳞绮纪》是国产电视剧的巅峰之作？"
 STATE_DIR = "/tmp/amdgpu-sim-demo-gen"
 PROGRESS_FILE = f"{STATE_DIR}/progress.jsonl"
-RUN_ROOT = "/tmp/sagr-lane-zcode-demo-tp2"
+RUN_ROOT = "/tmp/sagr-lane-zcode-demo-tp{TP}"
 
 WORKER_SOURCE = r'''
 import json, os, time
@@ -47,6 +49,9 @@ progress_path = os.environ["DEMO_PROGRESS_FILE"]
 prompt = os.environ["DEMO_PROMPT"]
 max_tokens = int(os.environ["DEMO_MAX_TOKENS"])
 model = os.environ["DEMO_MODEL"]
+tp = int(os.environ["DEMO_TP"])
+ctx = int(os.environ["DEMO_CONTEXT"])
+mtt = int(os.environ["DEMO_MAX_TOTAL_TOKENS"])
 
 def emit(rec):
     with open(progress_path, "a") as f:
@@ -63,18 +68,18 @@ emit({"event": "prompt_tokenized", "n_prompt": len(prompt_ids)})
 from sglang.srt.entrypoints.engine import Engine
 engine = Engine(
     model_path=model,
-    tp_size=2,
+    tp_size=tp,
     dtype="bfloat16",
     attention_backend="triton",
     disable_cuda_graph=True,
     disable_custom_all_reduce=True,
-    max_total_tokens=64,
+    max_total_tokens=mtt,
     max_running_requests=1,
     max_mamba_cache_size=5,
     random_seed=0,
     watchdog_timeout=86400,
     dist_timeout=86400,
-    context_length=256,
+    context_length=ctx,
     chunked_prefill_size=-1,
     skip_tokenizer_init=True,
     log_level="info",
@@ -145,13 +150,14 @@ def bar(cur: int, total: int, width: int = 26) -> str:
     return c("█" * filled, "green") + c("░" * (width - filled), "dim")
 
 
-def dispatch_summary(run_root: str):
+def dispatch_summary(run_root: str, tp: int):
     """返回 [(count, sig), ...] 每个已出现的会话一份，按名字排序。"""
     import glob as _glob
     out = []
-    for path in sorted(
+    paths = sorted(
         _glob.glob(f"{run_root}/self-amdgpu-opencl-run.*/dispatch-trace.jsonl")
-    )[:2]:
+    )
+    for path in paths[:tp]:
         n = 0
         sig = "—"
         try:
@@ -168,12 +174,12 @@ def dispatch_summary(run_root: str):
         except (OSError, json.JSONDecodeError):
             pass
         out.append((n, sig))
-    while len(out) < 2:
+    while len(out) < tp:
         out.append((0, "—"))
-    return out
+    return out[:tp]
 
 
-def build_worker_env(prompt: str, max_tokens: int, model: str) -> dict:
+def build_worker_env(prompt: str, max_tokens: int, model: str, tp: int) -> dict:
     product = (
         f"{ROOT}/env/rocm/product-v1-4d9d40454031c7345f25da81b6781995b09a3"
         "b10e4dd66026e019306fc7ee39b"
@@ -193,11 +199,11 @@ def build_worker_env(prompt: str, max_tokens: int, model: str) -> dict:
         "ROCM_SIM_ROOT": product,
         "HSA_PATH": product,
         "HSA_MODEL_LIB": f"{RUNTIME_BUILD}/libself_amdgpu_hsakmt_model.so.1",
-        "HSA_MODEL_TOPOLOGY": TOPOLOGY,
+        "HSA_MODEL_TOPOLOGY": TOPOLOGY.format(TP=tp),
         "HSA_ENABLE_DXG_DETECTION": "0",
         "HSA_ENABLE_INTERRUPT": "0",
         "HIP_PLATFORM": "amd",
-        "SAGR_MANAGED_RUN_ROOT": RUN_ROOT,
+        "SAGR_MANAGED_RUN_ROOT": RUN_ROOT.format(TP=tp),
         "SAGR_ROCR_LIBRARY_DIR": ROCR_LIB,
         "SGLANG_USE_AITER": "1",
         "FLA_CACHE_RESULTS": "1",
@@ -209,6 +215,9 @@ def build_worker_env(prompt: str, max_tokens: int, model: str) -> dict:
         "DEMO_PROMPT": prompt,
         "DEMO_MAX_TOKENS": str(max_tokens),
         "DEMO_MODEL": model,
+        "DEMO_TP": str(tp),
+        "DEMO_CONTEXT": str(256 if "0.8B" in model else 512),
+        "DEMO_MAX_TOTAL_TOKENS": str(64 if "0.8B" in model else 160),
     }
     return env
 
@@ -219,10 +228,18 @@ def main() -> int:
     )
     parser.add_argument("prompt", nargs="?", default=DEFAULT_PROMPT)
     parser.add_argument("--max-tokens", type=int, default=100)
-    parser.add_argument("--model", default=f"{ROOT}/models/Qwen3.5-0.8B")
+    parser.add_argument("--tp", type=int, default=2,
+                        choices=(1, 2, 4),
+                        help="TP 度：1/2 用 0.8B，4 用 9B（TP4 是 9B 的数学最大并行）")
+    parser.add_argument("--model", default=None,
+                        help="默认按 --tp 自动选择（tp<=2 → 0.8B, tp4 → 9B）")
     args = parser.parse_args()
+    tp = args.tp
+    model = args.model or (DEFAULT_MODEL_9B if tp >= 4 else DEFAULT_MODEL_8B)
 
     shutil.rmtree(STATE_DIR, ignore_errors=True)
+    run_root = RUN_ROOT.format(TP=tp)
+    shutil.rmtree(run_root, ignore_errors=True)
     os.makedirs(f"{STATE_DIR}/aiter-config", exist_ok=True)
     os.makedirs(f"{STATE_DIR}/triton-cache", exist_ok=True)
     os.makedirs(f"{STATE_DIR}/xdg", exist_ok=True)
@@ -233,10 +250,12 @@ def main() -> int:
         shutil.copyfile(pkg_csv, f"{STATE_DIR}/aiter-config/bf16_tuned_gemm.csv")
     open(PROGRESS_FILE, "w").close()
 
-    banner("AMDGPU-CDNA4-SIM · Qwen3.5-0.8B · SGLang TP2 · 双 gem5 实例", 58)
-    print(f"  {c('模型', 'dim')}: Qwen3.5-0.8B（24 层：18 GDN + 6 全注意力）")
+    model_name = "Qwen3.5-9B" if tp >= 4 else "Qwen3.5-0.8B"
+    layers = "36 层" if tp >= 4 else "24 层：18 GDN + 6 全注意力"
+    banner(f"AMDGPU-CDNA4-SIM · {model_name} · SGLang TP{tp} · {tp}× gem5 实例", 58)
+    print(f"  {c('模型', 'dim')}: {model_name}（{layers}）")
     print(f"  {c('Prompt', 'dim')}: {args.prompt[:44]}…")
-    print(f"  {c('并行', 'dim')}: TP2（rank 0/1 各持一个模拟 gfx950，NCCL Socket）")
+    print(f"  {c('并行', 'dim')}: TP{tp}（rank 0-{tp - 1} 各持一个模拟 gfx950，NCCL Socket）")
     print(f"  {c('目标', 'dim')}: {args.max_tokens} tokens（贪心解码）")
     print()
     print(c("  ▸ 拉起工作进程：2-GPU CU 一致拓扑 → DTIF fast-copy 权重注入…", "dim"), flush=True)
@@ -244,7 +263,7 @@ def main() -> int:
     worker_path = f"{STATE_DIR}/worker.py"
     with open(worker_path, "w") as f:
         f.write(WORKER_SOURCE)
-    env = build_worker_env(args.prompt, args.max_tokens, args.model)
+    env = build_worker_env(args.prompt, args.max_tokens, model, tp)
     worker = subprocess.Popen(
         [f"{CONDA_PREFIX}/bin/python", worker_path],
         env=env,
@@ -277,23 +296,26 @@ def main() -> int:
                 ev = rec.get("event")
                 if ev == "engine_ready":
                     print(
-                        c(f"  ✓ 双 rank 引擎就绪（{rec['load_s']}s）", "green"),
+                        c(f"  ✓ {tp} rank 引擎就绪（{rec['load_s']}s）", "green"),
                         flush=True,
                     )
                 elif ev == "token":
                     token_dts.append(rec["dt_s"])
                     last_text = rec["text"]
-                    (d0, s0), (d1, s1) = dispatch_summary(RUN_ROOT)
+                    summaries = dispatch_summary(run_root, tp)
                     w = term_width()
                     text = last_text.replace("\n", " ")
                     window = max(18, w - 30)
                     if len(text) > window:
                         text = "…" + text[-window:]
+                    rank_parts = "  ".join(
+                        f"{c(f'r{i}', 'cyan')} {s}({d})"
+                        for i, (d, s) in enumerate(summaries)
+                    )
                     print(
                         f"\033[G\033[K  {c('token', 'dim')} "
                         f"{c(str(rec['i']), 'bold')}/{c(str(args.max_tokens), 'dim')}"
-                        f"  {c('rank0', 'cyan')} {s0}({d0})"
-                        f"  {c('rank1', 'cyan')} {s1}({d1})"
+                        f"  {rank_parts}"
                         f"  {c(f'{time.time() - t_start:.0f}s', 'yellow')}"
                     )
                     print(
@@ -304,9 +326,10 @@ def main() -> int:
                         checkpoints_logged = rec["i"] // 10
                         recent = token_dts[-10:]
                         stamp = time.strftime("%H:%M:%S")
+                        total_disp = sum(d for d, _ in summaries)
                         print(
                             f"\033[G\033[K  {c(stamp, 'dim')} {c('●', 'magenta')} "
-                            f"checkpoint {rec['i']} tok · {d0 + d1} dispatches · "
+                            f"checkpoint {rec['i']} tok · {total_disp} dispatches · "
                             f"avg {sum(recent) / len(recent):.1f}s/tok\033[F",
                             end="", flush=True,
                         )
@@ -344,7 +367,7 @@ def main() -> int:
   {c('TTFT', 'yellow')}（首 token 延迟）      {final.get('ttft_s')}s
   {c('TPOT', 'yellow')}（每 token 延迟）      {final.get('tpot_s')}s
   {c('吞吐', 'yellow')}                    {len(ids) / max(final.get('total_s', 1), 1):.4f} tok/s
-  {c('引擎加载', 'dim')}                 {final.get('load_s')}s（双 rank 权重注入）
+  {c('引擎加载', 'dim')}                 {final.get('load_s')}s（{tp} rank 权重注入）
   {c('生成总时长', 'dim')}               {final.get('total_s')}s（{len(ids)} tokens）
 """)
     return 0
