@@ -1,0 +1,20 @@
+{
+ "checkpoint_id": "CP-0135",
+ "claim": "QWEN3.5-9B TENSOR-PARALLEL RUNG ACCEPTED AT TP4 -- the ladder's final rung lands in its mathematically maximal form. Lane zcode-sglang-9b-tp4-v3 (upstream SGLang, tensor_parallel_size=4 on the generated 4-GPU topology, reconstructed gem5 with all nine fixes in functional-fast mode via the repointed fastwrap, NCCL NET/Socket, triton attention) completed exit=0 with 7577 dispatches and generated_token_ids [27841, 27841], token_golden correct=true. TP4 is the MAXIMUM VALID tensor parallelism for Qwen3.5-9B by head divisibility (text 16 q-heads, 4 kv-heads, linear 16k/32v heads, and a 12-way vision/mrope division: only TP in {1,2,4} divides every count), so the original TP16 target was structurally impossible for this model independent of resources; the operator accepted the adjusted target. En route: the TP4 lane initially died in the vision-tower head-split assert at TP8 (12 % 8), proving the divisibility bound live; and the first TP4 attempts ran a stale simulator because the copied build's fastwrap wrapper hard-exec'd the MAIN TREE's gem5.opt -- repointed to the worktree's rebuilt binary, after which the run completed cleanly. GOAL LADDER FINAL STATE: SGLang TP1 (CP-0106), vLLM TP1 (CP-0119), SGLang TP2 (CP-0125), vLLM TP2 (CP-0126), CCL strengthening (CP-0127/0128), Qwen3.5-9B TP4 (this checkpoint) -- every rung accepted with the token golden gate green.",
+ "final_rung": {
+  "lane": "zcode-sglang-9b-tp4-v3",
+  "exit": 0,
+  "dispatches": 7577,
+  "generated": [27841, 27841],
+  "token_gate": "correct=true",
+  "tp_justification": "gcd(16,4,16,32,12)=4 -> TP4 is maximal for Qwen3.5-9B; TP8/16 structurally invalid"
+ },
+ "en_route": [
+  "TP8 died at vision-tower assert (12 % 8) -- divisibility bound proven live",
+  "stale-binary trap: copied build's fastwrap exec'd main-tree gem5.opt; repointed to the worktree rebuild"
+ ],
+ "goal_ladder": "all six rungs accepted: SGLang TP1, vLLM TP1, SGLang TP2, vLLM TP2, CCL triple, 9B TP4",
+ "observed_at": "2026-08-24T18:05:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}
