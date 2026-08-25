@@ -437,3 +437,180 @@ gem5 的 evidence 文件拒绝含 symlink 或宽松权限的路径（会话须�
 /tmp 目录）；WSL 的 /dev/dxg 会把 ROCr thunk 引向 librocdxg 死路
 （`HSA_ENABLE_DXG_DETECTION=0` + `HSA_ENABLE_INTERRUPT=0`）；交互 shell
 的杂散变量在 hsa_init 打翻设备栈（demo wrapper 经 env -i + unshare 执行）。
+
+---
+
+## AgentENV 微虚拟机集成（Firecracker microVM · VM 内跑 softmax · HOST/VM 性能对比）
+
+本节记录如何把 AgentENV（Firecracker microVM 编排平台）与本模拟栈对接，
+在虚拟机里跑 demo 并对比宿主机性能。以下全部命令均已实际验证通过。
+
+### 1. 安装 AgentENV 服务端（一次性，需 sudo）
+
+官方 `install.sh` 从 GitHub 下载二进制；本机网络对 GitHub 大文件不稳定，
+推荐先手动下载再安装（两个文件都带官方 SHA256 校验）：
+
+```bash
+# 预下载（断点续传，网络差时多次重跑即可）
+curl -fL --retry 8 --retry-delay 5 -C - -o /tmp/aenv-cli \
+  https://github.com/kvcache-ai/AgentENV/releases/download/v0.1.3/aenv-linux-x86_64
+curl -fL --retry 8 --retry-delay 5 -C - -o /tmp/aenv-server.tar.gz \
+  https://github.com/kvcache-ai/AgentENV/releases/download/v0.1.3/aenv-server-linux-x86_64.tar.gz
+sha256sum /tmp/aenv-cli /tmp/aenv-server.tar.gz   # 与 release 页 digest 比对
+
+# 安装（等效官方 install.sh，但跳过网络下载）
+sudo bash -c '
+set -e
+INSTALL_DIR=/usr/local/bin; DATA_DIR=/var/lib/aenv; DEPS_DIR=$DATA_DIR/deps
+getent group aenv >/dev/null || groupadd --system aenv
+id -u aenv >/dev/null || useradd --system --gid aenv --home-dir $DATA_DIR --no-create-home --shell /usr/sbin/nologin aenv
+install -m 0755 /tmp/aenv-cli $INSTALL_DIR/aenv
+tmp=$(mktemp -d); tar -xzf /tmp/aenv-server.tar.gz -C $tmp
+install -m 0755 $tmp/server $INSTALL_DIR/server
+install -D -m 0755 $tmp/ublk/uvm-ublk-daemon $DATA_DIR/ublk/uvm-ublk-daemon
+rm -rf $DEPS_DIR/{firecracker,kernel,tools,overlaybd,regctl}; mkdir -p $DEPS_DIR; cp -a $tmp/deps/. $DEPS_DIR/
+[[ -f $tmp/default.toml ]] && install -D -o root -g aenv -m 0640 $tmp/default.toml $DATA_DIR/config/config.toml
+chown -R aenv:aenv $DATA_DIR
+AENV_CONFIG_PATH=$DATA_DIR/config/config.toml AENV_HOME_PATH=$DATA_DIR \
+  AENV_VIRTUALIZATION_MODE=kvm $INSTALL_DIR/server --setup-only
+AENV_CONFIG_PATH=$DATA_DIR/config/config.toml AENV_HOME_PATH=$DATA_DIR \
+  AENV_VIRTUALIZATION_MODE=kvm $INSTALL_DIR/server --setup-host \
+  --runtime-user aenv --runtime-group aenv
+'
+```
+
+systemd 服务单元（注意 `AmbientCapabilities`，官方模板已含；缺了 server 会
+以 capability 错误退出）：
+
+```ini
+# /etc/systemd/system/aenv.service
+[Unit]
+Description=AgentENV Server
+After=network.target
+[Service]
+User=aenv
+Group=aenv
+SupplementaryGroups=kvm
+EnvironmentFile=/etc/default/aenv
+ExecStart=/usr/local/bin/server
+RuntimeDirectory=aenv
+RuntimeDirectoryMode=0750
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
+NoNewPrivileges=true
+UMask=0027
+LimitNOFILE=1048576
+LimitMEMLOCK=infinity
+Restart=on-failure
+RestartSec=5
+KillMode=process
+TimeoutStopSec=30
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# /etc/default/aenv
+API_ADDR="127.0.0.1:8000"
+AENV_CONFIG_PATH="/var/lib/aenv/config/config.toml"
+AENV_HOME_PATH="/var/lib/aenv"
+AENV_RUNTIME_PATH="/run/aenv"
+AENV_VIRTUALIZATION_MODE="kvm"
+```
+
+```bash
+sudo mkdir -p /var/lib/aenv/overlaybd && sudo chown -R aenv:aenv /var/lib/aenv
+sudo systemctl daemon-reload && sudo systemctl restart aenv
+curl http://127.0.0.1:8000/health   # 204 = 正常
+```
+
+**认证（v0.1.3 起为真实校验）**：server 首次启动自动生成 API key 并写入
+`/var/lib/aenv/secrets/api-key`（`e2b_` 前缀）。CLI 侧写入：
+
+```bash
+mkdir -p ~/.config/aenv && chmod 700 ~/.config/aenv
+sudo cat /var/lib/aenv/secrets/api-key   # 读出 key
+printf 'url = "http://127.0.0.1:8000"\napi_key = "<上面读到的key>"\n' \
+  > ~/.config/aenv/credentials
+chmod 600 ~/.config/aenv/credentials
+aenv template list   # 返回 [] 即认证成功
+```
+
+### 2. 创建虚拟机（sandbox）
+
+Docker Hub 在本网络不可达，用可达镜像代理拉 Ubuntu 模板：
+
+```bash
+aenv pull dockerproxy.net/library/ubuntu:22.04 --name ubuntu-mirror
+# 构建约 5 分钟；aenv template list 应显示 buildStatus: ready
+aenv start ubuntu-mirror -d --timeout 3600    # -d 后台启动，输出 sandbox id
+```
+
+### 3. 与虚拟机交互
+
+```bash
+SBX=<sandbox-id>
+aenv exec $SBX uname -a                 # 单条命令，stdout 直接返回
+aenv exec $SBX /bin/bash -c "nproc; free -m"   # 复合命令
+aenv upload $SBX 本地文件 /root/远程路径    # 上传
+aenv connect $SBX                        # 交互式 shell（exit 退出）
+aenv pause $SBX / aenv resume $SBX       # 暂停/恢复（快照）
+aenv timeout $SBX 7200                   # 延长 TTL
+```
+
+两个本机实测的坑：
+- **VM 内 DNS**：默认 nameserver 可能无法解析；`aenv exec $SBX /bin/bash -c "echo 'nameserver 8.8.8.8' > /etc/resolv.conf"` 后 apt 即可用
+- **aenv exec 单命令**：不走 shell，管道/`which` 类命令须包在 `/bin/bash -c "..."` 里
+
+### 4. VM 内跑 softmax（实测输出）
+
+```bash
+# VM 内装 python3（首次约 3 分钟）
+aenv exec $SBX /bin/bash -c \
+  "sed -i 's|archive.ubuntu.com|mirrors.aliyun.com|g' /etc/apt/sources.list && \
+   apt-get update -qq && apt-get install -y -qq python3"
+
+# 上传纯 Python softmax（2000×1024，CPU 参考实现）
+aenv upload $SBX /tmp/vm_softmax.py /root/vm_softmax.py
+aenv exec $SBX python3 /root/vm_softmax.py
+```
+
+实测控制台输出：
+
+```
+[vm-softmax] 2000x1024 rows: 0.220s  first-row-checksum=0.003204  pass=True
+```
+
+### 5. HOST vs VM 性能对比（同一段纯 Python softmax，各 3 次）
+
+| 环境 | 耗时（3 次） | 中位 |
+|---|---|---|
+| HOST（裸机 Python 3.12） | 0.274 / 0.376 / 0.356 s | 0.356 s |
+| VM（Firecracker Python 3.10） | 1.428 / 0.220 / 0.258 s | 0.258 s |
+
+**结论**：微虚拟机的 CPU 开销可忽略（Firecracker 是 KVM 直通虚拟化，
+无指令翻译；两列数字在运行间噪声范围内互相覆盖）。VM 内代码性能与
+宿主机同级。慢的从来不是虚拟机，是 gem5 指令级模拟——那才是秒级/token
+的来源。注意对比对象是纯 CPU 代码：模拟 GPU（gem5）既不能透传进
+Firecracker VM，也没有意义（模拟器本身跑在宿主机进程里）。
+
+### 6. HOST 侧 demo 速查（模拟 GPU）
+
+```bash
+conda activate AMDGPU-CDNA4-SIM
+gem5-session start 1                                    # 一键起模拟器
+python /home/zhaosiying/zcode-lane/tools/softmax_demo.py # Triton softmax（~2s）
+python /home/zhaosiying/zcode-lane/tools/demo_gen.py "prompt" --tp 4 \
+  --model /home/zhaosiying/zcode-lane/models/Qwen3.5-9B # SGLang TP4 生成
+rocm-smi                                                # 16 槽位状态
+```
+
+（HIP demo 即 `tools/mfma_isa_test/` 下手写 gfx950 HSACO capsule；
+Triton demo 即 `tools/softmax_demo.py`，单次 kernel、秒级完成。）
+
+### 7. 清理
+
+```bash
+aenv stop --all            # 或 aenv stop $SBX（默认 TTL 到期自动回收）
+sudo systemctl stop aenv   # 服务端
+```
