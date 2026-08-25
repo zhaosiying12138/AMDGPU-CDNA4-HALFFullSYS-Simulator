@@ -1,0 +1,9 @@
+{
+ "checkpoint_id": "CP-0147",
+ "claim": "TP4 9B demo crash root-caused from the operator-provided worker.out: the engine loaded all 4 ranks successfully (engine ready at 3008.9s, weight load 2765s), then generate() died with ValueError: The input (19 tokens) is longer than the model context length (16 tokens). The demo_gen.py worker had pinned context_length=16 and max_total_tokens=16 (copied from the accepted 2-token-prompt lane configuration), but the operator prompt is 19 tokens. Fixed: context_length=512, max_total_tokens=256 \u2014 fits the 19-token prompt plus the 20 output tokens with headroom. Environment cleaned of all hanging processes (gem5/sglang/firecracker all zeroed) before the fix.",
+ "fix": "context_length=512, max_total_tokens=256",
+ "observed_at": "2026-08-25T21:30:00+08:00",
+ "root_cause": "context_length=16 hardcoded from lane config; operator prompt is 19 tokens",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

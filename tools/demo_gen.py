@@ -53,8 +53,8 @@ def _main():
     model = os.environ["DEMO_MODEL"]
     tp = int(os.environ["DEMO_TP"])
     fast = os.environ.get("DEMO_FAST") == "1"
-    ctx = int(os.environ.get("DEMO_CONTEXT", "16"))
-    mtt = int(os.environ.get("DEMO_MAX_TOTAL_TOKENS", "16"))
+    ctx = int(os.environ.get("DEMO_CONTEXT", "512"))
+    mtt = int(os.environ.get("DEMO_MAX_TOKENS", "256"))
 
     def emit(rec):
         with open(progress_path, "a") as f:
@@ -243,8 +243,8 @@ def build_worker_env(prompt: str, max_tokens: int, model: str, tp: int, fast: bo
         "DEMO_MODEL": model,
         "DEMO_TP": str(tp),
         "DEMO_FAST": "1" if fast else "0",
-        "DEMO_CONTEXT": "16",
-        "DEMO_MAX_TOTAL_TOKENS": "16",
+        "DEMO_CONTEXT": "512",
+        "DEMO_MAX_TOTAL_TOKENS": "256",
     }
     return env
 
