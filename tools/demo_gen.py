@@ -54,7 +54,9 @@ def _main():
     tp = int(os.environ["DEMO_TP"])
     fast = os.environ.get("DEMO_FAST") == "1"
     ctx = int(os.environ.get("DEMO_CONTEXT", "512"))
-    mtt = int(os.environ.get("DEMO_MAX_TOKENS", "256"))
+    # 池上限读 DEMO_MAX_TOTAL_TOKENS；曾误读 DEMO_MAX_TOKENS（生成 token 数），
+    # 导致 --max-tokens 20 时 max_total_tokens=20，19 tok prompt 差点装不下
+    mtt = int(os.environ.get("DEMO_MAX_TOTAL_TOKENS", "256"))
 
     def emit(rec):
         with open(progress_path, "a") as f:
@@ -67,6 +69,14 @@ def _main():
     tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
     prompt_ids = tokenizer(prompt)["input_ids"]
     emit({"event": "prompt_tokenized", "n_prompt": len(prompt_ids)})
+    # 权重加载前先核对池装得下，把配置错误拦在 t≈30s 而不是一小时后
+    need = len(prompt_ids) + max_tokens
+    if need > ctx or need > mtt:
+        emit({"event": "fatal", "text": (
+            f"prompt {len(prompt_ids)} tok + 生成 {max_tokens} tok = {need} tok，"
+            f"超过池上限（context_length={ctx}, max_total_tokens={mtt}）——"
+            "已跳过权重加载直接退出")})
+        raise SystemExit(2)
     if fast:
         emit({"event": "log", "text": "⚡ 快速模式：load_format=dummy（跳过 19.3GB 权重加载；输出 token 无语义意义）"})
 
@@ -234,6 +244,17 @@ def build_worker_env(prompt: str, max_tokens: int, model: str, tp: int, fast: bo
         "SGLANG_USE_AITER": "1",
         "FLA_CACHE_RESULTS": "1",
         "NCCL_SHM_DISABLE": "1",
+        # 单机 TP 的集合通信全部走回环。不 pin 时 NCCL 按接口自动挑网卡，
+        # 而 AgentENV（CP-0145）的 firecracker 在主机上动态增删 veth-*，
+        # 接口表在运行窗口内会漂移：引擎就绪后第一个集合通信（embedding
+        # all-reduce 的 lazy NCCL 建链）曾 bind 失败 "Cannot assign
+        # requested address"（CP-0148）。注意只能用接口名 "lo"——RCcl
+        # 2.27 不认 "127.0.0.1" 的 IP 形式（"no socket interface found"，
+        # 探针实测），且 NCCL 对 lo 选的是 127.0.0.1 而非 aenv 的
+        # 10.255.255.254。INIT,NET 级别足够日后定位同类问题。
+        "NCCL_SOCKET_IFNAME": "lo",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,NET",
         "AITER_CONFIG_GEMM_BF16": f"{STATE_DIR}/aiter-config/bf16_tuned_gemm.csv",
         "TRITON_CACHE_DIR": f"{ROOT}/artifacts/zcode-cache/triton",
         "XDG_CACHE_HOME": f"{ROOT}/artifacts/zcode-cache/xdg",
@@ -358,7 +379,9 @@ def main() -> int:
                 except json.JSONDecodeError:
                     continue
                 ev = rec.get("event")
-                if ev == "engine_ready":
+                if ev == "fatal":
+                    print(c(f"  ✗ {rec['text']}", "red"), flush=True)
+                elif ev == "engine_ready":
                     print(
                         c(f"  ✓ {tp} rank 引擎就绪（{rec['load_s']}s）", "green"),
                         flush=True,
@@ -414,6 +437,16 @@ def main() -> int:
                 "red",
             )
         )
+        # 直接把日志末尾打到终端，省得再开文件找原因
+        try:
+            with open(f"{STATE_DIR}/worker.out", errors="replace") as f:
+                tail = f.readlines()[-25:]
+        except OSError:
+            tail = []
+        if tail:
+            print(c("  ── worker.out 末尾 ──", "dim"))
+            for line in tail:
+                print(f"  {c(line.rstrip()[:120], 'dim')}")
         return 1
     if final is None:
         print(c("  ✗ 未收到完成记录", "red"))
