@@ -45,77 +45,87 @@ RUN_ROOT = "/tmp/sagr-lane-zcode-demo-tp{TP}"
 WORKER_SOURCE = r'''
 import json, os, time
 
-progress_path = os.environ["DEMO_PROGRESS_FILE"]
-prompt = os.environ["DEMO_PROMPT"]
-max_tokens = int(os.environ["DEMO_MAX_TOKENS"])
-model = os.environ["DEMO_MODEL"]
-tp = int(os.environ["DEMO_TP"])
-ctx = int(os.environ["DEMO_CONTEXT"])
-mtt = int(os.environ["DEMO_MAX_TOTAL_TOKENS"])
 
-def emit(rec):
-    with open(progress_path, "a") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        f.flush()
+def _main():
+    progress_path = os.environ["DEMO_PROGRESS_FILE"]
+    prompt = os.environ["DEMO_PROMPT"]
+    max_tokens = int(os.environ["DEMO_MAX_TOKENS"])
+    model = os.environ["DEMO_MODEL"]
+    tp = int(os.environ["DEMO_TP"])
+    fast = os.environ.get("DEMO_FAST") == "1"
+    ctx = int(os.environ.get("DEMO_CONTEXT", "16"))
+    mtt = int(os.environ.get("DEMO_MAX_TOTAL_TOKENS", "16"))
 
-emit({"event": "worker_start"})
-t0 = time.time()
-from transformers import AutoTokenizer
-tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
-prompt_ids = tokenizer(prompt)["input_ids"]
-emit({"event": "prompt_tokenized", "n_prompt": len(prompt_ids)})
+    def emit(rec):
+        with open(progress_path, "a") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            f.flush()
 
-from sglang.srt.entrypoints.engine import Engine
-engine = Engine(
-    model_path=model,
-    tp_size=tp,
-    dtype="bfloat16",
-    attention_backend="triton",
-    disable_cuda_graph=True,
-    disable_custom_all_reduce=True,
-    max_total_tokens=mtt,
-    max_running_requests=1,
-    max_mamba_cache_size=5,
-    random_seed=0,
-    watchdog_timeout=86400,
-    dist_timeout=86400,
-    context_length=ctx,
-    chunked_prefill_size=-1,
-    skip_tokenizer_init=True,
-    log_level="info",
-)
-emit({"event": "engine_ready", "load_s": round(time.time() - t0, 1)})
+    emit({"event": "worker_start"})
+    t0 = time.time()
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
+    prompt_ids = tokenizer(prompt)["input_ids"]
+    emit({"event": "prompt_tokenized", "n_prompt": len(prompt_ids)})
+    if fast:
+        emit({"event": "log", "text": "⚡ 快速模式：load_format=dummy（跳过 19.3GB 权重加载；输出 token 无语义意义）"})
 
-output_ids = []
-token_times = []
-for i in range(max_tokens):
-    t = time.time()
-    out = engine.generate(
-        input_ids=prompt_ids + output_ids,
-        sampling_params={"max_new_tokens": 1, "temperature": 0.0},
+    from sglang.srt.entrypoints.engine import Engine
+    engine = Engine(
+        model_path=model,
+        tp_size=tp,
+        dtype="bfloat16",
+        attention_backend="triton",
+        disable_cuda_graph=True,
+        disable_custom_all_reduce=True,
+        max_total_tokens=mtt,
+        max_running_requests=1,
+        max_mamba_cache_size=5,
+        random_seed=0,
+        watchdog_timeout=86400,
+        dist_timeout=86400,
+        context_length=ctx,
+        chunked_prefill_size=-1,
+        skip_tokenizer_init=True,
+        log_level="info",
+        **({"load_format": "dummy"} if fast else {}),
     )
-    new = out["output_ids"][-1]
-    dt = time.time() - t
-    output_ids.append(new)
-    token_times.append(dt)
-    text = tokenizer.decode(output_ids, skip_special_tokens=True)
-    emit({
-        "event": "token", "i": i + 1, "dt_s": round(dt, 2),
-        "id": new, "text": text,
-    })
+    emit({"event": "engine_ready", "load_s": round(time.time() - t0, 1)})
 
-ttft = token_times[0] if token_times else 0
-rest = token_times[1:]
-tpot = (sum(rest) / len(rest)) if rest else 0
-emit({
-    "event": "done",
-    "ids": output_ids,
-    "ttft_s": round(ttft, 1),
-    "tpot_s": round(tpot, 2),
-    "load_s": round(time.time() - t0 - sum(token_times), 1),
-    "total_s": round(time.time() - t0, 1),
-})
-engine.shutdown()
+    output_ids = []
+    token_times = []
+    for i in range(max_tokens):
+        t = time.time()
+        out = engine.generate(
+            input_ids=prompt_ids + output_ids,
+            sampling_params={"max_new_tokens": 1, "temperature": 0.0},
+        )
+        new = out["output_ids"][-1]
+        dt = time.time() - t
+        output_ids.append(new)
+        token_times.append(dt)
+        text = tokenizer.decode(output_ids, skip_special_tokens=True)
+        emit({
+            "event": "token", "i": i + 1, "dt_s": round(dt, 2),
+            "id": new, "text": text,
+        })
+
+    ttft = token_times[0] if token_times else 0
+    rest = token_times[1:]
+    tpot = (sum(rest) / len(rest)) if rest else 0
+    emit({
+        "event": "done",
+        "ids": output_ids,
+        "ttft_s": round(ttft, 1),
+        "tpot_s": round(tpot, 2),
+        "load_s": round(time.time() - t0 - sum(token_times), 1),
+        "total_s": round(time.time() - t0, 1),
+    })
+    engine.shutdown()
+
+
+if __name__ == "__main__":
+    _main()
 '''
 
 
@@ -179,7 +189,7 @@ def dispatch_summary(run_root: str, tp: int):
     return out[:tp]
 
 
-def build_worker_env(prompt: str, max_tokens: int, model: str, tp: int) -> dict:
+def build_worker_env(prompt: str, max_tokens: int, model: str, tp: int, fast: bool = False) -> dict:
     product = (
         f"{ROOT}/env/rocm/product-v1-4d9d40454031c7345f25da81b6781995b09a3"
         "b10e4dd66026e019306fc7ee39b"
@@ -201,6 +211,7 @@ def build_worker_env(prompt: str, max_tokens: int, model: str, tp: int) -> dict:
         "HSA_MODEL_LIB": f"{RUNTIME_BUILD}/libself_amdgpu_hsakmt_model.so.1",
         "HSA_MODEL_TOPOLOGY": TOPOLOGY.format(TP=tp),
         "HSA_ENABLE_DXG_DETECTION": "0",
+        "HSA_NO_SCRATCH_RECLAIM": "1",
         "HSA_ENABLE_INTERRUPT": "0",
         "HIP_PLATFORM": "amd",
         "ROCM_PATH": f"{CONDA_PREFIX}/rocm-sysroot/opt/rocm-7.2.3",
@@ -210,20 +221,30 @@ def build_worker_env(prompt: str, max_tokens: int, model: str, tp: int) -> dict:
         "GPU_ARCHS": "gfx950",
         "SAGR_SIM_ROCMINFO": f"{STATE_DIR}/tool-shim/rocminfo",
         "SAGR_MANAGED_RUN_ROOT": RUN_ROOT.format(TP=tp),
+        # The runtime spawns gem5 through these; fastwrap appends
+        # --functional-fast, which the accepted lanes always ran under —
+        # in timing-accurate mode the NCCL init collectives spin forever
+        # because host-side polling and simulated time advance at
+        # different rates (the freeze at dispatch ~878/494).
+        "SAGR_MANAGED_GEM5": f"{ROOT}/projects/gem5/build/VEGA_X86/gem5.opt.fastwrap",
+        "SAGR_MANAGED_GEM5_CONFIG": f"{ROOT}/projects/gem5/configs/example/gemsim/host_dispatch.py",
+        "SAGR_MANAGED_REPO_ROOT": ROOT,
+        "TRITON_CACHE_AUTOTUNING": "1",
         "SAGR_ROCR_LIBRARY_DIR": ROCR_LIB,
         "SGLANG_USE_AITER": "1",
         "FLA_CACHE_RESULTS": "1",
         "NCCL_SHM_DISABLE": "1",
         "AITER_CONFIG_GEMM_BF16": f"{STATE_DIR}/aiter-config/bf16_tuned_gemm.csv",
-        "TRITON_CACHE_DIR": f"{STATE_DIR}/triton-cache",
-        "XDG_CACHE_HOME": f"{STATE_DIR}/xdg",
+        "TRITON_CACHE_DIR": f"{ROOT}/artifacts/zcode-cache/triton",
+        "XDG_CACHE_HOME": f"{ROOT}/artifacts/zcode-cache/xdg",
         "DEMO_PROGRESS_FILE": PROGRESS_FILE,
         "DEMO_PROMPT": prompt,
         "DEMO_MAX_TOKENS": str(max_tokens),
         "DEMO_MODEL": model,
         "DEMO_TP": str(tp),
-        "DEMO_CONTEXT": str(256 if "0.8B" in model else 512),
-        "DEMO_MAX_TOTAL_TOKENS": str(64 if "0.8B" in model else 160),
+        "DEMO_FAST": "1" if fast else "0",
+        "DEMO_CONTEXT": "16",
+        "DEMO_MAX_TOTAL_TOKENS": "16",
     }
     return env
 
@@ -240,6 +261,9 @@ def main() -> int:
     parser.add_argument("--model", default=None,
                         help="模型路径；--tp 4（9B 档）必须显式指定，"
                              "tp<=2 默认 Qwen3.5-0.8B")
+    parser.add_argument("--fast", action="store_true",
+                        help="快速模式：跳过真实权重加载（load_format=dummy），"
+                             "只验证引擎跑通并输出 token（结果无意义）")
     args = parser.parse_args()
     tp = args.tp
     if args.model:
@@ -281,7 +305,7 @@ def main() -> int:
     worker_path = f"{STATE_DIR}/worker.py"
     with open(worker_path, "w") as f:
         f.write(WORKER_SOURCE)
-    env = build_worker_env(args.prompt, args.max_tokens, model, tp)
+    env = build_worker_env(args.prompt, args.max_tokens, model, tp, args.fast)
 
     # Tool shim mirroring run_engine_lane: the product rocminfo and the
     # arch shim first on PATH so aiter resolves gfx950 without a real KMD.
@@ -296,8 +320,16 @@ def main() -> int:
     except FileExistsError:
         pass
     env["PATH"] = f"{shim}:{env['PATH']}"
+    # The lane masks NVML in a private mount namespace: this WSL host also
+    # exposes a real NVIDIA card, and upstream platform selection refuses to
+    # activate two platforms (cuda + rocm) at once.  unshare -r -m keeps the
+    # bind mount private to the worker.
     worker = subprocess.Popen(
-        [f"{CONDA_PREFIX}/bin/python", worker_path],
+        ["unshare", "-r", "-m", "--", "bash", "-c",
+         ': > /tmp/amdgpu-sim-demo-empty-nvml.so; '
+         'mount --bind /tmp/amdgpu-sim-demo-empty-nvml.so '
+         '/usr/lib/wsl/lib/libnvidia-ml.so.1 2>/dev/null || true; '
+         f'exec "{CONDA_PREFIX}/bin/python" "{worker_path}"'],
         env=env,
         stdout=open(f"{STATE_DIR}/worker.out", "w"),
         stderr=subprocess.STDOUT,
