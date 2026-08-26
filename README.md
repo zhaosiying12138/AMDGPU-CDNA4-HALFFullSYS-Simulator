@@ -614,3 +614,92 @@ Triton demo 即 `tools/softmax_demo.py`，单次 kernel、秒级完成。）
 aenv stop --all            # 或 aenv stop $SBX（默认 TTL 到期自动回收）
 sudo systemctl stop aenv   # 服务端
 ```
+
+## AgentENV 端到端推理：SGLang TP2 在微虚拟机内产出 golden token（CP-0148）
+
+在上一节 softmax 冒烟的基础上，本节把**完整的推理栈**搬进 AgentENV
+microVM：SGLang → torch → triton → HIP → ROCr（rocr-stage）→ hsakmt 模型
+→ 2× gem5（functional-fast，managed session）→ NCCL Socket（lo）。
+验证标准与宿主 lane 完全一致：0.8B 模型、TP2、冻结 prompt `(248044, 266)`、
+贪心解码 1 个 token，结果必须等于 golden `[27841]`。
+
+```
+[vm-run] generated token ids: [27841]
+[vm-run] expected: [27841]
+[vm-run] PASS
+```
+
+（引擎装载 786 s、峰值内存 ~15 GB、宿主机 ubuntu 26.04、沙箱 ubuntu 24.04、
+完整日志 `artifacts/agentenv-vm-tp2/vmrun.log`。）
+
+### 1. 一键发布（publish_sim_stack.sh --full）
+
+```bash
+aenv start --cold dockerproxy.net/library/ubuntu:24.04 \
+  --cpu 8 --memory 32768 --disk-size-mb 65536 --timeout 86400 -d   # 32 GB：两 rank 装载各峰值 >12 GB
+tools/agentenv/publish_sim_stack.sh --full <sandbox-id>            # 一键上传 ~12 GB 分层
+```
+
+发布采用 **host-mirror 布局**：guest 内完整镜像
+`/home/zhaosiying/zcode-lane/...` 与 `/home/zhaosiying/amdgpu-sim/...`
+（后者是 runtime .so 编译期内置的 managed 默认路径）。所有带绝对路径的
+东西——aiter 的 ROCm 探测、sysroot .so 闭包、conda 解释器 RPATH——在
+microVM 里逐一解析到与宿主相同的路径，`vm_run_sglang.sh` 的环境因此是
+宿主 lane 的逐字节镜像，而不是一次有损的 /opt 改写。
+
+| 流 | 内容 | 要点 |
+|---|---|---|
+| base | gem5.opt、configs 全树、hello fixture、ROCr stage、self-runtime、topology、product | tar 的 `--exclude` 必须**锚定**（`'/pyarrow*'`），否则跨目录误删（pandas 内部模块被 `'numba*'` 剥掉） |
+| python | conda 解释器+headers、site-packages（torch/triton/aiter/…) | aiter 只带 maps 证据里的 3 个 jit .so；torchvision/pandas/pyarrow 是硬依赖 |
+| sysroot | phase-A 闭包（实跑 maps 采集） | symlink 链多级追踪 + `.info/version`、`share/hip`、`bin/hipcc`、**完整 hipblaslt 库** |
+| hostlibs | 宿主 Ubuntu 26.04 glibc 2.43 加载器组 + libpython3.14 + stdlib | gem5.opt 在 26.04 上构建，24.04 沙箱跑不了原生二进制 |
+| caches | warm Triton cache + tvm-ffi | 冷缓存 = aiter/triton JIT 数十分钟研磨 |
+
+### 2. guest 内一键运行
+
+```bash
+tools/agentenv/vm_run_sglang.sh    # 沙箱内：组装环境 → SGLang TP2 → 1 token → PASS/FAIL
+```
+
+### 3. bring-up 踩坑实录（每条都值 30 分钟以上）
+
+1. **gem5 的 glibc 断层**：gem5.opt 需要 GLIBC_2.43 + libpython3.14，
+   24.04 只有 2.39。解法：ship 宿主 `ld-linux/libc/libm/libstdc++/
+   libpython3.14 + python3.14 stdlib` 到 `/home/zhaosiying/hostlibs/`，
+   把 `gem5.opt` 换成 `exec host-ld.so --library-path hostlibs/lib
+   gem5.opt.raw` 启动脚本（fastwrap 与 baked-default 路径都要装）。
+   症状是 `hsa_init -> 4104`，真实错误要用 `sagr_probe` 直连
+   `sagr_provider_open_managed` 才看得到（"managed gem5 did not publish
+   its private endpoint"）。
+2. **RCcl 的 WSL 分支**：宿主（WSL2）上 NCCL 打印 "Not using rocm_smi_lib
+   due to WSL2 environment detected" 并**跳过** rsmi 探测；Firecracker
+   guest 没有 `/dev/dxg`，走了 rsmi/ARSMI 硬件路径 → `internal error`。
+   `touch /dev/dxg` 即可让 guest 走同一条宿主分支。
+3. **内存口径**：topology 声明 MI350X 级 288 GB VRAM，模型按触碰提交
+   宿主页；不显式 `mem_fraction_static` 时每 rank 按 0.906×幻影显存推
+   池子，guest OOM 杀 scheduler。`mem_fraction_static=0.03` + 32 GB 沙箱
+   通过（装载峰值两 rank 合计 ~15 GB）。宿主侧同理：残留的旧 demo 进程
+   曾把宿主顶到 swap 满，OOM 杀掉了 aenv server——所有运行中的沙箱
+   蒸发且无 snapshot 可恢复。
+4. **spawn 守卫**：tp>1 的 worker 必须是真实文件 +
+   `if __name__ == "__main__"`；stdin heredoc 记录 `<stdin>`，
+   FileNotFoundError；无守卫则嵌套 spawn。
+5. **GNU tar exclude 默认不锚定**：`--exclude='numba*'` 会把
+   `pandas/core/util/numba_.py` 一并剥掉；所有顶层包名必须写成
+   `'/pkg*'`。
+6. **证据闭包而非猜测**：宿主实跑一次 TP2，worker 里快照全进程树
+   `/proc/*/maps`（`gen_phaseA_libs.sh`）→ 精确库清单。注意 maps 记录
+   realpath、symlink 链要多级追踪、文件读取（版本文件等）不进 maps。
+
+### 4. 复现命令速查
+
+```bash
+# 宿主（golden 对照）
+python tools/demo_gen.py "任意 prompt" --tp 2 --max-tokens 1   # → [27841]
+
+# AgentENV 沙箱（一次性建 + 发布）
+aenv start --cold dockerproxy.net/library/ubuntu:24.04 --cpu 8 \
+  --memory 32768 --disk-size-mb 65536 --timeout 86400 -d
+tools/agentenv/publish_sim_stack.sh --full <id>
+tools/agentenv/vm_run_sglang.sh                                  # 沙箱内 → PASS
+```
