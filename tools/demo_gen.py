@@ -199,6 +199,17 @@ def dispatch_summary(run_root: str, tp: int):
     return out[:tp]
 
 
+def mem_available_gb() -> float:
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / 1_048_576
+    except OSError:
+        pass
+    return -1.0
+
+
 def build_worker_env(prompt: str, max_tokens: int, model: str, tp: int, fast: bool = False) -> dict:
     product = (
         f"{ROOT}/env/rocm/product-v1-4d9d40454031c7345f25da81b6781995b09a3"
@@ -297,6 +308,25 @@ def main() -> int:
     else:
         model = DEFAULT_MODEL_8B
 
+    # 并发互斥：两个 TP4 demo 同时跑 = 8 个 gem5 挤爆 58GB 主机（2026-08-26
+    # 03:23 全局 OOM 就是这么来的），且会交叉污染 STATE_DIR。锁文件放在
+    # STATE_DIR 外面，rmtree 不影响已持有的 fd。
+    lock_path = f"{STATE_DIR}.lock"
+    lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        try:
+            with open(lock_path) as f:
+                holder = f.read().strip()
+        except OSError:
+            holder = "<读取失败>"
+        print(c(f"  ✗ 已有一个 demo 实例在跑（{holder}）——58GB 主机装不下第二个 TP4，"
+                f"先确认那个实例的状态再启动", "red"))
+        return 2
+    os.ftruncate(lock_fd, 0)
+    os.write(lock_fd, f"pid={os.getpid()} started={time.strftime('%F %T')}".encode())
+
     shutil.rmtree(STATE_DIR, ignore_errors=True)
     run_root = RUN_ROOT.format(TP=tp)
     shutil.rmtree(run_root, ignore_errors=True)
@@ -317,6 +347,13 @@ def main() -> int:
     print(f"  {c('Prompt', 'dim')}: {args.prompt[:44]}…")
     print(f"  {c('并行', 'dim')}: TP{tp}（rank 0-{tp - 1} 各持一个模拟 gfx950，NCCL Socket）")
     print(f"  {c('目标', 'dim')}: {args.max_tokens} tokens（贪心解码）")
+    avail = mem_available_gb()
+    if avail >= 0:
+        line = f"  {c('内存', 'dim')}: 可用 {avail:.0f}GB"
+        if avail < 30:
+            line += c(f"  ⚠ 低于 30GB——TP4 全链需要 ~30GB，"
+                      "先清掉其他 gem5/VM/引擎 run（内存不足时内核会挑牺牲品杀）", "red")
+        print(line)
     print()
     print(
         c(f"  ▸ 拉起工作进程：{tp}-GPU CU 一致拓扑 → DTIF fast-copy 权重注入…", "dim"),
@@ -430,13 +467,43 @@ def main() -> int:
 
     print("\033[E", end="", flush=True)
     if worker.returncode != 0:
+        rc = worker.returncode
+        sig = -rc if rc < 0 else None
+        # 自动归因：外部信号还是脚本缺陷，扫内核日志看 OOM 记录（受害者
+        # 不一定是本进程——2026-08-26 03:23 的 OOM 杀的是 firecracker，
+        # demo 是 6 分钟后被外部 SIGTERM 误杀的，两件事只有间接关系）
+        oom_lines = []
+        try:
+            since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t_start))
+            out = subprocess.run(
+                ["journalctl", "-k", "--since", since, "--no-pager"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout
+            oom_lines = [
+                l.split("kernel: ")[-1]
+                for l in out.splitlines()
+                if "Out of memory" in l or "oom-kill" in l
+            ][:4]
+        except Exception:
+            pass
         print(
             c(
-                f"  ✗ 工作进程异常退出（code {worker.returncode}）；"
+                f"  ✗ 工作进程异常退出（code {rc}）；"
                 f"日志: {STATE_DIR}/worker.out",
                 "red",
             )
         )
+        if sig == 15:
+            print(c("  ⚠ 死因 = 外部 SIGTERM：不是脚本缺陷，也不是它自己 OOM。", "yellow"))
+            print(c("    scheduler 进程名 sglang::* 会被 pkill -f sglang / 清理脚本命中"
+                    "（pkill 默认发 TERM）；查一下同期其他会话在做什么。", "yellow"))
+        elif sig == 9 and not oom_lines:
+            print(c("  ⚠ 死因 = SIGKILL：要么 SGLang 崩溃后自杀（看下方 traceback），"
+                    "要么被 pkill -9 / 内核 OOM 击中。", "yellow"))
+        if oom_lines:
+            print(c("  ⚠ 运行窗口内有内核 OOM 记录（注意看受害者是谁）：", "yellow"))
+            for l in oom_lines:
+                print(c(f"    {l[:110]}", "dim"))
         # 直接把日志末尾打到终端，省得再开文件找原因
         try:
             with open(f"{STATE_DIR}/worker.out", errors="replace") as f:
