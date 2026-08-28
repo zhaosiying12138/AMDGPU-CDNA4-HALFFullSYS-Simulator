@@ -329,9 +329,9 @@ if [[ $engine == sglang ]]; then
     export SAGR_QWEN35_SGLANG_LAYER_GATE_GOLDEN="${ROOT}/artifacts/qwen35-nvidia-golden/20260812-prefill2-max24-v1"
     export SAGR_QWEN35_OPERATOR_GOLDEN="${ROOT}/artifacts/qwen35-nvidia-operator-golden/20260819-prefill2-layer0-v3"
     export SAGR_TRITON_LAUNCH_LOG="$(dirname "$log")/triton-launches.jsonl"
-    export PYTHONPATH="${layer_gate_root}:${ROOT}/tools/triton_launch_probe:${ROOT}/projects/sglang-0.5.17:${ROOT}/env/sglang-overlay-cp312"
+    export PYTHONPATH="${SAGR_LANE_PYTHONPATH_PREFIX:-}${layer_gate_root}:${ROOT}/tools/triton_launch_probe:${ROOT}/projects/sglang-0.5.17:${ROOT}/env/sglang-overlay-cp312"
   else
-    export PYTHONPATH="${ROOT}/projects/sglang-0.5.17:${ROOT}/env/sglang-overlay-cp312"
+    export PYTHONPATH="${SAGR_LANE_PYTHONPATH_PREFIX:-}${ROOT}/projects/sglang-0.5.17:${ROOT}/env/sglang-overlay-cp312"
   fi
   # aiter's tuned-GEMM table has no valid tiling for the decode m=1 GEMM
   # shapes (n=8192 k=1024 rejected by selection_filter), which kills the
