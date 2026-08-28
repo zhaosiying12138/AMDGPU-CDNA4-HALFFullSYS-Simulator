@@ -24,8 +24,10 @@ ROOT=/home/zhaosiying/zcode-lane
 # must stay private.  The conda activate script below points TRITON_CACHE_DIR
 # at a shared conda-state dir; two lanes writing the same cache key
 # concurrently can corrupt compilation, so repoint it under this worktree
-# before anything imports triton.
-ZCODE_CACHE="${ROOT}/artifacts/zcode-cache"
+# before anything imports triton.  SAGR_LANE_CACHE_ROOT exists for the
+# perf-ablation harness: pointing it at a fresh directory gives a cold Triton
+# cache without touching the persistent warm one.
+ZCODE_CACHE="${SAGR_LANE_CACHE_ROOT:-${ROOT}/artifacts/zcode-cache}"
 mkdir -p "${ZCODE_CACHE}/triton" "${ZCODE_CACHE}/xdg"
 cd "$ROOT"
 
@@ -126,8 +128,11 @@ if [[ -z ${ZCODE_SHARE_CACHES:-} ]]; then
   export TRITON_CACHE_DIR="${ZCODE_CACHE}/triton"
   export XDG_CACHE_HOME="${ZCODE_CACHE}/xdg"
 fi
+# SAGR_LANE_FASTCOPY_MODE is the perf-ablation override for the DTIF
+# fast-copy gate: "fast" (default, the accepted lanes) or "legacy" (every
+# H2D/D2H copy becomes a simulated blit-kernel dispatch).
 # shellcheck disable=SC1091
-source "${ROOT}/scripts/fastcopy_mode.sh" fast
+source "${ROOT}/scripts/fastcopy_mode.sh" "${SAGR_LANE_FASTCOPY_MODE:-fast}"
 
 # The activate script of this prefix exports the product that predates every
 # fast-copy commit. Rewriting the paths is what makes the run test the code
@@ -272,7 +277,7 @@ if [[ -z "${gpu_archs_value//[[:space:]]/}" ]]; then
   export GPU_ARCHS
 fi
 
-export SAGR_MANAGED_GEM5="$gem5"
+export SAGR_MANAGED_GEM5="${SAGR_MANAGED_GEM5:-$gem5}"
 # The managed config path is normally this worktree's script; an already-set
 # value lets a diagnostic lane point at another worktree's config (e.g. the
 # hybrid-CTA branch whose script carries extra options the main tree lacks).
@@ -299,12 +304,15 @@ if [[ -n $compute_units ]]; then
   } >"$gem5_wrapper"
   chmod 700 "$gem5_wrapper"
   gem5="$gem5_wrapper"
-  export SAGR_MANAGED_GEM5="$gem5"
+  export SAGR_MANAGED_GEM5="${SAGR_MANAGED_GEM5:-$gem5}"
 fi
 
 export TRITON_DEFAULT_BACKEND=gemsim_hip
 export TRITON_BACKENDS_IN_TREE=0
-export GEMSIM_HIP_AUTOTUNE_MODE=correctness
+# SAGR_LANE_AUTOTUNE_MODE is the perf-ablation override: "correctness"
+# (default, one dispatch per autotune candidate) or "device" (full do_bench
+# scan on the simulator -- the unoptimized path).
+export GEMSIM_HIP_AUTOTUNE_MODE="${SAGR_LANE_AUTOTUNE_MODE:-correctness}"
 export TRITON_CACHE_AUTOTUNING=1
 # ROCr refuses to run multi-agent collectives without this and aborts with
 #   [FATAL ERROR]: HSA_NO_SCRATCH_RECLAIM=1 must be set
