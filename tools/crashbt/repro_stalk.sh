@@ -34,7 +34,7 @@ for i in $(seq 1 150); do
 done
 echo "child $CHILD" >> "$OUT/stalk.log"
 if [ -n "$CHILD" ]; then
-  if false; then timeout 420 gdb -p "$CHILD" -batch \
+  if true; then timeout 420 gdb -p "$CHILD" -batch \
       -ex "set pagination off" \
       -ex "handle SIGSEGV stop print nopass" \
       -ex "handle SIGABRT stop print nopass" \
