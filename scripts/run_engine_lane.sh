@@ -27,7 +27,18 @@ ROOT=/home/zhaosiying/zcode-lane
 # before anything imports triton.  SAGR_LANE_CACHE_ROOT exists for the
 # perf-ablation harness: pointing it at a fresh directory gives a cold Triton
 # cache without touching the persistent warm one.
-ZCODE_CACHE="${SAGR_LANE_CACHE_ROOT:-${ROOT}/artifacts/zcode-cache}"
+# A Triton HSACO embeds the absolute compiler support-library paths.  Reusing
+# a cache across different worktrees or source environments can therefore
+# hand a valid-looking gfx950 image to the wrong runtime.  Keep managed runs
+# isolated by default; the explicit override remains useful for a deliberate
+# warm-cache performance comparison.
+if [[ -n ${SAGR_LANE_CACHE_ROOT:-} ]]; then
+  ZCODE_CACHE="$SAGR_LANE_CACHE_ROOT"
+elif [[ -n ${SAGR_MANAGED_RUN_ROOT:-} ]]; then
+  ZCODE_CACHE="${SAGR_MANAGED_RUN_ROOT}/cache"
+else
+  ZCODE_CACHE="${ROOT}/artifacts/zcode-cache"
+fi
 mkdir -p "${ZCODE_CACHE}/triton" "${ZCODE_CACHE}/xdg"
 cd "$ROOT"
 
