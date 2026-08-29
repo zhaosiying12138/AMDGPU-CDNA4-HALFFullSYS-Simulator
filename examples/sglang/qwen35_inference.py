@@ -16,9 +16,9 @@ if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
 from qwen35_token_gate import (  # noqa: E402
-    EXPECTED_CONTINUATION_TOKEN_IDS,
     PROMPT_TOKEN_IDS,
     compare_token_ids,
+    expected_continuation_token_ids,
 )
 
 
@@ -54,10 +54,11 @@ def parse_args() -> argparse.Namespace:
         parser.error("--watchdog-timeout must be positive")
     if args.dist_timeout <= 0:
         parser.error("--dist-timeout must be positive")
-    if not 1 <= args.max_new_tokens <= len(EXPECTED_CONTINUATION_TOKEN_IDS):
+    expected_tokens = expected_continuation_token_ids(args.model_path)
+    if not 1 <= args.max_new_tokens <= len(expected_tokens):
         parser.error(
             "--max-new-tokens must fit the frozen golden continuation "
-            f"(1..{len(EXPECTED_CONTINUATION_TOKEN_IDS)})"
+            f"(1..{len(expected_tokens)})"
         )
     return args
 
@@ -105,7 +106,11 @@ def main() -> int:
             assert_completed()
         print(json.dumps(output, ensure_ascii=True, default=str))
         actual_ids = output.get("output_ids") if isinstance(output, dict) else None
-        token_gate = compare_token_ids(actual_ids, args.max_new_tokens)
+        token_gate = compare_token_ids(
+            actual_ids,
+            args.max_new_tokens,
+            expected_token_ids=expected_continuation_token_ids(args.model_path),
+        )
         token_gate["checkpoint_weights"] = args.load_format != "dummy"
         if not token_gate["checkpoint_weights"]:
             token_gate["correct"] = False
