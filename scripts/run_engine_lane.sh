@@ -318,6 +318,17 @@ export TRITON_CACHE_AUTOTUNING=1
 #   [FATAL ERROR]: HSA_NO_SCRATCH_RECLAIM=1 must be set
 # It is an upstream-documented ROCm setting, not a project workaround.
 export HSA_NO_SCRATCH_RECLAIM=1
+# All ranks are local simulator processes.  Pin RCCL bootstrap to loopback so
+# dynamic AgentENV veth creation/removal cannot race automatic interface
+# selection and leave a lazy collective with EADDRNOTAVAIL.
+export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-lo}"
+export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"
+export NCCL_DEBUG_SUBSYS="${NCCL_DEBUG_SUBSYS:-INIT,NET}"
+# PyTorch's monitor declares failure when its watchdog thread cannot enter a
+# HIP event query for 480 seconds.  One simulator kernel can legitimately hold
+# that API path for hours; the lane-level completed-wavefront watchdog remains
+# the liveness authority and captures a stalled simulator before termination.
+export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC="${SAGR_TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-86400}"
 unset SAGR_OPENCL_ENDPOINT SAGR_OPENCL_SOCKET SAGR_OPENCL_GEM5_EXTERNAL
 unset CUDA_VISIBLE_DEVICES
 

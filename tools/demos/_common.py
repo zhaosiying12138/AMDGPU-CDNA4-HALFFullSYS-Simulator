@@ -129,6 +129,10 @@ def build_env(tag: str, tp: int, prompt: str, max_tokens: int,
         "SAGR_MANAGED_RUN_ROOT": run_root,
         "SAGR_ROCR_LIBRARY_DIR": ROCR_LIB,
         "NCCL_SHM_DISABLE": "1",
+        "NCCL_SOCKET_IFNAME": "lo",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "INIT,NET",
+        "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "86400",
         "AITER_CONFIG_GEMM_BF16": f"{state_dir}/aiter-config/bf16_tuned_gemm.csv",
         "TRITON_CACHE_DIR": f"{state_dir}/triton-cache",
         "XDG_CACHE_HOME": f"{state_dir}/xdg",
@@ -141,7 +145,7 @@ def build_env(tag: str, tp: int, prompt: str, max_tokens: int,
     }
     if engine == "sglang":
         env["PYTHONPATH"] = (
-            f"{ROOT}/projects/sglang-0.5.17:{ROOT}/env/sglang-overlay-cp312"
+            f"{ROOT}/tools:{ROOT}/projects/sglang-0.5.17:{ROOT}/env/sglang-overlay-cp312"
         )
         env["SGLANG_USE_AITER"] = "1"
         env["FLA_CACHE_RESULTS"] = "1"

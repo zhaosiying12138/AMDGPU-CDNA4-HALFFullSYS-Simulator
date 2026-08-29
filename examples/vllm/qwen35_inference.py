@@ -135,6 +135,7 @@ def main() -> int:
             max_tokens=args.max_new_tokens,
             temperature=0.0,
             seed=args.seed,
+            ignore_eos=True,
         ),
     )
     actual_ids = list(outputs[0].outputs[0].token_ids)

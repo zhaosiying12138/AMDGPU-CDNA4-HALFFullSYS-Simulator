@@ -34,6 +34,7 @@ prompt_ids = tokenizer(prompt)["input_ids"]
 emit({"event": "log", "text": f"prompt 已编码：{len(prompt_ids)} tokens"})
 
 from sglang.srt.entrypoints.engine import Engine
+from qwen35_token_gate import expected_continuation_token_ids
 emit({"event": "log", "text": "构造 Engine(tp=4)……四个 rank 各注入四分之一权重（9B，19.3 GB）"})
 engine = Engine(
     model_path=model, tp_size=4, dtype="bfloat16",
@@ -51,7 +52,7 @@ for i in range(max_tokens):
     t = time.time()
     out = engine.generate(
         input_ids=prompt_ids + output_ids,
-        sampling_params={"max_new_tokens": 1, "temperature": 0.0},
+        sampling_params={"max_new_tokens": 1, "temperature": 0.0, "ignore_eos": True},
     )
     output_ids.append(out["output_ids"][-1])
     token_times.append(time.time() - t)
@@ -60,7 +61,10 @@ for i in range(max_tokens):
           "text": tokenizer.decode(output_ids, skip_special_tokens=True)})
 
 rest = token_times[1:]
+expected_ids = list(expected_continuation_token_ids(model)[:max_tokens])
 emit({"event": "done", "ids": output_ids,
+      "expected_ids": expected_ids,
+      "token_gate": output_ids == expected_ids,
       "ttft_s": round(token_times[0] if token_times else 0, 1),
       "tpot_s": round(sum(rest) / len(rest), 2) if rest else 0,
       "load_s": round(time.time() - t0 - sum(token_times), 1),
@@ -98,7 +102,7 @@ def main() -> int:
     if final is None:
         print(c("  ✗ 未收到完成记录", "red")); return 1
     final_report(final, text, "TP4", TP, "Qwen3.5-9B", state)
-    return 0
+    return 0 if final.get("token_gate") is True and len(final.get("ids", [])) == args.max_tokens else 1
 
 if __name__ == "__main__":
     raise SystemExit(main())

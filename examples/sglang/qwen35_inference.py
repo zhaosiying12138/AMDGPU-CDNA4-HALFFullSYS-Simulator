@@ -98,7 +98,11 @@ def main() -> int:
         )
         output = engine.generate(
             input_ids=list(PROMPT_TOKEN_IDS),
-            sampling_params={"max_new_tokens": args.max_new_tokens, "temperature": 0.0},
+            sampling_params={
+                "max_new_tokens": args.max_new_tokens,
+                "temperature": 0.0,
+                "ignore_eos": True,
+            },
         )
         if os.environ.get("SAGR_QWEN35_SGLANG_LAYER_GATE_OUTPUT"):
             from qwen35_sglang_layer_gate import assert_completed

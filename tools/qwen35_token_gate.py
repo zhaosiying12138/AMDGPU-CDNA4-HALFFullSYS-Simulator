@@ -10,12 +10,12 @@ from typing import Any
 
 SCHEMA = "amdgpu-sim.qwen35-token-golden-gate.v1"
 PROMPT_TOKEN_IDS = (248044, 266)
-EXPECTED_CONTINUATION_TOKEN_IDS = (27841, 27841)
+EXPECTED_CONTINUATION_TOKEN_IDS = (27841,) * 10
 # The original frozen continuation belongs to the 0.8B checkpoint.  The 9B
-# checkpoint has a different greedy first token for the same prompt; this was
+# checkpoint has a different greedy trajectory for the same prompt; this was
 # verified with a CPU reference forward over the same safetensors weights.
 MODEL_CONTINUATION_TOKEN_IDS = {
-    "Qwen3.5-9B": (248044,),
+    "Qwen3.5-9B": (248044, 266, 506, 506, 506, 506, 506, 506, 506, 506),
 }
 
 
