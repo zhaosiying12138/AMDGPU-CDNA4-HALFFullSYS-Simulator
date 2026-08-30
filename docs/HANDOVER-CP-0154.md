@@ -102,3 +102,11 @@
 4. 长任务用 `setsid` + 工作区脚本；Bash tool 的 `&` 在工具退出时会被杀。
 5. gem5 二进制 1.1GB 带 debug info——gdb attach 加载符号可能超 90s 超时；用 `timeout 200+` 或 raw-address 模式。
 6. 每次改 gem5 源码后 `scons -j12`（~8 分钟全量链接）；改 Python 配置不需要重编。
+
+## 7. 2026-08-31 完成证据
+
+- 真实 text prompt 的 0.8B TP2 一 token gate：`artifacts/debug-text-cu16b/20260831T012519-08tp2-1tok/report.json`，`actual=[271]`、`expected=[271]`、`correct=true`。
+- 真实 text prompt 的 9B TP4 一 token gate：`artifacts/debug-text-9b-mmap/20260831T031432-9tp4-1tok/report.json`，4 个 rank 均完成，`actual=[271]`、`expected=[271]`、`correct=true`，无 simulator fatal/watchdog/残留进程。
+- 竞争/liveness 轻量回归：`artifacts/cp0154-hybrid-stress/run{1,2,3}/result/result.json`，固定 2048-WG，三次 `oracle_correct=true` 且 output SHA256 相同。
+- 性能根因修复：`13be941160`（`HostKmtNativeMemory` 对 pinned dispatch 缓存 allocation lookup，并对认证 shared backing 使用 mmap，保留 pread/pwrite fallback）。权重加载由约 1104s 降至约 173s。
+- lane 分支最新提交为 `dcda9267`，已推送到 `public`；gem5 分支 `zcode/gem5-hybrid-cta2` 已推送到共享 `origin`。旧 bundle 因 partial-clone 缺失基线对象无法重打包，不能作为最新分支来源。
