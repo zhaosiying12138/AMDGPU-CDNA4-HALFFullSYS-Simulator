@@ -35,6 +35,11 @@ from qwen35_token_gate import (  # noqa: E402
     compare_token_ids,
     expected_continuation_token_ids,
 )
+from qwen35_text_golden import (  # noqa: E402
+    MODEL_CONTINUATIONS,
+    PROMPT as TEXT_GOLDEN_PROMPT,
+    compare_text_token_ids,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -45,6 +50,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tp-size", type=int, default=1)
     parser.add_argument("--context-length", type=int, default=16)
     parser.add_argument("--max-new-tokens", type=int, default=1)
+    parser.add_argument(
+        "--prompt",
+        default=None,
+        help=(
+            "Text prompt for the strict text golden. Only the pinned default "
+            "prompt has an independent reference; unknown prompts fail closed."
+        ),
+    )
     parser.add_argument("--max-num-seqs", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
@@ -72,7 +85,11 @@ def parse_args() -> argparse.Namespace:
         "accounted for ~70%% of a run's simulated execution.",
     )
     args = parser.parse_args()
-    expected_tokens = expected_continuation_token_ids(args.model_path)
+    expected_tokens = (
+        expected_continuation_token_ids(args.model_path)
+        if args.prompt is None
+        else MODEL_CONTINUATIONS.get(args.model_path.name, ())
+    )
     if not 1 <= args.max_new_tokens <= len(expected_tokens):
         parser.error(
             "--max-new-tokens must fit the frozen golden continuation "
@@ -88,6 +105,24 @@ def main() -> int:
     from vllm import LLM, SamplingParams
     from vllm.inputs import TokensPrompt
 
+    tokenizer = None
+    if args.prompt is None:
+        prompt_token_ids = list(PROMPT_TOKEN_IDS)
+    else:
+        from transformers import AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.model_path, local_files_only=True, trust_remote_code=True
+        )
+        prompt_token_ids = tokenizer(
+            args.prompt, add_special_tokens=False
+        )["input_ids"]
+        if args.prompt != TEXT_GOLDEN_PROMPT:
+            raise ValueError(
+                "--prompt has no frozen independent golden; refusing comparison"
+            )
+    required_tokens = len(prompt_token_ids) + args.max_new_tokens
+
     model = str(args.model_path)
     llm = LLM(
         model=model,
@@ -97,7 +132,7 @@ def main() -> int:
         skip_tokenizer_init=True,
         tensor_parallel_size=args.tp_size,
         dtype="bfloat16",
-        max_model_len=args.context_length,
+        max_model_len=max(args.context_length, required_tokens),
         max_num_seqs=args.max_num_seqs,
         seed=args.seed,
         max_num_batched_tokens=args.context_length,
@@ -130,7 +165,7 @@ def main() -> int:
         print("loaded_library=" + path, flush=True)
 
     outputs = llm.generate(
-        TokensPrompt(prompt_token_ids=list(PROMPT_TOKEN_IDS)),
+        TokensPrompt(prompt_token_ids=prompt_token_ids),
         SamplingParams(
             max_tokens=args.max_new_tokens,
             temperature=0.0,
@@ -140,11 +175,30 @@ def main() -> int:
     )
     actual_ids = list(outputs[0].outputs[0].token_ids)
     print("generated_token_ids=" + repr(actual_ids), flush=True)
-    token_gate = compare_token_ids(
-        actual_ids,
-        args.max_new_tokens,
-        expected_token_ids=expected_continuation_token_ids(args.model_path),
-    )
+    if args.prompt is None:
+        token_gate = compare_token_ids(
+            actual_ids,
+            args.max_new_tokens,
+            expected_token_ids=expected_continuation_token_ids(args.model_path),
+        )
+    else:
+        token_gate = compare_text_token_ids(
+            actual_ids,
+            args.max_new_tokens,
+            model_path=args.model_path,
+            prompt=args.prompt,
+            prompt_token_ids=prompt_token_ids,
+        )
+        token_gate["generated_text_raw"] = tokenizer.decode(
+            actual_ids,
+            skip_special_tokens=False,
+            clean_up_tokenization_spaces=False,
+        )
+        token_gate["generated_text"] = tokenizer.decode(
+            actual_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
     token_gate["checkpoint_weights"] = args.load_format != "dummy"
     if not token_gate["checkpoint_weights"]:
         token_gate["correct"] = False

@@ -34,7 +34,10 @@ prompt_ids = tokenizer(prompt)["input_ids"]
 emit({"event": "log", "text": f"prompt 已编码：{len(prompt_ids)} tokens"})
 
 from sglang.srt.entrypoints.engine import Engine
-from qwen35_token_gate import expected_continuation_token_ids
+from qwen35_text_golden import (
+    PROMPT as TEXT_GOLDEN_PROMPT,
+    compare_text_token_ids,
+)
 emit({"event": "log", "text": "构造 Engine(tp=2)……两个 rank 各注入半份权重"})
 engine = Engine(
     model_path=model, tp_size=2, dtype="bfloat16",
@@ -61,10 +64,22 @@ for i in range(max_tokens):
           "text": tokenizer.decode(output_ids, skip_special_tokens=True)})
 
 rest = token_times[1:]
-expected_ids = list(expected_continuation_token_ids(model)[:max_tokens])
+if prompt != TEXT_GOLDEN_PROMPT:
+    raise ValueError(
+        "demo token gate has no independent golden for this prompt; "
+        "refusing comparison"
+    )
+token_gate = compare_text_token_ids(
+    output_ids,
+    max_tokens,
+    model_path=model,
+    prompt=prompt,
+    prompt_token_ids=prompt_ids,
+)
 emit({"event": "done", "ids": output_ids,
-      "expected_ids": expected_ids,
-      "token_gate": output_ids == expected_ids,
+      "expected_ids": token_gate["expected_token_ids"],
+      "token_gate": token_gate["correct"],
+      "text_golden": token_gate,
       "ttft_s": round(token_times[0] if token_times else 0, 1),
       "tpot_s": round(sum(rest) / len(rest), 2) if rest else 0,
       "load_s": round(time.time() - t0 - sum(token_times), 1),

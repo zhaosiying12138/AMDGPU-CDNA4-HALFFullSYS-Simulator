@@ -291,5 +291,6 @@ def final_report(final: dict, last_text: str, engine: str, tp: int,
   {c('引擎加载', 'dim')}                 {final.get('load_s')}s（{tp} rank 权重注入）
   {c('生成总时长', 'dim')}               {total}s（{len(ids)} tokens）
   {c('token ids', 'dim')}               {ids}
+  {c('text golden', 'dim')}             {('PASS' if final.get('token_gate') is True else 'FAIL')}
   {c('日志', 'dim')}                   {state_dir}/worker.out
 """)

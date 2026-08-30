@@ -57,6 +57,7 @@ TIMEOUT_ENV = "QWEN35_NCCL_TP4_TIMEOUT_SECONDS"
 TERM_GRACE_ENV = "QWEN35_NCCL_TP4_TERM_GRACE_SECONDS"
 GEMM_PRESSURE_ENV = "QWEN35_NCCL_TP4_GEMM_PRESSURE_GIB"
 ALL_GATHER_ENV = "QWEN35_NCCL_TP4_ALL_GATHER"
+ALL_GATHER_LM_HEAD_ENV = "QWEN35_NCCL_TP4_ALL_GATHER_LM_HEAD"
 WORKER_RANK_ENV = "_QWEN35_NCCL_TP4_WORKER_RANK"
 RUN_ID_ENV = "_QWEN35_NCCL_TP4_RUN_ID"
 MASTER_ADDR_ENV = "_QWEN35_NCCL_TP4_MASTER_ADDR"
@@ -469,14 +470,19 @@ def run_worker(rank: int) -> int:
         # Optional TP4 all-gather probe. It is deliberately after the
         # all-reduce sequence so the default capsule remains unchanged.
         if os.environ.get(ALL_GATHER_ENV) == "1":
+            gather_shape = (
+                (1, 248320 // WORLD_SIZE)
+                if os.environ.get(ALL_GATHER_LM_HEAD_ENV) == "1"
+                else (OBSERVED_PREFILL_TOKENS, HIDDEN_SIZE)
+            )
             source = torch.arange(
-                OBSERVED_PREFILL_TOKENS * HIDDEN_SIZE,
+                math.prod(gather_shape),
                 dtype=torch.int32,
                 device=f"cuda:{rank}",
-            ).reshape(OBSERVED_PREFILL_TOKENS, HIDDEN_SIZE)
+            ).reshape(gather_shape)
             source = (source + rank * 100000).to(torch.bfloat16)
             gathered = torch.empty(
-                (WORLD_SIZE * OBSERVED_PREFILL_TOKENS, HIDDEN_SIZE),
+                (WORLD_SIZE * gather_shape[0], gather_shape[1]),
                 dtype=torch.bfloat16,
                 device=f"cuda:{rank}",
             )
@@ -491,9 +497,9 @@ def run_worker(rank: int) -> int:
                 [
                     (
                         torch.arange(
-                            OBSERVED_PREFILL_TOKENS * HIDDEN_SIZE,
+                            math.prod(gather_shape),
                             dtype=torch.int32,
-                        ).reshape(OBSERVED_PREFILL_TOKENS, HIDDEN_SIZE)
+                        ).reshape(gather_shape)
                         + peer * 100000
                     ).to(torch.bfloat16)
                     for peer in range(WORLD_SIZE)
@@ -504,6 +510,9 @@ def run_worker(rank: int) -> int:
             gather_equal = bool(torch.equal(observed_gathered, expected_gathered))
             report["all_gather"] = {
                 "shape": list(source.shape),
+                "mode": "lm_head_vocab_shard"
+                if len(gather_shape) == 2 and gather_shape[1] == 248320 // WORLD_SIZE
+                else "embedding_hidden",
                 "world_size": WORLD_SIZE,
                 "observed_sha256": _tensor_sha256(observed_gathered),
                 "expected_sha256": _tensor_sha256(expected_gathered),

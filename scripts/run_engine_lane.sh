@@ -48,6 +48,7 @@ model=""
 dummy_weights=0
 capsule=""
 max_new_tokens=1
+prompt=""
 product_hip=0
 debug_layer_gate=0
 # Number of compute units to expose in the gem5 host bridge.  The managed
@@ -69,6 +70,7 @@ while (($#)); do
     --model) model=${2:?}; shift 2 ;;
     --dummy-weights) dummy_weights=1; shift ;;
     --max-new-tokens) max_new_tokens=${2:?}; shift 2 ;;
+    --prompt) prompt=${2:?}; shift 2 ;;
     --product-hip) product_hip=1; shift ;;
     --debug-layer-gate) debug_layer_gate=1; shift ;;
     --gem5) gem5=${2:?}; shift 2 ;;
@@ -454,6 +456,7 @@ fi
   echo "gem5_base_sha256=$(sha256sum "${gem5_base:-${SAGR_MANAGED_GEM5}}" | cut -d' ' -f1)"
   echo "compute_units=${compute_units:-default}"
   echo "max_new_tokens=${max_new_tokens}"
+  echo "prompt=${prompt:-<synthetic-token-fixture>}"
   echo "hip_mode=${hip_mode}"
   echo "debug_layer_gate=${debug_layer_gate}"
   if (( debug_layer_gate )); then
@@ -521,6 +524,7 @@ elif [[ $engine == sglang ]]; then
     --max-new-tokens "$max_new_tokens" --seed 0 --watchdog-timeout 86400
     --dist-timeout 86400 --model-path "$model"
   )
+  [[ -z $prompt ]] || sglang_args+=(--prompt "$prompt")
   (( dummy_weights )) && sglang_args+=(--load-format dummy)
   unshare -r -m bash -c '
     mount --bind /tmp/empty-nvml.so /usr/lib/wsl/lib/libnvidia-ml.so.1
@@ -540,6 +544,7 @@ else
     # 16-token context with one sequence needs almost nothing.
     --gpu-memory-utilization "${SAGR_VLLM_GPU_MEM_UTIL:-0.30}"
   )
+  [[ -z $prompt ]] || vllm_args+=(--prompt "$prompt")
   # The driver's RPC into workers (sample_tokens and friends) times out
   # after VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS (default 300s).  Under the
   # simulator the sampler plus its TP2 collectives can exceed that wall

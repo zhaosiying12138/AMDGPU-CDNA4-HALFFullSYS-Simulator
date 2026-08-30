@@ -11,6 +11,7 @@ GEM5_CONFIG=${SAGR_TEST_GEM5_CONFIG:-${GEM5_ROOT}/configs/example/gemsim/host_di
 OUTPUT_BASE=${SAGR_TEST_OUTPUT_BASE:-${ROOT}/artifacts/qwen35-selftest}
 RUNROOT_BASE=${SAGR_TEST_RUNROOT_BASE:-/home/zhaosiying}
 TOKENS=10
+PROMPT=${SAGR_TEST_PROMPT:-'为什么说鞠婧祎主演的《月鳞绮纪》是国产电视剧的巅峰之作？'}
 TIMEOUT_OVERRIDE=
 ALLOW_BUSY=0
 CURRENT_RUN_ROOT=
@@ -24,6 +25,7 @@ Usage:
 
 Options:
   --tokens N              Generate and compare 1..10 tokens (default: 10).
+  --prompt TEXT           Use the pinned text prompt (must match its golden).
   --timeout-seconds N     Override the case timeout.
   --allow-busy-host       Run even when another model lane/gem5 is active.
   -h, --help              Show this help without starting a model.
@@ -105,6 +107,7 @@ esac
 while (($#)); do
   case "$1" in
     --tokens) TOKENS=${2:-}; shift 2 ;;
+    --prompt) PROMPT=${2:-}; shift 2 ;;
     --timeout-seconds) TIMEOUT_OVERRIDE=${2:-}; shift 2 ;;
     --allow-busy-host) ALLOW_BUSY=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -182,7 +185,7 @@ run_case() { # run_case <case-name>
   SAGR_SGLANG_USE_AITER=1 \
     timeout --signal=TERM --kill-after=120s "${timeout_seconds}s" \
       "$RUNNER" --engine sglang --tp "$tp" --model "$model" \
-      --max-new-tokens "$TOKENS" "$log"
+      --max-new-tokens "$TOKENS" --prompt "$PROMPT" "$log"
   runner_status=$?
   set -e
   ended_ns=$(date +%s%N)
