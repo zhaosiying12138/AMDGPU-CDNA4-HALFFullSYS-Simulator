@@ -308,7 +308,10 @@ export SAGR_MANAGED_REPO_ROOT="${ROOT}"
 if [[ -n $compute_units ]]; then
   wrapper_root="${SAGR_MANAGED_RUN_ROOT:-${ROOT}/artifacts/lanes}"
   mkdir -p "$wrapper_root"
-  gem5_base="$gem5"
+  # Preserve an explicitly selected managed wrapper (for example the hybrid
+  # CTA build supplied by test_qwen35_tp.sh).  Using the lane's default binary
+  # here silently drops its --hybrid-cta/--functional-fast arguments.
+  gem5_base="$SAGR_MANAGED_GEM5"
   gem5_wrapper="${wrapper_root}/gem5-cu${compute_units}.sh"
   {
     printf '%s\n' '#!/bin/sh'
@@ -317,7 +320,10 @@ if [[ -n $compute_units ]]; then
   } >"$gem5_wrapper"
   chmod 700 "$gem5_wrapper"
   gem5="$gem5_wrapper"
-  export SAGR_MANAGED_GEM5="${SAGR_MANAGED_GEM5:-$gem5}"
+  # This must replace the earlier default assignment above.  Leaving the
+  # original path in SAGR_MANAGED_GEM5 silently bypasses the wrapper and makes
+  # --compute-units a no-op for the managed session.
+  export SAGR_MANAGED_GEM5="$gem5"
 fi
 
 export TRITON_DEFAULT_BACKEND=gemsim_hip

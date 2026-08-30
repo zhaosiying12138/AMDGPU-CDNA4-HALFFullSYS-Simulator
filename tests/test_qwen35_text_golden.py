@@ -88,6 +88,13 @@ class Qwen35TextGoldenTests(unittest.TestCase):
             self.assertIn("compare_text_token_ids", source)
             self.assertNotIn("from qwen35_token_gate import expected_continuation_token_ids", source)
 
+    def test_compute_unit_wrapper_preserves_selected_gem5(self) -> None:
+        source = (ROOT / "scripts" / "run_engine_lane.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('gem5_base="$SAGR_MANAGED_GEM5"', source)
+        self.assertIn('export SAGR_MANAGED_GEM5="$gem5"', source)
+
 
 if __name__ == "__main__":
     unittest.main()
