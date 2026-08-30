@@ -60,6 +60,7 @@ owned_pids() { # owned_pids <run-root>
       printf '%s\n' "$pid"
       continue
     fi
+    [[ -r ${proc}/environ ]] || continue
     owns_env=0
     while IFS= read -r -d '' entry; do
       if [[ $entry == "SAGR_MANAGED_RUN_ROOT=${run_root}" ]]; then
