@@ -1,0 +1,15 @@
+{
+  "artifacts": "artifacts/lanes/zcode-decode-12/layer-gate/state-journal.jsonl (18 prefill_chunk_post + 72 decode_kernel events)",
+  "checkpoint_id": "CP-0097",
+  "claim": "Slot-fingerprint journal brackets the state rewrite to an unhooked path between the two forwards. Lane zcode-decode-12 ([27841,3] reproduced): the prefill chunk wrapper journals slot 2 of layer 0's SSM pool right after the kernel commits -- hash f01fdf45d4c8163c, mean_abs 0.00110402, which EQUALS the recurrent capsule's bit-exact reproduction of our correct prefill commit (recomputed now: f01fdf45d4c8163c) and sits at the golden's magnitude (0.00110399). The first decode packed_decode call then reads slot 2 as hash 7978045dafbd0792, mean 0.00102 -- rewritten. MambaPool.copy_from was journaled in the same run and NEVER fired (0 events), excluding the radix pool copy as the writer. The rewrite therefore happens in an unhooked path between the prefill forward and the first decode forward: leading candidates are the extra_buffer ping-pong slot swap in cache_unfinished_req/donate_mamba_ping_pong_slot (index reassignment plus any tensor-level moves outside copy_from) and _track_mamba_state_extend's scatter writes; a warmup decode forward is less likely (its request would use its own slots). The journal also rules out the decode conv_update kernel (seq 1 touches the conv pool only). Next: wrap donate_mamba_ping_pong_slot/set_mamba_ping_pong_slot/_track_mamba_state_extend and the needs_state_gather scatter to name the writer.",
+  "exclusions": [
+    "MambaPool.copy_from (0 journal events)",
+    "decode conv_update (conv pool only)"
+  ],
+  "hashes": {
+    "decode_L0_packed_entry": "7978045dafbd0792 (mean 0.00102, rewritten)",
+    "golden_L0_state": "ed4af306bbe6779e (mean 0.00110399, cross-arch bf16 differences expected)",
+    "prefill_chunk_post_L0": "f01fdf45d4c8163c (= capsule final_state, correct commit)"
+  },
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1"
+}

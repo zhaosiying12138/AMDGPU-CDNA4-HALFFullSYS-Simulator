@@ -1,0 +1,4 @@
+/home/zhaosiying/.cache/tvm-ffi/libtorch_c_dlpack_addon_torch212-rocm.so
+/home/zhaosiying/.cache/tvm-ffi/sgl_kernel_jit_clamp_position_int64_t_f0f4b97752d12e85__arch_9.5__tvmffi_0.1.10/sgl_kernel_jit_clamp_position_int64_t_f0f4b97752d12e85.so
+/home/zhaosiying/.cache/tvm-ffi/sgl_kernel_jit_kvcache_512_512_false_6ed09a2fb190a7d3__arch_9.5__tvmffi_0.1.10/sgl_kernel_jit_kvcache_512_512_false_6ed09a2fb190a7d3.so
+/home/zhaosiying/zcode-lane/build/rocr_logging_preload.so

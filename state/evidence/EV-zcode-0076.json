@@ -1,0 +1,24 @@
+{
+  "checkpoint_id": "CP-0076",
+  "claim": "Survey-mode layer gate zcode-lgate-4 under the dependent-fast-copy ROCr. Layer 0: all 24 operator boundaries pass (ordinals 0-23, including the sgl_kernel prebuilt silu_and_mul and all GEMMs). Layers 1-2 layer boundaries pass. Layer 3 (first NHD full-attention layer, aiter prebuilt mha_batch_prefill path) diverges at its layer boundary: hidden rel_l2 0.119, residual rel_l2 0.057, no NaN/Inf, magnitudes normal -- the attention path computes a systematically different result. All later layer boundaries mismatch as propagation. At dispatch 1742 (a later attention layer, after triton mrope/sigmoid_mul/gemma_norm launches) gem5 hit gpu_decoder.cc:14220 decode_invalid on word 0xda784400; LLVM's own gfx950 disassembler rejects that word too, indicating a decode-stream desync rather than a missing single instruction (candidate: an 8-byte literal-carrying encoding mis-split, inside the aiter prebuilt attention kernel). Fatal context captured at artifacts/lanes/zcode-lgate-4/fatal-20260820T023025. Working hypothesis: aiter prebuilt attention kernels are mis-simulated -- numerically wrong at layer 3 and decode-fatal at a later tile config.",
+  "fatal": {
+    "dispatches": 1742,
+    "first_level_bits_31_26": "0b110110 (VOP3P route)",
+    "llvm_gfx950_disasm": "invalid instruction encoding (both byte orders)",
+    "vop3p_op": 632,
+    "word": "0xda784400"
+  },
+  "fatal_capture_sha256": "e2cdbba1491fdb27d1eb9e51fa07c9fd42ccc87a1da0e81a4e1ec2cc8ef58947",
+  "layer0_operators_passed": 24,
+  "layer3_divergence": {
+    "hidden_rel_l2": 0.119,
+    "nonfinite": 0,
+    "residual_rel_l2": 0.057
+  },
+  "layers_passing_boundary": [
+    0,
+    1,
+    2
+  ],
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1"
+}

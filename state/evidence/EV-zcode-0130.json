@@ -1,0 +1,10 @@
+{
+ "checkpoint_id": "CP-0130",
+ "claim": "9B TP16 BRING-UP: first infrastructure wall fixed, second characterized. The bridge admission budget (8 regular + 8 excess client connections per host GPU bridge) covered only eight ranks' scheduler-plus-auxiliary connections; ranks past that had ROCr init silently rejected, dying with 'No CUDA GPUs are available' (first lane: rank 10). Fix: budgets raised to 64+64 (zcode/gem5-absorb 20a2ceaa1) with the TP16 arithmetic documented. After the raise, the second lane's first-failure rank moved from 10 to 13 and all nineteen simulator sessions completed the bridge handshake -- the budget was a real wall of several. The remaining failure mode: a late rank's torch still reports no devices during scheduler init, pointing at a session-endpoint discovery race or a per-rank ROCr init timeout under sixteen-way concurrent spawn (19 sessions, host 44GB free, no OOM entries). Next: instrument the runtime's session selection for the failing rank, consider staggering scheduler spawn, and lengthen the 15 s handshake timeout; the capsule-first methodology applies once a lane gets past weight load.",
+ "fix": {"what": "MaximumRegularClients/MaximumExcessClients 8+8 -> 64+64", "where": "src/dev/amdgpu/host_gpu_bridge.hh", "commit": "20a2ceaa1"},
+ "before_after": {"v1": "rank 10 died; only ~6 sessions past handshake", "v2": "rank 13 died; ALL 19 sessions handshake OK"},
+ "open": "late-rank ROCr init failure under 16-way concurrent spawn (discovery race / timeout)",
+ "observed_at": "2026-08-24T10:05:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

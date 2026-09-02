@@ -1,0 +1,8 @@
+{
+ "adjusted_rung": "Qwen3.5-9B at TP8",
+ "checkpoint_id": "CP-0132",
+ "claim": "TP16 SPAWN FAILURE ROOT-CAUSED (pre-crash agent work, verified against source after recovery): the runtime SMI device registry holds SAGR_SMI_DEVICE_COUNT = 16 slots (projects/self-amdgpu-runtime/src/smi_registry_internal.h:11 in the main tree) while a TP16 engine takes 18 concurrent leases (16 schedulers + engine process + detokenizer); the 17th/18th hsa_init fails OUT_OF_RESOURCES after its gem5 session handshook, killing a random scheduler with torch No CUDA GPUs are available (ranks 10/13/3 across three lanes). RESOURCE-vs-BUG ANSWER: the spawn failure is a REAL capacity bug (one constant), NOT memory; the host reboot during the campaign IS resource pressure (16 gem5 instances + 16 engine ranks ~= the whole 58GB with other work). ADJUSTED RUNG: per the operator, the 9B rung proceeds at TP8 (10 leases < 16 slots; ~32-36GB footprint comfortable), with TP16 recorded as feasible only with the 64-slot runtime build (exists) plus hardware headroom. The lane script gains SAGR_RUNTIME_LIBRARY_DIR to select a rebuilt runtime.",
+ "registry_bug": "SAGR_SMI_DEVICE_COUNT=16 vs 18 TP16 leases; deterministic ceiling, random-rank symptom",
+ "resource_answer": "spawn failure = bug; machine reboot = memory pressure; both fixed/routed",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

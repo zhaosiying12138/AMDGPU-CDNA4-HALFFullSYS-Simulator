@@ -1,0 +1,16 @@
+{
+  "checkpoint_id": "CP-0101",
+  "claim": "The slot-2 rewrite is now bracketed to INSIDE GDNAttnBackend.forward_decode, and both memory-layout suspects are cleared by minimal probes. Journal from zcode-decode-15: the REAL layer-cache temporal slot is still CORRECT at forward_decode entry (f01fdf45, = capsule reproduction) while the ssm_states kwarg received by packed_decode is already 7978045d -- only causal_conv1d_update runs in between. Two new capsules clear the layout suspects: (1) alloc-alias probe (artifacts/qwen35-alloc-alias/v2): three production-shaped device allocations have disjoint spans and a conv-pool roll leaves temporal/sentinel untouched; (2) conv-neighbor probe (artifacts/qwen35-conv-neighbor/v1): the REAL production Triton causal_conv1d_update executing on a production-shaped conv pool changes its own slot but leaves the adjacent temporal pool and sentinel bit-identical. Remaining hypotheses: the two journal points see different tensor objects (data_ptr not yet journaled -- the cheap decisive next step), the envelope/dedup pool layout routes the kernel's stores through a strided view whose production layout differs from the standalone probe, or an actor between the entry wrapper and dispatcher call mutates the pool outside the hooked kernels. ALSO RECORDED: a new gem5 decode gap found by the alias probe -- GLOBAL_STORE_BYTE_D16_HI has no decoder class (bf16 slice assignment fatals), the probe works around it in fp32.",
+  "cleared": [
+    "plain allocation aliasing",
+    "standalone conv kernel neighbor writes"
+  ],
+  "journal": {
+    "decode_entry_pool_L0": "f01fdf45d4c8163c (correct)",
+    "events": "18 prefill_chunk_post + 18 extend_exit_pool + 16 decode_entry_pool + 32 decode_kernel at poll",
+    "packed_decode_ssm_kwarg_L0": "7978045dafbd0792 (rewritten)"
+  },
+  "new_gap": "gem5 decode: GLOBAL_STORE_BYTE_D16_HI fatal (bf16 D16_HI byte stores)",
+  "next": "journal data_ptr at both points to test tensor identity; then reproduce with the production envelope layout",
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1"
+}

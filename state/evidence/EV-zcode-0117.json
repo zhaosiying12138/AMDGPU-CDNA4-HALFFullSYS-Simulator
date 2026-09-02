@@ -1,0 +1,13 @@
+{
+ "checkpoint_id": "CP-0117",
+ "claim": "The recurring kernel-32 wild-pointer family is DECODED: a hash-table probe loop. Two gem5 diagnostics landed to make that possible (both keepers): (1) no-class decode fatals print the raw opcode (CP-0112); (2) the host-native fault panic now dumps 320 bytes of code around the faulting PC plus the kernarg (compute_unit.cc, this checkpoint) -- a fatal is self-identifying. The v10/v11 dumps disassemble (llvm-21) to: a probe loop [global_load_dword entry from table s[24:25]+14; global_load_ushort; s_waitcnt vmcnt(1); 16-bit multiply hash; v_add next index; s_cbranch_scc1 back], an exit path computing two candidate pointers (s[0:1] and s[4:5] bases + idx*4 via v_lshl_add_u64), a per-lane vcc select (v_subrev_co_u32 borrow + v_cndmask), and the faulting global_load_dword of the SELECTED probe pointer -- wild and unaligned because the hash chain diverged. The kernarg is [0,0,ptr,ptr,ptr] with lds 4112; siblings in the same JIT arena: grid 62208 lds 8192 ka 304 and grid 512 ka 40. The s_waitcnt ordering in the code is correct as written, so the leading hypothesis is a gem5 memory-arrival/ordering defect for global loads consumed inside a loop (the straight-line dwordx4->vmcnt->ALU path was cleared by an earlier capsule; the loop + dword/ushort combination was never covered). A background fix task is building a hash-loop ISA capsule to falsify this first, with alternatives (garbage initial table from an earlier kernel; v_mul_lo_u32; s_cbranch iteration control; v_lshl_add_u64 SGPR-base pairs) and gem5 instrumentation as the fallback. Lane artifacts: v10 fatal-20260823T033816 (first dump, +/-64B), v11 fatal-20260823T043714 (full +/-256B window).",
+ "decoded_kernel": {
+  "family": "hash-table probe loop; wild pointer = diverged hash chain's selected probe address",
+  "fault_site": "global_load_dword v2, v[2:3], off after per-lane vcc pointer select",
+  "leading_hypothesis": "stale global-load data inside a loop across s_waitcnt vmcnt in gem5"
+ },
+ "diagnostics_added": "panic code-dump (+/-256B) + kernarg print in compute_unit.cc; raw-opcode print in decode fatals (CP-0112)",
+ "observed_at": "2026-08-23T04:47:39",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

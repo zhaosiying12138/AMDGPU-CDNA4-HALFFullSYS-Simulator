@@ -1,0 +1,21 @@
+{
+  "accumOffset_cleared": "LLVM AMDGPUAsmPrinter computeAccumOffset = alignTo(numVGPR,4)/4-1 encoded; gem5 (field+1)*4 decodes to the same raw VGPR base; consistent, in-bounds.",
+  "capsule": "tools/qwen35_mfma_ticket_capsule.py",
+  "checkpoint_id": "CP-0079",
+  "claim": "Ticket-addressed ISA differential pins the aiter divergence to a systemic VOP3/VOP3P write-back defect on module-loaded kernels. A clang-built gfx950 kernel distributes unique per-lane tickets via LDS ds_add_rtn_u32 (independent of v_mbcnt), so every observation is addressing-pollution-free. Result: ds_add_rtn, VOP2 address arithmetic, and global_store all work per-lane, while EVERY VOP3/VOP3P instruction tested (v_accvgpr_write/read roundtrip, chained v_mfma_f32_32x32x16_bf16 C/D-in-AGPR, v_pk_mul_f32, v_mbcnt_lo/hi) writes its vdst only for one lane -- the other 255 lanes read exact zeros. This reproduces in seconds (tools/qwen35_mfma_ticket_capsule.py + tools/mfma_isa_test/) and explains the aiter CK attention numeric divergence (per-lane thread-id/data paths collapse to one lane's values) and plausibly the decode fatal (address corruption from collapsed lane math). Triton kernels use VOP3 heavily and pass, so the defect is specific to how the hipModuleLoadData-loaded kernel's waves are initialized (exec/SGPR/kernarg setup) or how VOP3 write-back interacts with that state, NOT to AGPR semantics: the accumOffset unified-file model was verified consistent with LLVM's descriptor semantics.",
+  "observations": {
+    "VOP2_DS_GLOBAL": "all per-lane correct",
+    "VOP3_VOP3P": "vdst written for exactly one lane per wave; other lanes exact zero",
+    "affected": [
+      "v_accvgpr_write_b32",
+      "v_accvgpr_read_b32",
+      "v_mfma_f32_32x32x16_bf16",
+      "v_pk_mul_f32",
+      "v_mbcnt_lo_u32_b32",
+      "v_mbcnt_hi_u32_b32"
+    ],
+    "tickets": "256/256 unique via ds_add_rtn_u32 (LDS atomic works)"
+  },
+  "result_sha256": "3e2e0055e1a5846e3d82bd2482159d28095136686906715a59346e3329f732bc",
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1"
+}

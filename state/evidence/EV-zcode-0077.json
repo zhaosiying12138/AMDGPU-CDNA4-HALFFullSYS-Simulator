@@ -1,0 +1,16 @@
+{
+  "capsule": "tools/qwen35_mfma_isa_capsule.py",
+  "capsule_result_sha256": "5f650c19504f75f1b2371afced73df1d46533cfaf158c75cc0ca4a0819a78391",
+  "checkpoint_id": "CP-0077",
+  "claim": "Minimal ISA-level reproducer for the aiter CK attention divergence. A hand-built gfx950 kernel (tools/mfma_isa_test/, clang -x hip, uniform constant operands so expectations are layout-independent) exercises v_mfma_f32_32x32x16_bf16 with C/D in AGPR chained twice (expect 32.0f in every accumulator element), v_accvgpr_write/read roundtrip (expect 100.0f), and v_pk_mul_f32 (expect 3.0f). Result: lane 0 returns all four expected values; lanes 1-63 return 3.0f (the v6 constant) in the mfma and accvgpr slots -- per-lane AGPR state is aliased to ordinary VGPR contents for every lane but lane 0. This is the root functional defect behind the aiter mha_batch_prefill divergence (multi-key attention corrupt, single-key identity exact) and is reproducible in seconds via tools/qwen35_mfma_isa_capsule.py under the lane runner. Triton tl.dot with VGPR accumulators is bit-exact, isolating the defect to the AGPR/accumOffset unified-file model (wavefront.cc accumOffset propagation, register_manager allocation, or the MFMA/accvgpr operand mapping).",
+  "next_suspects": [
+    "wavefront.hh accumOffset propagation from hsa_queue_entry (_accumOffset=(akc->accum_offset+1)*4)",
+    "register_manager VRF allocation vs accumOffset+num_agpr",
+    "MFMA/accvgpr operand read for selector>=256 plus accumOffset"
+  ],
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1",
+  "symptom": {
+    "lane0": "all correct",
+    "lanes_1_63": "mfma_a0=mfma_a1=accvgpr_roundtrip=3.0 (v6 constant pollution), pk_mul_lo bad on 48 lanes"
+  }
+}

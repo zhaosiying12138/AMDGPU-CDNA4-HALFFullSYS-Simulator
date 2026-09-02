@@ -1,0 +1,9 @@
+{
+ "checkpoint_id": "CP-0115",
+ "claim": "v_mfma_f32_4x4x4_16b_bf16 implemented (zcode/gem5-absorb 86f8fdbcc). The CP-0112 improvement (no-class decode fatals print their raw opcode) paid off immediately: vLLM lane v8, running on the MUBUF-ACC-fixed gem5, sailed past the former warmup crash only to hit the next gap at opcode 0xd3df0000 = v_mfma_f32_4x4x4_16b_bf16 (llvm-21 identification) -- the single MFMA variant whose decode site fataled while its f16 twin (same 4x4x4x16 geometry) and the bf16 16x16x16/32x32x8 shapes were already served by the generic Inst_VOP3P_MAI__V_MFMA_MXFP template. The fix adds the bf16 4x4x4 typedef and wires the decoder to it; gem5.opt rebuilt clean. v8's progression past the FLA warmup (the CP-0114 fix holds in the full engine context) is itself evidence: the crash position moved from the warmup call to a later post-load kernel.",
+ "context": "v8 on MUBUF-ACC-fixed gem5 progressed past the vLLM warmup crash; next gap named itself via the CP-0112 opcode print",
+ "gem5_commit": "86f8fdbcc (zcode/gem5-absorb)",
+ "observed_at": "2026-08-23T01:56:27",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

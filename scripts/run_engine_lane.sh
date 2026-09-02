@@ -18,7 +18,28 @@
 # to the self-runtime interface, which is the thing under test.
 set -u
 
-ROOT=/home/zhaosiying/amdgpu-sim
+ROOT=/home/zhaosiying/zcode-lane
+# zcode worktree isolation: the immutable conda product, model weights and
+# frozen goldens are shared with the primary tree read-only, but mutable caches
+# must stay private.  The conda activate script below points TRITON_CACHE_DIR
+# at a shared conda-state dir; two lanes writing the same cache key
+# concurrently can corrupt compilation, so repoint it under this worktree
+# before anything imports triton.  SAGR_LANE_CACHE_ROOT exists for the
+# perf-ablation harness: pointing it at a fresh directory gives a cold Triton
+# cache without touching the persistent warm one.
+# A Triton HSACO embeds the absolute compiler support-library paths.  Reusing
+# a cache across different worktrees or source environments can therefore
+# hand a valid-looking gfx950 image to the wrong runtime.  Keep managed runs
+# isolated by default; the explicit override remains useful for a deliberate
+# warm-cache performance comparison.
+if [[ -n ${SAGR_LANE_CACHE_ROOT:-} ]]; then
+  ZCODE_CACHE="$SAGR_LANE_CACHE_ROOT"
+elif [[ -n ${SAGR_MANAGED_RUN_ROOT:-} ]]; then
+  ZCODE_CACHE="${SAGR_MANAGED_RUN_ROOT}/cache"
+else
+  ZCODE_CACHE="${ROOT}/artifacts/zcode-cache"
+fi
+mkdir -p "${ZCODE_CACHE}/triton" "${ZCODE_CACHE}/xdg"
 cd "$ROOT"
 
 engine=""
@@ -27,6 +48,7 @@ model=""
 dummy_weights=0
 capsule=""
 max_new_tokens=1
+prompt=""
 product_hip=0
 debug_layer_gate=0
 # Number of compute units to expose in the gem5 host bridge.  The managed
@@ -48,6 +70,7 @@ while (($#)); do
     --model) model=${2:?}; shift 2 ;;
     --dummy-weights) dummy_weights=1; shift ;;
     --max-new-tokens) max_new_tokens=${2:?}; shift 2 ;;
+    --prompt) prompt=${2:?}; shift 2 ;;
     --product-hip) product_hip=1; shift ;;
     --debug-layer-gate) debug_layer_gate=1; shift ;;
     --gem5) gem5=${2:?}; shift 2 ;;
@@ -109,8 +132,20 @@ fi
 PREFIX="${ROOT}/env/conda/rocm-pytorch-v3-fa8414cce688f934f538163621423376c2542acff3e4d3e403df4340d90fcd6d"
 # shellcheck disable=SC1091
 source "${PREFIX}/etc/conda/activate.d/amdgpu-sim-rocm-pytorch.sh"
+# Override the activate script's shared conda-state cache with the private
+# worktree cache prepared above (see the ROOT block comment for why).
+# ZCODE_SHARE_CACHES=1 is a diagnostic A/B switch that keeps the lane on the
+# shared caches exactly like the primary tree's lanes, to attribute an env
+# failure to the cache split instead of the code under test.
+if [[ -z ${ZCODE_SHARE_CACHES:-} ]]; then
+  export TRITON_CACHE_DIR="${ZCODE_CACHE}/triton"
+  export XDG_CACHE_HOME="${ZCODE_CACHE}/xdg"
+fi
+# SAGR_LANE_FASTCOPY_MODE is the perf-ablation override for the DTIF
+# fast-copy gate: "fast" (default, the accepted lanes) or "legacy" (every
+# H2D/D2H copy becomes a simulated blit-kernel dispatch).
 # shellcheck disable=SC1091
-source "${ROOT}/scripts/fastcopy_mode.sh" fast
+source "${ROOT}/scripts/fastcopy_mode.sh" "${SAGR_LANE_FASTCOPY_MODE:-fast}"
 
 # The activate script of this prefix exports the product that predates every
 # fast-copy commit. Rewriting the paths is what makes the run test the code
@@ -118,11 +153,23 @@ source "${ROOT}/scripts/fastcopy_mode.sh" fast
 # minutes proving nothing.
 STALE="${ROOT}/env/rocm/product-v1-f76db762609b346cb83b920cc82cd2b734b75cd31b8562e6536ad81275fe17e1"
 HEAD_PRODUCT="${ROOT}/env/rocm/product-v1-4d9d40454031c7345f25da81b6781995b09a3b10e4dd66026e019306fc7ee39b"
-RUNTIME_BUILD="${ROOT}/projects/self-amdgpu-runtime/build/cp28-runtime-clang"
-# Keep the product as the default, but allow a lane to point at a freshly
-# rebuilt ROCr stage.  This is deliberately narrower than replacing the whole
-# product: model DSO, topology, rocminfo, and HIP remain owned by HEAD_PRODUCT.
-ROCR_LIBRARY_DIR="${SAGR_ROCR_LIBRARY_DIR:-${HEAD_PRODUCT}/lib}"
+RUNTIME_BUILD="${SAGR_RUNTIME_LIBRARY_DIR:-${ROOT}/projects/self-amdgpu-runtime/build/cp28-runtime-clang}"
+# SAGR_RUNTIME_LIBRARY_DIR (optional): point the lane at a rebuilt runtime
+# tree (it must contain libself_amdgpu_hsakmt_model.so.1 and
+# libself_amdgpu_runtime.so.1). Used by the TP16 lane to run the build whose
+# SMI registry holds 64 device slots instead of 16: a TP16 engine holds 18
+# concurrent registry leases (16 schedulers + engine process + detokenizer),
+# and with 16 slots the 17th/18th hsa_init failed OUT_OF_RESOURCES after its
+# gem5 session had already handshaken, killing a random scheduler with
+# "No CUDA GPUs are available".
+# Keep the product as the base, but default this worktree to the rebuilt ROCr
+# stage: the conda product prefix named by the activate script predates every
+# fast-copy commit in projects/rocm-systems, and a lane that loads it falls
+# back from DTIF fast copy to blit-kernel copies and dies at the first device
+# allocation with hipErrorInvalidImage.  SAGR_ROCR_LIBRARY_DIR still overrides
+# (the upstream switch); only the default changes.  model DSO, topology,
+# rocminfo, and HIP remain owned by HEAD_PRODUCT.
+ROCR_LIBRARY_DIR="${SAGR_ROCR_LIBRARY_DIR:-${ROOT}/build/rocr-stage-0401e8cd/lib}"
 if [[ ! -f "${ROCR_LIBRARY_DIR}/libhsa-runtime64.so.1" ]]; then
   printf 'ROCr library directory is missing libhsa-runtime64.so.1: %s\n' \
     "$ROCR_LIBRARY_DIR" >&2
@@ -149,6 +196,36 @@ if (( tp > 1 )); then
       --output-dir "$HSA_MODEL_TOPOLOGY" --gpu-count "$tp" >/dev/null || {
         printf 'could not generate a %s-GPU topology\n' "$tp" >&2; exit 2; }
   fi
+  # The generated topology advertises a full gfx950 (simd_count 1024 =
+  # 256 compute units), but the simulator instantiates NUM_COMPUTE_UNITS
+  # (default 4). That mismatch is not just cosmetic: engine libraries size
+  # kernels by the advertised CU count (aiter's get_cu_num() parses this
+  # very topology through the product rocminfo shim), and its split-K GEMMs
+  # assign early workgroups to poll workspace flags that later workgroups
+  # publish -- a schedule that assumes near-full-grid co-residency. With a
+  # 4-CU simulator and in-order workgroup admission, the first resident
+  # cohort is all pollers, the publishers are never admitted, and both TP
+  # ranks livelock deterministically (observed at dispatch 1618/1619 on
+  # every SGLang TP2 run). Publish exactly what is simulated:
+  # simd_count = NUM_COMPUTE_UNITS * simd_per_cu.
+  gemsim_cus="${GEMSIM_NUM_COMPUTE_UNITS:-4}"
+  if [[ ! $gemsim_cus =~ ^[0-9]+$ ]] || (( gemsim_cus < 1 )); then
+    gemsim_cus=4
+  fi
+  gemsim_simds=$(( gemsim_cus * 4 ))
+  for node_props in "${HSA_MODEL_TOPOLOGY}"/nodes/*/properties; do
+    [[ -f $node_props ]] || continue
+    # Only GPU nodes carry a non-zero simd_count; the CPU node's 0 marks it
+    # as a CPU, and rewriting it would publish a bogus gfx000 GPU agent.
+    current_simds=$(sed -n 's/^simd_count \([0-9][0-9]*\)$/\1/p' "$node_props")
+    if [[ -n $current_simds ]] && (( current_simds > 0 )) && \
+       (( current_simds != gemsim_simds )); then
+      sed -i "s/^simd_count [0-9][0-9]*$/simd_count ${gemsim_simds}/" \
+        "$node_props"
+      printf 'topology %s: simd_count -> %d (%d CUs) to match the simulator\n' \
+        "$node_props" "$gemsim_simds" "$gemsim_cus" >&2
+    fi
+  done
 else
   export HSA_MODEL_TOPOLOGY="${HEAD_PRODUCT}/share/self-amdgpu-runtime/hsakmt-topology"
 fi
@@ -213,8 +290,11 @@ if [[ -z "${gpu_archs_value//[[:space:]]/}" ]]; then
   export GPU_ARCHS
 fi
 
-export SAGR_MANAGED_GEM5="$gem5"
-export SAGR_MANAGED_GEM5_CONFIG="${ROOT}/projects/gem5/configs/example/gemsim/host_dispatch.py"
+export SAGR_MANAGED_GEM5="${SAGR_MANAGED_GEM5:-$gem5}"
+# The managed config path is normally this worktree's script; an already-set
+# value lets a diagnostic lane point at another worktree's config (e.g. the
+# hybrid-CTA branch whose script carries extra options the main tree lacks).
+export SAGR_MANAGED_GEM5_CONFIG="${SAGR_MANAGED_GEM5_CONFIG:-${ROOT}/projects/gem5/configs/example/gemsim/host_dispatch.py}"
 export SAGR_MANAGED_REPO_ROOT="${ROOT}"
 # SAGR_MANAGED_RUN_ROOT is inherited from the lane supervisor. It confines this
 # lane's simulators to their own directory so progress accounting and cleanup
@@ -228,7 +308,10 @@ export SAGR_MANAGED_REPO_ROOT="${ROOT}"
 if [[ -n $compute_units ]]; then
   wrapper_root="${SAGR_MANAGED_RUN_ROOT:-${ROOT}/artifacts/lanes}"
   mkdir -p "$wrapper_root"
-  gem5_base="$gem5"
+  # Preserve an explicitly selected managed wrapper (for example the hybrid
+  # CTA build supplied by test_qwen35_tp.sh).  Using the lane's default binary
+  # here silently drops its --hybrid-cta/--functional-fast arguments.
+  gem5_base="$SAGR_MANAGED_GEM5"
   gem5_wrapper="${wrapper_root}/gem5-cu${compute_units}.sh"
   {
     printf '%s\n' '#!/bin/sh'
@@ -237,17 +320,34 @@ if [[ -n $compute_units ]]; then
   } >"$gem5_wrapper"
   chmod 700 "$gem5_wrapper"
   gem5="$gem5_wrapper"
+  # This must replace the earlier default assignment above.  Leaving the
+  # original path in SAGR_MANAGED_GEM5 silently bypasses the wrapper and makes
+  # --compute-units a no-op for the managed session.
   export SAGR_MANAGED_GEM5="$gem5"
 fi
 
 export TRITON_DEFAULT_BACKEND=gemsim_hip
 export TRITON_BACKENDS_IN_TREE=0
-export GEMSIM_HIP_AUTOTUNE_MODE=correctness
+# SAGR_LANE_AUTOTUNE_MODE is the perf-ablation override: "correctness"
+# (default, one dispatch per autotune candidate) or "device" (full do_bench
+# scan on the simulator -- the unoptimized path).
+export GEMSIM_HIP_AUTOTUNE_MODE="${SAGR_LANE_AUTOTUNE_MODE:-correctness}"
 export TRITON_CACHE_AUTOTUNING=1
 # ROCr refuses to run multi-agent collectives without this and aborts with
 #   [FATAL ERROR]: HSA_NO_SCRATCH_RECLAIM=1 must be set
 # It is an upstream-documented ROCm setting, not a project workaround.
 export HSA_NO_SCRATCH_RECLAIM=1
+# All ranks are local simulator processes.  Pin RCCL bootstrap to loopback so
+# dynamic AgentENV veth creation/removal cannot race automatic interface
+# selection and leave a lazy collective with EADDRNOTAVAIL.
+export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-lo}"
+export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"
+export NCCL_DEBUG_SUBSYS="${NCCL_DEBUG_SUBSYS:-INIT,NET}"
+# PyTorch's monitor declares failure when its watchdog thread cannot enter a
+# HIP event query for 480 seconds.  One simulator kernel can legitimately hold
+# that API path for hours; the lane-level completed-wavefront watchdog remains
+# the liveness authority and captures a stalled simulator before termination.
+export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC="${SAGR_TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-86400}"
 unset SAGR_OPENCL_ENDPOINT SAGR_OPENCL_SOCKET SAGR_OPENCL_GEM5_EXTERNAL
 unset CUDA_VISIBLE_DEVICES
 
@@ -259,11 +359,43 @@ if [[ $engine == sglang ]]; then
     export SAGR_QWEN35_SGLANG_LAYER_GATE_GOLDEN="${ROOT}/artifacts/qwen35-nvidia-golden/20260812-prefill2-max24-v1"
     export SAGR_QWEN35_OPERATOR_GOLDEN="${ROOT}/artifacts/qwen35-nvidia-operator-golden/20260819-prefill2-layer0-v3"
     export SAGR_TRITON_LAUNCH_LOG="$(dirname "$log")/triton-launches.jsonl"
-    export PYTHONPATH="${layer_gate_root}:${ROOT}/tools/triton_launch_probe:${ROOT}/projects/sglang-0.5.17:${ROOT}/env/sglang-overlay-cp312"
+    export PYTHONPATH="${SAGR_LANE_PYTHONPATH_PREFIX:-}${layer_gate_root}:${ROOT}/tools/triton_launch_probe:${ROOT}/projects/sglang-0.5.17:${ROOT}/env/sglang-overlay-cp312"
   else
-    export PYTHONPATH="${ROOT}/projects/sglang-0.5.17:${ROOT}/env/sglang-overlay-cp312"
+    export PYTHONPATH="${SAGR_LANE_PYTHONPATH_PREFIX:-}${ROOT}/projects/sglang-0.5.17:${ROOT}/env/sglang-overlay-cp312"
   fi
-  export SGLANG_USE_AITER=1
+  # aiter's tuned-GEMM table has no valid tiling for the decode m=1 GEMM
+  # shapes (n=8192 k=1024 rejected by selection_filter), which kills the
+  # engine at the first decode step.  SAGR_SGLANG_USE_AITER=0 routes the
+  # linear layers through the standard torch F.linear path while leaving the
+  # attention backend selection untouched.
+  export SGLANG_USE_AITER="${SAGR_SGLANG_USE_AITER:-1}"
+  # aiter resolves its bf16 tuned-GEMM table from a machine-global file
+  # (/tmp/aiter_configs/bf16_tuned_gemm.csv).  Two concurrent lanes once
+  # rewrote that file mid-run: the victim lane then selected a different,
+  # freshly JIT-compiled GEMM for shapes that earlier runs had served from
+  # the table, and the fresh kernel chased a stale pointer into a gem5
+  # host-native load panic (zcode-decode-18, capture fatal-20260821T122252;
+  # the same signature explains the never-reproduced "Invalid tiling" crash
+  # of lgate-4).  Pin the table per lane to a frozen copy so dispatch
+  # decisions are lane-local and reproducible.
+  aiter_cfg_dir="${SAGR_MANAGED_RUN_ROOT:-/tmp}/aiter-config"
+  mkdir -p "$aiter_cfg_dir"
+  if [[ ! -s ${aiter_cfg_dir}/bf16_tuned_gemm.csv ]]; then
+    # Seed from the package-owned table (deterministic per pinned env), not
+    # the mutable /tmp copy whose contents depend on what other lanes last
+    # merged into it.  aiter's import merges the package model_configs into
+    # this file at startup, so the lane-local copy ends up complete either
+    # way, and only this lane ever writes it.
+    for src in \
+      "${PREFIX}/lib/python3.12/site-packages/aiter/configs/bf16_tuned_gemm.csv" \
+      /tmp/aiter_configs/bf16_tuned_gemm.csv; do
+      if [[ -r $src ]]; then
+        cp "$src" "${aiter_cfg_dir}/bf16_tuned_gemm.csv"
+        break
+      fi
+    done
+  fi
+  export AITER_CONFIG_GEMM_BF16="${aiter_cfg_dir}/bf16_tuned_gemm.csv"
   export FLA_CACHE_RESULTS=1
 else
   # vLLM runs on the formal Triton path: the unchanged upstream AMD hip
@@ -285,7 +417,17 @@ else
   # gemsim_hip, which is no longer discovered here, and Triton rejects an
   # unknown TRITON_DEFAULT_BACKEND outright.
   export TRITON_DEFAULT_BACKEND=amd
-  export PYTHONPATH=""
+  # Keep PYTHONPATH empty for upstream purity EXCEPT the read-only Triton
+  # probe sitecustomize, which (a) names kernels through the launch log and
+  # (b) optionally disables do_bench's L2-flush zero during autotune
+  # (SAGR_TRITON_FAST_AUTOTUNE=1) -- the flush is the one-time-tuning wall
+  # that consumed whole 12h lanes on 16.7M-workitem fill kernels.  Both
+  # behaviors are gated by env and write no state into the engine.
+  if [[ -n ${SAGR_TRITON_LAUNCH_LOG:-} || -n ${SAGR_TRITON_FAST_AUTOTUNE:-} ]]; then
+    export PYTHONPATH="${ROOT}/tools/triton_launch_probe"
+  else
+    export PYTHONPATH=""
+  fi
   # Empty allowlist: vllm/plugins/__init__.py loads a plugin only when its name
   # is in VLLM_PLUGINS, and an empty value parses to a list matching nothing.
   # This is the hard kill switch for both vllm.platform_plugins and
@@ -320,6 +462,7 @@ fi
   echo "gem5_base_sha256=$(sha256sum "${gem5_base:-${SAGR_MANAGED_GEM5}}" | cut -d' ' -f1)"
   echo "compute_units=${compute_units:-default}"
   echo "max_new_tokens=${max_new_tokens}"
+  echo "prompt=${prompt:-<synthetic-token-fixture>}"
   echo "hip_mode=${hip_mode}"
   echo "debug_layer_gate=${debug_layer_gate}"
   if (( debug_layer_gate )); then
@@ -382,11 +525,12 @@ if [[ -n $capsule ]]; then
   status=$?
 elif [[ $engine == sglang ]]; then
   sglang_args=(
-    --tp-size "$tp" --attention-backend aiter
+    --tp-size "$tp" --attention-backend "${SAGR_ATTENTION_BACKEND:-aiter}"
     --context-length 16 --max-total-tokens 16 --max-mamba-cache-size 5
     --max-new-tokens "$max_new_tokens" --seed 0 --watchdog-timeout 86400
     --dist-timeout 86400 --model-path "$model"
   )
+  [[ -z $prompt ]] || sglang_args+=(--prompt "$prompt")
   (( dummy_weights )) && sglang_args+=(--load-format dummy)
   unshare -r -m bash -c '
     mount --bind /tmp/empty-nvml.so /usr/lib/wsl/lib/libnvidia-ml.so.1
@@ -398,7 +542,26 @@ else
     --tp-size "$tp" --model-path "$model"
     --context-length 16 --max-new-tokens "$max_new_tokens" --max-num-seqs 1
     --seed 0
+    # vLLM sizes every cache pool from the utilization fraction of the
+    # device's reported memory; on the simulated 287 GB device the 0.30
+    # default dedicates ~84 GB to caches, and zeroing that mamba pool is
+    # what dominated zcode-vllm-tp1-v1 past its 12 h ceiling (643 kernels
+    # of 16.7M workitems before the dummy profile run even finished).  A
+    # 16-token context with one sequence needs almost nothing.
+    --gpu-memory-utilization "${SAGR_VLLM_GPU_MEM_UTIL:-0.30}"
   )
+  [[ -z $prompt ]] || vllm_args+=(--prompt "$prompt")
+  # The driver's RPC into workers (sample_tokens and friends) times out
+  # after VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS (default 300s).  Under the
+  # simulator the sampler plus its TP2 collectives can exceed that wall
+  # clock while being perfectly alive -- vLLM TP2 once reached the very
+  # last sampling step of generation and died only on this timeout.
+  export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS="${SAGR_VLLM_RPC_TIMEOUT_SECONDS:-300}"
+  # The NCCL watchdog separately kills any single collective that outlives
+  # ParallelConfig.distributed_timeout_seconds (default 600s); the example
+  # exposes it as --distributed-timeout.  Under the simulator the TP2
+  # logits all-gather is a legitimately multi-hour collective.
+  vllm_args+=(--distributed-timeout "${SAGR_VLLM_DIST_TIMEOUT_SECONDS:-600}")
   (( dummy_weights )) && vllm_args+=(--load-format dummy)
   # A real file, not a heredoc: with tensor_parallel_size > 1 vLLM spawns
   # workers through multiprocessing, and spawn re-imports the parent __main__

@@ -1,0 +1,21 @@
+{
+ "checkpoint_id": "CP-0104",
+ "claim": "The prefill->decode-boundary gem5 panic (decode-18 AND decode-19, byte-identical signature: kernel=32, lds=4112, same pc offset, same wfDynId=581073, kernargHead=[0,heap_ptr,ptr,ptr]) reproduced with NO concurrent lanes, retracting the concurrent-capsule interference theory as the primary cause. Forensic analysis (dispatch trace alignment, 1:1 Triton-launch-to-dispatch mapping) shows the faulting kernel is a NON-Triton, freshly-loaded kernel whose siblings are huge-grid GEMMs dispatched right after the last prefill Triton launch (seq 311, final-norm); the faulting address shares low 32 bits with the kernarg heap pointer with flipped high bits (0x7628bc8010fc vs kernarg 0x7624bc801800) -- a chased stale/garbage pointer. The new code path at exactly this point in 18/19 but not in the surviving decode-15 is the layer gate's LogitsProcessor probe, whose torch.topk on the 248320-wide logits launched a fresh huge-grid GPU kernel the engine itself never runs (engine sampler is argmax-only); the probe now does ALL math on CPU copies (plain .cpu() copy only on the GPU side). Separately, aiter's bf16 tuned-GEMM table resolves from the machine-global /tmp/aiter_configs and every sglang import rewrites it; the lane script now pins a per-lane frozen copy seeded from the package-owned table (deterministic, lane-local writes). decode-20 launched with both fixes carries the full instrument set: conv-update before/after fingerprints with pre-conv input tensor capture, decode-entry conv+ssm ptr/shape/stride, and the CPU-math logits probe. ALSO recorded: the prefill late-layer drift is characterized (subagent analysis of decode-15/18 comparisons + mismatch dumps) as diffuse, sign-balanced bf16 accumulation noise injected by the GDN chunked core/conv1d/MLP (~0.3-1%/layer, rate rising at L16-17), with NO structural signature (no 128-dim slice, no single head/token) and a robust argmax -- consistent with the correct first token; it is tolerance calibration, not a defect.",
+ "crash_signature": {
+  "decoded": "GPUNativeMemory serves GPU VA as host VA verbatim; panic = HostKmtNativeMemory::read false = address not inside any single live registered allocation (or overlapping-allocation ambiguity)",
+  "forensics": "crash-capture analysis aligned 311 Triton launches to 1732 retired dispatches 1:1; crash is dispatch #1733",
+  "kernel": "fresh non-Triton kernel, first use at prefill->decode boundary; lds=4112, kernarg ~32B [0,ptr,ptr,ptr]",
+  "panic": "host-native vector memory access failed size=4 read, compute_unit.cc:1532"
+ },
+ "fixes": [
+  "gate logits probe: CPU-only topk/float (no probe-side GPU kernels)",
+  "run_engine_lane.sh: AITER_CONFIG_GEMM_BF16 pinned to per-lane frozen copy seeded from package table"
+ ],
+ "lane": "zcode-decode-20 (running)",
+ "observed_at": "2026-08-21T13:14:17",
+ "retractions": [
+  "concurrent-capsule aiter-config rewrite as the PRIMARY crash cause (config drift remains a real isolation gap, now fixed)"
+ ],
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

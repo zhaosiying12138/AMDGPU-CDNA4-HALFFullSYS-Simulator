@@ -1,0 +1,18 @@
+{
+ "bisect_state": {
+  "fault": "buffer_store_dwordx4 wild write; inputs dumped to artifacts/qwen35-vllm-fla-stages-capsule/v4/*.safetensors",
+  "stage_faulting": "5 chunk_gated_delta_rule_fwd_h (h-kernel)",
+  "stages_passing": [
+   "1 cumsum",
+   "2 kkt",
+   "3 solve_tril",
+   "4 wy_fast (w,u finite)"
+  ]
+ },
+ "checkpoint_id": "CP-0112",
+ "claim": "GLOBAL_STORE_BYTE_D16_HI decoder gap implemented; vLLM FLA chain bisected to the single fwd_h kernel. (1) The stage-by-stage capsule's 'spin-hang' and 'decode fatal' at dispatch 54 were the same gap: a torch elementwise kernel uses global_store_byte_d16_hi (0xdc648000 = `global_store_byte_d16_hi v0, v0, s[0:1]` per llvm-21), which had no decoder class in gem5 (first recorded by the CP-0101 alloc-alias probe). Fixed in zcode/gem5-absorb 7265e7f47: new Inst_FLAT__FLAT_STORE_BYTE_D16_HI (stores bits [23:16] of the data register as a one-byte element, mirroring the SHORT_D16_HI sibling), wired into all four decode sites (FLAT/GLOBAL/MUBUF/SCRATCH), plus every remaining no-class decode fatal now prints the raw machInst word. (2) With the gap closed, the stage capsule ran the FLA chain end to end: stages 1-4 (chunk_local_cumsum, chunk_scaled_dot_kkt, solve_tril, recompute_w_u) all completed with finite dumps (w mean 0.000927, u mean 0.395210) -- their kernels are correct under gem5. The crash is stage 5 alone: chunk_gated_delta_rule_fwd_h (the h-kernel, lds 73728, kernel=32, fault `buffer_store_dwordx4 v28, v44, s[8:11], s128` wild write at 0x76ee51c47e80, kernarg pointers 0x76edd7840000/0x76f5f6000000/..., s2=s3=0xffffffff) on KNOWN-GOOD dumped inputs. Next bisect level: re-drive the single h-kernel from the dumped k/w/u/g/state with reduced heads/chunks; the disassembly's offset path is cndmask-e64 with SOP2-s_and_b64-produced s[2:3] masks and the fault offset register v44.",
+ "gem5_commit": "7265e7f47 (zcode/gem5-absorb)",
+ "observed_at": "2026-08-22T21:50:59",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

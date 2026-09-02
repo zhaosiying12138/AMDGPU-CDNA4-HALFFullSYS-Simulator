@@ -1,0 +1,50 @@
+{
+  "checkpoint_id": "CP-0086",
+  "claim": "Minimal reproducer for a wide-destination scoreboard hazard: ds_read_b128 into v[0:3] returns CORRECT raw data (verified by storing v0..v3 directly: exactly [d0,d1,d2,d3] per row), but a dependent instruction a few cycles later (a v_cndmask dword-select chain over v1..v3) reads STALE register contents, while consumers further downstream (the global stores of the same registers) read the FRESH values. The busy-clear for the wide destination therefore releases consumers BEFORE all four destination registers are committed, or the consumer-side readiness path (RegisterFileCache bypass in VectorRegisterFile::operandsReady) skips the not-yet-written registers. This is the first concrete hazard reproducing the CK attention symptom shape: tile data loaded via ds_read_b128 (192 per kernel) feeding nearby MFMA consumers reads stale tile fragments, losing exactly those head-dim slices while narrow (b32/b64) paths and far consumers stay correct. Reproducer: tools/mfma_isa_test/lds_b128d.hip + tools/qwen35_lds_race_capsule.py (v6-raw result: raw v[0:3] all correct, selected dword wrong on 256/256 lanes).",
+  "evidence": {
+    "far_consumers_fresh": true,
+    "raw_correct": [
+      [
+        60,
+        61,
+        62,
+        63
+      ],
+      [
+        60,
+        61,
+        62,
+        63
+      ],
+      [
+        60,
+        61,
+        62,
+        63
+      ],
+      [
+        60,
+        61,
+        62,
+        63
+      ]
+    ],
+    "selected_stale": [
+      63,
+      63,
+      63,
+      62
+    ]
+  },
+  "fix_targets": [
+    "completion/unmark path for multi-register LDS destinations (LMP completion -> completeAcc -> vdstK.write -> unmark ordering)",
+    "RegisterFileCache bypass condition in VectorRegisterFile::operandsReady",
+    "consistency between dispatchInstruction busy-marking (covers physIndices) and the unmark site (coverage unknown)"
+  ],
+  "reproducer": {
+    "capsule": "tools/qwen35_lds_race_capsule.py",
+    "kernel": "tools/mfwa_isa_test/lds_b128d.hip",
+    "result": "artifacts/qwen35-lds-race-capsule/v6-raw/result.json"
+  },
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1"
+}

@@ -1,0 +1,12 @@
+{
+ "checkpoint_id": "CP-0113",
+ "claim": "vLLM wild-store defect reduced to a MINIMAL single-kernel deterministic repro. tools/qwen35_vllm_fwdh_capsule.py re-drives chunk_gated_delta_rule_fwd_h alone (T=64, K=V=128, cu_seqlens [0,64], seed-0 random inputs, constant-config autotune matching the lane): the kernel faults at heads=16 AND at heads=1 -- the smallest possible shape (2 workgroups) -- with the identical signature (buffer_store_dwordx4 v28, v44, s[8:11], s128 to an unaligned unmapped host address, s2=s3=0xffffffff, lds 73728, kernel=32). The defect is therefore intrinsic to gem5's execution of this Triton kernel, not a scale/race/data artifact: stages 1-4 of the chain are correct (CP-0112), the e64 cndmask scalar-pair condition and the saveexec path are proven correct (CP-0111 probe2), so the remaining suspects are the kernel's SOP2 s_and_b64 mask production, its MUBUF buffer-descriptor/offset chain (v44) in host-native mode, its 72KB LDS double-buffer loop, or the varlen index loads (cu_seqlens/chunk_offsets). A background fix task is iterating against this minutes-scale oracle with the CK, cndmask-probe2, and full-FLA-chain capsules as regression gates. The heads sweep runs small-first so any passing shape bounds the fault; heads=1 faulting removes shape-dependence from the hypothesis space entirely.",
+ "observed_at": "2026-08-22T21:58:25",
+ "repro": {
+  "signature": "buffer_store_dwordx4 wild write, s2=s3=0xffffffff, lds 73728",
+  "tool": "tools/qwen35_vllm_fwdh_capsule.py",
+  "verdict": "faults at heads=1 (minimal) and heads=16"
+ },
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

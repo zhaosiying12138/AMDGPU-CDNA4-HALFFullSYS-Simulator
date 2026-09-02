@@ -1,0 +1,14 @@
+{
+ "checkpoint_id": "CP-0102",
+ "claim": "Journal identity fields for the slot-2 rewrite bracket: the layer gate's decode_entry_pool event (GDNAttnBackend.forward_decode entry, real layer-cache temporal) and decode_kernel event (packed_decode ssm_states kwarg) now record tensor_ptr/tensor_shape/tensor_stride alongside the slot fingerprint. This is the decisive test between the two remaining CP-0101 hypotheses: if the two points report different data_ptr, forward_decode re-binds ssm_states to a different tensor (find the actor between entry and dispatcher); if data_ptr matches but the fingerprint differs, the production envelope/dedup strided layout routes the conv kernel's stores onto the temporal slot (reproduce on the captured production tensor). decode-16 ran the pre-edit gate (a cd typo short-circuited the edit chain); the edit was re-applied and verified (py_compile + field presence) and zcode-decode-17 was launched with it. A leftover decode-16 lane (superseded, 377% CPU on its scheduler) was killed to keep decode-17's gem5 unstarved.",
+ "edit": "tools/qwen35_sglang_layer_gate/qwen35_sglang_layer_gate.py:6 insertions at the two journal sites",
+ "expected_reading": {
+  "decision": "X equal -> in-place rewrite by an unhooked actor or layout alias; X differs -> re-binding between the two points",
+  "decode_entry_pool_L0": "tensor_ptr X, fp f01fdf45d4c8163c (correct)",
+  "packed_decode_ssm_kwarg_L0": "tensor_ptr X, fp 7978045dafbd0792 (rewritten)"
+ },
+ "lane": "zcode-decode-17 (running, artifacts/lanes/zcode-decode-17/)",
+ "observed_at": "2026-08-21T11:42:22",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

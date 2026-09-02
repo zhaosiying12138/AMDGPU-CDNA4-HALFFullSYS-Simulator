@@ -1,0 +1,18 @@
+{
+ "bringup_wall": {
+  "caller": "vLLM _warmup_prefill_kernels -> triton.autotune(chunk_scaled_dot_kkt_fwd, 27 configs)",
+  "evidence": "py-spy live stack + /proc/pid/mem kernarg (0x4000000, 0x72bf75400000) + single code object in dispatch trace",
+  "kernel": "ATen 64MB fill x hundreds = triton do_bench L2-flush zero"
+ },
+ "checkpoint_id": "CP-0107",
+ "claim": "vLLM TP1 bring-up first-failure analysis. Lane v1 (defaults) was killed by its 12h ceiling mid-dummy-profile: 643 kernels of 16,777,216 workitems dominated. v4 instrumentation (py-spy on the live engine + kernarg reads from /proc/pid/mem + dispatch-trace grouping) identifies them conclusively: ALL are ONE code object, an ATen 64MB fill (kernarg = size 0x4000000 + one pointer, same device buffer 0x72bf75400000 in a /memfd:self-amdgpu-hsakmt-model region every time), launched by triton.testing.do_bench's cache-flush between reps while vLLM's _warmup_prefill_kernels autotunes the FLA GDN kernels (chunk_scaled_dot_kkt_fwd: 27 configs x reps; stack: do_bench <- autotuner.run <- chunk_scaled_dot_kkt_fwd <- _warmup_prefill_kernels). So the vLLM bring-up wall is ONE-TIME Triton autotuning under gem5, not a simulator defect: each do_bench rep pays a simulated 64MB zero. The worktree-private Triton cache (artifacts/zcode-cache/triton) persists across lanes and already contains the compiled chunk_scaled_dot_kkt artifacts; once tuning completes, all later vllm lanes reuse it (the sglang lanes' completed autotune jsons in the same cache are the precedent). Lane infra added: SAGR_VLLM_GPU_MEM_UTIL passthrough (vLLM sizes caches from the utilization fraction of the simulated 287GB device; 0.30 -> ~84GB of caches whose pool zeroing would itself dominate; 0.015 for bring-up) and the read-only Triton launch probe for the vllm branch (SAGR_TRITON_LAUNCH_LOG), which named the FLA kernels. Also fixed en route: the probe-side GPU torch.topk crash lesson generalized -- diagnostics must add no GPU kernels; the vllm probe inclusion is sitecustomize-based and engine-untouched. v4 continues grinding the autotune within its 10h ceiling; v5+ reap the warm cache.",
+ "lanes": {
+  "v1": "12h ceiling, 643 big kernels, profiling incomplete (defaults)",
+  "v3": "killed for re-instrumentation; mem 0.02 reduced but did not remove fills (autotune is shape-independent of pool)",
+  "v4": "running: mem 0.015 + triton probe; compiled artifacts already landing in the worktree cache"
+ },
+ "next": "v4 completes or exhausts ceiling -> v5 with warm autotune cache reaches the real generate; then first-failure debugging per SGLang methodology",
+ "observed_at": "2026-08-22T11:47:40",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

@@ -1,0 +1,23 @@
+{
+ "checkpoint_id": "CP-0114",
+ "claim": "MUBUF ACC-BIT DEFECT FOUND AND FIXED; THE vLLM BLOCKING CRASH IS GONE. Root cause (subagent, pinned by per-instruction watchpoints against the heads=1 minimal oracle): gem5 decoded the MUBUF second-dword bit 23 as a legacy TFE field nothing read, but from gfx90a through gfx950/CDNA4 that bit is ACC ('VDATA is Accumulation VGPR', verified against the CDNA4 ISA reference and llvm-mc a[..] vs v[..] round-trips). The Triton h-kernel executes `buffer_load_dwordx4 a[0:3], v61, s[4:7], 0 offen` (words E05C1000 8081003D); gem5 wrote the 16B/lane into ARCHITECTURAL v[0:3], destroying v0 = the packed work-item ID with the zeroed h0 state. The loop's LDS swizzle math then produced garbage offsets (v46 = 0x7fba7cf2 = a float bit pattern x2), and the guarded buffer_store_dwordx4 wrote ~2GB past h_base, unaligned and unmapped -- the host-native panic. The s_and_b64/cndmask/saveexec paths were exonerated en route, as was v_bitop3's truth table. FIX (zcode/gem5-absorb, 5 files +107/-32): decode the bit as ACC; add Inst_MUBUF::mubufAccOffset()/mubufDataIdx() redirecting VDATA (not VADDR) through the wave's accumOffset when ACC is set, mirroring the absorbed DS-ACC fix f96ecfb4b and V_ACCVGPR_READ/WRITE, failing closed (panic) if ACC is set without an AGPR allocation; all 30 VDATA operand constructions in mubuf.cc route through it. Secondary real bug fixed: v_bitop3_b32's result accumulator was uint16_t (high 16 bits of every result zeroed; ISA pseudocode is 32-bit). VERIFICATION: the heads-sweep oracle passes all shapes with CORRECT NUMERICS (final_state mean 7.6666 vs analytic ~7.1; v_new 8192/8192 nonzero) -- the single-kernel fault became full completion; THE FULL FLA CHAIN CAPULE NOW PASSES ([fla-warmup] passed=True -- the chain that was the vLLM crash); regression gates green (agent runs: CK synthetic+package exact, cndmask-probe2 passed=True) plus an INDEPENDENT re-run of CK synthetic on the committed tree confirming all four shapes exact. NOTED for future work: MTBUF and FLAT/GLOBAL/SCRATCH formats also carry an ACC bit per CDNA4 and remain unredirected (no known trigger). vLLM lane v8 launches next on this gem5.",
+ "gem5_fix": {
+  "branch": "zcode/gem5-absorb",
+  "files": [
+   "gpu_decoder.hh (TFE->ACC decode)",
+   "op_encodings.hh (mubufAccOffset/mubufDataIdx)",
+   "mubuf.cc (30 VDATA sites)",
+   "vop3.cc (bitop3 32-bit accumulator)",
+   "gpu_decoder.test.cc (decode test)"
+  ],
+  "precedent": "mirrors DS-ACC fix f96ecfb4b"
+ },
+ "observed_at": "2026-08-23T00:46:42",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf",
+ "verification": {
+  "fla_full_chain": "[fla-warmup] passed=True",
+  "fwdh_heads_sweep": "heads 1/4/8/16 finite=True, numerics correct (final_state 7.67 ~ analytic 7.1)",
+  "regressions": "CK synthetic+package exact; cndmask-probe2 passed (agent) + CK synthetic re-verified independently after rebuild"
+ }
+}

@@ -34,6 +34,14 @@ class Qwen35TokenGateTests(unittest.TestCase):
             {"index": 0, "expected": 27841, "actual": 279},
         )
 
+    def test_9b_uses_its_checkpoint_specific_oracle(self) -> None:
+        expected = gate.expected_continuation_token_ids("/models/Qwen3.5-9B")
+        self.assertEqual(expected, (248044, 266, 506, 506, 506, 506, 506, 506, 506, 506))
+        result = gate.compare_token_ids(
+            [248044], 1, expected_token_ids=expected
+        )
+        self.assertTrue(result["correct"])
+
     def test_missing_or_malformed_output_fails_closed(self) -> None:
         missing = gate.compare_token_ids([], 1)
         malformed = gate.compare_token_ids("27841", 1)
@@ -47,7 +55,7 @@ class Qwen35TokenGateTests(unittest.TestCase):
 
     def test_unfrozen_continuation_length_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
-            gate.compare_token_ids([27841, 27841, 27841], 3)
+            gate.compare_token_ids([27841] * 11, 11)
 
     def test_both_engine_drivers_use_the_same_gate_and_prompt(self) -> None:
         for relative in (

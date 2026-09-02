@@ -1,0 +1,16 @@
+{
+ "checkpoint_id": "CP-0110",
+ "claim": "vLLM first-failure localized to a gem5 saveexec-destination read anomaly, with two fast oracles. (1) CHAIN REPRO: tools/qwen35_vllm_fla_warmup_capsule.py replays vLLM's _warmup_prefill_kernels call (chunk_gated_delta_rule_fwd, T=64, dummies, cu_seqlens [0,64], constant-time autotune matching the lane) and panics with the SAME signature as zcode-vllm-tp1-v7: kernel with lds=73728 + 4-pointer kernarg, host-native wild-address fault at dispatch 32 (capsule: size=2 write at 0x7ec6baa47e80; lane: size=16 write at 0x...7c22) -- a ~15 min capsule replaces the 40 min lane. (2) ISA DISCRIMINATOR: disassembly of the h-kernel (from the Triton cache) shows its buffer_store_dwordx4 offsets are selected by `v_cndmask_b32_e64 vN, v111, v14, s[2:3]` immediately after saveexec-style masking; tools/qwen35_cndmask_e64_capsule.py + tools/mfma_isa_test/cndmask_e64.{hip,hsaco} adjudicate the pieces: patterns p0/p1/p2 (s_mov-written s[2:3] = 0xFFFF / all-ones / 0xFFFF0000) ALL PASS -- the e64 cndmask scalar-pair condition select is correct (hardware dst = cond ? src1 : src0; an earlier expectation-model inversion was corrected, echoing the CP-0086 lesson). p3 (s_and_saveexec_b64 s[2:3], vcc) FAILS: the following cndmask sees a VCC-shaped condition (lanes<32) instead of the destination's old-exec value (all ones), while a later raw dump of s2/s3 shows (-1,-1) -- the destination EVENTUALLY holds the correct value but an immediately-following VOP3 read sees the wrong one; exec-masking of subsequent stores shows the same transient. The saveexec execute() in src/arch/amdgpu/vega/insts/sop1.cc looks source-correct (sdst = old exec), so the defect is in operand write/read plumbing or timing. A background fix task is running against the capsule oracle with the packed-bf16 CK capsule and the lm_head capsule as regression gates. ALSO fixed en route: the launch-probe sitecustomize now survives an unopenable log path (one missing directory silently reverted a whole lane to real autotuning), and the FLA capsule documents the vllm-branch env recipe (TRITON_DEFAULT_BACKEND=amd + fast-autotune) needed to match lane kernel selection.",
+ "crash_attribution": "h-kernel offsets selected by saveexec-adjacent e64 cndmask; masked-off lanes take the wrong offset operand -> wild buffer_store_dwordx4",
+ "observed_at": "2026-08-22T18:54:57",
+ "oracles": {
+  "chain": "tools/qwen35_vllm_fla_warmup_capsule.py (panics with the v7 signature in ~15 min)",
+  "isa": "tools/qwen35_cndmask_e64_capsule.py (p0/p1/p2 pass; p3 = saveexec adjacency, fails)",
+  "regressions": [
+   "qwen35_aiter_ck_repro_capsule (synthetic+package)",
+   "qwen35_lmhead_m1_capsule"
+  ]
+ },
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

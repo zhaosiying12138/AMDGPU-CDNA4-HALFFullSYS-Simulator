@@ -1,0 +1,16 @@
+{
+ "checkpoint_id": "CP-0136",
+ "claim": "ISOLATED USER TOOLCHAIN ENVIRONMENT DELIVERED AND VERIFIED LIVE. scripts/make_amdgpu_tools_env.sh builds env/conda/amdgpu-sim-tools -- a zero-package pure-activation conda environment: conda activate puts rocm-smi (vendored tools/gemsim_smi.py), gem5-session (scripts/gem5_session_control.sh: start/stop/restart/status for one standalone listener-mode gem5 with 0700 /tmp session dir and session.env endpoint pickup), and triton-softmax (tools/triton_softmax_demo.py: single-launch fp32+bf16 softmax vs torch.softmax, no benchmark) on PATH with private Triton/XDG caches; deactivate restores the base shell. LIVE VERIFICATION: gem5-session start boots a standalone simulator (canonical per-boot job UUID, 0700 session, bridge handshake), and triton-softmax PASSES both dtypes (8x256 fp32 max_err=0.00000, 4x256 bf16 max_err=0.00000, overall PASS) against that instance via SAGR_GENERIC_BRIDGE_ENDPOINT external attach. THREE portability traps found and fixed en route, each now encoded in the generator: (1) evidence files reject paths through symlinks or with group/other permission bits -- the session must live at a real 0700 /tmp directory, not inside the conda prefix (env/conda is a symlink); (2) WSL exposes /dev/dxg, and without HSA_ENABLE_DXG_DETECTION=0 the ROCr thunk walker chases librocdxg and never reaches the hsakmt model library -- hsa_init 4104 with zero devices; HSA_ENABLE_INTERRUPT=0 likewise; (3) an interactive conda shell carries variables that break the device stack at hsa_init, so the demo wrapper re-execs through env -i + unshare with an explicit variable shuttle -- the same isolation the working capsule lanes use. README.md gains a user-facing section (one-key build, rocm-smi, gem5-session, demo).",
+ "live_verification": {
+  "gem5_session": "start -> RUNNING pid, endpoint handshake OK",
+  "triton_softmax": "fp32 max_err=0.00000 PASS; bf16 max_err=0.00000 PASS; overall PASS"
+ },
+ "observed_at": "2026-08-24T22:30:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf",
+ "traps_encoded": [
+  "0700 symlink-free session dir for evidence files",
+  "HSA_ENABLE_DXG_DETECTION=0 + HSA_ENABLE_INTERRUPT=0 on WSL",
+  "demo wrapper execs via env -i + unshare"
+ ]
+}

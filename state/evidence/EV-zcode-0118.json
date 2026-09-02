@@ -1,0 +1,17 @@
+{
+ "checkpoint_id": "CP-0118",
+ "claim": "VOP3 CLAMP DEFECT ON UNSIGNED INTEGER ADD/SUB FOUND AND FIXED; vLLM TP1 GENERATES THE GOLDEN CONTINUATION. Root cause (subagent forensics, closed end-to-end): gem5's v_sub_u32/v_add_u32/v_subrev_u32 e64 ignored the CLAMP output modifier -- hardware saturates _u32 forms into [0, 2^32-1] (the _i32 twins were already correct), gem5 wrapped. During vLLM generate, a JIT boundary/scan kernel computed per-thread search-window sizes with v_sub_u32_e64 clamp (0-1024, 512-1024): hardware saturates to 0, gem5 wrapped to 0xfffffc00/0xfffffe00. Those became the first entries of a 512-entry partition-offsets table (verified by a 2M-entry write-watch ring: written once, exactly -1024/-512, by that kernel; later deltas consistent). The downstream 'hash-probe' kernel loaded offsets[wi] correctly and computed baseA = ptr1 + (offsets[1]<<2) assuming non-negative offsets BECAUSE of the clamp; the wrapped -512 became ~+17GB and the final global_load_dword faulted unmapped -- the deterministic wfDynId-930674 crash at dispatch ~1870 (identical v9-v12). The stale-load-after-waitcnt hypothesis was falsified first by an instruction-for-instruction mirror capsule (all 10 fields x 64 lanes exact on the PRE-FIX binary -- the consumer machinery was correct; the defect only manifested in the full lane). FIX (zcode/gem5-absorb): vop3AddU32/vop3SubU32 saturation helpers in vop_semantics.hh mirroring the i32 pair; the three opcodes route through them with instData.CLAMP. RESULT: vLLM lane zcode-vllm-tp1-v19 COMPLETED exit=0, 5611 dispatches, generated_token_ids [27841, 27841], token_golden correct=true -- the first vLLM full generation on this stack. Regression gates on the fixed binary: CK synthetic (cos 0.999999) + package (bit-exact) exit 0; cndmask probe2 passed; FLA warmup chain passed; lmhead argmax exact everywhere (within_atol flag bit-identical to the pre-fix baseline, pre-existing). New oracle committed: qwen35_hashloop_capsule.py + mfma_isa_test/hashloop_probe.{hip,hsaco} (mirrors the faulting window exactly and now includes direct clamp underflow/overflow checks).",
+ "gem5_fix": "vop_semantics.hh + vop3.cc, +37/-3: vop3AddU32/vop3SubU32 clamp saturation for v_add_u32/v_sub_u32/v_subrev_u32",
+ "observed_at": "2026-08-23T13:01:29",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf",
+ "v19": {
+  "dispatches": 5611,
+  "generated": [
+   27841,
+   27841
+  ],
+  "state": "completed exit=0",
+  "token_gate": "correct=true"
+ }
+}

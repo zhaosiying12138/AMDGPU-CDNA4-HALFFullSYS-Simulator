@@ -1,0 +1,18 @@
+{
+ "checkpoint_id": "CP-0109",
+ "claim": "GEM5 PACKED-BF16-ATOMIC DEFECT FOUND AND FIXED; THE AITER CK PATH IS NOW EXACT UNDER gem5. Root cause (subagent investigation with the CP-0108 oracle): global_atomic_pk_add_bf16's host-native AMO functor (AtomicOpPkAddBF16 -> AMDGPU::PkBfloat16) wrote each raw bf16 half directly into the mxfp wrapper's 32-bit storage, but mxfp keeps elements LEFT-ALIGNED (mxfp(uint32_t) shifts the payload to the top sbits+ebits+mbits bits; bf16 = bits 31:16). The halves landed in the ignored low padding, operator float() converted every element as +0.0, and the packed bf16 atomic add was a complete silent no-op (address/data/exec-mask all correct, destination unchanged). The drifted aiter table dispatches the flydsl kernel hgemm_bf16_16x64x128x4_SPK2_W1x1_BLDS1_TN_AS1 whose split-K epilogue accumulates into C via exactly these atomics, so C kept its epilogue zeros -- the cos 0.000000 / mean 0.26 signature (mean == E|reference|, zero vs nonzero). Instrumented runs cleared every other path in the kernel (LDS-DMA staging, ds_write_b16 C-staging, ds_read_b128, v_mfma_f32_16x16x32_bf16, epilogue address math, semaphore atomics). FIX: projects/gem5 commit 7878fb26e on zcode/gem5-absorb (18 lines in src/arch/amdgpu/common/dtype/packed_types.hh: route halves through the aligning mxbfloat16(uint32_t) constructor; extract from the top of each word). Independent verification on the rebuilt final binary: synthetic table (CK path) all four shapes cos 0.999997-0.999999, mean 0.0004, exit 0; package table (torch path) remains bit-exact -- no regression. CONSEQUENCES: (1) the SGLang second-token root cause is now fixed at the SIMULATOR level too -- table state no longer decides correctness (the CP-0104 lane pin stays as belt-and-suspenders); (2) the long-standing 'aiter attention dims [0:128) loss' signature is plausibly the same no-op (split-K epilogues) and must be re-tested against this binary; (3) vLLM bring-up continues on the fixed binary (v6's fatal is void -- it ran a mid-iteration experimental gem5 build during the subagent's rebuilds; its unaligned-address buffer_store signature is not evidence). New diagnostic tools from the investigation committed alongside: qwen35_ck_isa_probe_capsule.py (structured-input probe through the real flydsl kernel + code-object dump) and qwen35_gemm_path_probe_capsule.py + mfma_isa_test/gemm_path_probes (hand-built ISA discriminator).",
+ "gem5_commit": "cb3968339 (zcode/gem5-absorb)",
+ "observed_at": "2026-08-22T17:03:41",
+ "oracle_results": {
+  "package_after": "bit-exact, exit 0",
+  "synthetic_after": "cos 0.999997-0.999999, mean 0.0004, exit 0",
+  "synthetic_before": "cos 0.000000 x4, exit 2"
+ },
+ "retest_queue": [
+  "aiter attention capsule (dims [0:128) loss signature) against the fixed binary",
+  "SGLang decode lane with the pin REMOVED to prove table-independence",
+  "vLLM TP1 lane v7 on the fixed binary"
+ ],
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

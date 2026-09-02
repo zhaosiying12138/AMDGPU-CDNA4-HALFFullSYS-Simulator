@@ -1,0 +1,13 @@
+{
+ "change": "single-launch demo: CPU randn + CPU reference; GPU executes H2D + softmax kernel + D2H only",
+ "checkpoint_id": "CP-0138",
+ "claim": "SOFTMAX DEMO SHRUNK TO A SINGLE LAUNCH AND RENAMED PER OPERATOR REQUEST. The old triton-softmax ran two dtype configurations and generated its inputs with torch.randn(..., device=cuda): each randn is a Philox RNG kernel with a 65536-workgroup grid on the simulator (the repeated grid=[65536,1,1] dispatches in the operator log were those RNG launches plus DTIF copies, not softmax), and the second dtype doubled everything. tools/softmax_demo.py replaces it: CPU-side input generation and CPU-side reference softmax mean the GPU executes exactly one H2D copy, one Triton softmax kernel, and one D2H copy; default 4x128 fp32, BLOCK_N=128. The wrapper binary triton-softmax is removed from the environment -- the entry is now plain python softmax_demo.py, and the script self-heals a hostile interactive shell by re-execing through a clean environment (unshare + env shuttle, inheriting the DXG/interrupt flags) when torch.cuda is unavailable, so no wrapper is needed. LIVE TIMED RESULT: real 2m3.17s cold is gone; the new demo completes in real 0m2.3s including python+torch import, printing 4x128 float32 max_err=0.00000 PASS -- far inside the operator's one-minute budget.",
+ "entry": "python tools/softmax_demo.py (wrapper triton-softmax removed)",
+ "observed_at": "2026-08-25T02:20:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf",
+ "timing": {
+  "new": "real 0m2.3s end-to-end, one kernel, max_err=0.00000 PASS",
+  "old": "two configs, device RNG kernels, many 65536-grid dispatches"
+ }
+}

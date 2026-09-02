@@ -223,8 +223,10 @@ class Qwen35SglangLayerGateTests(unittest.TestCase):
                     # importing SGLang in this pure-host unit test.
                     patched = gate._patched_functions
                     patched.clear()
-                    for index in range(5):
-                        patched[(index, "function")] = object()
+                    for index, name in enumerate(
+                        sorted(gate._REQUIRED_FUNCTION_WRAPPERS)
+                    ):
+                        patched[(index, name)] = object()
                     controller.arm_operator_layer(layer, ())
                 install.assert_not_called()
             self.assertTrue(controller.operator_active)

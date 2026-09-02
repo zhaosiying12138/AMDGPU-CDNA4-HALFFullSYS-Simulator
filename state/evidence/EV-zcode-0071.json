@@ -1,0 +1,49 @@
+{
+  "capsule_result_sha256": "7a98577187545c5b3f15672d77f3f48246af5dc68c914e48dae41ed64e5f162c",
+  "capsule_tensors_sha256": "2624cda1f9eea8de8b64223050236caac53dbc3f18782a817cfd7d5a9b30f9a6",
+  "checkpoint_id": "CP-0071",
+  "claim": "Generic gem5 DPP suppressed-lane repair verified on the recurrent capsule. The capsule replays the layer-0 gdn_recurrent_output operator (chunk_gated_delta_rule with in-kernel q/k l2norm) from the captured layer-gate first-mismatch inputs. Before the fix the simulator matched its own captured buggy output (rel_l2=0.0) and diverged from the NVIDIA RTX 5090 golden (rel_l2=0.4426, cosine=0.8971, gate threshold rel_l2<=0.03 cosine>=0.98 -> FAIL). After gem5 commit 5718717b6 the replay matches the golden within BF16 accumulation tolerance: rel_l2=0.004108, cosine=0.999992, max_abs=6.1e-05 (gate atol=0.015625, rtol=0.02), and no longer reproduces the buggy capture (rel_l2=0.5079). No acceptance claim: single-operator diagnostic capsule on layer 0.",
+  "environment": {
+    "gem5_binary": "projects/gem5/build/VEGA_X86/gem5.opt (worktree-private build, sha recorded in lane log)",
+    "rocr": "rebuilt stage build/rocr-stage-0401e8cd/lib (projects/rocm-systems 0401e8cdb6); the conda product prefix ROCr predates the fast-copy commits and dies at first device allocation with hipErrorInvalidImage via blit-kernel fallback"
+  },
+  "fix": "vega: suppress DPP-masked lanes instead of writing their source value (processDPP active-lane mask; row/bank/exec-masked and invalid-source lanes keep the architectural old destination; exec-inactive source reads are invalid accesses per AMD GPUOpen cross-lane semantics)",
+  "gem5_commit": "5718717b63d5dff45c9998be0b24c0ddb742d35a",
+  "metrics_after_fix_vs_golden": {
+    "actual_norm": 0.033720921725034714,
+    "actual_sha256": "59286b14700e5407e894d2abb9dbed93cc10c772c1ac74fdf0daa1ef12b3dc14",
+    "cosine_similarity": 0.9999923706054688,
+    "dtype": "bfloat16",
+    "max_abs_error": 6.103515625e-05,
+    "reference_dtype": "bfloat16",
+    "reference_norm": 0.03375452011823654,
+    "reference_sha256": "31b1a4b09697c5c718cd99a2c25c789683da3bddd4f35e18ec83e7aec2630af5",
+    "relative_l2_error": 0.0041082259535742,
+    "shape": [
+      2,
+      16,
+      128
+    ]
+  },
+  "metrics_after_fix_vs_old_buggy_capture": {
+    "actual_norm": 0.033720921725034714,
+    "actual_sha256": "59286b14700e5407e894d2abb9dbed93cc10c772c1ac74fdf0daa1ef12b3dc14",
+    "cosine_similarity": 0.8969923257827759,
+    "dtype": "bfloat16",
+    "max_abs_error": 0.00994873046875,
+    "reference_dtype": "bfloat16",
+    "reference_norm": 0.029394540935754776,
+    "reference_sha256": "2bd077febca463d0ca3f9e2af195bbc1f9fce71c7f66f01f97c73984799781a3",
+    "relative_l2_error": 0.5079377677336789,
+    "shape": [
+      2,
+      16,
+      128
+    ]
+  },
+  "metrics_before_fix_vs_golden": {
+    "cosine_similarity": 0.8971107602119446,
+    "relative_l2_error": 0.44258675453127777
+  },
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1"
+}

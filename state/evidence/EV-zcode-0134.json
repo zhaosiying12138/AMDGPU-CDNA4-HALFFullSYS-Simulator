@@ -1,0 +1,14 @@
+{
+ "checkpoint_id": "CP-0134",
+ "claim": "RECONSTRUCTION VALIDATED END-TO-END; REMOTE BACKUP COMPLETE; 9B RUNG RESUMES AT TP8. (1) The reconstructed gem5 (zcode/gem5-rebuild a6e9be550, nine fixes re-applied on the main-tree head) passes the SGLang TP1 FORMAL lane: zcode-tp1-formal-postrecon completed exit=0 with [27841, 27841] and token_golden correct=true -- this also empirically settles the DPP-semantics question left open by the deletion (the main-tree's preserve-destination DPP semantics carry the validated trajectory; no suppress repair needed for the ladder). (2) Remote backup per the operator's instruction: the main repo's zcode/sglang-tp1-dpp branch (71 commits, all evidence and capsules) is pushed to git@github.com:zhaosiying12138/AMDGPU-CDNA4-HALFFullSYS-Simulator.git, and the full reconstructed gem5 tree is pushed as zcode/gem5-backup on the same remote (verified: the branch tree differs from zcode/gem5-rebuild by one untracked IDE file only). The layered single-push truncation was routed around with a two-commit layered branch; the network later tolerated the full pack anyway. (3) The 9B rung resumes at TP8 per the operator's adjustment (TP16 exceeds this 58GB host with 16 simulators + 16 ranks; the registry-slot bug is separately diagnosed with a 64-slot build available).",
+ "backup": {
+  "remote": "git@github.com:zhaosiying12138/AMDGPU-CDNA4-HALFFullSYS-Simulator.git",
+  "main_repo": "zcode/sglang-tp1-dpp (71 commits)",
+  "gem5": "zcode/gem5-backup (full reconstructed tree; = rebuild + IDE file)"
+ },
+ "tp1_postrecon": {"exit": 0, "generated": [27841, 27841], "token_gate": "correct=true", "dpp_verdict": "main-tree preserve semantics sufficient"},
+ "next": "zcode-sglang-9b-tp8-v1 launched",
+ "observed_at": "2026-08-24T16:45:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

@@ -1,0 +1,15 @@
+{
+ "checkpoint_id": "CP-0137",
+ "claim": "USER TOOLCHAIN v2: rocm-smi now reflects standalone gem5 instances, gem5-session takes an instance count, the environment carries a short name, and the GPU model line is branded. (1) ROOT CAUSE of the all-OFF report: the SMI registry is written only by the runtime managed-session path (register_managed_daemon -> sagr_smi_registry_claim, managed_session.c:812/830); gem5-session boots a listener-mode gem5 directly, so no one ever wrote device-XX.bin. Fix: tools/gemsim_smi_publish.py -- a lease-holder daemon that writes the exact 320-byte SHA-digested record (magic/version/slot/flags, owner+daemon pids with /proc start times, epoch/connection, rank/world, uuids, gem5 exe dev/ino, monotonic ns, endpoint, zero padding) into /tmp/amdgpu-sim-smi-<uid>/device-NN.bin at mode 0600 nlink 1 in a 0700 dir and HOLDS an exclusive flock -- the reader liveness contract -- unlinking on exit; gem5-session spawns it per instance and kills it on stop. (2) gem5-session generalized to a fleet: start [N] boots N instances (1-16) with per-instance 0700 session dirs, rank i / world N, one job-uuid, SMI lease per slot; stop [i|--all]; restart reuses the last count; status per instance with dispatch counts; session.env exports SAGR_GENERIC_BRIDGE_ENDPOINT (instance 0) + SAGR_TOOLS_INSTANCE_COUNT + SAGR_TOOLS_INSTANCE_ENDPOINTS. (3) Environment renamed to AMDGPU-CDNA4-SIM installed at ~/miniforge3/envs (conda activate AMDGPU-CDNA4-SIM; SAGR_TOOLS_ENV_TARGET overrides), replacing the long-path amdgpu-sim-tools name. (4) rocm-smi gains a MODEL column and summary line: AMD Instinct MI350X (Yu Shuxin fan special edition); JSON adds device_model. LIVE VERIFIED: start 1 -> 1 ON with pid/rank; triton-softmax PASS both dtypes exact 0.00000; start 2 -> 2 ON (ranks 0,1 same job uuid); restart 1 -> 1 ON; stop --all -> 0 ON and holders reaped.",
+ "live_verification": [
+  "start 1 -> 1 ON",
+  "softmax PASS exact",
+  "start 2 -> 2 ON ranks 0/1",
+  "restart 1 -> 1 ON",
+  "stop --all -> 0 ON"
+ ],
+ "observed_at": "2026-08-25T01:40:00+08:00",
+ "root_cause": "SMI registry written only by managed-session runtime path; standalone listener-mode gem5 never wrote device records",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

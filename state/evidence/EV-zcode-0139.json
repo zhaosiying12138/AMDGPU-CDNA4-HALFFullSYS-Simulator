@@ -1,0 +1,19 @@
+{
+ "checkpoint_id": "CP-0139",
+ "claim": "HISTORICAL PERFORMANCE INVENTORY + ONE-KEY 100-TOKEN CUSTOMER DEMO DELIVERED. (A) From the recorded accepted lanes (no re-runs): SGLang TP1 0.8B e2e 1304s for prompt-2+2-tokens (vLLM TP1 643s, SGLang TP2 552s, vLLM TP2 2360s dominated by its multi-hour simulated logits all-gather, SGLang TP4 9B 1096s). Honest derived per-token: TTFT is the bulk of e2e (prefill+weight-load amortized), TPOT 0.8B SGLang TP1 ~500-1000s/token band on the 4-CU simulator; these are simulator-speed numbers, NOT GPU-speed, and are reported as such. A 100-token demo at these rates is a many-hour run -- the demo script therefore carries per-token progress UI as its primary feature. (B) tools/demo_gen.py: one-key customer demo -- python demo_gen.py \"prompt\"; SGLang offline engine on the simulated GPU, greedy, 100 tokens default; live per-token two-line progress display (token i/N, layer, sampled dispatch signature grid/wg/lds from the real gem5 dispatch-trace, elapsed, sliding window of the decoded text so-far), checkpoint kernel-log lines every 10 tokens (dispatch count, per-token average) that surface the simulator fix paths (DTIF fast-copy weight injection, Triton GDN kernels), and a closing metrics block (TTFT/TPOT/throughput/engine-load/dispatches). Self-healing environment pickup reads the gem5-session endpoint file; fails fast with a red message if no simulator is running. Compiles and --help verified.",
+ "demo": {
+  "entry": "python tools/demo_gen.py \"prompt\"",
+  "ui": "per-token progress: token i/N, layer, kernel signature, decoded-text window, checkpoint kernel logs every 10 tokens, TTFT/TPOT/throughput at close"
+ },
+ "historical_metrics": {
+  "SGLang_TP1_0.8B": "1304s",
+  "SGLang_TP2_0.8B": "552s",
+  "SGLang_TP4_9B": "1096s",
+  "note": "e2e = prompt(2 tok) + 2 generated tokens, simulator speed (not GPU speed)",
+  "vLLM_TP1_0.8B": "643s",
+  "vLLM_TP2_0.8B": "2360s (logits all-gather dominated)"
+ },
+ "observed_at": "2026-08-25T04:00:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

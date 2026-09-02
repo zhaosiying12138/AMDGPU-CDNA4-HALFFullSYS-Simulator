@@ -1,0 +1,23 @@
+{
+  "checkpoint_id": "CP-0070",
+  "claim": "Zcode independent SGLang TP1 debug lane. Worktree at /home/zhaosiying/zcode-lane on branch zcode/sglang-tp1-dpp, baseline root 93f28ae. Preserves fable5's in-flight gem5 working-tree state (c827a521d plus unstaged v_add_i32/v_sub_i32, buffer_wbl2/buffer_inv, s_wakeup, KMT control fixed-point) as gem5 commit 24866e2a6, then adds the generic DPP suppressed-lane repair (gem5 commit 5718717b6). No acceptance claim; diagnostic bring-up lane only.",
+  "copied_untracked_tools": [
+    "tools/qwen35_sglang_layer_gate/qwen35_sglang_layer_gate.py",
+    "tools/qwen35_token_gate.py",
+    "tools/qwen35_recurrent_capsule.py",
+    "tools/qwen35_nvidia_operator_golden.py",
+    "tools/compat_orjson/orjson.py",
+    "tests/test_qwen35_sglang_layer_gate.py",
+    "tests/test_qwen35_token_gate.py"
+  ],
+  "gem5_baseline_preserve_commit": "5718717b63d5dff45c9998be0b24c0ddb742d35a",
+  "root_baseline_commit": "93f28aee0bf950bee8c914d935b3038896b4a324",
+  "schema": "amdgpu-sim.zcode-lane-manifest.v1",
+  "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf",
+  "tool_hashes": {
+    "scripts/run_engine_lane.sh": "309c3a92f16bffb25ab769a78e51bcdce5e0640deb297e4691f107fdadf5bfa9",
+    "tools/qwen35_recurrent_capsule.py": "7d497654551d22c504a3205d898df6720a1f14cd2cc6aa9a40671e5752bb3aac",
+    "tools/qwen35_sglang_layer_gate/qwen35_sglang_layer_gate.py": "205f0e198036bf7d7bf7600883334ade78544d301729dce6e9867c01c0b3a3ba",
+    "tools/qwen35_token_gate.py": "58d80005b46e175c0d38ab14f12c704e6398a1381773fd2d03f9306d1bdee2e1"
+  }
+}

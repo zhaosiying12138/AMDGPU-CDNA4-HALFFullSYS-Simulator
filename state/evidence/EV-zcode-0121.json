@@ -1,0 +1,13 @@
+{
+ "checkpoint_id": "CP-0121",
+ "claim": "TP2 bring-up progress: two walls knocked down, a third characterized. (1) The SHM/direct transport deadlock (CP-0120) is steerable: NCCL_SHM_DISABLE=1 moves every channel to NET/Socket (verified in NCCL INFO logs: 'Channel 00 : 0[0] -> 1[1] [receive] via NET/Socket/0') and the lane passes the point where SHM froze. (2) The next gap self-identified: s_memrealtime (NCCL's RTC read for watchdog timeouts) was a no-flag stub the scoreboard readiness check rejected as an unknown type; now implemented in zcode/gem5-absorb (ALU classification, curTick() written to the SDATA pair -- consumers need a monotonic 64-bit clock). (3) With both fixed, the Socket-transport lane ALSO symmetric-deadlocks: both ranks' gem5s freeze at 1618 dispatches each (lane total 3236, wavefront completion frozen ~599534) with the engine host idle in generate() and NCCL proxy threads present. Two different transports deadlocking symmetrically at collective kernels points at a SHARED mechanism inside the collective kernel itself under gem5 -- leading suspect: the kernels' flag-polling loops (global atomics / host-buffer polling) in host-native mode. Next: a minimal two-process NCCL allreduce capsule (tiny buffer, one collective) to reproduce in minutes, then bisect the poll loop exactly as the FLA chain was bisected.",
+ "next": "two-process NCCL allreduce capsule; bisect the collective kernel poll loop",
+ "observed_at": "2026-08-23T17:30:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "socket_deadlock": {
+  "ranks": "both freeze at 1618 dispatches (symmetric)",
+  "suspect": "collective kernel flag polling under gem5 (transport-independent)"
+ },
+ "s_memrealtime": "implemented: ALU flag + curTick() -> SDATA pair (was no-flag stub, scoreboard-rejected)",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

@@ -1,0 +1,21 @@
+{
+ "checkpoint_id": "CP-0126",
+ "claim": "vLLM TP2 ACCEPTED; DUAL-ENGINE TP2 COMPLETE. Lane zcode-vllm-tp2-v4 (upstream vLLM at tensor_parallel_size=2 on the CU-consistent 2-GPU topology, NET/Socket transport, fast deterministic autotune, cache cap) completed exit=0 with 15606 dispatches, generated_token_ids [27841, 27841], token_golden correct=true. Getting there took three timeout walls, each named and unblocked in sequence: (1) v1 died at the final sampling step on the driver's VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS RPC timeout (default 300s) -- the sampler was alive and advancing, just simulator-slow; the lane script gained SAGR_VLLM_RPC_TIMEOUT_SECONDS. (2) v2 with 3600s died the same way -- the TP2 logits all-gather is a multi-hour collective at simulator speed. (3) v3 with 21600s RPC died on a DIFFERENT timeout: the PyTorch NCCL watchdog killing the single _ALLGATHER collective at ParallelConfig.distributed_timeout_seconds (default 600s) -- examples/vllm/qwen35_inference.py gained --distributed-timeout and the lane script SAGR_VLLM_DIST_TIMEOUT_SECONDS. (4) v4 with both at 21600s completed. The sampler itself was observed mid-flight churning through tens of millions of wavefronts on the collective kernel -- a legitimately enormous simulated workload, not a hang. GOAL LADDER: rungs 1-3 all accepted (SGLang TP1 CP-0106, vLLM TP1 CP-0119, SGLang TP2 CP-0125, vLLM TP2 this checkpoint). Remaining: CCL strengthening and Qwen3.5-9B TP16.",
+ "goal_ladder": {
+  "rung1": "SGLang TP1 accepted CP-0106",
+  "rung2": "vLLM TP1 accepted CP-0119",
+  "rung3": "SGLang TP2 accepted CP-0125; vLLM TP2 accepted CP-0126 (this)",
+  "remaining": "CCL strengthening; Qwen3.5-9B TP16"
+ },
+ "lane": "zcode-vllm-tp2-v4",
+ "result": {"exit": 0, "dispatches": 15606, "generated": [27841, 27841], "token_gate": "correct=true"},
+ "timeout_walls": [
+  "RPC VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS 300s (v1) -> SAGR_VLLM_RPC_TIMEOUT_SECONDS passthrough",
+  "RPC 3600s still short (v2)",
+  "NCCL watchdog distributed_timeout_seconds 600s on _ALLGATHER (v3) -> --distributed-timeout + SAGR_VLLM_DIST_TIMEOUT_SECONDS",
+  "both at 21600s (v4) -> complete"
+ ],
+ "observed_at": "2026-08-24T07:20:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

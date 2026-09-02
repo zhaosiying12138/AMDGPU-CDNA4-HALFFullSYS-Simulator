@@ -1,0 +1,8 @@
+{
+ "checkpoint_id": "CP-0144",
+ "claim": "TP4 demo UnboundLocalError fixed: the CP-0143 shim injection referenced env before build_worker_env() assigned it (the shim block sat above the env construction). Reordered -- env built first, shim created and prepended to PATH after -- and an AST-level use-before-assign audit of main() confirms no remaining env reads precede its assignment. Script-only delivery per operator instruction.",
+ "observed_at": "2026-08-25T06:40:00+08:00",
+ "root_cause": "shim PATH injection executed before env = build_worker_env(...)",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

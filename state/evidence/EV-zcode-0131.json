@@ -1,0 +1,10 @@
+{
+ "checkpoint_id": "CP-0131",
+ "claim": "9B TP16 bring-up state: the failing rank VARIES across runs (v1 rank 10, v2 rank 13, v3 rank 3), always at the same site -- SGLang's earliest get_device_sm() probe where torch reports 'No CUDA GPUs are available' -- while ALL nineteen simulator sessions in each run complete their bridge handshake individually (19/19 at one handshake each, healthy gem5 logs, no OOM, 44GB free). Conclusion: a CONCURRENCY RACE in per-rank simulator-session assignment or ROCr agent discovery under sixteen-way simultaneous spawn, not a capacity or budget issue (the CP-0130 budget fix already moved the failure from deterministic-8-ranks to one-random-rank). The gpu-16 topology is CU-consistent (all 16 GPU nodes at simd_count 16 after the CP-0124 script rewrite). Candidate next steps for the rung: (a) instrument the runtime's session-endpoint assignment for two ranks landing on one session (the assignment lives in prebuilt libself_amdgpu_runtime; SAGR_MANAGED_RUN_ROOT is the only knob), (b) stagger SGLang scheduler spawn or serialize torch.cuda init per rank via a sitecustomize lock, (c) raise the runtime's startup-timeout if the race is a slow-session race rather than a collision. The first three lanes' artifacts are retained under artifacts/lanes/zcode-sglang-9b-tp16-v{1,2,3}.",
+ "race_evidence": {"v1": "rank 10 died (pre-budget-fix)", "v2": "rank 13 died, 19/19 sessions handshake OK", "v3": "rank 3 died, same site get_device_sm()"},
+ "interpretation": "random-rank ROCr enumeration failure = session assignment/discovery race under 16-way concurrent spawn",
+ "candidates": ["instrument endpoint assignment in libself_amdgpu_runtime", "stagger scheduler spawn / serialize cuda init", "raise runtime startup-timeout"],
+ "observed_at": "2026-08-24T10:35:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

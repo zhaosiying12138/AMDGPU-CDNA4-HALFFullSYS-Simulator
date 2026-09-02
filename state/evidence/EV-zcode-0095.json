@@ -1,0 +1,26 @@
+{
+  "artifacts": "artifacts/lanes/zcode-decode-9/layer-gate/decode{2,3}_{conv_update,packed_decode}_states.safetensors",
+  "checkpoint_id": "CP-0095",
+  "claim": "Decode-entry state-pool capture convicts the state carry between prefill commit and first decode. The layer gate now dumps cache_indices + the SELECTED conv/ssm pool slots at the first decode kernel invocation (capture fires in the pre-arm window because layer-0's kernels run before the post-hook that arms the decode row; conv_states is positional in causal_conv1d_update). Lane zcode-decode-9 ([27841,3] reproduced, exit 3): cache_indices=[2], the conv slot holds real data, and the SSM slot [16,128,128] is FULLY POPULATED yet ESSENTENTIALLY UNCORRELATED with the correct state -- cosine 0.0007 vs the NVIDIA prefill-final golden AND vs our own prefill-committed state (the recurrent capsule's bit-exact reproduction, rel_l2 1.39 both). Combined with CP-0093 (both decode kernels and the whole m=1 layer chain bit-exact standalone) and CP-0092 (layer-0 decode input bit-exact, output diverges): slot 2's content is rewritten or misrouted between the prefill state commit and the first decode read. Prime suspects: the mamba radix cache (uses_mamba_radix_cache=True, strategy extra_buffer) re-copying pool states after prefill through device-to-device copies (the DTIF dependent-signals reject falls back to blit kernels), or a warmup/dummy decode forward overwriting the slot before the real decode step.",
+  "measurements": {
+    "cache_indices": [
+      2
+    ],
+    "conv_slot": "real data, nonzero 0.67",
+    "ssm_mean_abs": {
+      "correct": 0.001104,
+      "decode_entry": 0.001631
+    },
+    "ssm_vs_golden": {
+      "cos": 0.00071,
+      "rel_l2": 1.3899
+    },
+    "ssm_vs_own_prefill_commit": {
+      "bitexact_frac": 0.0,
+      "cos": 0.00071,
+      "rel_l2": 1.3895
+    }
+  },
+  "next": "capture the pool slot at EVERY kernel call of decode row 2 + immediately after prefill commit to bracket the rewrite; audit the mamba radix-cache extra_buffer copies (fast-copy reject->blit fallback) and any dummy decode forward",
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1"
+}

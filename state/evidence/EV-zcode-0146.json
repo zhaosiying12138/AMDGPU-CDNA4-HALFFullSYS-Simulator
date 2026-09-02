@@ -1,0 +1,21 @@
+{
+ "checkpoint_id": "CP-0146",
+ "claim": "DEMO --fast MODE VERIFIED END-TO-END: TOKEN OUTPUT ACHIEVED. zcode-lane demo_gen.py --tp 2 --fast (dummy weights) completed the full chain \u2014 engine construction, dual-rank weight injection, Mamba/KV pool allocation, warmup, and greedy decode \u2014 emitting token 1 (id 99449, TTFT 477.5s, engine load 4047s) with the progress UI, checkpoint kernel logs, and closing metrics all rendering. FIVE stacked defects were fixed en route, each independently diagnosed: (1) worker source lacked an if __name__ guard, so multiprocessing spawn re-executed module-level code and crashed with the bootstrapping error; (2) the worker environment missed the full pinned ROCm compiler stack (ROCM_PATH/HIP_PATH/HIP_CLANG_PATH) so aiter died at import with ROCm version file not found; (3) HSA_NO_SCRATCH_RECLAIM=1 was absent, which the ROCr stack hard-requires on this WSL host; (4) the worker launch needed unshare -r -m with NVML masked (WSL exposes a real NVIDIA card that makes platform selection refuse cuda+rocm dual activation); (5) the demo was rebuilding a fresh Triton/XDG cache each run, forcing the aiter JIT attention autotune to re-grind on the simulator for tens of minutes at the Mamba-cache boundary \u2014 pointing TRITON_CACHE_DIR/XDG_CACHE_HOME at the worktree persistent cache (artifacts/zcode-cache, 411 warm entries) broke through. Also fixed in passing: env-before-shim ordering (UnboundLocalError) and the tp4 hard-coded banner text. The deterministic freeze at dispatch ~494/878 that blocked four prior smoke attempts was the cold-cache JIT grind, not a deadlock \u2014 with warm caches the same boundary passes in minutes. The fast mode honestly labels its output as semantically meaningless (dummy weights) while exercising every real engine path.",
+ "fix_chain": [
+  "spawn __main__ guard",
+  "ROCM_PATH/HIP_PATH/HIP_CLANG_PATH worker env",
+  "HSA_NO_SCRATCH_RECLAIM=1",
+  "unshare+NVML-mask worker launch",
+  "persistent warm Triton/XDG caches"
+ ],
+ "live_result": {
+  "engine_load_s": 4047.0,
+  "mode": "tp2 fast dummy",
+  "token_id": 99449,
+  "total_s": 4524.5,
+  "ttft_s": 477.5
+ },
+ "observed_at": "2026-08-25T15:45:00+08:00",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf"
+}

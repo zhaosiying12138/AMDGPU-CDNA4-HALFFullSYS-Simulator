@@ -1,0 +1,37 @@
+{
+ "artifacts": "artifacts/qwen35-aiter-ck-repro-capsule/v1 (report.json, tensors.safetensors, both tables)",
+ "capsule": {
+  "exit_semantics": "0 = clean, 2 = reproduced",
+  "package_table": "all bit-exact (max 0.0, cos 1.0), torch path",
+  "shapes": [
+   [
+    1,
+    5120,
+    1024
+   ],
+   [
+    1,
+    8192,
+    1024
+   ],
+   [
+    2,
+    5120,
+    1024
+   ],
+   [
+    2,
+    8192,
+    1024
+   ]
+  ],
+  "synthetic_table": "all cos 0.000000, mean 0.26, CK path",
+  "tool": "tools/qwen35_aiter_ck_repro_capsule.py"
+ },
+ "checkpoint_id": "CP-0108",
+ "claim": "CONTROLLED MINUTES-SCALE REPRO of the gem5 CK-kernel execution defect that caused the SGLang second-token corruption. tools/qwen35_aiter_ck_repro_capsule.py calls the engine's exact linear-layer entry (aiter.tuned_gemm.tgemm.mm -> gemm_a16w16) at the decode GEMM shapes M in {1,2} x N in {5120,8192} x K=1024 under two table states, everything else identical: (a) --table package (the lane's pinned package-seeded table): ALL FOUR SHAPES BIT-EXACT vs fp64 (max_abs_diff 0.000000, cos 1.0000) via the torch-path dispatch; (b) --table synthetic (package rows + the M in {1,2} gfx950 rows for the engine's exact shapes cloned from the drifted M=1 N=8192 K=1024 entry): ALL FOUR SHAPES cos 0.000000, mean abs diff ~0.26, max ~1.3-1.5 -- total corruption via the CK-kernel dispatch. Single variable (the table rows) flips correctness: the dispatch choice is correct, the gem5 execution of the selected CK kernel is defective. This converts the previously lane-scale (40 min) aiter-CK investigation into a minutes-scale capsule with exit-code semantics (exit 2 = repro), the substrate for the gem5 fix (early-k staging defect family previously localized from the attention path). With a gem5 fix validated against this capsule, the per-lane table pin becomes a belt-and-suspenders rather than a correctness dependency -- restoring the any-operator generality requirement (table state must never decide correctness).",
+ "observed_at": "2026-08-22T12:47:15",
+ "schema": "amdgpu-sim.evidence.v1",
+ "source_lock_sha256": "dbe15dae4f3d385c36fbd263afd40d764c4fcd0de5f2992ed2b3a7e78dccb0bf",
+ "vllm_lane": "zcode-vllm-tp1-v4 still autotuning (cache accumulating; wall named in CP-0107)"
+}

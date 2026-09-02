@@ -1,0 +1,19 @@
+{
+  "checkpoint_id": "CP-0092",
+  "claim": "Decode-phase layer gate localizes the second-token defect. The extended gate (decode re-arming on single-token forwards, mid-row positions-bypass for SGLang's context-threaded layer calls) compared both decode steps of the deterministic [27841, 3] run row-by-row against the NVIDIA decode4 golden. VERDICT: decode step 1 (row 2) layer 0 INPUT is bit-exact (rel_l2 0.0) while layer 0 OUTPUT diverges catastrophically (rel_l2 1.42, cos 0.37), and the divergence persists at rel_l2 ~1.0-1.9 through all 24 layers; row 3 (decode step 2) inherits it (1.4-2.2). Scaling analysis rules out zero/half/double state updates (best residual 0.94 at scale 0.5); corr(d_actual, d_expected)=0.57 means genuinely different state-dependent computation. Since layer 0 is a GDN layer whose decode-only code path is causal_conv1d_update (Triton) + the fused recurrent decode dispatcher (Triton) -- both bypassed entirely during prefill, which matched within noise -- the defect is pinned to the GDN decode kernel pair (or their state-slot indexing), NOT to m=1 GEMM precision (same GEMMs were exact in prefill) and NOT to the triton decode attention (full-attention layers 3/7/.. get already-corrupt inputs). The first token (from the 2-token prefill forward) is exact, which is why token 1 is correct and only token 2 diverges.",
+  "evidence": {
+    "lane": "zcode-decode-5 (record-all, comparisons.jsonl 48+14 decode rows)",
+    "row2_layer_input_L0_rel_l2": 0.0,
+    "row2_layer_output_L0": {
+      "cos": 0.3657,
+      "rel_l2": 1.4229
+    },
+    "row2_layer_output_range": "0.89-1.92 across 24 layers",
+    "row3_layer_output_L0": {
+      "rel_l2": 1.773
+    },
+    "scaling_analysis": "no clean scale; corr(deltas)=0.57"
+  },
+  "next": "GDN decode kernel differential: causal_conv1d_update and the packed/fused recurrent decode Triton kernels standalone vs CPU fp32 references, seeded with layer-0 weights and the captured prefill-final conv/ssm states",
+  "schema": "amdgpu-sim.zcode-lane-evidence.v1"
+}
