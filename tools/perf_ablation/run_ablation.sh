@@ -2,14 +2,14 @@
 # Perf-ablation harness: run one SGLang TP1 0.8B 1-token lane under a named
 # configuration and capture everything the parser needs.
 #
-# Configurations (see docs/blog/gem5-performance-chapter.md):
+# Configurations are defined in docs/HANDOVER-CP-0154.md.
 #   c2-status-quo    warm cache  + correctness autotune + fastcopy fast   (= accepted lanes)
 #   c1-legacy-copy   warm cache  + correctness autotune + fastcopy legacy
 #   c0p-cold-correct cold cache  + correctness autotune + fastcopy legacy
 #   c0-cold-device   cold cache  + device autotune       + fastcopy legacy (slowest baseline)
 #
 # Usage: run_ablation.sh <config> [timeout-seconds]
-# Output: artifacts/perf-ablation-2026-08/<config>/{lane.log,runroot/,timeout.marker}
+# Output: artifacts/perf-ablation-2026-08/<config>/{lane.log,runroot.path,timeout.marker}
 set -uo pipefail
 
 ROOT=/home/zhaosiying/zcode-lane
@@ -41,7 +41,7 @@ esac
 
 DIR="${OUT}/${CONFIG}"
 rm -rf "$DIR"
-mkdir -p "$DIR/runroot"
+mkdir -p "$DIR"
 
 # The lane honors several SAGR_* inheritance points (ROCr stage, gem5
 # selection); a leaked value from an interactive shell silently swaps the
@@ -55,18 +55,20 @@ unset SAGR_ROCR_LIBRARY_DIR SAGR_MANAGED_GEM5 SAGR_MANAGED_GEM5_CONFIG \
 # AF_UNIX pathname limit is 108 bytes: the artifacts path is far too long
 # for the managed session's bridge socket (gem5 aborts with "endpoint is too
 # long"), so keep the live runroot short and archive it after the run.
-RUNROOT="/tmp/sagr-abl-${CONFIG}"
+RUNROOT="/home/zhaosiying/rabl-${CONFIG}"
 rm -rf "$RUNROOT"
+mkdir -p "$RUNROOT"
 export SAGR_MANAGED_RUN_ROOT="$RUNROOT"
+printf '%s\n' "$RUNROOT" >"${DIR}/runroot.path"
 
-echo "[ablation] config=$CONFIG timeout=${TIMEOUT_S}s runroot=$DIR"
+echo "[ablation] config=$CONFIG timeout=${TIMEOUT_S}s runroot=$RUNROOT"
 timeout --signal=TERM --kill-after=60 "$TIMEOUT_S" \
   bash "${ROOT}/scripts/run_engine_lane.sh" \
     --engine sglang --tp 1 --fast --max-new-tokens 1 \
     "${DIR}/lane.log"
 status=$?
 if (( status == 124 )); then
-  echo "[ablation] TIMEOUT after ${TIMEOUT}s" | tee "${DIR}/timeout.marker"
+  echo "[ablation] TIMEOUT after ${TIMEOUT_S}s" | tee "${DIR}/timeout.marker"
 fi
 echo "[ablation] done status=$status"
 exit "$status"

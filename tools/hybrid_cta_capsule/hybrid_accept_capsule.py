@@ -24,11 +24,10 @@ ROOT = Path(__file__).resolve().parents[2]
 faulthandler.enable()
 
 KERNELS = {
-    "plain_dp": ("_Z8plain_dpPf", 4, 64),      # grid 4 WG x 64 thr
-    "barrier_lds": ("_Z11barrier_ldsPf", 4, 128),  # grid 4 WG x 2 waves
-    "atomic_decline": ("_Z14atomic_declinePf", 4, 64),
+    "plain_dp": ("_Z8plain_dpPf", 64),
+    "barrier_lds": ("_Z11barrier_ldsPf", 128),
+    "atomic_decline": ("_Z14atomic_declinePf", 64),
 }
-TOTAL_SLOTS = 4 * 256  # wg*256 + lane worst case
 
 
 def main() -> int:
@@ -38,7 +37,11 @@ def main() -> int:
                        str(ROOT / "artifacts/hybrid-cta-capsule/v1"))))
     args = parser.parse_args()
     name = os.environ.get("HYBRID_KERNEL", "plain_dp")
-    symbol, grid, block = KERNELS[name]
+    symbol, block = KERNELS[name]
+    grid = int(os.environ.get("HYBRID_GRID_WGS", "4"))
+    if grid < 2:
+        raise ValueError("HYBRID_GRID_WGS must be at least 2")
+    total_slots = grid * 256  # kernels index wg*256 + lane
 
     image = (Path(__file__).parent / "hybrid_kernels.hsaco").read_bytes()
     hip_path = None
@@ -57,7 +60,7 @@ def main() -> int:
         ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p)]
     lib.hipModuleLaunchKernel.restype = ctypes.c_int
 
-    out = torch.zeros(TOTAL_SLOTS, dtype=torch.float32, device="cuda")
+    out = torch.zeros(total_slots, dtype=torch.float32, device="cuda")
     module = ctypes.c_void_p()
     buf = ctypes.create_string_buffer(image)
     assert lib.hipModuleLoadData(ctypes.byref(module), ctypes.cast(buf, ctypes.c_void_p)) == 0
@@ -77,6 +80,17 @@ def main() -> int:
     histogram = {}
     for v in uvals:
         histogram[v] = histogram.get(v, 0) + 1
+    oracle_correct = None
+    if name == "plain_dp":
+        oracle_correct = all(
+            uvals[wg * 256 + lane] == wg * 4096 + lane
+            for wg in range(grid)
+            for lane in range(block)
+        ) and all(
+            uvals[wg * 256 + lane] == 0
+            for wg in range(grid)
+            for lane in range(block, 256)
+        )
     result = {
         "schema": "amdgpu-sim.hybrid-cta-capsule.v1",
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -87,6 +101,7 @@ def main() -> int:
         "output_sha256": hashlib.sha256(raw).hexdigest(),
         "distinct_values": len(histogram),
         "top_values": sorted(histogram.items(), key=lambda x: -x[1])[:6],
+        "oracle_correct": oracle_correct,
         "gem5": os.environ.get("SAGR_MANAGED_GEM5", "<unset>"),
     }
     args.output_dir.mkdir(mode=0o700, parents=True, exist_ok=False)

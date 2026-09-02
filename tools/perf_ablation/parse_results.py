@@ -47,7 +47,12 @@ def parse_lane(log_text: str) -> dict:
     kv = re.findall(r"KV Cache is allocated\. elapsed=([\d.]+) s", log_text)
     if kv:
         out["kv_cache_s"] = min(float(v) for v in kv)
-    init = re.findall(r"Init timings \(s\): load_weight=([\d.]+), kv_cache_allocation=([\d.]+), scheduler_e2e=([\d.]+)", log_text)
+    init = re.findall(
+        r"(?:Engine startup timings|Init timings) \(s\): "
+        r"load_weight=([\d.]+), kv_cache_allocation=([\d.]+), "
+        r"scheduler_e2e=([\d.]+)",
+        log_text,
+    )
     if init:
         lw, kvc, sched = init[-1]
         out["init_load_weight_s"] = float(lw)
@@ -58,6 +63,8 @@ def parse_lane(log_text: str) -> dict:
         out["fastcopy"] = "/".join(fastcopy[-1])
     out["timeout"] = "TIMEOUT" in log_text
     ids = re.findall(r'"output_ids": \[([0-9, ]+)\]', log_text)
+    if not ids:
+        ids = re.findall(r'"generated_token_ids": \[([0-9, ]+)\]', log_text)
     if ids:
         out["output_ids"] = ids[-1].strip()
     return out
@@ -88,7 +95,11 @@ def main() -> int:
         row = {"config": cfgdir.name}
         if log.exists():
             row.update(parse_lane(log.read_text(errors="replace")))
-        runroot = cfgdir / "runroot"
+        runroot_file = cfgdir / "runroot.path"
+        if runroot_file.is_file():
+            runroot = Path(runroot_file.read_text(encoding="utf-8").strip())
+        else:
+            runroot = cfgdir / "runroot"
         if runroot.exists():
             row.update(parse_runroot(runroot))
         rows.append(row)
