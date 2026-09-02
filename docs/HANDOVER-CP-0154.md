@@ -109,4 +109,5 @@
 - 真实 text prompt 的 9B TP4 一 token gate：`artifacts/debug-text-9b-mmap/20260831T031432-9tp4-1tok/report.json`，4 个 rank 均完成，`actual=[271]`、`expected=[271]`、`correct=true`，无 simulator fatal/watchdog/残留进程。
 - 竞争/liveness 轻量回归：`artifacts/cp0154-hybrid-stress/run{1,2,3}/result/result.json`，固定 2048-WG，三次 `oracle_correct=true` 且 output SHA256 相同。
 - 性能根因修复：`13be941160`（`HostKmtNativeMemory` 对 pinned dispatch 缓存 allocation lookup，并对认证 shared backing 使用 mmap，保留 pread/pwrite fallback）。权重加载由约 1104s 降至约 173s。
-- lane 分支最新提交为 `dcda9267`，已推送到 `public`；gem5 分支 `zcode/gem5-hybrid-cta2` 已推送到共享 `origin`。旧 bundle 因 partial-clone 缺失基线对象无法重打包，不能作为最新分支来源。
+- 顶层 `main` 最新提交为 `7f1ea0f`，已推送到 `public`；受保护的 lane 分支 `zcode/sglang-tp1-dpp` 保留在 `fd28dde8`，不能删除或继续改写。gem5 分支 `zcode/gem5-hybrid-cta2` 保留在 `13be9411`，已推送到共享 `origin`，顶层 `main` 的 `projects/gem5` gitlink 已固定到该 commit。
+- main 当前还包含 AQL failure capsule (`e5b6a4c7`)、ROCr lazy-publication race fix 和 KMT capacity gitlinks (`08d207a7`)，以及重新物化的 source-only operator manifest (`7f1ea0f`)。旧 bundle 因 partial-clone 缺失基线对象无法重打包，不作为最新分支来源。
