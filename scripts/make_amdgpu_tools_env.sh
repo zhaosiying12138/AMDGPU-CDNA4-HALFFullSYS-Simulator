@@ -110,6 +110,13 @@ SMI
 # gem5-session: start/stop/restart/status for the standalone simulator.
 ln -sfn "${ROOT}/scripts/gem5_session_control.sh" "${TOOLS_ENV}/bin/gem5-session"
 
+# triton-softmax: one-shot Triton kernel on the simulated GPU, checked
+# against a CPU reference (exit 0/1).
+cat > "${TOOLS_ENV}/bin/triton-softmax" <<SMX
+#!/bin/sh
+exec "${ROCM_PREFIX}/bin/python" "${ROOT}/tools/softmax_demo.py" "\$@"
+SMX
+
 chmod +x "${TOOLS_ENV}/bin/rocm-smi" "${TOOLS_ENV}/bin/triton-softmax" \
         "${ROOT}/scripts/gem5_session_control.sh" "${ROOT}/tools/softmax_demo.py"
 

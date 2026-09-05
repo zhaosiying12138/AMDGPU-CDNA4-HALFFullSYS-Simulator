@@ -133,6 +133,9 @@ def build_env(tag: str, tp: int, prompt: str, max_tokens: int,
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "INIT,NET",
         "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "86400",
+        # ROCr refuses multi-agent collectives without this (the lane runner
+        # exports it too; missing it aborts RCCL init outright).
+        "HSA_NO_SCRATCH_RECLAIM": "1",
         "AITER_CONFIG_GEMM_BF16": f"{state_dir}/aiter-config/bf16_tuned_gemm.csv",
         "TRITON_CACHE_DIR": f"{state_dir}/triton-cache",
         "XDG_CACHE_HOME": f"{state_dir}/xdg",
@@ -191,11 +194,34 @@ def prepare_state(state_dir: str, run_root_tag: str) -> None:
 
 
 def launch_worker(state_dir: str, env: dict, worker_source: str):
+    """Write the worker spawn-safe and launch it under the lane's NVML mask.
+
+    Two conditions the lane runner (scripts/run_engine_lane.sh) provides and
+    a bare Popen does not:
+      - sglang's Engine forces multiprocessing "spawn", whose children re-run
+        the entry module during bootstrap; wrapping the body in a guarded
+        main() keeps it from re-executing there (the idiom of the lane
+        examples and of any spawn-safe __main__).
+      - This WSL host exposes a real NVIDIA GPU through NVML; without the
+        bind-mount mask vLLM's platform resolver sees cuda *and* rocm and
+        refuses to activate either platform.
+    """
+    indented = "\n".join(
+        ("    " + line if line.strip() else line)
+        for line in worker_source.splitlines()
+    )
     worker_path = f"{state_dir}/worker.py"
     with open(worker_path, "w") as f:
-        f.write(worker_source)
+        f.write(
+            "def _worker_main():\n" + indented + "\n\n\n"
+            'if __name__ == "__main__":\n    _worker_main()\n'
+        )
+    open("/tmp/empty-nvml.so", "w").close()
     return subprocess.Popen(
-        [f"{CONDA_PREFIX}/bin/python", worker_path],
+        ["unshare", "-r", "-m", "bash", "-c",
+         'mount --bind /tmp/empty-nvml.so /usr/lib/wsl/lib/libnvidia-ml.so.1; '
+         'exec "$0" "$@"',
+         f"{CONDA_PREFIX}/bin/python", worker_path],
         env=env,
         stdout=open(f"{state_dir}/worker.out", "w"),
         stderr=subprocess.STDOUT,
