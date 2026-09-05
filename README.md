@@ -8,7 +8,7 @@
 |---|---|
 | SGLang TP4 · Qwen3.5-9B · 金色 prompt 稳定推理 20 tokens（TTFT/TPOT/加载耗时） | [docs/assets/screenshots/hero-20tok-metrics.png](docs/assets/screenshots/hero-20tok-metrics.png) |
 | `rocm-smi`：gem5 实例启动前/后（16 槽位、MI350X 虚拟卡） | [启动前](docs/assets/screenshots/smi-before.png) · [启动后](docs/assets/screenshots/smi-after.png) |
-| AgentENV 沙箱内 SGLang TP2 golden token（归档 2026-08-26） | [docs/assets/screenshots/agentenv-vm-tp2.png](docs/assets/screenshots/agentenv-vm-tp2.png) |
+| AgentENV 沙箱内 SGLang TP2 golden token（2026-09-05 现场复跑 PASS，~12 min） | [docs/assets/screenshots/agentenv-vmrun-pass.png](docs/assets/screenshots/agentenv-vmrun-pass.png) |
 | 算子正确性回归（softmax + HIP 双模式胶囊） | [docs/assets/screenshots/operator-correctness.png](docs/assets/screenshots/operator-correctness.png) |
 
 ## 已验证能力矩阵
@@ -22,7 +22,7 @@
 | SGLang TP4 · Qwen3.5-9B（1 token golden `[271]`；另归档 10-token PASS） | `scripts/test_qwen35_tp.sh 9b-tp4`；F1/F2 双二进制复验 |
 | vLLM TP4 · Qwen3.5-9B | 未验证 |
 | CCL：AllReduce/AllGather/ReduceScatter/Broadcast/Barrier，world 2..16（验证 2/3/4/8/16） | `tests/test_gemsim_ccl_*`、`tools/gemsim_ccl_live_allreduce_acceptance.py` |
-| AgentENV 沙箱内端到端（SGLang TP2 golden token） | `tools/agentenv/vm_run_sglang.sh`；归档 `artifacts/agentenv-vm-tp2/vmrun.log` |
+| AgentENV 沙箱内端到端（SGLang TP2 golden token） | `tools/agentenv/vm_run_sglang.sh`；2026-09-05 现场复跑 PASS（沙箱内权重加载 ~330 s、全程 ~12 min）；另有 2026-08-26 归档 `artifacts/agentenv-vm-tp2/vmrun.log` |
 
 > 模型推理的截图均为 **1 token golden PASS** 口径（多 token 稳定性由 20-token 演示与归档 10-token gate 证明）——为了让展示实验只做一次，正确性由 fail-closed 门禁背书。
 
@@ -100,6 +100,8 @@ bash scripts/test_qwen35_tp.sh 9b-tp4 --tokens 1
 
 ```bash
 # 一次性：安装 AgentENV 服务端（需 sudo，详见 docs/AGENTENV_SERVICE.md）
+# WSL 重启后若服务起不来：/run 是 tmpfs，需 root 预建
+#   sudo mkdir -p /run/aenv && sudo chown aenv:aenv /run/aenv
 # 常规流程：
 aenv start --cold dockerproxy.net/library/ubuntu:24.04 --cpu 8 --memory 32768 \
   --disk-size-mb 65536 <sandbox-id>

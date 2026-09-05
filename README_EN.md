@@ -8,7 +8,7 @@ A gem5-based "HALF-FullSYS" AMD GPU simulator: **the KMD kernel driver is remove
 |---|---|
 | SGLang TP4 · Qwen3.5-9B · golden prompt, 20 stable tokens (TTFT/TPOT/load time) | [docs/assets/screenshots/hero-20tok-metrics.png](docs/assets/screenshots/hero-20tok-metrics.png) |
 | `rocm-smi` before/after gem5 instances (16 slots, virtual MI350X) | [before](docs/assets/screenshots/smi-before.png) · [after](docs/assets/screenshots/smi-after.png) |
-| SGLang TP2 golden token inside an AgentENV sandbox (archived 2026-08-26) | [docs/assets/screenshots/agentenv-vm-tp2.png](docs/assets/screenshots/agentenv-vm-tp2.png) |
+| SGLang TP2 golden token inside an AgentENV sandbox (live re-run PASS 2026-09-05, ~12 min) | [docs/assets/screenshots/agentenv-vmrun-pass.png](docs/assets/screenshots/agentenv-vmrun-pass.png) |
 | Operator-correctness regression (softmax + dual-mode HIP capsules) | [docs/assets/screenshots/operator-correctness.png](docs/assets/screenshots/operator-correctness.png) |
 
 ## Verified capability matrix
@@ -22,7 +22,7 @@ A gem5-based "HALF-FullSYS" AMD GPU simulator: **the KMD kernel driver is remove
 | SGLang TP4 · Qwen3.5-9B (1-token golden `[271]`; an archived 10-token PASS also exists) | `scripts/test_qwen35_tp.sh 9b-tp4`; F1/F2 dual-binary re-verification |
 | vLLM TP4 · Qwen3.5-9B | not verified |
 | CCL: AllReduce/AllGather/ReduceScatter/Broadcast/Barrier, worlds 2..16 (2/3/4/8/16 verified) | `tests/test_gemsim_ccl_*`, `tools/gemsim_ccl_live_allreduce_acceptance.py` |
-| End-to-end inside AgentENV sandboxes (SGLang TP2 golden token) | `tools/agentenv/vm_run_sglang.sh`; archived `artifacts/agentenv-vm-tp2/vmrun.log` |
+| End-to-end inside AgentENV sandboxes (SGLang TP2 golden token) | `tools/agentenv/vm_run_sglang.sh`; live re-run PASS 2026-09-05 (in-sandbox weight load ~330 s, ~12 min end to end); archived `artifacts/agentenv-vm-tp2/vmrun.log` (2026-08-26) |
 
 > Model-inference screenshots use the **1-token golden PASS** convention (multi-token stability is covered by the 20-token demo and the archived 10-token gate) — showcase experiments run once, correctness is backed by fail-closed gates.
 
@@ -100,6 +100,9 @@ Uses the fixed prompt 「为什么说鞠婧祎主演的《月鳞绮纪》是国�
 
 ```bash
 # One-time: install the AgentENV server (sudo required, see docs/AGENTENV_SERVICE.md)
+# After a WSL restart /run is tmpfs and empty; pre-create it as root or the
+# service's ExecStartPre fails to mkdir:
+#   sudo mkdir -p /run/aenv && sudo chown aenv:aenv /run/aenv
 # Regular flow:
 aenv start --cold dockerproxy.net/library/ubuntu:24.04 --cpu 8 --memory 32768 \
   --disk-size-mb 65536 <sandbox-id>
