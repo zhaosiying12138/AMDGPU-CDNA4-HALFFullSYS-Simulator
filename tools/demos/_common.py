@@ -186,6 +186,13 @@ def prepare_state(state_dir: str, run_root_tag: str) -> None:
     shutil.rmtree(f"/tmp/sagr-lane-zcode-demo-{run_root_tag}", ignore_errors=True)
     for sub in ("aiter-config", "triton-cache", "xdg"):
         os.makedirs(f"{state_dir}/{sub}", exist_ok=True)
+    # Seed the per-run Triton cache from the shared warm cache when present:
+    # a cold cache turns the first forward into hours of JIT (one 0.8B demo
+    # measured 6.2 h TTFT cold vs ~minutes warm).  Same convention as the
+    # lanes' warm-cache口径; a miss simply recompiles.
+    warm = f"{ROOT}/artifacts/zcode-cache/triton"
+    if os.path.isdir(warm):
+        shutil.copytree(warm, f"{state_dir}/triton-cache", dirs_exist_ok=True)
     pkg_csv = (
         f"{CONDA_PREFIX}/lib/python3.12/site-packages/aiter/configs/bf16_tuned_gemm.csv"
     )
