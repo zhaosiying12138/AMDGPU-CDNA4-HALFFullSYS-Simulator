@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | [English](README_EN.md)
 
-基于 gem5 的 AMD GPU "半全系统"（HALF-FullSYS）模拟器：**去掉 KMD 内核驱动，也不把 ROCm Runtime 装进模拟的 x86 虚拟机**——一座 AF_UNIX bridge（+ sealed memfd 共享显存）把**原封不动的宿主侧 ROCm 软件栈**（ROCr/HIP/Triton/PyTorch/aiter/SGLang/vLLM，原生 wheel）接到 gem5 模拟的 VEGA ISA + gfx950 decoder + Command Processor 上。对上游保持零修改（ROCr 仅 6 commits、+251/−61 行；LLVM/HIP/RCCL/Triton/PyTorch/vLLM/SGLang/aiter 一行未动），多 gem5 实例 + 双 CCL 路径（原版 RCCL 与自研 `gemsim_ccl` ProcessGroup 后端）支撑 **SGLang/vLLM 以 TP2 跑通 Qwen3.5-0.8B、SGLang 以 TP4 跑通 Qwen3.5-9B**，端到端 token golden 全部 PASS；一轮按功能分层的优化把单 token 模拟墙钟从基线的 4 h 超时未完成压到 **703 s（≥20.5×，保守下界）**、权重加载路径 **28.6×**（全精确）、9B 加载 **6.08×**。
+基于 gem5 的 AMD GPU "半全系统"（HALF-FullSYS）模拟器：**去掉 KMD 内核驱动，也不把 ROCm Runtime 装进模拟的 x86 虚拟机**——一座 AF_UNIX bridge（+ sealed memfd 共享显存）把**原封不动的宿主侧 ROCm 软件栈**（ROCr/HIP/Triton/PyTorch/aiter/SGLang/vLLM，原生 wheel）接到 gem5 模拟的 VEGA ISA + gfx950 decoder + Command Processor 上。对上游保持零修改（ROCr 仅 6 commits、+251/−61 行；LLVM/HIP/RCCL/Triton/PyTorch/vLLM/SGLang/aiter 一行未动），多 gem5 实例 + 双 CCL 路径（原版 RCCL 与自研 `gemsim_ccl` ProcessGroup 后端）支撑 **SGLang/vLLM 以 TP2 跑通 Qwen3.5-0.8B、双双以 TP4 跑通 Qwen3.5-9B 的 20-token 稳定推理**，端到端 token golden 全部 PASS；一轮按功能分层的优化把单 token 模拟墙钟从基线的 4 h 超时未完成压到 **703 s（≥20.5×，保守下界）**、权重加载路径 **28.6×**（全精确）、9B 加载 **6.08×**。
 
 | 成果 | 截图 |
 |---|---|
@@ -20,7 +20,7 @@
 | SGLang TP1 / TP2 · Qwen3.5-0.8B（1 token golden `[27841]`；TP2 另有 10-token gate） | `scripts/test_qwen35_tp.sh 0.8b-tp2`；归档 lane 全 PASS |
 | vLLM TP1 / TP2 · Qwen3.5-0.8B（同 golden） | lane `zcode-vllm-tp1-v19`、`zcode-vllm-tp2-v4` |
 | SGLang TP4 · Qwen3.5-9B（1 token golden `[271]`；另归档 10-token PASS） | `scripts/test_qwen35_tp.sh 9b-tp4`；F1/F2 双二进制复验 |
-| vLLM TP4 · Qwen3.5-9B | 未验证 |
+| vLLM TP4 · Qwen3.5-9B（1-token golden `[271]`；**20-token 稳定推理**，前 10 与独立 golden 逐位一致、与 SGLang 轨迹完全相同；含 hybrid LDS 筛选缺陷修复，见 gem5 `3eae4d043`） | `data/vllm-9b-tp4/*.log` 归档于 `docs/blog/2026-09-amdgpu-cdna4-halffullsys/`（2026-09-06，~5.5 h 全程） |
 | CCL：AllReduce/AllGather/ReduceScatter/Broadcast/Barrier，world 2..16（验证 2/3/4/8/16） | `tests/test_gemsim_ccl_*`、`tools/gemsim_ccl_live_allreduce_acceptance.py` |
 | AgentENV 沙箱内端到端（SGLang TP2 golden token） | `tools/agentenv/vm_run_sglang.sh`；2026-09-05 现场复跑 PASS（沙箱内权重加载 ~330 s、全程 ~12 min）；另有 2026-08-26 归档 `artifacts/agentenv-vm-tp2/vmrun.log` |
 
@@ -95,6 +95,17 @@ bash scripts/test_qwen35_tp.sh 9b-tp4 --tokens 1
 ```
 
 固定 prompt「为什么说鞠婧祎主演的《月鳞绮纪》是国产电视剧的巅峰之作？」，期望 token `[271]`；fail-closed `report.json`（token golden、gem5 panic 扫描、NCCL watchdog、HIP 209、残留进程五项）。0.8B TP2：`bash scripts/test_qwen35_tp.sh 0.8b-tp2 --tokens 1`。多 token 演示（TTFT/TPOT）：`python tools/demos/demo_sglang_tp4.py --max-tokens N`。
+
+vLLM 9B TP4（多 token 生成超过 golden 长度时自动比对已覆盖前缀）需要两个额外开关——vLLM 走 in-tree Triton 后端，autotune 的 L2-flush 必须由 shim 关闭；9B 每 rank 权重 4.3 GiB，util 按 0.019 取：
+
+```bash
+SAGR_TRITON_FAST_AUTOTUNE=1 SAGR_VLLM_GPU_MEM_UTIL=0.019 \
+SAGR_VLLM_RPC_TIMEOUT_SECONDS=86400 SAGR_VLLM_DIST_TIMEOUT_SECONDS=86400 \
+  bash scripts/run_engine_lane.sh --engine vllm --tp 4 \
+    --model models/Qwen3.5-9B --max-new-tokens 20 \
+    --prompt '为什么说鞠婧祎主演的《月鳞绮纪》是国产电视剧的巅峰之作？' \
+    <lane.log>
+```
 
 ### 6. AgentENV 沙箱内运行（可选）
 
