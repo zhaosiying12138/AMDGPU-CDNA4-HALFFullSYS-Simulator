@@ -90,11 +90,12 @@ def parse_args() -> argparse.Namespace:
         if args.prompt is None
         else MODEL_CONTINUATIONS.get(args.model_path.name, ())
     )
-    if not 1 <= args.max_new_tokens <= len(expected_tokens):
-        parser.error(
-            "--max-new-tokens must fit the frozen golden continuation "
-            f"(1..{len(expected_tokens)})"
-        )
+    if not 1 <= args.max_new_tokens:
+        parser.error("--max-new-tokens must be a positive integer")
+    # Generations longer than the frozen golden gate the covered prefix
+    # exactly and report the remainder as greedy continuation without an
+    # independent oracle (the same convention as the multi-token demos).
+    args.gate_tokens = min(args.max_new_tokens, len(expected_tokens))
     return args
 
 
@@ -175,20 +176,26 @@ def main() -> int:
     )
     actual_ids = list(outputs[0].outputs[0].token_ids)
     print("generated_token_ids=" + repr(actual_ids), flush=True)
+    gate_n = args.gate_tokens
     if args.prompt is None:
         token_gate = compare_token_ids(
-            actual_ids,
-            args.max_new_tokens,
+            actual_ids[:gate_n],
+            gate_n,
             expected_token_ids=expected_continuation_token_ids(args.model_path),
         )
     else:
         token_gate = compare_text_token_ids(
-            actual_ids,
-            args.max_new_tokens,
+            actual_ids[:gate_n],
+            gate_n,
             model_path=args.model_path,
             prompt=args.prompt,
             prompt_token_ids=prompt_token_ids,
         )
+    token_gate["golden_checked_tokens"] = gate_n
+    token_gate["greedy_continuation_tokens"] = (
+        args.max_new_tokens - gate_n
+    )
+    if args.prompt is not None:
         token_gate["generated_text_raw"] = tokenizer.decode(
             actual_ids,
             skip_special_tokens=False,
