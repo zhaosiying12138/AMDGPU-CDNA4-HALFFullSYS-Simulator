@@ -540,7 +540,7 @@ elif [[ $engine == sglang ]]; then
 else
   vllm_args=(
     --tp-size "$tp" --model-path "$model"
-    --context-length 16 --max-new-tokens "$max_new_tokens" --max-num-seqs 1
+    --context-length "${SAGR_VLLM_CONTEXT_LENGTH:-16}" --max-new-tokens "$max_new_tokens" --max-num-seqs 1
     --seed 0
     # vLLM sizes every cache pool from the utilization fraction of the
     # device's reported memory; on the simulated 287 GB device the 0.30
