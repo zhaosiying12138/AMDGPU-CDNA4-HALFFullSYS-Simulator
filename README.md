@@ -125,10 +125,13 @@ aenv exec <sandbox-id> -- bash tools/agentenv/vm_run_sglang.sh   # 沙箱内 SGL
 ## 已知限制（如实）
 
 1. **KMT scratch 准入竞态（未修）**：accurate + legacy copy + 无 idle park 的慢速配置可触发 `host_gpu_bridge.cc:3695` 竞态挂起（性能消融的截断臂源于此；全优化配置未触发）。复现材料：`artifacts/blog-perf-2026-09/results/L0-attempt2-stall-forensics/`。
-2. hybrid CTA 的功能 WG 步进是串行的（~3–4 ms/WG，不随 CU 数扩展）；decode memoization 与 light_stats 门控在 backlog。
-3. TP>1 的 CCL 仅有正确性/稳定性修复，无性能优化。
-4. layer gate 的 diffing 钩子有内存累积，24 层比到第 19 层会被 OOM killer 终止（已覆盖层全部通过）。
-5. functional-fast/hybrid 模式 simTicks 不可用于时序结论（identity banner 强制登记）。
+2. **vLLM 0.8B 分块 prefill 形状缺陷（已定性、已缓解）**：`max_num_batched_tokens=16` 切分 19-token 文本 prompt 时产 `[0]`（ctx 17/20/64 全通过；SGLang 与 9B 不受影响）。缓解：`SAGR_VLLM_CONTEXT_LENGTH`（lane 已不硬编码 16）；根因停在分块 GDN chunk kernel 层，取证见博客 §十.7。
+3. hybrid CTA 的功能 WG 步进是串行的（~3–4 ms/WG，不随 CU 数扩展）；decode memoization 与 light_stats 门控在 backlog。
+4. TP>1 的 CCL 仅有正确性/稳定性修复，无性能优化。
+5. layer gate 的 diffing 钩子有内存累积，24 层比到第 19 层会被 OOM killer 终止（已覆盖层全部通过）。
+6. functional-fast/hybrid 模式 simTicks 不可用于时序结论（identity banner 强制登记）。
+
+近期语义修复（均在 gem5 `233dc032a` / runtime `bc6f497`，细节见博客 §十.7）：hybrid 筛选的 LDS/wave 槽资源 fail-closed（大 group-segment kernel 回落时序路径而非 panic）；s_barrier 现在同时等待参与 wave 的在飞 LDS 访问（SI/CI 语义，满-LDS 串行化胶囊验收）；`SAGR_MANAGED_STARTUP_TIMEOUT_MS` 为慢宿主放宽 managed-session 启动窗。正确性套件支持 offload 到慢机复验（operator 层与 0.8B 引擎四格的跨机逐字节一致已验证）。
 
 ## 溯源与治理
 

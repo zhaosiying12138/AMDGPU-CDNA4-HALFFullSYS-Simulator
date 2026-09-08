@@ -126,10 +126,13 @@ Strategy: upstream wheels preinstalled in the image; in-house sources (gem5/runt
 ## Known limitations (stated honestly)
 
 1. **KMT scratch-admission race (unfixed)**: slow timing configurations (accurate + legacy copy + no idle park) can trigger the race at `host_gpu_bridge.cc:3695` and hang (the censored ablation arms hit this; the fully optimized configuration never has). Reproduction material: `artifacts/blog-perf-2026-09/results/L0-attempt2-stall-forensics/`.
-2. The hybrid CTA executor's functional stepping is serial (~3–4 ms/WG, does not scale with CU count); decode memoization and light_stats gating are on the backlog.
-3. TP>1 CCL has correctness/stability fixes only, no performance work.
-4. The layer gate's diffing hooks accumulate memory; a 24-layer comparison gets OOM-killed at layer 19 (all covered layers pass).
-5. simTicks under functional-fast/hybrid must not be used for timing conclusions (the identity banner records this per run).
+2. **vLLM 0.8B chunked-prefill shape defect (characterized, mitigated)**: with `max_num_batched_tokens=16` splitting a 19-token text prompt the run emits `[0]` (ctx 17/20/64 all pass; SGLang and 9B are unaffected). Mitigation: `SAGR_VLLM_CONTEXT_LENGTH` (the lane no longer hardcodes 16); the root cause is pinned to the chunked GDN kernel layer — forensics in blog §10.7.
+3. The hybrid CTA executor's functional stepping is serial (~3–4 ms/WG, does not scale with CU count); decode memoization and light_stats gating are on the backlog.
+4. TP>1 CCL has correctness/stability fixes only, no performance work.
+5. The layer gate's diffing hooks accumulate memory; a 24-layer comparison gets OOM-killed at layer 19 (all covered layers pass).
+6. simTicks under functional-fast/hybrid must not be used for timing conclusions (the identity banner records this per run).
+
+Recent semantic fixes (gem5 `233dc032a` / runtime `bc6f497`; details in blog §10.7): the hybrid screen now fails closed on LDS and wave-slot demands (large-group-segment kernels fall back to the timing path instead of panicking); s_barrier also waits for the participating waves' outstanding LDS traffic (SI/CI semantics, accepted by the full-LDS serialization capsule); `SAGR_MANAGED_STARTUP_TIMEOUT_MS` widens the managed-session startup window on slow hosts. The correctness suites support offloading to a slow machine — cross-host bit-identical results (operator suite and the 0.8B engine grid) have been verified this way.
 
 ## Provenance and governance
 
