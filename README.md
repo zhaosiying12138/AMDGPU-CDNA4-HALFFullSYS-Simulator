@@ -125,7 +125,7 @@ aenv exec <sandbox-id> -- bash tools/agentenv/vm_run_sglang.sh   # 沙箱内 SGL
 ## 已知限制（如实）
 
 1. **KMT scratch 准入竞态（未修）**：accurate + legacy copy + 无 idle park 的慢速配置可触发 `host_gpu_bridge.cc:3695` 竞态挂起（性能消融的截断臂源于此；全优化配置未触发）。复现材料：`artifacts/blog-perf-2026-09/results/L0-attempt2-stall-forensics/`。
-2. **vLLM 0.8B 分块 prefill 形状缺陷（已定性、已缓解）**：`max_num_batched_tokens=16` 切分 19-token 文本 prompt 时产 `[0]`（ctx 17/20/64 全通过；SGLang 与 9B 不受影响）。缓解：`SAGR_VLLM_CONTEXT_LENGTH`（lane 已不硬编码 16）；根因停在分块 GDN chunk kernel 层，取证见博客 §十.7。
+2. **vLLM 0.8B 分块 prefill 形状缺陷（已修复，gem5 `62d197403`）**：根因为 skinny split-K GEMM（`wvSplitKrc`，m%16==0 才启用）路径上四个独立的 gem5 缺陷叠加——AGPR 别名窗口未并入 wave 的 VGPR 预约、kernel descriptor 的 `accum_offset` 不能当统一文件别名基址、MAI 指令 acc 操作数编码（`acc[n]` = `REG_VGPR_MIN+n`）被误读、`v_dot2c_f32_f16` 未实现。修复后 vLLM 自带的 `wvSplitKrc` 包装在 16×64×512 形状、CuCount=1 与 256 全网格双判决 `match=true`（零 NaN）；探针族与 full-LDS 回归全绿（`tools/mfma_isa_test/`）。`SAGR_VLLM_CONTEXT_LENGTH` 旋钮保留。
 3. hybrid CTA 的功能 WG 步进是串行的（~3–4 ms/WG，不随 CU 数扩展）；decode memoization 与 light_stats 门控在 backlog。
 4. TP>1 的 CCL 仅有正确性/稳定性修复，无性能优化。
 5. layer gate 的 diffing 钩子有内存累积，24 层比到第 19 层会被 OOM killer 终止（已覆盖层全部通过）。
