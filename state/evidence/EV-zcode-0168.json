@@ -1,0 +1,18 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-zcode-0168",
+  "type": "engine-lane-end-to-end-verification",
+  "claim": "After the SGPR admission fix (96089d0f3), the vLLM 0.8B ctx16 engine lane -- the chunked 16+3 prefill of the 19-token golden prompt, i.e. the skinny-GEMM path closed by the AGPR fix -- runs end to end and its token gate passes bit-exact against the independent golden.",
+  "command_argv": ["scripts/run_engine_lane.sh --engine vllm --tp 1 --max-new-tokens 1 (SAGR_VLLM_CONTEXT_LENGTH=16, SAGR_TRITON_FAST_AUTOTUNE=1, SAGR_VLLM_GPU_MEM_UTIL=0.015, CU16, functional-fast)"],
+  "cwd": "/home/zhaosiying/zcode-lane",
+  "repo_commits": {"gem5": "96089d0f39...", "lane": "8b3d55a (docs baseline)"},
+  "started_at": "2026-09-10T05:53:40+08:00",
+  "ended_at": "2026-09-10T07:09:46+08:00",
+  "exit_code": 0,
+  "result": "generated_token_ids=[27841]; token_golden correct=true, checkpoint_weights=true, first_mismatch=null; clean exit (status=0). Runtime ~76 min.",
+  "stdout_sha256": null,
+  "stderr_sha256": null,
+  "environment_fingerprint": {"kernel": "WSL2 x86_64", "gem5": "gem5.opt --functional-fast (16 CUs)", "log": "/tmp/ctx16g.log"},
+  "limitations": ["The earlier [271]-vs-[0] symptom used the 0.30 mem-util CU4 default config; this verified pass used the CU16 fast-autotune recipe (the known-good remote matrix configuration). Both configurations exercise the same chunked-prefill skinny path."],
+  "redactions": []
+}
