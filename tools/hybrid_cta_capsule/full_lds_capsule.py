@@ -22,8 +22,12 @@ import torch
 
 faulthandler.enable()
 
-SYMBOLS = {"full_lds_a": ("_Z10full_lds_aPf", 256), "full_lds_b": ("_Z10full_lds_bPf", 256),
-           "full_lds_a128": ("_Z10full_lds_aPf", 128), "full_lds_b128": ("_Z10full_lds_bPf", 128)}
+SYMBOLS = {
+    "full_lds_a": ("_Z10full_lds_aPf", (256, 1)),
+    "full_lds_b": ("_Z10full_lds_bPf", (256, 1)),
+    "full_lds_c": ("_Z10full_lds_cPf", (64, 4)),
+    "full_lds_d": ("_Z10full_lds_dPf", (64, 4)),
+}
 
 
 def main() -> int:
@@ -32,7 +36,8 @@ def main() -> int:
         os.environ.get("FULL_LDS_CAPSULE_OUTPUT", "artifacts/full-lds-capsule/v1")))
     args = parser.parse_args()
     name = os.environ.get("FULL_LDS_KERNEL", "full_lds_a")
-    symbol, block = SYMBOLS[name]
+    symbol, (bx, by) = SYMBOLS[name]
+    block = bx * by
     grid = int(os.environ.get("FULL_LDS_GRID_WGS", "4"))
     total = grid * block
 
@@ -59,7 +64,7 @@ def main() -> int:
     arg0 = ctypes.c_ulonglong(out.data_ptr())
     params = (ctypes.c_void_p * 1)(ctypes.cast(ctypes.byref(arg0), ctypes.c_void_p))
     stream = torch.cuda.current_stream().cuda_stream
-    rc = lib.hipModuleLaunchKernel(fn, grid, 1, 1, block, 1, 1, 0,
+    rc = lib.hipModuleLaunchKernel(fn, grid, 1, 1, bx, by, 1, 0,
                                    ctypes.c_void_p(stream), params, None)
     assert rc == 0, f"launch {rc}"
     torch.cuda.synchronize()
