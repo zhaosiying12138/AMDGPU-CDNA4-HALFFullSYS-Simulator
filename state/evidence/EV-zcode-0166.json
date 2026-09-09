@@ -1,0 +1,18 @@
+{
+  "schema": "amdgpu-sim.evidence.v1",
+  "id": "EV-zcode-0166",
+  "type": "instruction-level-defect-fix-verification",
+  "claim": "The AGPR alias-window reservation + gfx950 MAI operand-decoding fix makes the real vLLM wvSplitKrc wrapper numerically correct, closing the wvSplitKrc defect behind the 0.8B x long-prompt (ctx16) failure.",
+  "command_argv": ["scripts/run_engine_lane.sh --engine vllm --tp 1 --capsule tools/mfma_isa_test/exact_wv_capsule.py --compute-units 4 (EXACT_WV_CUCOUNT=1 then 256; M=16 N=64 K=512 fp16)"],
+  "cwd": "/home/zhaosiying/zcode-lane",
+  "repo_commits": {"gem5": "62d1974036fc5b0ce32488e6185bbb8862e8b694", "lane": "fd28dde5d5b1d0d1f67a4f288b83ce90800c4fd0 (baseline)"},
+  "started_at": "2026-09-09T08:00:00+08:00",
+  "ended_at": "2026-09-09T09:40:00+08:00",
+  "exit_code": 0,
+  "result": "exact_wv wrapper capsule: CuCount=1 match=true nan_count=0 maxdiff=0.02548980712890625; CuCount=256 (1024 workgroups) match=true, same maxdiff. Micro-probes on the same build: mfma AGPR chain 64.0 all lanes, single-shot 32.0/32.0, atomic_ret old values 0..7, flat_acc_store 256/256, load_lds round trip, full_lds oracle_correct.",
+  "stdout_sha256": null,
+  "stderr_sha256": null,
+  "environment_fingerprint": {"kernel": "WSL2 x86_64", "gem5": "gem5.opt --functional-fast --hybrid-cta (4 CUs)", "wrapper": "vllm._custom_ops.wvSplitKrc via upstream ROCr + self-amdgpu KMT bridge"},
+  "limitations": ["The wrapper rejects shapes outside M=16, N in {32,64}, K<=512; the historical 16x16x1024 hand-rolled launches are outside its envelope and their earlier mismatches are attributed to that, not to the simulator.", "Engine-lane ctx16/17/20/64 end-to-end matrix and remote re-verification are still pending."],
+  "redactions": []
+}
