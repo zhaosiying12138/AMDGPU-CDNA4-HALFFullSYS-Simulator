@@ -168,3 +168,15 @@ Ops-side hardening alongside: `SAGR_MANAGED_STARTUP_TIMEOUT_MS` widens the manag
 - [gem5](https://github.com/gem5/gem5) and its [Full System AMD GPU model](https://www.gem5.org/documentation/general_docs/gpu_models/gpufs) — the simulation core and its VEGA/amdgpu device model.
 - [AgentENV](https://github.com/kvcache-ai/AgentENV) (Moonshot AI & kvcache-ai) — sandbox infrastructure.
 - [ROCm/rocm-systems](https://github.com/ROCm/rocm-systems) — the ROCr/ROCclr/RCCL upstream.
+
+## License
+
+> **All original code in this repository is released under the [GNU General Public License v3.0](LICENSE).**
+
+You are free to use, modify, and redistribute this project; derivative distributions must likewise be licensed under GPL-3.0, carry the full license text, and retain this notice. Third-party components keep their original licenses (all one-way compatible with GPL-3.0, unchanged by this project; their copyright and license notices are preserved in place):
+
+| Component | Form in this project | Original license |
+|---|---|---|
+| [gem5](https://github.com/gem5/gem5) (incl. the VEGA/amdgpu device model) | `projects/gem5` sub-repository + 65 modification commits (the 35 defect fixes and the bridge/HALF-FullSYS stack) | BSD-3-Clause / MIT (see its `LICENSE`, `COPYING`; third-party code under `ext/` is LGPL) |
+| [ROCr/ROCclr](https://github.com/ROCm/rocm-systems) | `patches/rocm-systems/`, 6 commits, +251/−61 lines | MIT |
+| vLLM / SGLang / PyTorch / Triton / aiter | unmodified stock wheels, used at runtime, not distributed with this repository | Apache-2.0 / BSD-3 / MIT |

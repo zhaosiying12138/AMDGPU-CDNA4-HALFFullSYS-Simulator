@@ -167,3 +167,15 @@ aenv exec <sandbox-id> -- bash tools/agentenv/vm_run_sglang.sh   # 沙箱内 SGL
 - [gem5](https://github.com/gem5/gem5) 及其 [Full System AMD GPU model](https://www.gem5.org/documentation/general_docs/gpu_models/gpufs)——本项目的模拟核心与其 VEGA/amdgpu 设备模型。
 - [AgentENV](https://github.com/kvcache-ai/AgentENV)（Moonshot AI & kvcache-ai）——沙箱基础设施。
 - [ROCm/rocm-systems](https://github.com/ROCm/rocm-systems)——ROCr/ROCclr/RCCL 上游。
+
+## 许可证
+
+> **本仓库的全部原创代码以 [GNU General Public License v3.0](LICENSE) 发布。**
+
+你可以自由使用、修改与再分发本项目；但衍生分发必须同样以 GPL-3.0 授权、附带本许可证全文并保留本声明。第三方组件保留其原始许可证（均为 GPL-3.0 单向兼容，不因本项目改变，其版权与许可声明在对应文件中原样保留）：
+
+| 组件 | 本项目中的形态 | 原始许可证 |
+|---|---|---|
+| [gem5](https://github.com/gem5/gem5)（含 VEGA/amdgpu 设备模型） | `projects/gem5` 子仓 + 65 个修改提交（35 项缺陷修复与 bridge/HALF-FullSYS 栈） | BSD-3-Clause / MIT（见其 `LICENSE`、`COPYING`；`ext/` 内第三方为 LGPL） |
+| [ROCr/ROCclr](https://github.com/ROCm/rocm-systems) | `patches/rocm-systems/`，6 提交 +251/−61 行 | MIT |
+| vLLM / SGLang / PyTorch / Triton / aiter | 零修改的原生 wheel，仅随用、不随仓分发 | Apache-2.0 / BSD-3 / MIT |
