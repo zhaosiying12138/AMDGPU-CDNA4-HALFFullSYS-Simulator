@@ -122,16 +122,18 @@ aenv exec <sandbox-id> -- bash tools/agentenv/vm_run_sglang.sh   # 沙箱内 SGL
 
 策略：上游 wheel 预装镜像；自研源码（gem5/runtime/ROCr stage）host 侧编译 + 一键发布；多沙箱互不干扰（详见 `tools/agentenv/`）。
 
-## 已知限制（如实）
+## 已修复的上游缺陷（记录）
 
-1. **~~KMT scratch 准入竞态~~（已修复，gem5 `61196d8cb`）**：根因是 gem5 对宿主拥有的 inactive-signal mailbox 做越权断言（写 1 后要求回读仍为 1）——慢速配置下 ROCr 忙轮询线程在写-读窗口内完成"消费→装 scratch→写 0"，被误判为投递失败进而关连接、双侧自旋。修复后准入不再解读 mailbox 取值（回读仅作可达性探测、发布幂等、未满足一律延期，teardown 经 KMT destroy 路径）；修复构建上回归三件套全绿。复现材料：`artifacts/blog-perf-2026-09/results/L0-attempt2-stall-forensics/`。
-2. **vLLM 0.8B 分块 prefill 形状缺陷（已修复，gem5 `62d197403` + `96089d0f3`）**：根因为 skinny split-K GEMM（`wvSplitKrc`，m%16==0 才启用）路径上五个独立的 gem5 缺陷叠加——①SGPR 分配粒度（gfx942/950 descriptor 按 16-SGPR granule 编码，老代码 /2 欠预约：panic 或共驻 wave SGPR 重叠）；②AGPR 别名窗口未并入 wave 的 VGPR 预约；③kernel descriptor 的 `accum_offset` 不能当统一文件别名基址（别名基址改从 wave 自身 VGPR 区派生，AGPR 需求从 code object 元数据恢复）；④MAI 指令 acc 操作数编码（`acc[n]` = `REG_VGPR_MIN+n`）被误读、`v_dot2c_f32_f16` 未实现；⑤SGPR 准入检查漏乘 SIMD 数（16 波 WG×208=3328 误对照单 SIMD 2048，真实分摊 4 SIMD 每侧 832）。修复后 vLLM 自带 `wvSplitKrc` 包装在 16×64×512 形状、CuCount=1 与 256 全网格双判决 `match=true`（零 NaN），**且 ctx16 引擎 lane 端到端 token gate bit-exact PASS**（EV-zcode-0168）；探针族与 full-LDS 回归全绿（`tools/mfma_isa_test/`）。`SAGR_VLLM_CONTEXT_LENGTH` 旋钮保留。
-3. hybrid CTA 的功能 WG 步进是串行的（~3–4 ms/WG，不随 CU 数扩展）；decode memoization 与 light_stats 门控在 backlog。
-4. TP>1 的 CCL 仅有正确性/稳定性修复，无性能优化。
-5. layer gate 的 diffing 钩子有内存累积，24 层比到第 19 层会被 OOM killer 终止（已覆盖层全部通过）。
-6. functional-fast/hybrid 模式 simTicks 不可用于时序结论（identity banner 强制登记）。
+1. **KMT scratch 准入竞态（gem5 `61196d8cb`）**：根因是 gem5 对宿主拥有的 inactive-signal mailbox 做越权断言（写 1 后要求回读仍为 1）——慢速配置下 ROCr 忙轮询线程在写-读窗口内完成"消费→装 scratch→写 0"，被误判为投递失败进而关连接、双侧自旋。修复后准入不再解读 mailbox 取值（回读仅作可达性探测、发布幂等、未满足一律延期、teardown 经 KMT destroy 路径）；修复构建上回归三件套全绿。复现材料：`artifacts/blog-perf-2026-09/results/L0-attempt2-stall-forensics/`。
+2. **vLLM 0.8B 分块 prefill 形状缺陷（gem5 `62d197403` + `96089d0f3`）**：根因为 skinny split-K GEMM（`wvSplitKrc`，m%16==0 才启用）路径上五个独立的 gem5 缺陷叠加——①SGPR 分配粒度（gfx942/950 descriptor 按 16-SGPR granule 编码，老代码 /2 欠预约：panic 或共驻 wave SGPR 重叠）；②AGPR 别名窗口未并入 wave 的 VGPR 预约；③kernel descriptor 的 `accum_offset` 不能当统一文件别名基址（别名基址改从 wave 自身 VGPR 区派生，AGPR 需求从 code object 元数据恢复）；④MAI 指令 acc 操作数编码（`acc[n]` = `REG_VGPR_MIN+n`）被误读、`v_dot2c_f32_f16` 未实现；⑤SGPR 准入检查漏乘 SIMD 数（16 波 WG×208=3328 误对照单 SIMD 2048，真实分摊 4 SIMD 每侧 832）。修复后 vLLM 自带 `wvSplitKrc` 包装在 16×64×512 形状、CuCount=1 与 256 全网格双判决 `match=true`（零 NaN），**且 ctx16 引擎 lane 端到端 token gate bit-exact PASS**（EV-zcode-0168）；探针族与 full-LDS 回归全绿（`tools/mfma_isa_test/`）。`SAGR_VLLM_CONTEXT_LENGTH` 旋钮保留。
+3. **近期语义修复**（gem5 `233dc032a` / runtime `bc6f497`，细节见博客 §十.7）：hybrid 筛选的 LDS/wave 槽资源 fail-closed（大 group-segment kernel 回落时序路径而非 panic）；s_barrier 现在同时等待参与 wave 的在飞 LDS 访问（SI/CI 语义，满-LDS 串行化胶囊验收）；`SAGR_MANAGED_STARTUP_TIMEOUT_MS` 为慢宿主放宽 managed-session 启动窗。正确性套件支持 offload 到慢机复验（operator 层与 0.8B 引擎四格的跨机逐字节一致已验证）。
 
-近期语义修复（均在 gem5 `233dc032a` / runtime `bc6f497`，细节见博客 §十.7）：hybrid 筛选的 LDS/wave 槽资源 fail-closed（大 group-segment kernel 回落时序路径而非 panic）；s_barrier 现在同时等待参与 wave 的在飞 LDS 访问（SI/CI 语义，满-LDS 串行化胶囊验收）；`SAGR_MANAGED_STARTUP_TIMEOUT_MS` 为慢宿主放宽 managed-session 启动窗。正确性套件支持 offload 到慢机复验（operator 层与 0.8B 引擎四格的跨机逐字节一致已验证）。
+## 已知限制
+
+1. hybrid CTA 的功能 WG 步进是串行的（~3–4 ms/WG，不随 CU 数扩展）；decode memoization 与 light_stats 门控在 backlog。
+2. TP>1 的 CCL 仅有正确性/稳定性修复，无性能优化。
+3. layer gate 的 diffing 钩子有内存累积，24 层比到第 19 层会被 OOM killer 终止（已覆盖层全部通过）。
+4. functional-fast/hybrid 模式 simTicks 不可用于时序结论（identity banner 强制登记）。
 
 ## 溯源与治理
 
