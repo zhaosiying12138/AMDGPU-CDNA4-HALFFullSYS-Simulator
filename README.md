@@ -110,7 +110,7 @@ bash scripts/test_qwen35_tp.sh 9b-tp4 --tokens 1
 
 固定 prompt「为什么说鞠婧祎主演的《月鳞绮纪》是国产电视剧的巅峰之作？」，期望 token `[271]`；fail-closed `report.json`（token golden、gem5 panic 扫描、NCCL watchdog、HIP 209、残留进程五项）。0.8B TP2：`bash scripts/test_qwen35_tp.sh 0.8b-tp2 --tokens 1`。多 token 演示（TTFT/TPOT）：`python tools/demos/demo_sglang_tp4.py --max-tokens N`。
 
-vLLM 9B TP4（多 token 生成超过 golden 长度时自动比对已覆盖前缀）需要两个额外开关——vLLM 走 in-tree Triton 后端，autotune 的 L2-flush 必须由 shim 关闭；9B 每 rank 权重 4.3 GiB，util 按 0.019 取：
+vLLM 9B TP4（多 token 生成超过 golden 长度时自动比对已覆盖前缀）需要两个额外开关——vLLM 走 in-tree Triton 后端，autotune 的 L2-flush 必须由 shim 关闭；9B 每 rank 权重 4.3 GiB，util 按 0.019 取。`SAGR_*` 环境变量前缀得名于宿主侧自研运行时 **SAGR = Self-AMDGPU-Runtime**（`projects/self-amdgpu-runtime`，C ABI 符号前缀 `sagr_*`）：
 
 ```bash
 SAGR_TRITON_FAST_AUTOTUNE=1 SAGR_VLLM_GPU_MEM_UTIL=0.019 \

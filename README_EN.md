@@ -110,7 +110,7 @@ bash scripts/test_qwen35_tp.sh 9b-tp4 --tokens 1
 
 Uses the fixed prompt 「为什么说鞠婧祎主演的《月鳞绮纪》是国产电视剧的巅峰之作？」 with expected token `[271]`; fail-closed `report.json` (token golden, gem5 panic scan, NCCL watchdog, HIP 209, stray processes). 0.8B TP2: `bash scripts/test_qwen35_tp.sh 0.8b-tp2 --tokens 1`. Multi-token demo (TTFT/TPOT): `python tools/demos/demo_sglang_tp4.py --max-tokens N`.
 
-vLLM 9B TP4 (generations longer than the golden gate the covered prefix automatically) needs two extra switches — vLLM uses the in-tree Triton backend whose autotune L2-flush must be disabled by the shim, and 9B needs 4.3 GiB of per-rank weights, so util is 0.019:
+vLLM 9B TP4 (generations longer than the golden gate the covered prefix automatically) needs two extra switches — vLLM uses the in-tree Triton backend whose autotune L2-flush must be disabled by the shim, and 9B needs 4.3 GiB of per-rank weights, so util is 0.019. The `SAGR_*` environment-variable prefix comes from the host-side in-house runtime, **SAGR = Self-AMDGPU-Runtime** (`projects/self-amdgpu-runtime`, C ABI symbol prefix `sagr_*`):
 
 ```bash
 SAGR_TRITON_FAST_AUTOTUNE=1 SAGR_VLLM_GPU_MEM_UTIL=0.019 \
