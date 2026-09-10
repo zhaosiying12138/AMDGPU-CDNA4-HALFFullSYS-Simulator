@@ -20,7 +20,7 @@
 | SGLang TP1 / TP2 · Qwen3.5-0.8B（1 token golden `[27841]`；TP2 另有 10-token gate） | `scripts/test_qwen35_tp.sh 0.8b-tp2`；归档 lane 全 PASS |
 | vLLM TP1 / TP2 · Qwen3.5-0.8B（同 golden） | lane `zcode-vllm-tp1-v19`、`zcode-vllm-tp2-v4` |
 | SGLang TP4 · Qwen3.5-9B（1 token golden `[271]`；另归档 10-token PASS） | `scripts/test_qwen35_tp.sh 9b-tp4`；F1/F2 双二进制复验 |
-| vLLM TP4 · Qwen3.5-9B（1-token golden `[271]`；**20-token 稳定推理**，前 10 与独立 golden 逐位一致、与 SGLang 轨迹完全相同；含 hybrid LDS 筛选缺陷修复，见 gem5 `3eae4d043`） | `data/vllm-9b-tp4/*.log` 归档于 `docs/blog/2026-09-amdgpu-cdna4-halffullsys/`（2026-09-06，~5.5 h 全程） |
+| vLLM TP4 · Qwen3.5-9B（1-token golden `[271]`；**20-token 稳定推理**，前 10 与独立 golden 逐位一致、与 SGLang 共享 15-token 相同前缀；含 hybrid LDS 筛选缺陷修复，见 gem5 `3eae4d043`） | `data/vllm-9b-tp4/*.log` 归档于 `docs/blog/2026-09-amdgpu-cdna4-halffullsys/`（2026-09-06，~5.5 h 全程） |
 | CCL：AllReduce/AllGather/ReduceScatter/Broadcast/Barrier，world 2..16（验证 2/3/4/8/16） | `tests/test_gemsim_ccl_*`、`tools/gemsim_ccl_live_allreduce_acceptance.py` |
 | AgentENV 沙箱内端到端（SGLang TP2 golden token） | `tools/agentenv/vm_run_sglang.sh`；2026-09-05 现场复跑 PASS（沙箱内权重加载 ~330 s、全程 ~12 min）；另有 2026-08-26 归档 `artifacts/agentenv-vm-tp2/vmrun.log` |
 

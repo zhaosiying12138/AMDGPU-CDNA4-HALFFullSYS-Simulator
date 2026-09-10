@@ -20,7 +20,7 @@ A gem5-based "HALF-FullSYS" AMD GPU simulator: **the KMD kernel driver is remove
 | SGLang TP1 / TP2 · Qwen3.5-0.8B (1-token golden `[27841]`; TP2 also has a 10-token gate) | `scripts/test_qwen35_tp.sh 0.8b-tp2`; archived lanes all PASS |
 | vLLM TP1 / TP2 · Qwen3.5-0.8B (same golden) | lanes `zcode-vllm-tp1-v19`, `zcode-vllm-tp2-v4` |
 | SGLang TP4 · Qwen3.5-9B (1-token golden `[271]`; an archived 10-token PASS also exists) | `scripts/test_qwen35_tp.sh 9b-tp4`; F1/F2 dual-binary re-verification |
-| vLLM TP4 · Qwen3.5-9B (1-token golden `[271]`; **20-token stable generation**, first 10 tokens match the independent golden bit-for-bit and are identical to SGLang's trajectory; includes the hybrid LDS-screen fix, gem5 `3eae4d043`) | archives under `docs/blog/2026-09-amdgpu-cdna4-halffullsys/data/vllm-9b-tp4/` (2026-09-06, ~5.5 h end to end) |
+| vLLM TP4 · Qwen3.5-9B (1-token golden `[271]`; **20-token stable generation**, first 10 tokens match the independent golden bit-for-bit and share a 15-token identical prefix with SGLang; includes the hybrid LDS-screen fix, gem5 `3eae4d043`) | archives under `docs/blog/2026-09-amdgpu-cdna4-halffullsys/data/vllm-9b-tp4/` (2026-09-06, ~5.5 h end to end) |
 | CCL: AllReduce/AllGather/ReduceScatter/Broadcast/Barrier, worlds 2..16 (2/3/4/8/16 verified) | `tests/test_gemsim_ccl_*`, `tools/gemsim_ccl_live_allreduce_acceptance.py` |
 | End-to-end inside AgentENV sandboxes (SGLang TP2 golden token) | `tools/agentenv/vm_run_sglang.sh`; live re-run PASS 2026-09-05 (in-sandbox weight load ~330 s, ~12 min end to end); archived `artifacts/agentenv-vm-tp2/vmrun.log` (2026-08-26) |
 
