@@ -86,7 +86,7 @@ bash scripts/regression/operator_correctness.sh --quick  # 冒烟级
 bash scripts/regression/perf_bench.sh [--with-baseline] [--tokens N] [--out DIR]
 ```
 
-两臂（SGLang TP1 · 0.8B · 1 token · CU16 · warm cache，串行独占主机）：`legacy`（快拷/空闲停泊关闭）与 `full`（全开），输出 wall/load_weight/kv/调度/请求时延与 retired dispatch 数的汇总表（`<out>/summary.md` 与逐臂 `metrics.json`）。`--with-baseline` 额外加 bugfix-only 二进制臂（`ASIM_GEM5_BASE` 指向 gem5 `8cd1db918` 树）；注意 accurate（无 functional-fast）基线会命中已知 scratch 准入竞态（见"已知限制"），不在快测范围。
+两臂（SGLang TP1 · 0.8B · 1 token · CU16 · warm cache，串行独占主机）：`legacy`（快拷/空闲停泊关闭）与 `full`（全开），输出 wall/load_weight/kv/调度/请求时延与 retired dispatch 数的汇总表（`<out>/summary.md` 与逐臂 `metrics.json`）。`--with-baseline` 额外加 bugfix-only 二进制臂（`ASIM_GEM5_BASE` 指向 gem5 `8cd1db918` 树）；注意 accurate（无 functional-fast）基线曾命中 scratch 准入竞态（已修复，gem5 `61196d8cb`），不在快测范围。
 
 ### 5. 端到端：SGLang Qwen3.5-9B · TP4 · 金色 prompt
 
@@ -125,7 +125,7 @@ aenv exec <sandbox-id> -- bash tools/agentenv/vm_run_sglang.sh   # 沙箱内 SGL
 ## 已知限制（如实）
 
 1. **~~KMT scratch 准入竞态~~（已修复，gem5 `61196d8cb`）**：根因是 gem5 对宿主拥有的 inactive-signal mailbox 做越权断言（写 1 后要求回读仍为 1）——慢速配置下 ROCr 忙轮询线程在写-读窗口内完成"消费→装 scratch→写 0"，被误判为投递失败进而关连接、双侧自旋。修复后准入不再解读 mailbox 取值（回读仅作可达性探测、发布幂等、未满足一律延期，teardown 经 KMT destroy 路径）；修复构建上回归三件套全绿。复现材料：`artifacts/blog-perf-2026-09/results/L0-attempt2-stall-forensics/`。
-2. **vLLM 0.8B 分块 prefill 形状缺陷（已修复，gem5 `62d197403`）**：根因为 skinny split-K GEMM（`wvSplitKrc`，m%16==0 才启用）路径上四个独立的 gem5 缺陷叠加——AGPR 别名窗口未并入 wave 的 VGPR 预约、kernel descriptor 的 `accum_offset` 不能当统一文件别名基址、MAI 指令 acc 操作数编码（`acc[n]` = `REG_VGPR_MIN+n`）被误读、`v_dot2c_f32_f16` 未实现。修复后 vLLM 自带的 `wvSplitKrc` 包装在 16×64×512 形状、CuCount=1 与 256 全网格双判决 `match=true`（零 NaN）；探针族与 full-LDS 回归全绿（`tools/mfma_isa_test/`）。`SAGR_VLLM_CONTEXT_LENGTH` 旋钮保留。
+2. **vLLM 0.8B 分块 prefill 形状缺陷（已修复，gem5 `62d197403` + `96089d0f3`）**：根因为 skinny split-K GEMM（`wvSplitKrc`，m%16==0 才启用）路径上五个独立的 gem5 缺陷叠加——①SGPR 分配粒度（gfx942/950 descriptor 按 16-SGPR granule 编码，老代码 /2 欠预约：panic 或共驻 wave SGPR 重叠）；②AGPR 别名窗口未并入 wave 的 VGPR 预约；③kernel descriptor 的 `accum_offset` 不能当统一文件别名基址（别名基址改从 wave 自身 VGPR 区派生，AGPR 需求从 code object 元数据恢复）；④MAI 指令 acc 操作数编码（`acc[n]` = `REG_VGPR_MIN+n`）被误读、`v_dot2c_f32_f16` 未实现；⑤SGPR 准入检查漏乘 SIMD 数（16 波 WG×208=3328 误对照单 SIMD 2048，真实分摊 4 SIMD 每侧 832）。修复后 vLLM 自带 `wvSplitKrc` 包装在 16×64×512 形状、CuCount=1 与 256 全网格双判决 `match=true`（零 NaN），**且 ctx16 引擎 lane 端到端 token gate bit-exact PASS**（EV-zcode-0168）；探针族与 full-LDS 回归全绿（`tools/mfma_isa_test/`）。`SAGR_VLLM_CONTEXT_LENGTH` 旋钮保留。
 3. hybrid CTA 的功能 WG 步进是串行的（~3–4 ms/WG，不随 CU 数扩展）；decode memoization 与 light_stats 门控在 backlog。
 4. TP>1 的 CCL 仅有正确性/稳定性修复，无性能优化。
 5. layer gate 的 diffing 钩子有内存累积，24 层比到第 19 层会被 OOM killer 终止（已覆盖层全部通过）。
