@@ -138,9 +138,15 @@ aenv exec <sandbox-id> -- bash tools/agentenv/vm_run_sglang.sh   # 沙箱内 SGL
 
 ## 已修复的上游缺陷（记录）
 
-1. **KMT scratch 准入竞态（gem5 `61196d8cb`）**：根因是 gem5 对宿主拥有的 inactive-signal mailbox 做越权断言（写 1 后要求回读仍为 1）——慢速配置下 ROCr 忙轮询线程在写-读窗口内完成"消费→装 scratch→写 0"，被误判为投递失败进而关连接、双侧自旋。修复后准入不再解读 mailbox 取值（回读仅作可达性探测、发布幂等、未满足一律延期、teardown 经 KMT destroy 路径）；修复构建上回归三件套全绿。复现材料：`artifacts/blog-perf-2026-09/results/L0-attempt2-stall-forensics/`。
-2. **vLLM 0.8B 分块 prefill 形状缺陷（gem5 `62d197403` + `96089d0f3`）**：根因为 skinny split-K GEMM（`wvSplitKrc`，m%16==0 才启用）路径上五个独立的 gem5 缺陷叠加——①SGPR 分配粒度（gfx942/950 descriptor 按 16-SGPR granule 编码，老代码 /2 欠预约：panic 或共驻 wave SGPR 重叠）；②AGPR 别名窗口未并入 wave 的 VGPR 预约；③kernel descriptor 的 `accum_offset` 不能当统一文件别名基址（别名基址改从 wave 自身 VGPR 区派生，AGPR 需求从 code object 元数据恢复）；④MAI 指令 acc 操作数编码（`acc[n]` = `REG_VGPR_MIN+n`）被误读、`v_dot2c_f32_f16` 未实现；⑤SGPR 准入检查漏乘 SIMD 数（16 波 WG×208=3328 误对照单 SIMD 2048，真实分摊 4 SIMD 每侧 832）。修复后 vLLM 自带 `wvSplitKrc` 包装在 16×64×512 形状、CuCount=1 与 256 全网格双判决 `match=true`（零 NaN），**且 ctx16 引擎 lane 端到端 token gate bit-exact PASS**（EV-zcode-0168）；探针族与 full-LDS 回归全绿（`tools/mfma_isa_test/`）。`SAGR_VLLM_CONTEXT_LENGTH` 旋钮保留。
-3. **近期语义修复**（gem5 `233dc032a` / runtime `bc6f497`，细节见博客 §十.7）：hybrid 筛选的 LDS/wave 槽资源 fail-closed（大 group-segment kernel 回落时序路径而非 panic）；s_barrier 现在同时等待参与 wave 的在飞 LDS 访问（SI/CI 语义，满-LDS 串行化胶囊验收）；`SAGR_MANAGED_STARTUP_TIMEOUT_MS` 为慢宿主放宽 managed-session 启动窗。正确性套件支持 offload 到慢机复验（operator 层与 0.8B 引擎四格的跨机逐字节一致已验证）。
+四周内在 gem5（34 项）与 ROCr（1 项）共修复 **35 项上游缺陷**，按层分组列要；每项的背景、触发条件与根因修法在博客 §七 逐条展开：
+
+- **VEGA ISA / decoder 层（10 项）**：SMEM SBASE 操作数未按 2 倍缩放；`v_mfma_f32_16x16x16_bf16` 解码桩 abort；`ds_swizzle_b32` 不执行真操作数（静默污染 l2norm 数值）；SDWA 225 处 fail-closed panic 收敛为共享操作数层；DS 编码 ACC 位被当非法（aiter CK GEMM 首字即命中）；DPP 禁用 lane 的目标被无置换源覆盖（wave 归约部分和翻倍）；MUBUF cache-control 与 VOP3 i32 缺失；九项重建系列（packed-bf16 原子对齐、`STORE_BYTE_D16_HI` 解码、MUBUF/FLAT ACC 重定向、4×4×4 MFMA、clamp 饱和、`v_bitop3`、`s_memrealtime`、故障流转储、准入预算）；gfx942/950 字面量 FMA 解码别名；未命名 selector 反汇编 fatal + 首个全局原子 abort。
+- **gpu-compute 微体系时序层（8 项）**：wave 带在飞内存响应 retire（假 VGPR 越界 panic）；内存响应记错发出 lane（`s_waitcnt lgkmcnt` 活锁）；重复地址 lane 记账不一致；CU 在内存未清空时入睡（响应永不投递）；icache invalidate 不注销 LGKM 记录；带 ALU/Nop 语义的 DS 指令从不计入 lgkmcnt（先 fail-closed 暴露、再按组段语义根修）；vmcnt/expcnt/lgkmcnt 记账泄漏；"宽目标记分板冒险"诊断的**主动撤回**（两项结论系复现器自身缺陷，撤回记录留档）。
+- **KMT / 内存生命周期层（4 项）**：不安全的延迟释放方案整体回退（陈旧 VA 注册冲突）；kernarg 指针 pinning（只 pin 解析到 live allocation 的 64 位字）；packed kernarg 槽位 4 字节偏移扫描；scratch 请求幂等化（TP2 初始化死锁根修）。
+- **bridge / 多线程并发竞态（8 项）**：hybrid dispatch 生命周期竞态（执行票据 + 完成序）；2048-WG 单事件排空饿死 SIGIO（改切片执行）；客户端准入预算 8+8→64+64（TP16 第 17 个客户端静默失败）；TP16 变 rank 握手竞态；对称 collective / `reduce_scatter` 确定性死锁（根因报告入库）；ROCr 懒 blit shader 发布未串行（自家改动引入的并发问题同样修）；aiter 调优表跨 lane 互写（per-lane 冻结表）；hybrid 筛选漏检 LDS/wave 槽资源（per-dispatch 资源检查——vLLM 9B TP4 跑通的最后一环）。
+- **收官五重缺陷战役（5 项，指令级取证）**：s_barrier LDS 排空（波到达≠波完成）；SGPR 分配粒度（CDNA3/4 的 16-SGPR granule 被 halve，静默 NaN 或 panic）；AGPR 别名窗口四子缺陷（别名窗不预约 / `accum_offset` 不可作基址 / MAI acc 编码误读 / `v_dot2c_f32_f16` 未实现）；KMT scratch 准入竞态（对宿主 mailbox 越权断言，慢配置双侧自旋）；SGPR 准入漏乘 SIMD 数（16 波 workgroup 误杀）。战役把 0.8B × 长文本的形状专属失败追到指令级，终判 ctx16 引擎 lane 端到端 token gate **bit-exact PASS**；vLLM 自带 `wvSplitKrc` 包装 CuCount=1/256 双判决 match，探针族与 full-LDS 回归常驻全绿（`tools/mfma_isa_test/`）。
+
+运维侧另有语义加固：`SAGR_MANAGED_STARTUP_TIMEOUT_MS` 为慢宿主放宽 managed-session 启动窗；正确性套件支持跨机 offload 复验（operator 层与 0.8B 引擎四格逐字节一致）。
 
 ## 已知限制
 
