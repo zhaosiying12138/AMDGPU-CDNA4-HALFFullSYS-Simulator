@@ -38,6 +38,20 @@ A gem5-based "HALF-FullSYS" AMD GPU simulator: **the KMD kernel driver is remove
 
 Layer contributions (load path): DTIF fast copy 35.1% > functional-fast 28.4% > KMT mapping cache 26.2% > hybrid CTA 9.3% > idle park/progress 0.9%. Methodology, ablation ladder, and per-layer data: `docs/blog/2026-09-amdgpu-cdna4-halffullsys/` (data sources `data/*.json`).
 
+The effect charts behind the three headline rows (from the blog's archived-data figures):
+
+0.8B TP1 single-token ablation ladder (≥20.5× against the censored baseline, conservative lower bound; hatched = censored arms):
+
+![0.8B TP1 ablation waterfall](docs/assets/charts/waterfall.png)
+
+Per-layer contributions on the 0.8B weight-load path, 3355 s → 117 s (exact at every step):
+
+![weight-load path layer contributions](docs/assets/charts/contribution.png)
+
+9B TP4 weight-load comparison (F1 all-optimizations vs F2 bugfix-only dual arms, 6.08×):
+
+![9B weight-load comparison](docs/assets/charts/nineb-load.png)
+
 ## Quick start
 
 ### 0. Prerequisites

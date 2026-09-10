@@ -38,6 +38,20 @@
 
 分层贡献（加载路径）：DTIF fast copy 35.1% > functional-fast 28.4% > KMT mapping cache 26.2% > hybrid CTA 9.3% > idle park/progress 0.9%。口径、消融阶梯与逐层数据见 `docs/blog/2026-09-amdgpu-cdna4-halffullsys/`（数据源 `data/*.json` 可溯源）。
 
+三条 headline 的效果图（与上表逐行对应，均出自博客的归档数据图）：
+
+0.8B TP1 单 token 消融阶梯（≥20.5× 对截断基线，保守下界；斜纹 = 截断臂）：
+
+![0.8B TP1 消融阶梯瀑布图](docs/assets/charts/waterfall.png)
+
+0.8B 权重加载路径 3355 s → 117 s 的分层贡献（每一级都精确完成）：
+
+![权重加载路径分层贡献](docs/assets/charts/contribution.png)
+
+9B TP4 权重加载对照（F1 全优化 vs F2 bugfix-only 双臂，6.08×）：
+
+![9B 权重加载对照](docs/assets/charts/nineb-load.png)
+
 ## 快速开始
 
 ### 0. 前置条件
