@@ -2,14 +2,14 @@
 
 [简体中文](README.md) | [English](README_EN.md)
 
-基于 gem5 的 AMD GPU "半全系统"（HALF-FullSYS）模拟器：**去掉 KMD 内核驱动，也不把 ROCm Runtime 装进模拟的 x86 虚拟机**——一座 AF_UNIX bridge（+ sealed memfd 共享显存）把**原封不动的宿主侧 ROCm 软件栈**（ROCr/HIP/Triton/PyTorch/aiter/SGLang/vLLM，原生 wheel）接到 gem5 模拟的 VEGA ISA + gfx950 decoder + Command Processor 上。对上游保持零修改（ROCr 仅 6 commits、+251/−61 行；LLVM/HIP/RCCL/Triton/PyTorch/vLLM/SGLang/aiter 一行未动），多 gem5 实例 + 双 CCL 路径（原版 RCCL 与自研 `gemsim_ccl` ProcessGroup 后端）支撑 **SGLang/vLLM 以 TP2 跑通 Qwen3.5-0.8B、双双以 TP4 跑通 Qwen3.5-9B 的 20-token 稳定推理**，端到端 token golden 全部 PASS；一轮按功能分层的优化把单 token 模拟墙钟从基线的 4 h 超时未完成压到 **703 s（≥20.5×，保守下界）**、权重加载路径 **28.6×**（全精确）、9B 加载 **6.08×**。
+基于 gem5 的 AMD GPU "半全系统"（HALF-FullSYS）模拟器：**去掉 KMD 内核驱动，也不把 ROCm Runtime 装进模拟的 x86 虚拟机**——一座 AF_UNIX bridge（+ sealed memfd 共享显存）把**原封不动的宿主侧 ROCm 软件栈**（ROCr/HIP/Triton/PyTorch/aiter/SGLang/vLLM，原生 wheel）接到 gem5 模拟的 VEGA ISA + gfx950 decoder + Command Processor 上。对上游保持零修改（ROCr 仅 6 commits、+251/−61 行；LLVM/HIP/RCCL/Triton/PyTorch/vLLM/SGLang/aiter 一行未动），多 gem5 实例 + 双 CCL 路径（原版 RCCL 与自研 `gemsim_ccl` ProcessGroup 后端）支撑 **SGLang/vLLM 以 TP2 跑通 Qwen3.5-0.8B、双双以 TP4 跑通 Qwen3.5-9B 的 20-token 稳定推理**，端到端 token golden 全部 PASS——**9B TP4 上 TTFT 仅 ~27 分钟、此后每 token 15–18 分钟（TPOT）、19 GB 权重 ~3.5 分钟装载完**，对逐指令模拟器而言这是可日常运转的验证速度。一轮按功能分层的优化把 0.8B（SGLang TP1）单 token 模拟墙钟从基线的 4 h 超时未完成压到 **703 s（≥20.5×，保守下界）**、权重加载路径 **28.6×**（全精确）、9B 加载 **6.08×**；过程中沿真实引擎负载修复了 gem5/ROCr 上游 **35 项缺陷**（含把 0.8B × 长文本失败追到指令级的五重缺陷战役，见「已修复的上游缺陷」）。
 
 | 成果 | 截图 |
 |---|---|
-| SGLang TP4 · Qwen3.5-9B · 金色 prompt 稳定推理 20 tokens（TTFT/TPOT/加载耗时） | [docs/assets/screenshots/hero-20tok-metrics.png](docs/assets/screenshots/hero-20tok-metrics.png) |
-| `rocm-smi`：gem5 实例启动前/后（16 槽位、MI350X 虚拟卡） | [启动前](docs/assets/screenshots/smi-before.png) · [启动后](docs/assets/screenshots/smi-after.png) |
-| AgentENV 沙箱内 SGLang TP2 golden token（2026-09-05 现场复跑 PASS，~12 min） | [docs/assets/screenshots/agentenv-vmrun-pass.png](docs/assets/screenshots/agentenv-vmrun-pass.png) |
-| 算子正确性回归（softmax + HIP 双模式胶囊） | [docs/assets/screenshots/operator-correctness.png](docs/assets/screenshots/operator-correctness.png) |
+| SGLang TP4 · Qwen3.5-9B · 金色 prompt 稳定推理 20 tokens（TTFT/TPOT/加载耗时） | ![SGLang TP4 20-token 指标](docs/assets/screenshots/hero-20tok-metrics.png) |
+| `rocm-smi`：gem5 实例启动前/后（16 槽位、MI350X 虚拟卡） | ![rocm-smi 启动前](docs/assets/screenshots/smi-before.png) ![rocm-smi 四实例在线](docs/assets/screenshots/smi-after.png) |
+| AgentENV 沙箱内 SGLang TP2 golden token（2026-09-05 现场复跑 PASS，~12 min） | ![沙箱内 SGLang TP2 golden PASS](docs/assets/screenshots/agentenv-vmrun-pass.png) |
+| 算子正确性回归（softmax + HIP 双模式胶囊） | ![算子正确性回归](docs/assets/screenshots/operator-correctness.png) |
 
 ## 已验证能力矩阵
 
