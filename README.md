@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | [English](README_EN.md)
 
-基于 gem5 的 AMD GPU "半全系统"（HALF-FullSYS）模拟器：**去掉 KMD 内核驱动，也不把 ROCm Runtime 装进模拟的 x86 虚拟机**——一座 AF_UNIX bridge（+ sealed memfd 共享显存）把**原封不动的宿主侧 ROCm 软件栈**（ROCr/HIP/Triton/PyTorch/aiter/SGLang/vLLM，原生 wheel）接到 gem5 模拟的 VEGA ISA + gfx950 decoder + Command Processor 上。对上游保持零修改（ROCr 仅 6 commits、+251/−61 行；LLVM/HIP/RCCL/Triton/PyTorch/vLLM/SGLang/aiter 一行未动），多 gem5 实例 + 双 CCL 路径（原版 RCCL 与自研 `gemsim_ccl` ProcessGroup 后端）支撑 **SGLang/vLLM 以 TP2 跑通 Qwen3.5-0.8B、双双以 TP4 跑通 Qwen3.5-9B 的 20-token 稳定推理**，端到端 token golden 全部 PASS——**9B TP4 上 TTFT 仅 ~27 分钟、此后每 token 15–18 分钟（TPOT）、19 GB 权重 ~3.5 分钟装载完**，对逐指令模拟器而言这是可日常运转的验证速度。一轮按功能分层的优化把 0.8B（SGLang TP1）单 token 模拟墙钟从基线的 4 h 超时未完成压到 **703 s（≥20.5×，保守下界）**、权重加载路径 **28.6×**（全精确）、9B 加载 **6.08×**；过程中沿真实引擎负载修复了 gem5/ROCr 上游 **35 项缺陷**（含把 0.8B × 长文本失败追到指令级的五重缺陷战役，见「已修复的上游缺陷」）。
+基于 gem5 的 AMD GPU "半全系统"（HALF-FullSYS）模拟器：**去掉 KMD 内核驱动，也不把 ROCm Runtime 装进模拟的 x86 虚拟机**——一座 AF_UNIX bridge（+ sealed memfd 共享显存）把**原封不动的宿主侧 ROCm 软件栈**（ROCr/HIP/Triton/PyTorch/aiter/SGLang/vLLM，原生 wheel）接到 gem5 模拟的 VEGA ISA + gfx950 decoder + Command Processor 上。对上游保持零修改（ROCr 仅 6 commits、+251/−61 行；LLVM/HIP/RCCL/Triton/PyTorch/vLLM/SGLang/aiter 一行未动），多 gem5 实例 + 双 CCL 路径（CCL = Collective Communication Library，集合通信库；原版 RCCL 与自研 `gemsim_ccl` ProcessGroup 后端）支撑 **SGLang/vLLM 以 TP2 跑通 Qwen3.5-0.8B、双双以 TP4 跑通 Qwen3.5-9B 的 20-token 稳定推理**，端到端 token golden 全部 PASS——**9B TP4 上 TTFT（Time-To-First-Token，首 token 延迟）仅 ~27 分钟、此后每 token 15–18 分钟（TPOT，Time-Per-Output-Token，每 token 生成耗时）、19 GB 权重 ~3.5 分钟装载完**，对逐指令模拟器而言这是可日常运转的验证速度。一轮按功能分层的优化把 0.8B（SGLang TP1）单 token 模拟墙钟从基线的 4 h 超时未完成压到 **703 s（≥20.5×，保守下界）**、权重加载路径 **28.6×**（全精确）、9B 加载 **6.08×**；过程中沿真实引擎负载修复了 gem5/ROCr 上游 **35 项缺陷**（含把 0.8B × 长文本失败追到指令级的五重缺陷战役，见「已修复的上游缺陷」）。
 
 | 成果 | 截图 |
 |---|---|
@@ -17,7 +17,7 @@
 |---|---|
 | HIP C 算子（hsa/hipModuleLoadData 胶囊：plain_dp / barrier_lds / atomic_decline） | 双模式（functional-fast vs hybrid）输出 SHA256 逐字节一致；`scripts/regression/operator_correctness.sh` |
 | Triton kernel（softmax / vecadd / SiluAndMul） | `examples/quickstart/`、`tools/softmax_demo.py`（CPU 参照，实测 ~2 s PASS） |
-| SGLang TP1 / TP2 · Qwen3.5-0.8B（1 token golden `[27841]`；TP2 另有 10-token gate） | `scripts/test_qwen35_tp.sh 0.8b-tp2`；归档 lane 全 PASS |
+| SGLang TP1 / TP2 · Qwen3.5-0.8B（1 token golden `[27841]`；TP2 另有 10-token gate） | `scripts/test_qwen35_tp.sh 0.8b-tp2`；归档 lane（lane = 一次受控隔离的完整引擎运行，含日志/指标/gate）全 PASS |
 | vLLM TP1 / TP2 · Qwen3.5-0.8B（同 golden） | lane `zcode-vllm-tp1-v19`、`zcode-vllm-tp2-v4` |
 | SGLang TP4 · Qwen3.5-9B（1 token golden `[271]`；另归档 10-token PASS） | `scripts/test_qwen35_tp.sh 9b-tp4`；F1/F2 双二进制复验 |
 | vLLM TP4 · Qwen3.5-9B（1-token golden `[271]`；**20-token 稳定推理**，前 10 与独立 golden 逐位一致、与 SGLang 共享 15-token 相同前缀；含 hybrid LDS 筛选缺陷修复，见 gem5 `3eae4d043`） | `data/vllm-9b-tp4/*.log` 归档于 `docs/blog/2026-09-amdgpu-cdna4-halffullsys/`（2026-09-06，~5.5 h 全程） |
@@ -36,7 +36,7 @@
 | 9B TP4 单 token 墙钟 | 4862 s | **1788 s** | **2.72×** |
 | hybrid CTA 接纳率（真实模型负载诊断） | — | 82.5% launch / 83.4% workgroup | fail-closed 静态筛选；被拒 kernel 回落完整时序 |
 
-分层贡献（加载路径）：DTIF fast copy 35.1% > functional-fast 28.4% > KMT mapping cache 26.2% > hybrid CTA 9.3% > idle park/progress 0.9%。口径、消融阶梯与逐层数据见 `docs/blog/2026-09-amdgpu-cdna4-halffullsys/`（数据源 `data/*.json` 可溯源）。
+分层贡献（加载路径）：DTIF（Direct Transport Interface，ROCr 宿主侧快拷贝通道）fast copy 35.1% > functional-fast 28.4% > KMT mapping cache 26.2% > hybrid CTA 9.3% > idle park/progress 0.9%。口径、消融阶梯与逐层数据见 `docs/blog/2026-09-amdgpu-cdna4-halffullsys/`（数据源 `data/*.json` 可溯源）。
 
 三条 headline 的效果图（与上表逐行对应，均出自博客的归档数据图）：
 
