@@ -1,3 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+ * Full license text: LICENSE at the repository root.
+ */
+
 #include <hip/hip_runtime.h>
 /* global_load_lds_dwordx4 -> LDS -> ds_read_b128 round-trip probe.
  * Lane L loads in[L*4..L*4+3] through the load-to-LDS path, then reads

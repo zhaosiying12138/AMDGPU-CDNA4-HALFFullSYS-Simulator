@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Single-kernel bisect: chunk_gated_delta_rule_fwd_h on dumped-good inputs.
 
 CP-0112 pinned the vLLM wild-store crash to this one kernel: stages 1-4 of

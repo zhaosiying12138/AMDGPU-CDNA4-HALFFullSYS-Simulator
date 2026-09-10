@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 # Attribute managed gem5 simulators to the model lane that started them.
 #
 # This exists because a managed gem5 carries almost no identity. It is spawned

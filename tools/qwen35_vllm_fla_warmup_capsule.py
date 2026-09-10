@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Replay vLLM's GDN prefill-kernel warmup to bisect the wild-address crash.
 
 zcode-vllm-tp1-v7 panicked right after model load inside the warmup that

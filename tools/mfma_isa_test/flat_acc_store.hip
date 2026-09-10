@@ -1,3 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+ * Full license text: LICENSE at the repository root.
+ */
+
 #include <hip/hip_runtime.h>
 /* FLAT/global store with AGPR data-source probe: MFMA result lands in
  * a[0:3], then one global_store_dwordx4 reads the accumulator directly as

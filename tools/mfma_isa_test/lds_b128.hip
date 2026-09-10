@@ -1,3 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+ * Full license text: LICENSE at the repository root.
+ */
+
 __shared__ char lds_pad[4096];
 
 __global__ void mfma_agpr_test(float* out) {

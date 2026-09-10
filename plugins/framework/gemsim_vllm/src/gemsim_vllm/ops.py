@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
+
 """torch.library operators backed only by the generic GemSim Triton path."""
 
 from __future__ import annotations

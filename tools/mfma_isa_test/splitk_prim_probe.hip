@@ -1,3 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+ * Full license text: LICENSE at the repository root.
+ */
+
 #include <hip/hip_runtime.h>
 
 /* Primitive bisect probe for the wvSplitKrc (vLLM skinny split-K) NaN.

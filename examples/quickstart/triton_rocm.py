@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Compile and run ordinary upstream Triton AMD kernels on the ROCm device."""
 
 from __future__ import annotations

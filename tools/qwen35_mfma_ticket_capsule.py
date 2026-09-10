@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Ticket-addressed ISA differential: v_mbcnt, AGPR roundtrip, chained MFMA, v_pk_mul."""
 import argparse, ctypes, faulthandler, json, os, struct
 from datetime import datetime, timezone

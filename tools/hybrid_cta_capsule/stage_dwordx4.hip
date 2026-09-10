@@ -1,3 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+ * Full license text: LICENSE at the repository root.
+ */
+
 // Global dwordx4 staging-path probe, CK double-buffer fetch shape.
 //
 // Suspect: GLOBAL wide loads (global_load_dwordx4) -> s_waitcnt vmcnt(0)

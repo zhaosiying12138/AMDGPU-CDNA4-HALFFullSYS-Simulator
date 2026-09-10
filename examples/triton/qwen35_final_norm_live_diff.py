@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Compare the live post-layer-23 Qwen3.5 final norm with NVIDIA.
 
 This diagnostic is deliberately separate from the model runner whose exact

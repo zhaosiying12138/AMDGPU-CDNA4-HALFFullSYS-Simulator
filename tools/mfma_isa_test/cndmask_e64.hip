@@ -1,3 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+ * Full license text: LICENSE at the repository root.
+ */
+
 /* Discriminator: v_cndmask_b32_e64 with an explicit SCALAR PAIR condition.
  *
  * The vLLM warmup crash kernel (chunk_gated_delta_rule_fwd_kernel_h) computes

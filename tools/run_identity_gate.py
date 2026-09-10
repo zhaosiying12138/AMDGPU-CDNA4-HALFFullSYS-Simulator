@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Resolve and assert the binary identity a run is about to execute.
 
 A model run costs 50-70 minutes. A run whose loaded ROCr/HIP does not descend

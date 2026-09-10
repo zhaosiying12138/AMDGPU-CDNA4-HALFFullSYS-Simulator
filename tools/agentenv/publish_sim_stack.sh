@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 # One-key publish: push the full simulation stack into a running AgentENV
 # sandbox and assemble a runnable host-mirrored tree at /home/zhaosiying.
 #

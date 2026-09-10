@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
+
 """Host-only tests for fail-closed Qwen3.5 per-layer checkpoints."""
 
 from __future__ import annotations

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Minimal reproducer for the aiter prebuilt batch-prefill attention path.
 
 The SGLang TP1 lane selects ``--attention-backend aiter``; its NHD

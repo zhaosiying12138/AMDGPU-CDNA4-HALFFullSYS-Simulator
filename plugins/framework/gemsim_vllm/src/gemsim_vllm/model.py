@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
+
 """GemSim-owned Qwen3.5 text architecture registered through vLLM's API.
 
 This module deliberately does not replace the upstream multimodal

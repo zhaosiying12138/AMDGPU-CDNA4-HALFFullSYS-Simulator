@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """v_mfma_f32_16x16x32_bf16 probe capsule (wvSplitKrc inner op).
 
 All-ones bf16 operands, C=0: every accumulator lane must read exactly 32.0f,

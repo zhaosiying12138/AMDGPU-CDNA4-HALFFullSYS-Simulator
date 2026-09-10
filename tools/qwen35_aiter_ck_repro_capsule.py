@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Controlled repro capsule: aiter tuned-GEMM dispatch at decode m=1 shapes.
 
 The SGLang second-token defect was root-caused to aiter's machine-global

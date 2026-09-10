@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 # Token-gate lane runner: plain inference (no layer gate), Triton attention
 # backend (the upstream AMD recommendation per GOAL.md), 2 new tokens
 # compared by the inference script against the frozen token golden.

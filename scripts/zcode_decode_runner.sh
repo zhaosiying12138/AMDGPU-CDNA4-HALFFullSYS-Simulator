@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 # Decode-gate lane: prefill + both decode steps gated against the decode4
 # golden row-by-row (record-all survey over all 24 layers x 2 decode rows).
 LANE_NAME="${LANE_NAME:-zcode-decode}"

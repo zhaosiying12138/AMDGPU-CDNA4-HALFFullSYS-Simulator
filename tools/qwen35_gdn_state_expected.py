@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Offline expected-GDN-state analyzer for the second-token defect.
 
 Reimplements the NVIDIA golden generator's layer-0 recurrence (zero initial

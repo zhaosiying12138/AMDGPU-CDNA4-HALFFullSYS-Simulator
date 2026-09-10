@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
+
 """共享支撑：demo_* 一键脚本的引擎环境组装、进度渲染与汇总。"""
 from __future__ import annotations
 

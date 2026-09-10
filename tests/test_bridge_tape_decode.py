@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
+
 """Decoder gates for the gem5 bridge wire tape.
 
 The tape is written by C++ and read by Python, so the two ends can drift

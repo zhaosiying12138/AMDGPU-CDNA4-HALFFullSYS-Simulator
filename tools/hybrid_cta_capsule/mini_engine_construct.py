@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Minimal hybrid-crash reproducer: construct the sglang Engine (Qwen3.5-0.8B,
 TP1, load_format=dummy) far enough to reach the RoPE inv-freq kernels that
 segfault under --hybrid-cta in the model lane, without weight loading.

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Weight-free world=4 RCCL all-reduce discriminator/regression capsule.
 
 Run it in the SGLang lane environment (the model path is identity only; this

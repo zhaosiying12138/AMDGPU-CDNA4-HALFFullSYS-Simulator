@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 # Install and validate one feature-local runtime bundle inside an AgentENV VM.
 # The archive contains relative tar names rooted at /home/zhaosiying/amdgpu-sim.
 set -euo pipefail

@@ -1,3 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+ * Full license text: LICENSE at the repository root.
+ */
+
 #include <hip/hip_runtime.h>
 /* Two-batch load->wait->MFMA chain probe (immediate-offset loads so the
  * asm needs a single base pointer). All-ones f16 tiles: every element of

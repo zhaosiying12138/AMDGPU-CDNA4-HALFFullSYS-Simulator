@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Skinny-GEMM shape scanner: the vLLM 0.8B ctx16 defect isolator.
 
 The failing ctx16 lane uniquely dispatches grid=(16384,4,1) wg=(64,4,1)

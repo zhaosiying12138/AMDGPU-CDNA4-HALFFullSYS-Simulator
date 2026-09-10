@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 # One runner for every acceptance lane: {SGLang, vLLM} x {TP1, TP2, TP16}.
 #
 #   scripts/run_engine_lane.sh --engine sglang --tp 1 <logfile>

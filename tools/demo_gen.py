@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """一键客户演示：SGLang 多 TP 生成 100 个 token（默认 TP2 最快；--tp 4 需手动 --model 指定 9B）。
 
 用法（无需手动 gem5-session——TP2 引擎自己按 rank 拉起两个模拟器）：

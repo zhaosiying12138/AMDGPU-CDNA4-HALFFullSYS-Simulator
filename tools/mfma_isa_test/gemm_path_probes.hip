@@ -1,3 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+ * Full license text: LICENSE at the repository root.
+ */
+
 /* ISA-level discriminators for the flydsl gemm4 zero-output defect.
  *
  * One wavefront (64 lanes), ONE pointer argument (buf) holding:

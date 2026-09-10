@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 # Pure-performance regression bench: SGLang TP1 · Qwen3.5-0.8B · 1 token.
 #
 # Measures end-to-end host wall time plus the engine's own phase timings

@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 # Self-contained hybrid-crash reproducer with native stack capture:
 # 1. launch the TP1 layer-gate lane under hybridfastwrap (60-90s to crash)
 # 2. stalk the spawned scheduler child

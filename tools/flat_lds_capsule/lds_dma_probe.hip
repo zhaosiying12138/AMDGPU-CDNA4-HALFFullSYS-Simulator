@@ -1,3 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+ * Full license text: LICENSE at the repository root.
+ */
+
 // Device source for the gfx950 LDS-DMA capsule (tools/flat_lds_capsule).
 //
 // Every kernel launches ONE 64-lane wave per workgroup, fills its whole LDS

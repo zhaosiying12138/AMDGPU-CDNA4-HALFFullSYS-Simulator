@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 # Parameterized layer-gate lane runner.
 #   LANE_NAME      lane directory under artifacts/lanes
 #   RECORD_ALL=1   gate survey mode (record every mismatch, continue)

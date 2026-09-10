@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 cd /home/zhaosiying/zcode-lane
 export SAGR_MANAGED_GEM5_CONFIG=/home/zhaosiying/zcode-gem5-hybrid2/configs/example/gemsim/host_dispatch.py
 export SAGR_MANAGED_RUN_ROOT=/home/zhaosiying/rdbg

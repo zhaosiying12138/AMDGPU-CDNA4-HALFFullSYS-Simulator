@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 # Operator-correctness regression: Triton kernel + HIP dual-mode capsules.
 #
 #  1. Triton softmax: tools/softmax_demo.py (one real Triton launch on the

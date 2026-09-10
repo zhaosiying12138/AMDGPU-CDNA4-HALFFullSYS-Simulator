@@ -1,3 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+ * Full license text: LICENSE at the repository root.
+ */
+
 #include <hip/hip_runtime.h>
 /* MFMA 16x16x32_f16 element-layout probe: structured A/B, one MFMA,
  * every lane stores its four accumulator elements. The host computes the

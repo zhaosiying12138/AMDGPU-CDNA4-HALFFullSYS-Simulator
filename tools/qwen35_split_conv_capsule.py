@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Capsule the last two layer-0 decode stages with REAL trajectory data.
 
 Proven so far (all on the simulator, cos ~1.0): the decode embedding input,

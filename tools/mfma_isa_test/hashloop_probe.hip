@@ -1,3 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+ * Full license text: LICENSE at the repository root.
+ */
+
 /* Discriminator: hash-probe loop -> s_waitcnt vmcnt -> 16-bit multiply chain
  *                  -> pointer select -> final global loads.
  *

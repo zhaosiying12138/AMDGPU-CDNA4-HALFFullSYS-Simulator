@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 # Attach gdb to the scheduler child (a NEW python process appearing after the
 # parent) and dump the native stack when it takes SIGSEGV/SIGABRT.
 PARENT="$1"

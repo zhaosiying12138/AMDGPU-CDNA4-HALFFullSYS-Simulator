@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Compare the real Qwen3.5-9B layer-0 prefill GDN chain to CPU.
 
 This is deliberately narrower than a model run: it loads only the two prompt

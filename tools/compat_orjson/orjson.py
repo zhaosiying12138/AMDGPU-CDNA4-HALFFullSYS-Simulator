@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
+
 """Small diagnostic-only orjson compatibility shim for the CUDA capsule.
 
 The pinned ROCm environment supplies the binary orjson wheel through the

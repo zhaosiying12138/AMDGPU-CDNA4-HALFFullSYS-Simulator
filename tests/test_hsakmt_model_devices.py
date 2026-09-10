@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
+
 """Cross-repository invariants for the multi-GPU KFD model.
 
 The model DSO publishes one logical agent per topology GPU node but serves all

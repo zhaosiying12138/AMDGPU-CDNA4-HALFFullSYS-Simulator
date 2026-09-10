@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
+
 """Log every Triton kernel launch with its name and grid.
 
 Attributing simulator wall-clock to a *specific* kernel is otherwise guesswork:

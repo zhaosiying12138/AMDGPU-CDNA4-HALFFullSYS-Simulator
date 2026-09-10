@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Apply the multi-compute-unit wiring to a copy of host_dispatch.py.
 
 Textual, idempotent, and fails loudly if any anchor is missing, so the edit

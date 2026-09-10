@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
+
 """Bounded GemSim full-attention backend for the formal vLLM plugin.
 
 The backend supports one-request decode and empty-cache causal prefill with a

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Capsule the layer-0 decode-input chain kernels at m=1 vs m=2.
 
 The decode row's layer-0 input is bit-perfect against golden while its

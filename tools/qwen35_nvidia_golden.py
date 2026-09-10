@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Generate an independent CUDA golden for the Qwen3.5-0.8B backbone.
 
 The computation uses only PyTorch CUDA and the pinned checkpoint. It does not

@@ -1,3 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+ * Full license text: LICENSE at the repository root.
+ */
+
 __shared__ char lds_pad[1024];
 
 // A: plain data-parallel. out[wg*256 + lane] = wg*4096 + lane (raw bits).

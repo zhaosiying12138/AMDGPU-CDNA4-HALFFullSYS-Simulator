@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 """Layer-0 GDN decode chain capsule: find the first diverging m=1 op.
 
 The decode-kernel differential (tools/qwen35_gdn_decode_diff_capsule.py)

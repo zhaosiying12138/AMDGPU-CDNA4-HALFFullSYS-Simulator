@@ -1,4 +1,8 @@
 #!/usr/bin/env sh
+
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 AMDGPU-CDNA4-HALFFullSYS-Simulator contributors
+# Full license text: LICENSE at the repository root.
 # Run the upstream Triton AMD softmax smoke inside an AgentENV sandbox.
 #
 #   aenv exec <sandbox-id> -- /bin/sh /home/zhaosiying/amdgpu-sim/scripts/sandbox_triton_smoke.sh
